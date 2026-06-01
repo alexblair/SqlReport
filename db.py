@@ -17,7 +17,7 @@ import sqlite3
 import time
 from typing import Optional
 
-from app_config import get_config as _get_app_config
+from app_config import get_active_db_config as _get_active_db_config
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -29,8 +29,8 @@ from app_config import get_config as _get_app_config
 
 
 def _get_db_config() -> dict:
-    """从 app_config 读取 config_db 配置段。"""
-    return _get_app_config().get("config_db", {})
+    """从 app_config 获取当前启用的 config_db 配置（支持多配置列表 + enable 切换）。"""
+    return _get_active_db_config()
 
 
 def _get_engine() -> str:

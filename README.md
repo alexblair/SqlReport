@@ -100,29 +100,34 @@ After login, go to `/config` to configure connection pools, users, and reports.
 
 The application uses `app_config.json` (or the `CONFIG_FILE` env var) to select the config database engine.
 
-### SQLite 模式（默认） / SQLite Mode (Default)
+`config_db` 支持**多配置列表**格式，通过 `enable` 字段切换当前使用的引擎。旧版单 dict 格式仍兼容。
+
+The `config_db` field supports a **list of configurations**, toggled via the `enable` flag. The legacy single-dict format is still supported.
+
+### 完整示例 / Full Example
 
 ```json
 {
-    "config_db": {
-        "engine": "sqlite3",
-        "path": "config.db"
-    }
-}
-```
-
-### MySQL 模式 / MySQL Mode
-
-```json
-{
-    "config_db": {
-        "engine": "mysql",
-        "host": "127.0.0.1",
-        "port": 3306,
-        "user": "root",
-        "password": "your_password",
-        "database": "sqlreport_config"
-    }
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080
+    },
+    "config_db": [
+        {
+            "enable": true,
+            "engine": "mysql",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "root",
+            "password": "your_password",
+            "database": "sqlreport_config"
+        },
+        {
+            "enable": false,
+            "engine": "sqlite3",
+            "path": "config.db"
+        }
+    ]
 }
 ```
 
@@ -130,13 +135,12 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 
 ```json
 {
-    "config_db": {
-        "engine": "mysql",
-        "socket": "/var/run/mysqld/mysqld.sock",
-        "user": "root",
-        "password": "your_password",
-        "database": "sqlreport_config"
-    }
+    "enable": true,
+    "engine": "mysql",
+    "socket": "/var/run/mysqld/mysqld.sock",
+    "user": "root",
+    "password": "your_password",
+    "database": "sqlreport_config"
 }
 ```
 

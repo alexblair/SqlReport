@@ -6,10 +6,20 @@ app_config.py — 应用配置文件管理
   - config_db: 配置数据库的存储引擎（sqlite3/mysql）和相关连接参数
   - server: HTTP 服务监听地址和端口
 
+config_db 支持多配置列表，通过 enable 字段切换当前使用的引擎：
+
+    "config_db": [
+        {"enable": true,  "engine": "mysql",  "host": "...", ...},
+        {"enable": false, "engine": "sqlite3", "path": "config.db"}
+    ]
+
+兼容旧格式（单 dict），自动识别并处理。
+
 使用方式:
-    from app_config import get_config, get_server_config
+    from app_config import get_config, get_server_config, get_active_db_config
     cfg = get_config()
-    engine = cfg["config_db"]["engine"]
+    db_cfg = get_active_db_config()
+    engine = db_cfg["engine"]
     host, port = get_server_config()
 """
 
@@ -44,10 +54,13 @@ def _load_config() -> dict[str, Any]:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {
-            "config_db": {
-                "engine": "sqlite3",
-                "path": "config.db",
-            }
+            "config_db": [
+                {
+                    "enable": True,
+                    "engine": "sqlite3",
+                    "path": "config.db",
+                }
+            ]
         }
 
 
@@ -87,3 +100,26 @@ def get_server_config() -> tuple[str, int]:
     except (ValueError, TypeError):
         port = _DEFAULT_PORT
     return host, port
+
+
+def get_active_db_config() -> dict[str, Any]:
+    """从 config_db 配置段中获取当前启用的数据库配置。
+
+    支持两种格式：
+      1. 列表格式（新）— 遍历列表返回第一个 enable=true 的条目
+      2. 字典格式（旧，向后兼容）— 直接返回
+
+    未找到启用配置或配置段缺失时返回默认 SQLite 配置。
+    """
+    raw = get_config().get("config_db")
+
+    if isinstance(raw, list):
+        for entry in raw:
+            if entry.get("enable", False):
+                return entry
+        return {"engine": "sqlite3", "path": "config.db", "enable": True}
+
+    if isinstance(raw, dict):
+        return raw
+
+    return {"engine": "sqlite3", "path": "config.db", "enable": True}
