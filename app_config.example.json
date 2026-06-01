@@ -1,0 +1,6 @@
+{
+    "config_db": {
+        "engine": "sqlite3",
+        "path": "config.db"
+    }
+}

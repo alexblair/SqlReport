@@ -25,6 +25,7 @@
 | **多字段筛选** | 任意列模糊搜索，支持多字段同时过滤 |
 | **CSV 导出** | 一键导出完整查询结果，UTF-8 BOM 确保 Excel 正确识别中文 |
 | **纯标准库** | 仅依赖 `mysql-connector-python`，其余全部使用 Python 内置模块 |
+| **配置存储双引擎** | 支持 SQLite / MySQL 两种配置存储方案，通过 `app_config.json` 切换 |
 
 ## ✨ Features
 
@@ -38,6 +39,7 @@
 | **Multi-field Filtering** | Fuzzy search on any column, multi-field simultaneous filtering |
 | **CSV Export** | One-click export of full query results, UTF-8 BOM for Excel compatibility |
 | **Pure Stdlib** | Only depends on `mysql-connector-python`; everything else is Python built-in |
+| **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
 
 ---
 
@@ -88,6 +90,58 @@ After login, go to `/config` to configure connection pools, users, and reports.
 
 ---
 
+## 🔧 配置文件 / Configuration File
+
+应用通过 `app_config.json`（或 `CONFIG_FILE` 环境变量指定路径）控制配置数据库的存储引擎。
+
+The application uses `app_config.json` (or the `CONFIG_FILE` env var) to select the config database engine.
+
+### SQLite 模式（默认） / SQLite Mode (Default)
+
+```json
+{
+    "config_db": {
+        "engine": "sqlite3",
+        "path": "config.db"
+    }
+}
+```
+
+### MySQL 模式 / MySQL Mode
+
+```json
+{
+    "config_db": {
+        "engine": "mysql",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "root",
+        "password": "your_password",
+        "database": "sqlreport_config"
+    }
+}
+```
+
+MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 二选一）：
+
+```json
+{
+    "config_db": {
+        "engine": "mysql",
+        "socket": "/var/run/mysqld/mysqld.sock",
+        "user": "root",
+        "password": "your_password",
+        "database": "sqlreport_config"
+    }
+}
+```
+
+> ⚠️ `app_config.json` 包含数据库密码，已加入 `.gitignore`，请勿提交到版本控制。
+>
+> `app_config.json` contains credentials and is in `.gitignore` — do not commit.
+
+---
+
 ## 🖥️ 页面说明 / Pages
 
 ### 配置页 `/config`
@@ -119,22 +173,25 @@ After login, go to `/config` to configure connection pools, users, and reports.
 
 ```
 SqlReport/
-├── server.py          # HTTP 服务器入口、路由分发
-├── config.py          # 配置页 CRUD 处理
-├── report.py          # 报表页、分页、排序、筛选
-├── export.py          # CSV 导出
-├── auth.py            # 用户认证、Session 管理
-├── db.py              # SQLite 配置存储 + MySQL 连接管理
-├── tests/             # 单元测试
+├── server.py              # HTTP 服务器入口、路由分发
+├── config_page.py         # 配置页 CRUD 处理
+├── report_page.py         # 报表页、分页、排序、筛选
+├── export.py              # CSV 导出
+├── auth.py                # 用户认证、Session 管理
+├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
+├── app_config.py          # 应用配置文件加载器
+├── app_config.json        # 应用配置文件（含密码，不提交）
+├── app_config.example.json# 配置文件模板
+├── tests/                 # 单元测试
 │   ├── test_config.py
 │   ├── test_report.py
 │   ├── test_export.py
 │   ├── test_auth.py
 │   ├── test_db.py
 │   └── test_server.py
-├── config.db          # SQLite 配置数据库（自动创建）
-├── manage_service.sh  # Systemd 服务管理脚本
-└── AGENTS.md          # AI 开发代理指引
+├── config.db              # SQLite 配置数据库（自动创建）
+├── manage_service.sh      # Systemd 服务管理脚本
+└── AGENTS.md              # AI 开发代理指引
 ```
 
 ---
@@ -152,7 +209,8 @@ python -m unittest discover -s tests/ -v
 
 | 变量 / Variable | 默认值 / Default | 说明 / Description |
 |----------------|------------------|-------------------|
-| `CONFIG_DB` | `config.db` | SQLite 配置数据库文件路径 |
+| `CONFIG_FILE` | `app_config.json` | 应用配置文件路径 |
+| `CONFIG_DB` | `config.db` | SQLite 数据库文件路径（配置文件中的 `path` 优先级更高） |
 | `HOST` | `0.0.0.0` | HTTP 服务监听地址 |
 | `PORT` | `8000` | HTTP 服务监听端口 |
 
@@ -163,7 +221,7 @@ python -m unittest discover -s tests/ -v
 | 层级 / Layer | 技术 / Technology |
 |-------------|------------------|
 | Web 服务器 | `http.server` (Python stdlib) |
-| 配置存储 | SQLite (Python stdlib `sqlite3`) |
+| 配置存储 | SQLite (Python stdlib `sqlite3`) 或 MySQL (`mysql-connector-python`)，通过 `app_config.json` 切换 |
 | 数据查询 | MySQL via `mysql-connector-python` |
 | 认证 | Cookie + SHA-256 salt hash (Python stdlib `hashlib`, `secrets`, `hmac`) |
 | 前端 | 纯 HTML + 内联 CSS（无 JS 框架） |

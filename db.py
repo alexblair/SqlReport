@@ -2,12 +2,12 @@
 db.py — 数据库层
 
 职责：
-1. SQLite 存储配置数据（连接池、用户、报表配置）
-2. MySQL 连接管理（从配置池创建连接执行查询）
+1. 配置数据库（config_db）：根据 app_config.json 选择 SQLite 或 MySQL 存储
+   （连接池配置、用户、报表配置、分类、session）
+2. MySQL 连接管理：从配置池创建连接执行用户 SQL 查询
 
 设计原则：
 - 所有函数显式接收 db 连接参数（依赖注入），方便测试 mock
-- 每请求创建独立 SQLite 连接，避免线程安全问题
 - MySQL 连接按需创建，不维护长连接池（精简）
 """
 
@@ -17,84 +17,319 @@ import sqlite3
 import time
 from typing import Optional
 
+from app_config import get_config as _get_app_config
+
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
-CONFIG_DB = os.environ.get("CONFIG_DB", "config.db")
-
 # ---------------------------------------------------------------------------
-# SQLite 初始化
+# 引擎判断
 # ---------------------------------------------------------------------------
 
 
-def get_config_db() -> sqlite3.Connection:
-    """创建并返回一个新的 SQLite 连接（每请求使用独立连接，线程安全）。"""
-    conn = sqlite3.connect(CONFIG_DB)
+def _get_db_config() -> dict:
+    """从 app_config 读取 config_db 配置段。"""
+    return _get_app_config().get("config_db", {})
+
+
+def _get_engine() -> str:
+    """返回当前配置的 config_db 引擎名（mysql / sqlite3）。"""
+    return _get_db_config().get("engine", "sqlite3")
+
+
+# ---------------------------------------------------------------------------
+# SQLite 连接
+# ---------------------------------------------------------------------------
+
+
+def _connect_sqlite() -> sqlite3.Connection:
+    """根据 app_config 或环境变量创建 SQLite 连接。"""
+    cfg = _get_db_config()
+    db_path = cfg.get("path") or os.environ.get("CONFIG_DB", "config.db")
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db(conn: sqlite3.Connection) -> None:
+# ---------------------------------------------------------------------------
+# MySQL 连接（config_db 引擎模式）
+# ---------------------------------------------------------------------------
+
+
+class _MySQLRow:
+    """MySQL 行包装，同时支持 dict 键访问和整数索引（兼容 sqlite3.Row）。"""
+
+    def __init__(self, data: dict):
+        self._data = data
+        self._keys = list(data.keys())
+
+    def __getitem__(self, key):
+        if isinstance(key, (int, slice)):
+            if isinstance(key, slice):
+                return [self._data[k] for k in self._keys[key]]
+            return self._data[self._keys[key]]
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data.values())
+
+    def __len__(self):
+        return len(self._data)
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return self._data.values()
+
+    def __repr__(self):
+        return repr(self._data)
+
+
+class _MySQLCursor:
+    """MySQL 游标包装，提供 fetchone/fetchall/rowcount/lastrowid 接口。"""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.rowcount = cursor.rowcount
+        self.lastrowid = cursor.lastrowid
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return _MySQLRow(row) if row else None
+
+    def fetchall(self):
+        return [_MySQLRow(r) for r in self._cursor.fetchall()]
+
+
+class _MySQLConnection:
     """
-    初始化数据库表结构。
+    MySQL 连接包装，提供与 sqlite3.Connection 兼容的子集接口。
 
-    每次调用都会执行 CREATE TABLE IF NOT EXISTS（幂等），
-    并运行必要的迁移检查，确保新列/新表在旧数据库上也被创建。
+    自动将 ? 占位符转为 %s，使上层 CRUD 函数无需修改 SQL 字符串即可
+    在 SQLite 和 MySQL 间切换。
     """
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS connection_pools (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT    UNIQUE NOT NULL,
-            host        TEXT    NOT NULL,
-            port        INTEGER NOT NULL DEFAULT 3306,
-            user        TEXT    NOT NULL,
-            password    TEXT    NOT NULL,
-            database    TEXT    NOT NULL,
-            sort_order  INTEGER NOT NULL DEFAULT 0
-        );
 
-        CREATE TABLE IF NOT EXISTS users (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            username        TEXT    UNIQUE NOT NULL,
-            password_hash   TEXT    NOT NULL
-        );
+    def __init__(self, conn):
+        self._conn = conn
 
-        CREATE TABLE IF NOT EXISTS report_categories (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT    UNIQUE NOT NULL,
-            parent_id   INTEGER,
-            sort_order  INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (parent_id) REFERENCES report_categories(id) ON DELETE SET NULL
-        );
+    def execute(self, sql: str, params=None):
+        import mysql.connector
 
-        CREATE TABLE IF NOT EXISTS report_configs (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            name               TEXT    UNIQUE NOT NULL,
-            sql_query          TEXT    NOT NULL,
-            default_page_size  INTEGER NOT NULL DEFAULT 20,
-            pool_id            INTEGER,
-            category_id        INTEGER,
-            sort_order         INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
-            FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
-        );
+        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s
+        mysql_sql = sql.replace("?", "%s") if params is not None else sql
+        cursor = self._conn.cursor(dictionary=True)
+        try:
+            cursor.execute(mysql_sql, params or ())
+        except mysql.connector.Error:
+            cursor.close()
+            raise
+        return _MySQLCursor(cursor)
 
-        CREATE TABLE IF NOT EXISTS sessions (
-            token      TEXT PRIMARY KEY,
-            username   TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-    """)
+    def executescript(self, sql: str):
+        """兼容 sqlite3 的 executescript：按分号拆分逐条执行。"""
+        for statement in sql.split(";"):
+            stmt = statement.strip()
+            if stmt:
+                self.execute(stmt)
+        self.commit()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def _connect_mysql_config() -> _MySQLConnection:
+    """根据 app_config 创建 MySQL 连接（用于 config_db 存储）。"""
+    import mysql.connector
+
+    cfg = _get_db_config()
+    config = {
+        "host": cfg.get("host", "127.0.0.1"),
+        "port": cfg.get("port", 3306),
+        "user": cfg.get("user", "root"),
+        "password": cfg.get("password", ""),
+        "database": cfg.get("database", "sqlreport_config"),
+        "connection_timeout": 10,
+        "charset": "utf8mb4",
+    }
+    if cfg.get("socket"):
+        config["unix_socket"] = cfg["socket"]
+    elif config["host"] == "localhost":
+        config["host"] = "127.0.0.1"
+    raw = mysql.connector.connect(**config)
+    return _MySQLConnection(raw)
+
+
+# ---------------------------------------------------------------------------
+# 工厂: get_config_db
+# ---------------------------------------------------------------------------
+
+
+def get_config_db():
+    """
+    创建并返回一个 config_db 连接。
+
+    根据 app_config.json 中的 engine 字段自动选择 SQLite 或 MySQL。
+    每请求应调用一次（独立连接，线程安全）。
+    """
+    engine = _get_engine()
+    if engine == "mysql":
+        return _connect_mysql_config()
+    return _connect_sqlite()
+
+
+# ---------------------------------------------------------------------------
+# DDL
+# ---------------------------------------------------------------------------
+
+_SQLITE_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS connection_pools (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    UNIQUE NOT NULL,
+        host        TEXT    NOT NULL,
+        port        INTEGER NOT NULL DEFAULT 3306,
+        user        TEXT    NOT NULL,
+        password    TEXT    NOT NULL,
+        database    TEXT    NOT NULL,
+        sort_order  INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        username        TEXT    UNIQUE NOT NULL,
+        password_hash   TEXT    NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS report_categories (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    UNIQUE NOT NULL,
+        parent_id   INTEGER,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (parent_id) REFERENCES report_categories(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS report_configs (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        name               TEXT    UNIQUE NOT NULL,
+        sql_query          TEXT    NOT NULL,
+        default_page_size  INTEGER NOT NULL DEFAULT 20,
+        pool_id            INTEGER,
+        category_id        INTEGER,
+        sort_order         INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
+        FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+        token      TEXT PRIMARY KEY,
+        username   TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+"""
+
+_MYSQL_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS connection_pools (
+        id          INTEGER AUTO_INCREMENT PRIMARY KEY,
+        name        VARCHAR(255) UNIQUE NOT NULL,
+        host        VARCHAR(255) NOT NULL,
+        port        INTEGER NOT NULL DEFAULT 3306,
+        user        VARCHAR(255) NOT NULL,
+        password    VARCHAR(255) NOT NULL,
+        database    VARCHAR(255) NOT NULL,
+        sort_order  INTEGER NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS users (
+        id              INTEGER AUTO_INCREMENT PRIMARY KEY,
+        username        VARCHAR(255) UNIQUE NOT NULL,
+        password_hash   VARCHAR(255) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS report_categories (
+        id          INTEGER AUTO_INCREMENT PRIMARY KEY,
+        name        VARCHAR(255) UNIQUE NOT NULL,
+        parent_id   INTEGER,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (parent_id) REFERENCES report_categories(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS report_configs (
+        id                 INTEGER AUTO_INCREMENT PRIMARY KEY,
+        name               VARCHAR(255) UNIQUE NOT NULL,
+        sql_query          TEXT    NOT NULL,
+        default_page_size  INTEGER NOT NULL DEFAULT 20,
+        pool_id            INTEGER,
+        category_id        INTEGER,
+        sort_order         INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
+        FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS sessions (
+        token      VARCHAR(255) PRIMARY KEY,
+        username   VARCHAR(255) NOT NULL,
+        created_at DOUBLE NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+
+def _get_schema_sql(engine: str) -> str:
+    """返回对应引擎的建表 DDL。"""
+    return _MYSQL_SCHEMA if engine == "mysql" else _SQLITE_SCHEMA
+
+
+# ---------------------------------------------------------------------------
+# 初始化 & 迁移
+# ---------------------------------------------------------------------------
+
+
+def init_db(conn) -> None:
+    """
+    初始化数据库表结构并执行迁移。
+
+    根据 conn 的实际类型自动判断引擎，执行对应的 DDL 和迁移逻辑。
+    幂等：可安全重复调用。
+    """
+    engine = _get_engine()
+    schema = _get_schema_sql(engine)
+
+    # 建表
+    if engine == "mysql":
+        for stmt in schema.split(";"):
+            s = stmt.strip()
+            if s:
+                conn.execute(s)
+    else:
+        conn.executescript(schema)
     conn.commit()
 
+    if engine == "mysql":
+        _init_mysql_migrations(conn)
+    else:
+        _init_sqlite_migrations(conn)
+
+
+def _init_sqlite_migrations(conn: sqlite3.Connection) -> None:
+    """SQLite 专属迁移逻辑。"""
     # 迁移 1: report_configs 旧版 NOT NULL + CASCADE → 新版
     cursor = conn.execute("PRAGMA table_info(report_configs)")
     col_info = {}
     for row in cursor.fetchall():
-        # PRAGMA table_info 返回: (cid, name, type, notnull, dflt_value, pk)
         col_info[row[1]] = {"notnull": row[3]}
     if col_info.get("pool_id", {}).get("notnull") == 1:
         conn.executescript("""
@@ -117,13 +352,18 @@ def init_db(conn: sqlite3.Connection) -> None:
         """)
         conn.commit()
 
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    col_info = {}
+    for row in cursor.fetchall():
+        col_info[row[1]] = {"notnull": row[3]}
+
     # 迁移 2: 添加 category_id 列（旧库没有该列）
     if "category_id" not in col_info:
         try:
             conn.execute("ALTER TABLE report_configs ADD COLUMN category_id INTEGER")
             conn.commit()
         except sqlite3.OperationalError:
-            conn.rollback()  # 列已存在，忽略
+            conn.rollback()
 
     # 迁移 3: 创建 report_categories 表（旧库没有该表）
     conn.execute("""CREATE TABLE IF NOT EXISTS report_categories (
@@ -145,8 +385,49 @@ def init_db(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             conn.rollback()
 
-    # 迁移 5: 清理重复的 report_categories 表（迁移3可能创建了不带 parent_id 的旧表结构）
-    # 如果已经存在，上面 ALTER TABLE 已经处理；无需额外操作
+
+def _init_mysql_migrations(conn: _MySQLConnection) -> None:
+    """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
+    # 迁移 1: 检查 report_configs.pool_id 是否为 NOT NULL
+    cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+    col_info = {}
+    for row in cursor.fetchall():
+        # SHOW COLUMNS: Field, Type, Null, Key, Default, Extra
+        col_info[row[0]] = {"null": row[2]}
+    if col_info.get("pool_id", {}).get("null") == "NO":
+        # MySQL 不支持 RENAME 后重建的轻量方式，直接修改列
+        conn.execute(
+            "ALTER TABLE report_configs MODIFY COLUMN pool_id INTEGER NULL"
+        )
+        conn.commit()
+
+    cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+    col_info = {}
+    for row in cursor.fetchall():
+        col_info[row[0]] = {}
+
+    # 迁移 2: 添加 category_id 列
+    if "category_id" not in col_info:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN category_id INTEGER")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 3: 迁移 4 已由建表 DDL 覆盖，无需额外操作
+
+    # 迁移 4: 检查 report_categories 是否有 parent_id 列
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_categories")
+        cat_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        cat_cols = set()
+    if "parent_id" not in cat_cols:
+        try:
+            conn.execute("ALTER TABLE report_categories ADD COLUMN parent_id INTEGER")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -610,7 +891,7 @@ def count_mysql_query(conn, sql: str, params: tuple = ()) -> int:
 def add_session(conn: sqlite3.Connection, token: str, username: str) -> None:
     """持久化一条 session 记录。"""
     conn.execute(
-        "INSERT OR REPLACE INTO sessions (token, username, created_at) VALUES (?,?,?)",
+        "REPLACE INTO sessions (token, username, created_at) VALUES (?,?,?)",
         (token, username, time.time()),
     )
     conn.commit()
