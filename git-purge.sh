@@ -7,15 +7,19 @@
 #   2. 取消跟踪（git rm --cached）
 #   3. 从全部提交历史中彻底抹除（git filter-branch --index-filter）
 #   4. 清理残留引用并回收磁盘空间
-#   5. 可选：强制推送到远程覆盖历史
+#   5. 可选：强制推送到远程覆盖历史（支持 GitHub Token）
 #
 # 用法：
-#   ./git-purge.sh <文件或目录路径> [--push]
+#   ./git-purge.sh <路径> [--push] [--token <GITHUB_TOKEN>]
+#
+#   --token 也可通过环境变量 GITHUB_TOKEN 或 GH_TOKEN 传入。
+#   --token 优先级：命令行 > GITHUB_TOKEN > GH_TOKEN
 #
 # 示例：
 #   ./git-purge.sh config.db
-#   ./git-purge.sh secrets/       --push
-#   ./git-purge.sh *.log
+#   ./git-purge.sh secrets/ --push --token ghp_xxxxxx
+#   GITHUB_TOKEN=ghp_xxxxxx ./git-purge.sh .env --push
+#   ./git-purge.sh '*.log' --push
 #
 # 注意：
 #   - 必须在 Git 仓库根目录执行
@@ -32,7 +36,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
@@ -40,31 +44,68 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # ---------------------------------------------------------------------------
-# 检查参数
+# 解析参数
 # ---------------------------------------------------------------------------
-if [ $# -lt 1 ]; then
-    echo "用法: $0 <文件或目录路径> [--push]"
-    echo ""
-    echo "示例:"
-    echo "  $0 config.db"
-    echo "  $0 secrets/ --push"
-    echo "  $0 '*.log'"
-    exit 1
+TARGET=""
+DO_PUSH=0
+TOKEN=""
+
+# 先从环境变量读取 token
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    TOKEN="$GITHUB_TOKEN"
+elif [ -n "${GH_TOKEN:-}" ]; then
+    TOKEN="$GH_TOKEN"
 fi
 
-TARGET="$1"
-PUSH="${2:-}"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --push)
+            DO_PUSH=1
+            shift
+            ;;
+        --token)
+            if [ $# -lt 2 ]; then
+                err "--token 需要参数"
+                exit 1
+            fi
+            TOKEN="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "用法: $0 <路径> [--push] [--token <TOKEN>]"
+            echo ""
+            echo "环境变量: GITHUB_TOKEN, GH_TOKEN"
+            exit 0
+            ;;
+        -*)
+            err "未知选项: $1"
+            exit 1
+            ;;
+        *)
+            if [ -n "$TARGET" ]; then
+                err "只能指定一个路径"
+                exit 1
+            fi
+            TARGET="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$TARGET" ]; then
+    err "请指定要删除的文件或目录路径"
+    echo "用法: $0 <路径> [--push] [--token <TOKEN>]"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # 前置检查
 # ---------------------------------------------------------------------------
-# 1. 是否在 git 仓库中
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
     err "当前目录不是一个 Git 仓库"
     exit 1
 fi
 
-# 2. 工作区是否干净（避免意外丢失未提交修改）
 if ! git diff --quiet HEAD 2>/dev/null; then
     warn "工作区有未提交的修改，建议先 commit 或 stash"
     read -rp "是否继续？(y/N) " CONFIRM
@@ -74,7 +115,6 @@ if ! git diff --quiet HEAD 2>/dev/null; then
     fi
 fi
 
-# 3. 目标路径是否存在（仅警告）
 if [ ! -e "$TARGET" ] && ! git ls-files --error-unmatch "$TARGET" > /dev/null 2>&1; then
     warn "路径 '$TARGET' 既不在磁盘上也不在 Git 跟踪中，将继续尝试从历史中清理"
 fi
@@ -100,13 +140,11 @@ fi
 echo ""
 info "Step 1/5 — 将 '$TARGET' 加入 .gitignore"
 
-# 如果 .gitignore 不存在则创建
 if [ ! -f .gitignore ]; then
     touch .gitignore
     ok "创建 .gitignore"
 fi
 
-# 如果尚未包含该条目则追加
 if ! grep -Fxq "$TARGET" .gitignore 2>/dev/null; then
     echo "$TARGET" >> .gitignore
     ok "已追加到 .gitignore"
@@ -115,7 +153,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: 取消跟踪（如果正在跟踪）
+# Step 2: 取消跟踪
 # ---------------------------------------------------------------------------
 echo ""
 info "Step 2/5 — 取消跟踪 '$TARGET'"
@@ -142,7 +180,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 4: 从全部历史中抹除（filter-branch）
+# Step 4: 从全部历史中抹除
 # ---------------------------------------------------------------------------
 echo ""
 info "Step 4/5 — 从全部提交历史中抹除 '$TARGET'"
@@ -162,14 +200,10 @@ ok "历史重写完成"
 echo ""
 info "Step 5/5 — 清理残留引用和回收磁盘空间"
 
-# 删除备份引用
 git for-each-ref --format='delete %(refname)' refs/original | \
     git update-ref --stdin 2>/dev/null || true
 
-# 过期 reflog
 git reflog expire --expire=now --all
-
-# 垃圾回收（彻底删除悬空对象）
 git gc --prune=now --aggressive 2>/dev/null || git gc --prune=now
 
 ok "清理完成"
@@ -186,38 +220,96 @@ info "当前仓库状态："
 git log --oneline -3
 
 echo ""
-echo "────────────────────────────────────────────────────────"
 
 # ---------------------------------------------------------------------------
 # 可选：强制推送到远程
 # ---------------------------------------------------------------------------
-if [ "$PUSH" = "--push" ]; then
-    # 检查是否有远程仓库
-    REMOTE=$(git remote)
-    if [ -z "$REMOTE" ]; then
+_push_remote() {
+    local REMOTES
+    REMOTES=$(git remote)
+    if [ -z "$REMOTES" ]; then
         warn "未配置远程仓库，跳过推送"
-    else
-        echo ""
-        warn "即将强制推送到以下远程仓库："
-        git remote -v
-        echo ""
-        read -rp "确认强制推送？(y/N) " CONFIRM_PUSH
-        if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-            echo ""
-            info "正在强制推送（覆盖远程历史）..."
-            git push --force --all origin
-            git push --force --tags origin
-            ok "推送完成"
-        else
-            info "跳过推送"
-        fi
+        return
     fi
-else
+
     echo ""
-    info "未指定 --push，跳过远程推送"
-    info "如需推送请执行："
-    echo "    git push --force --all origin"
-    echo "    git push --force --tags origin"
+    warn "即将强制推送到以下远程仓库："
+    git remote -v
+    echo ""
+    read -rp "确认强制推送？(y/N) " CONFIRM_PUSH
+    if [[ ! "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+        info "跳过推送"
+        return
+    fi
+
+    # 如果提供了 token，临时注入到所有 HTTPS 远程 URL 中
+    if [ -n "$TOKEN" ]; then
+        info "检测到 GitHub Token，正在注入认证信息..."
+
+        # 保存原始 remote URL，用于推送完成后恢复
+        ORIG_REMOTE_URLS=$(git remote -v | awk '{print $2}' | sort -u)
+
+        # 逐个 remote 处理
+        for REMOTE in $REMOTES; do
+            REMOTE_URL=$(git remote get-url "$REMOTE")
+            # 只处理 HTTPS 类型的 URL
+            if echo "$REMOTE_URL" | grep -q "^https://"; then
+                # 如果 URL 中已有凭据则跳过
+                if echo "$REMOTE_URL" | grep -q "@"; then
+                    warn "remote '$REMOTE' 的 URL 已包含凭据，使用现有凭据"
+                else
+                    # 注入 token:  https://USER:TOKEN@host/owner/repo.git
+                    REMOTE_URL_AUTH=$(echo "$REMOTE_URL" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+                    git remote set-url "$REMOTE" "$REMOTE_URL_AUTH"
+                    ok "已为 remote '$REMOTE' 注入 Token"
+                fi
+            fi
+        done
+    fi
+
+    echo ""
+    info "正在强制推送（覆盖远程历史）..."
+
+    # 先推送所有分支，再推送 tags
+    git push --force --all origin 2>&1 || {
+        err "推送失败，请检查网络/代理/Token 权限"
+        _restore_remote_urls
+        exit 1
+    }
+    git push --force --tags origin 2>&1 || true
+
+    ok "推送完成"
+
+    # 恢复原始 remote URL（移除 token）
+    _restore_remote_urls
+}
+
+_restore_remote_urls() {
+    if [ -n "${ORIG_REMOTE_URLS:-}" ]; then
+        echo "$ORIG_REMOTE_URLS" | while read -r URL; do
+            # 从 URL 中提取不带凭据的原始 URL
+            CLEAN_URL=$(echo "$URL" | sed "s|https://.*@|https://|")
+            # 找到哪个 remote 用的是这个带 token 的 URL
+            for R in $(git remote); do
+                CUR_URL=$(git remote get-url "$R" 2>/dev/null || true)
+                if [ "$CUR_URL" = "$URL" ]; then
+                    git remote set-url "$R" "$CLEAN_URL"
+                    ok "已清除 remote '$R' 中的 Token"
+                fi
+            done
+        done
+    fi
+}
+
+if [ "$DO_PUSH" -eq 1 ]; then
+    _push_remote
+else
+    info "如需推送覆盖远程历史，请执行："
+    echo ""
+    echo "    ./git-purge.sh '$TARGET' --push [--token <TOKEN>]"
+    echo "    # 或使用环境变量:"
+    echo "    GITHUB_TOKEN=ghp_xxxxxx git push --force --all origin"
+    echo ""
 fi
 
 echo ""
