@@ -26,13 +26,13 @@ import auth
 import config
 import report
 import export as export_mod
+from app_config import get_server_config
 
 # ---------------------------------------------------------------------------
-# 配置
+# 配置（从 app_config.json 加载，支持环境变量 HOST / PORT 覆盖）
 # ---------------------------------------------------------------------------
 
-HOST = "0.0.0.0"
-PORT = 8080
+HOST, PORT = get_server_config()
 
 # ---------------------------------------------------------------------------
 # 登录页 HTML
