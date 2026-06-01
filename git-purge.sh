@@ -7,18 +7,26 @@
 #   2. 取消跟踪（git rm --cached）
 #   3. 从全部提交历史中彻底抹除（git filter-branch --index-filter）
 #   4. 清理残留引用并回收磁盘空间
-#   5. 可选：强制推送到远程覆盖历史（支持 GitHub Token）
+#   5. 可选：强制推送到远程覆盖历史（支持 Token + 代理）
 #
 # 用法：
-#   ./git-purge.sh <路径> [--push] [--token <GITHUB_TOKEN>]
+#   ./git-purge.sh <路径> [--push] [--token <TOKEN>] [--proxy <PROXY>]
 #
-#   --token 也可通过环境变量 GITHUB_TOKEN 或 GH_TOKEN 传入。
-#   --token 优先级：命令行 > GITHUB_TOKEN > GH_TOKEN
+#   认证（优先级：--token > GITHUB_TOKEN > GH_TOKEN）：
+#     --token <TOKEN>       GitHub Personal Access Token
+#     GITHUB_TOKEN         环境变量
+#     GH_TOKEN             环境变量
+#
+#   代理（优先级：--proxy > ALL_PROXY > HTTPS_PROXY > HTTP_PROXY）：
+#     --proxy <URL>        HTTP 代理地址，如 http://127.0.0.1:6012
+#     ALL_PROXY            环境变量（全大写或全小写）
+#     HTTPS_PROXY          环境变量
+#     HTTP_PROXY           环境变量
 #
 # 示例：
 #   ./git-purge.sh config.db
-#   ./git-purge.sh secrets/ --push --token ghp_xxxxxx
-#   GITHUB_TOKEN=ghp_xxxxxx ./git-purge.sh .env --push
+#   ./git-purge.sh secrets/ --push --token ghp_xxxxxx --proxy http://127.0.0.1:6012
+#   GITHUB_TOKEN=ghp_xxxxxx ALL_PROXY=http://127.0.0.1:6012 ./git-purge.sh .env --push
 #   ./git-purge.sh '*.log' --push
 #
 # 注意：
@@ -49,12 +57,28 @@ err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 TARGET=""
 DO_PUSH=0
 TOKEN=""
+PROXY=""
 
 # 先从环境变量读取 token
 if [ -n "${GITHUB_TOKEN:-}" ]; then
     TOKEN="$GITHUB_TOKEN"
 elif [ -n "${GH_TOKEN:-}" ]; then
     TOKEN="$GH_TOKEN"
+fi
+
+# 从环境变量读取代理（优先级：ALL_PROXY > HTTPS_PROXY > HTTP_PROXY）
+if [ -n "${ALL_PROXY:-}" ]; then
+    PROXY="$ALL_PROXY"
+elif [ -n "${all_proxy:-}" ]; then
+    PROXY="$all_proxy"
+elif [ -n "${HTTPS_PROXY:-}" ]; then
+    PROXY="$HTTPS_PROXY"
+elif [ -n "${https_proxy:-}" ]; then
+    PROXY="$https_proxy"
+elif [ -n "${HTTP_PROXY:-}" ]; then
+    PROXY="$HTTP_PROXY"
+elif [ -n "${http_proxy:-}" ]; then
+    PROXY="$http_proxy"
 fi
 
 while [ $# -gt 0 ]; do
@@ -71,10 +95,19 @@ while [ $# -gt 0 ]; do
             TOKEN="$2"
             shift 2
             ;;
+        --proxy)
+            if [ $# -lt 2 ]; then
+                err "--proxy 需要参数"
+                exit 1
+            fi
+            PROXY="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "用法: $0 <路径> [--push] [--token <TOKEN>]"
+            echo "用法: $0 <路径> [--push] [--token <TOKEN>] [--proxy <URL>]"
             echo ""
-            echo "环境变量: GITHUB_TOKEN, GH_TOKEN"
+            echo "认证环境变量: GITHUB_TOKEN, GH_TOKEN"
+            echo "代理环境变量: ALL_PROXY, HTTPS_PROXY, HTTP_PROXY"
             exit 0
             ;;
         -*)
@@ -94,7 +127,7 @@ done
 
 if [ -z "$TARGET" ]; then
     err "请指定要删除的文件或目录路径"
-    echo "用法: $0 <路径> [--push] [--token <TOKEN>]"
+    echo "用法: $0 <路径> [--push] [--token <TOKEN>] [--proxy <URL>]"
     exit 1
 fi
 
@@ -226,9 +259,12 @@ echo ""
 # ---------------------------------------------------------------------------
 _push_remote() {
     local REMOTES
+    _SET_PROXY=0  # 全局作用域，供 _restore_git_proxy 读取
+
     REMOTES=$(git remote)
     if [ -z "$REMOTES" ]; then
         warn "未配置远程仓库，跳过推送"
+        _restore_git_proxy
         return
     fi
 
@@ -239,26 +275,36 @@ _push_remote() {
     read -rp "确认强制推送？(y/N) " CONFIRM_PUSH
     if [[ ! "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
         info "跳过推送"
+        _restore_git_proxy
         return
     fi
 
-    # 如果提供了 token，临时注入到所有 HTTPS 远程 URL 中
+    # ---- 代理配置 ----
+    if [ -n "$PROXY" ]; then
+        # 保存现有 git proxy 配置
+        OLD_HTTP_PROXY=$(git config --global --get http.proxy 2>/dev/null || true)
+        OLD_HTTPS_PROXY=$(git config --global --get https.proxy 2>/dev/null || true)
+        # 设置代理
+        git config --global http.proxy "$PROXY"
+        git config --global https.proxy "$PROXY"
+        _SET_PROXY=1
+        ok "已设置 Git 代理: $PROXY"
+    fi
+
+    # ---- Token 注入 ----
+    _SET_TOKEN=0
     if [ -n "$TOKEN" ]; then
         info "检测到 GitHub Token，正在注入认证信息..."
-
-        # 保存原始 remote URL，用于推送完成后恢复
+        # 保存原始 remote URL
         ORIG_REMOTE_URLS=$(git remote -v | awk '{print $2}' | sort -u)
+        _SET_TOKEN=1
 
-        # 逐个 remote 处理
         for REMOTE in $REMOTES; do
             REMOTE_URL=$(git remote get-url "$REMOTE")
-            # 只处理 HTTPS 类型的 URL
             if echo "$REMOTE_URL" | grep -q "^https://"; then
-                # 如果 URL 中已有凭据则跳过
                 if echo "$REMOTE_URL" | grep -q "@"; then
                     warn "remote '$REMOTE' 的 URL 已包含凭据，使用现有凭据"
                 else
-                    # 注入 token:  https://USER:TOKEN@host/owner/repo.git
                     REMOTE_URL_AUTH=$(echo "$REMOTE_URL" | sed "s|https://|https://x-access-token:${TOKEN}@|")
                     git remote set-url "$REMOTE" "$REMOTE_URL_AUTH"
                     ok "已为 remote '$REMOTE' 注入 Token"
@@ -270,18 +316,35 @@ _push_remote() {
     echo ""
     info "正在强制推送（覆盖远程历史）..."
 
-    # 先推送所有分支，再推送 tags
     git push --force --all origin 2>&1 || {
         err "推送失败，请检查网络/代理/Token 权限"
         _restore_remote_urls
+        _restore_git_proxy
         exit 1
     }
     git push --force --tags origin 2>&1 || true
 
     ok "推送完成"
 
-    # 恢复原始 remote URL（移除 token）
+    # 恢复原始配置
     _restore_remote_urls
+    _restore_git_proxy
+}
+
+_restore_git_proxy() {
+    if [ "${_SET_PROXY:-0}" -eq 1 ]; then
+        if [ -n "${OLD_HTTP_PROXY:-}" ]; then
+            git config --global http.proxy "$OLD_HTTP_PROXY"
+        else
+            git config --global --unset http.proxy 2>/dev/null || true
+        fi
+        if [ -n "${OLD_HTTPS_PROXY:-}" ]; then
+            git config --global https.proxy "$OLD_HTTPS_PROXY"
+        else
+            git config --global --unset https.proxy 2>/dev/null || true
+        fi
+        ok "已恢复 Git 代理配置"
+    fi
 }
 
 _restore_remote_urls() {
@@ -306,9 +369,10 @@ if [ "$DO_PUSH" -eq 1 ]; then
 else
     info "如需推送覆盖远程历史，请执行："
     echo ""
-    echo "    ./git-purge.sh '$TARGET' --push [--token <TOKEN>]"
+    echo "    ./git-purge.sh '$TARGET' --push [--token <TOKEN>] [--proxy <URL>]"
     echo "    # 或使用环境变量:"
-    echo "    GITHUB_TOKEN=ghp_xxxxxx git push --force --all origin"
+    echo "    GITHUB_TOKEN=ghp_xxxxxx ALL_PROXY=http://127.0.0.1:6012 \\"
+    echo "      git push --force --all origin"
     echo ""
 fi
 
