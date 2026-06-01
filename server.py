@@ -18,6 +18,8 @@ server.py — HTTP 服务器入口
 """
 
 import sys
+import os
+import logging
 import urllib.parse
 import http.server
 import threading
@@ -26,7 +28,7 @@ import auth
 import config
 import report
 import export as export_mod
-from app_config import get_server_config
+from app_config import get_server_config, get_log_config
 
 # ---------------------------------------------------------------------------
 # 配置（从 app_config.json 加载，支持环境变量 HOST / PORT 覆盖）
@@ -123,9 +125,9 @@ def _render_login_page(error: str = "") -> str:
 class ReportHandler(http.server.BaseHTTPRequestHandler):
     """HTTP 请求处理器"""
 
-    # 不打印标准日志
+    # HTTP 请求日志（日志关闭时静默，开启时写入文件）
     def log_message(self, format, *args):
-        pass
+        logging.info("%s - %s", self.client_address[0], format % args)
 
     # ---- 路由 ----
 
@@ -288,11 +290,39 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
+# 日志
+# ---------------------------------------------------------------------------
+
+
+def setup_logging():
+    """根据 app_config.json 配置初始化日志系统。"""
+    enabled, log_path = get_log_config()
+    if not enabled:
+        logging.basicConfig(level=logging.WARNING, force=True)
+        return
+
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        filename=log_path,
+        filemode="a",
+        force=True,
+    )
+    logging.info("日志系统已初始化，文件: %s", os.path.abspath(log_path))
+
+
+# ---------------------------------------------------------------------------
 # 启动
 # ---------------------------------------------------------------------------
 
 
 def main():
+    setup_logging()
     # 初始化数据库
     conn = db.get_config_db()
     try:
@@ -302,10 +332,10 @@ def main():
         if not db.get_all_users(conn):
             pw_hash = auth.hash_password("admin123")
             db.add_user(conn, "admin", pw_hash)
-            print("首次启动检测：默认管理员已创建")
-            print("  用户名: admin")
-            print("  密  码: admin123")
-            print("  ⚠️  请尽快登录 /config 修改密码")
+            logging.info("首次启动检测：默认管理员已创建")
+            logging.info("  用户名: admin")
+            logging.info("  密  码: admin123")
+            logging.warning("  ⚠️  请尽快登录 /config 修改密码")
     finally:
         conn.close()
 
@@ -325,18 +355,18 @@ def main():
                     ["fuser", "-k", f"{PORT}/tcp"],
                     capture_output=True, timeout=5
                 )
-                print(f"已清理端口 {PORT}，重新绑定...")
+                logging.info("已清理端口 %s，重新绑定...", PORT)
                 server = http.server.HTTPServer((HOST, PORT), ReportHandler)
             except Exception:
-                print(f"错误: 端口 {PORT} 已被占用")
-                print(f"请手动执行: fuser -k {PORT}/tcp")
-                print(f"或: kill -9 $(lsof -ti:{PORT})")
+                logging.error("端口 %s 已被占用", PORT)
+                logging.error("请手动执行: fuser -k %s/tcp", PORT)
+                logging.error("或: kill -9 $(lsof -ti:%s)", PORT)
                 sys.exit(1)
         else:
             raise
 
-    print(f"服务器已启动: http://{HOST}:{PORT}")
-    print("按 Ctrl+C 停止服务器")
+    logging.info("服务器已启动: http://%s:%s", HOST, PORT)
+    logging.info("按 Ctrl+C 停止服务器")
 
     # 在守护线程中运行 serve_forever，主线程用 join(timeout) 轮询，
     # 确保 Ctrl+C 能立即中断，不会因为 select() 阻塞而延迟
@@ -347,7 +377,7 @@ def main():
         while server_thread.is_alive():
             server_thread.join(timeout=1)
     except KeyboardInterrupt:
-        print("\n正在关闭服务器...")
+        logging.info("正在关闭服务器...")
         # 关闭 socket 迫使 serve_forever 退出，避免 shutdown 阻塞
         try:
             server.shutdown()
@@ -355,7 +385,7 @@ def main():
             # 第二次 Ctrl+C 可能在 shutdown 阻塞期间发生
             pass
         server.server_close()
-        print("服务器已关闭")
+        logging.info("服务器已关闭")
 
 
 if __name__ == "__main__":

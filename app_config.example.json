@@ -4,6 +4,11 @@
         "port": 8080
     },
 
+    "log": {
+        "enable": true,
+        "path": "run.log"
+    },
+
     "config_db": [
         {
             "enable": true,

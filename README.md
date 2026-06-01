@@ -144,6 +144,21 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 }
 ```
 
+### 日志配置 / Log Configuration
+
+```json
+{
+    "log": {
+        "enable": false,
+        "path": "run.log"
+    }
+}
+```
+
+- `enable` — `true` 开启文件日志，`false` 关闭（默认）
+- `path` — 日志文件路径，默认为 `run.log`（项目根目录）
+- 日志包含启动信息、请求记录和错误信息
+
 > ⚠️ `app_config.json` 包含数据库密码，已加入 `.gitignore`，请勿提交到版本控制。
 >
 > `app_config.json` contains credentials and is in `.gitignore` — do not commit.
