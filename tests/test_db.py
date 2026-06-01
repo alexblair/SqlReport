@@ -16,6 +16,8 @@ class TestInitDB(unittest.TestCase):
     """测试数据库初始化"""
 
     def setUp(self):
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
         self.conn = sqlite3.connect(":memory:")
         # 重置全局标志，允许重复初始化
         db._initialized = False
@@ -23,6 +25,7 @@ class TestInitDB(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
         db._initialized = False
+        self.engine_patcher.stop()
 
     def test_init_db_creates_tables(self):
         """init_db 应创建所有配置表"""
@@ -306,6 +309,8 @@ class TestSessionCRUD(unittest.TestCase):
     """Session CRUD 测试"""
 
     def setUp(self):
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
         self.conn = sqlite3.connect(":memory:")
         db._initialized = False
         db.init_db(self.conn)
@@ -313,6 +318,7 @@ class TestSessionCRUD(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
         db._initialized = False
+        self.engine_patcher.stop()
 
     def test_add_and_get_session(self):
         """添加 session 后应能通过 token 查询到用户名"""

@@ -329,13 +329,20 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
         no_pool_opt = '<option value="">-- 请选择 --</option>'
     required_attr = "" if is_edit else "required"
 
-    # 生成分类选择列表
+    # 生成分类选择列表（树形结构）
     cur_cat_id = report["category_id"] if report and report.get("category_id") else ""
-    categories = db.get_all_categories(conn)
+    cat_tree = db.get_category_tree(conn)
     category_options = ""
-    for c in categories:
-        sel = ' selected' if cur_cat_id != "" and str(c["id"]) == str(cur_cat_id) else ''
-        category_options += f'<option value="{c["id"]}"{sel}>{_escape(c["name"])}</option>'
+    def _render_cat_opts(nodes, depth=0):
+        html = ""
+        for node in nodes:
+            indent = "　" * depth
+            sel = ' selected' if cur_cat_id != "" and str(node["id"]) == str(cur_cat_id) else ''
+            html += f'<option value="{node["id"]}"{sel}>{indent}{_escape(node["name"])}</option>'
+            if node["children"]:
+                html += _render_cat_opts(node["children"], depth + 1)
+        return html
+    category_options = _render_cat_opts(cat_tree)
 
     # ---- SQL 编辑器 JavaScript ----
     _sql_editor_js = r"""
@@ -549,131 +556,6 @@ def _render_user_section(conn) -> str:
 
 
 def _render_category_section(conn) -> str:
-    """渲染报表分类列表"""
-    categories, unassigned = db.get_reports_by_category(conn)
-    pools = db.get_all_pools(conn)
-    pool_opts = '<option value="">无</option>'
-    for p in pools:
-        pool_opts += f'<option value="{p["id"]}">{_escape(p["name"])}</option>'
-    cat_opts = '<option value="">未分类</option>'
-    for c in categories:
-        cat_opts += f'<option value="{c["id"]}">{_escape(c["name"])}</option>'
-
-    cat_rows = ""
-    for i, cat in enumerate(categories):
-        cat_id = cat["id"]
-        move_btns = ""
-        if len(categories) > 1:
-            if i > 0:
-                move_btns += f'<form method="post" action="/config/categories/{cat_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-            if i < len(categories) - 1:
-                move_btns += f'<form method="post" action="/config/categories/{cat_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-
-        report_rows = ""
-        for j, r in enumerate(cat["reports"]):
-            r_id = r["id"]
-            pool_sel = pool_opts.replace(f'value="{r["pool_id"]}"', f'value="{r["pool_id"]}" selected') if r["pool_id"] else pool_opts
-            move_r = ""
-            if len(cat["reports"]) > 1:
-                if j > 0:
-                    move_r += f'<form method="post" action="/config/reports/{r_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-                if j < len(cat["reports"]) - 1:
-                    move_r += f'<form method="post" action="/config/reports/{r_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-            report_rows += f"""<tr>
-  <td><a href="/report?id={r_id}" style="color:#4f46e5;font-weight:500;text-decoration:none">{_escape(r["name"])}</a></td>
-  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r["sql_query"][:60])}{'...' if len(r["sql_query"]) > 60 else ''}</code></td>
-  <td class="ops-cell">
-    {move_r}
-    {_link_btn(f"/config/reports/{r_id}/edit", "编辑")}
-    {_link_btn(f"/config/reports/{r_id}/copy", "复制")}
-    <form method="post" action="/config/reports/{r_id}/move-category" style="display:inline">
-      <select name="category_id" onchange="this.form.submit()" style="padding:4px 6px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="">移至…</option>
-        {cat_opts}
-      </select>
-    </form>
-    <form method="post" action="/config/reports/{r_id}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除报表 {_escape(r["name"])}？')">
-      <button type="submit" class="btn btn-danger btn-sm">删除</button>
-    </form>
-  </td>
-</tr>"""
-
-        cat_rows += f"""<tr class="category-header">
-  <td colspan="3" style="padding:6px 14px;background:#f1f5f9;font-weight:600;font-size:14px;color:#334155;border-bottom:1px solid #e2e8f0">
-    <span style="display:flex;align-items:center;gap:8px">
-      <span>📁 {_escape(cat["name"])}</span>
-      <span style="font-size:12px;color:#94a3b8;font-weight:400">({len(cat["reports"])} 个报表)</span>
-      <span style="flex:1"></span>
-      {move_btns}
-      {_link_btn(f"/config/categories/{cat_id}/edit", "重命名", "btn btn-outline btn-sm")}
-      <form method="post" action="/config/categories/{cat_id}/delete" style="display:inline"
-            onsubmit="return confirm('确定删除分类 {_escape(cat["name"])}？(报表不会删除)')">
-        <button type="submit" class="btn btn-danger btn-sm">删除</button>
-      </form>
-    </span>
-  </td>
-</tr>""" + (report_rows or '<tr><td colspan="3" class="empty-state" style="padding:12px 14px;color:#94a3b8;font-size:13px">该分类暂无报表</td></tr>')
-
-    # 未分类报表
-    if unassigned:
-        unassigned_rows = ""
-        for j, r in enumerate(unassigned):
-            r_id = r["id"]
-            move_r = ""
-            if len(unassigned) > 1:
-                if j > 0:
-                    move_r += f'<form method="post" action="/config/reports/{r_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-                if j < len(unassigned) - 1:
-                    move_r += f'<form method="post" action="/config/reports/{r_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-            unassigned_rows += f"""<tr>
-  <td><a href="/report?id={r_id}" style="color:#4f46e5;font-weight:500;text-decoration:none">{_escape(r["name"])}</a></td>
-  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r["sql_query"][:60])}{'...' if len(r["sql_query"]) > 60 else ''}</code></td>
-  <td class="ops-cell">
-    {move_r}
-    {_link_btn(f"/config/reports/{r_id}/edit", "编辑")}
-    {_link_btn(f"/config/reports/{r_id}/copy", "复制")}
-    <form method="post" action="/config/reports/{r_id}/move-category" style="display:inline">
-      <select name="category_id" onchange="this.form.submit()" style="padding:4px 6px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="">移至…</option>
-        <option value="" disabled>────</option>
-        {cat_opts}
-      </select>
-    </form>
-    <form method="post" action="/config/reports/{r_id}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除报表 {_escape(r["name"])}？')">
-      <button type="submit" class="btn btn-danger btn-sm">删除</button>
-    </form>
-  </td>
-</tr>"""
-        cat_rows += f"""<tr class="category-header">
-  <td colspan="3" style="padding:6px 14px;background:#f8fafc;font-weight:600;font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0">
-    📄 未分类 ({len(unassigned)} 个报表)
-  </td>
-</tr>""" + unassigned_rows
-
-    if not cat_rows:
-        cat_rows = '<tr><td colspan="3" class="empty-state">暂无报表</td></tr>'
-
-    return f"""<div class="section">
-<div class="section-title">
-  <span>📁 报表层级管理</span>
-  <span class="actions">
-    {_link_btn("/config/categories/add", "新增层级", "btn btn-primary btn-sm")}
-    {_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")}
-  </span>
-</div>
-<div class="table-wrap">
-<table><thead><tr>
-  <th>名称</th><th>SQL</th><th>操作</th>
-</tr></thead><tbody>
-{cat_rows}
-</tbody></table>
-</div>
-</div>"""
-
-
-def _render_category_section(conn) -> str:
     """渲染报表分类配置段（分类管理 + 各分类下的报表列表）"""
     cat_reports, unclassified_reports = db.get_reports_by_category(conn)
     all_cats = db.get_all_categories(conn)
@@ -760,9 +642,10 @@ function updateBatchCount() {{
 </script>"""
 
     def _render_report_rows(report_list, in_category=False):
-        """渲染报表列表行"""
+        """渲染报表列表行（含调序按钮）"""
         rows = ""
-        for r in report_list:
+        total = len(report_list)
+        for idx, r in enumerate(report_list):
             rpt_id = r["id"]
             pool_name = ""
             pool_id = r["pool_id"]
@@ -775,6 +658,13 @@ function updateBatchCount() {{
                 if pool_name
                 else '<span style="color:#dc2626;font-size:13px">连接池已删除</span>'
             )
+            # 调序按钮
+            move_btns = ""
+            if total > 1:
+                if idx > 0:
+                    move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
+                if idx < total - 1:
+                    move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
             rows += f"""<tr>
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
   <td><strong>{_escape(r['name'])}</strong></td>
@@ -784,6 +674,7 @@ function updateBatchCount() {{
   <td>{r['default_page_size']}</td>
   <td>{pool_badge}</td>
   <td class="ops-cell">
+    {move_btns}
     {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
     {_link_btn(f"/config/reports/{rpt_id}/copy", "复制")}
     <form method="post" action="/config/reports/{rpt_id}/delete" style="display:inline"
@@ -797,14 +688,12 @@ function updateBatchCount() {{
     # 构建分类区域
     cat_areas = ""
 
-    # 分类列表（树形缩进）
-    def _render_cat_item(cat, all_cats_list, depth=0):
-        depth = _get_depth(cat, all_cats_list)
-        indent = "　" * depth
-        children = [c for c in all_cats_list if c.get("parent_id") == cat["id"]]
+    # 分类列表（树形结构）
+    def _render_cat_item(cat, depth=0):
+        children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
         has_children = len(children) > 0
         move_btns = ""
-        siblings = [c for c in all_cats_list if c.get("parent_id") == cat.get("parent_id")]
+        siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
         idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
         n = len(siblings)
         if n > 1:
@@ -814,37 +703,41 @@ function updateBatchCount() {{
             if idx < n - 1:
                 move_btns += f'<form method="post" action="/config/categories/{cat["id"]}/move-down" style="display:inline">' \
                              f'<button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)})</span>' if has_children else ""
-        return f"""<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;padding:4px 10px;border-radius:16px;font-size:14px">
-  {indent}{_escape(cat["name"])}{badge}
+        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>' if has_children else ""
+        return f"""<div style="padding:8px {8 + depth * 24}px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9">
+  <span style="font-size:14px;font-weight:500">{_escape(cat["name"])}{badge}</span>
+  <span style="flex:1"></span>
   {move_btns}
   {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
   <form method="post" action="/config/categories/{cat['id']}/delete" style="display:inline"
         onsubmit="return confirm('确定删除分类 {_escape(cat['name'])}？分类下的报表和子分类将变为未分类。')">
     <button type="submit" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:12px">删除</button>
   </form>
-</span> """
+</div>"""
 
     cat_list_html = ""
     roots = db.get_category_tree(conn)
     def _render_tree(nodes, depth=0):
         html = ""
         for node in nodes:
-            html += _render_cat_item(node, all_cats) + " "
+            html += _render_cat_item(node, depth)
             if node["children"]:
                 html += _render_tree(node["children"], depth + 1)
         return html
     cat_list_html = _render_tree(roots)
 
     if not cat_list_html and not all_reports:
-        cat_list_html = '<span style="color:#94a3b8;font-size:14px">暂无分类</span>'
+        cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
 
     cat_areas += f"""<div class="section">
 <div class="section-title">
   <span>📁 报表分类</span>
-  <span class="actions">{_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}</span>
+  <span class="actions">
+    {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
+    {_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")}
+  </span>
 </div>
-<div style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 0">
+<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
   {cat_list_html}
 </div>
 </div>"""
@@ -863,7 +756,7 @@ function updateBatchCount() {{
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="var c=document.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
+  <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
   <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>操作</th>
 </tr></thead><tbody>
 {rows}
@@ -883,7 +776,7 @@ function updateBatchCount() {{
 {batch_bar}
 <div class="table-wrap">
 <table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="var c=document.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
+  <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
   <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>操作</th>
 </tr></thead><tbody>
 {uncat_rows or '<tr><td colspan="6" class="empty-state">暂无未分类报表</td></tr>'}

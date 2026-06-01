@@ -17,9 +17,11 @@
 
 | 特性 | 说明 |
 |------|------|
-| **连接池管理** | 可视化 CRUD 管理 MySQL 连接池（主机、端口、用户、密码、库名） |
+| **连接池管理** | 可视化 CRUD 管理 MySQL 连接池，支持拖拽排序 |
 | **用户管理** | 多用户支持，密码哈希存储（SHA-256 + salt） |
-| **报表配置** | 自定义 SQL 查询、绑定连接池、默认每页行数 |
+| **报表配置** | 自定义 SQL 查询、绑定连接池、默认每页行数，支持分类树管理 |
+| **分类树管理** | 无限层级分类，树形缩进展示，支持调序、新增、删除、重命名 |
+| **批量操作** | 批量删除报表，分类内全选/反选 |
 | **分页表格** | 内存分页、显示总页数、跳转任意页 |
 | **多字段排序** | 点击列头排序，支持多列组合排序 |
 | **多字段筛选** | 任意列模糊搜索，支持多字段同时过滤 |
@@ -31,9 +33,11 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Connection Pool Mgmt** | Visual CRUD for MySQL connection pools (host, port, user, password, database) |
+| **Connection Pool Mgmt** | Visual CRUD for MySQL connection pools with sortable list |
 | **User Management** | Multi-user support with salted SHA-256 password hashing |
-| **Report Configuration** | Custom SQL queries, bind to connection pool, configurable page size |
+| **Report Configuration** | Custom SQL queries, bind to connection pool, configurable page size, category tree |
+| **Category Tree** | Unlimited depth categories, tree-indented display, reorder/add/rename/delete |
+| **Batch Operations** | Batch delete reports, select all/deselect per category |
 | **Paginated Tables** | In-memory pagination with total pages display and page jump |
 | **Multi-column Sorting** | Click column headers, support multi-column combo sort |
 | **Multi-field Filtering** | Fuzzy search on any column, multi-field simultaneous filtering |
@@ -146,11 +150,18 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 
 ### 配置页 `/config`
 
-三合一配置管理界面：
+三合一配置管理界面，左侧导航切换：
 
-- **连接池** — 添加/编辑/删除 MySQL 连接配置
+- **连接池** — 添加/编辑/删除 MySQL 连接配置，支持调序
 - **用户** — 添加/编辑/删除系统用户
-- **报表** — 配置 SQL 查询、绑定的连接池、默认每页行数
+- **报表** — 配置 SQL 查询、绑定的连接池、默认每页行数、所属分类
+- **分类** — 无限层级树形管理，支持拖拽式调序
+
+报表配置页特色：
+- 分类树形展示，缩进表示层级
+- 每个报表行内带有上下移动按钮
+- 分类级全选/反选，支持批量删除
+- 报表可跨分类移动（下拉选择目标分类）
 
 ### 报表页 `/report`
 
@@ -174,8 +185,8 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 ```
 SqlReport/
 ├── server.py              # HTTP 服务器入口、路由分发
-├── config_page.py         # 配置页 CRUD 处理
-├── report_page.py         # 报表页、分页、排序、筛选
+├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类）
+├── report.py              # 报表页、分页、排序、筛选
 ├── export.py              # CSV 导出
 ├── auth.py                # 用户认证、Session 管理
 ├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
@@ -183,14 +194,15 @@ SqlReport/
 ├── app_config.json        # 应用配置文件（含密码，不提交）
 ├── app_config.example.json# 配置文件模板
 ├── tests/                 # 单元测试
-│   ├── test_config.py
-│   ├── test_report.py
-│   ├── test_export.py
 │   ├── test_auth.py
+│   ├── test_config.py
 │   ├── test_db.py
+│   ├── test_export.py
+│   ├── test_report.py
 │   └── test_server.py
-├── config.db              # SQLite 配置数据库（自动创建）
+├── config.db              # SQLite 配置数据库（自动创建，不提交）
 ├── manage_service.sh      # Systemd 服务管理脚本
+├── git-purge.sh           # Git 仓库重写工具（清理历史/更改作者/代理支持）
 └── AGENTS.md              # AI 开发代理指引
 ```
 

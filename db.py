@@ -156,6 +156,7 @@ class _MySQLConnection:
 def _connect_mysql_config() -> _MySQLConnection:
     """根据 app_config 创建 MySQL 连接（用于 config_db 存储）。"""
     import mysql.connector
+    from mysql.connector import ClientFlag
 
     cfg = _get_db_config()
     config = {
@@ -166,6 +167,8 @@ def _connect_mysql_config() -> _MySQLConnection:
         "database": cfg.get("database", "sqlreport_config"),
         "connection_timeout": 10,
         "charset": "utf8mb4",
+        # 使 rowcount 返回匹配行数而非实际修改行数（与 SQLite 行为一致）
+        "client_flags": [ClientFlag.FOUND_ROWS],
     }
     if cfg.get("socket"):
         config["unix_socket"] = cfg["socket"]
@@ -250,7 +253,7 @@ _MYSQL_SCHEMA = """
         port        INTEGER NOT NULL DEFAULT 3306,
         user        VARCHAR(255) NOT NULL,
         password    VARCHAR(255) NOT NULL,
-        database    VARCHAR(255) NOT NULL,
+        `database`  VARCHAR(255) NOT NULL,
         sort_order  INTEGER NOT NULL DEFAULT 0
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -439,7 +442,7 @@ def add_pool(conn: sqlite3.Connection, name: str, host: str, port: int,
     """新增一个 MySQL 连接池配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM connection_pools").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO connection_pools (name,host,port,user,password,database,sort_order) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO connection_pools (name,host,port,user,password,`database`,sort_order) VALUES (?,?,?,?,?,?,?)",
         (name, host, port, user, password, database, max_order + 1),
     )
     conn.commit()
@@ -464,7 +467,7 @@ def update_pool(conn: sqlite3.Connection, pool_id: int, name: str, host: str,
                 port: int, user: str, password: str, database: str) -> bool:
     """更新连接池配置，影响行数 >0 返回 True。"""
     cur = conn.execute(
-        "UPDATE connection_pools SET name=?,host=?,port=?,user=?,password=?,database=? WHERE id=?",
+        "UPDATE connection_pools SET name=?,host=?,port=?,user=?,password=?,`database`=? WHERE id=?",
         (name, host, port, user, password, database, pool_id),
     )
     conn.commit()
@@ -502,13 +505,14 @@ def move_pool(conn: sqlite3.Connection, pool_id: int, direction: str) -> bool:
     if idx is None:
         return False
     if direction == "up" and idx > 0:
-        swap_id = pools[idx - 1]["id"]
+        swap_idx = idx - 1
     elif direction == "down" and idx < len(pools) - 1:
-        swap_id = pools[idx + 1]["id"]
+        swap_idx = idx + 1
     else:
         return False
+    swap_id = pools[swap_idx]["id"]
     so_a = pools[idx]["sort_order"] or idx
-    so_b = pools[swap_id]["sort_order"] or (idx + (1 if direction == "up" else -1))
+    so_b = pools[swap_idx]["sort_order"] or swap_idx
     conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_b, pool_id))
     conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()
@@ -636,13 +640,14 @@ def move_report(conn: sqlite3.Connection, report_id: int, direction: str,
     if idx is None:
         return False
     if direction == "up" and idx > 0:
-        swap_id = reports[idx - 1]["id"]
+        swap_idx = idx - 1
     elif direction == "down" and idx < len(reports) - 1:
-        swap_id = reports[idx + 1]["id"]
+        swap_idx = idx + 1
     else:
         return False
+    swap_id = reports[swap_idx]["id"]
     so_a = reports[idx]["sort_order"] or idx
-    so_b = reports[swap_id]["sort_order"] or (idx + (1 if direction == "up" else -1))
+    so_b = reports[swap_idx]["sort_order"] or swap_idx
     conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_b, report_id))
     conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()
@@ -717,13 +722,14 @@ def move_category(conn: sqlite3.Connection, category_id: int, direction: str) ->
     if idx is None:
         return False
     if direction == "up" and idx > 0:
-        swap_id = cats[idx - 1]["id"]
+        swap_idx = idx - 1
     elif direction == "down" and idx < len(cats) - 1:
-        swap_id = cats[idx + 1]["id"]
+        swap_idx = idx + 1
     else:
         return False
+    swap_id = cats[swap_idx]["id"]
     so_a = cats[idx]["sort_order"] or idx
-    so_b = cats[swap_id]["sort_order"] or (idx + (1 if direction == "up" else -1))
+    so_b = cats[swap_idx]["sort_order"] or swap_idx
     conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_b, category_id))
     conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()

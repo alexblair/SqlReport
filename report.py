@@ -747,12 +747,13 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             # 只保留当前列的排序（移除其他）
             new_sorts = [(col, new_dir)]
 
-        sort_href = f"/report?id={report_id}&page_size={qs_page_size}"
+        # 构建排序 URL，使用 &amp; 确保 HTML 属性中的 & 正确转义
+        sort_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
         if new_sorts:
-            sort_href += "&" + _build_sort_params(new_sorts)
+            sort_href += "&amp;" + _build_sort_params(new_sorts)
         # 保留所有筛选参数
         if filters:
-            sort_href += "&" + _build_filter_params(filters)
+            sort_href += "&amp;" + _build_filter_params(filters)
 
         arrow_cls = "sort-arrow active" if current_dir else "sort-arrow"
 
@@ -814,10 +815,10 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">刷新</button></noscript>
   </form>
-  <a href="/export?id={report_id}{('&'+_build_filter_params(filters)) if filters else ''}">
+  <a href="/export?id={report_id}{('&amp;'+_build_filter_params(filters)) if filters else ''}">
     <button type="button" class="btn btn-success btn-sm">导出 CSV</button>
   </a>
-  <a href="/report?id={report_id}&page_size={qs_page_size}{('&'+_build_sort_params(sorts)) if sorts else ''}{('&'+_build_filter_params(filters)) if filters else ''}&refresh=1" class="btn-refresh">⟳ 重建缓存</a>
+  <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
 </div>"""
@@ -825,9 +826,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     # ---- 筛选清除提示 ----
     clear_html = ""
     if filters:
-        clear_href = f"/report?id={report_id}&page_size={qs_page_size}"
+        clear_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
         if sorts:
-            clear_href += "&" + _build_sort_params(sorts)
+            clear_href += "&amp;" + _build_sort_params(sorts)
         filter_summary = "、".join(f'{_escape(c)}="{_escape(q)}"' for c, q in filters)
         clear_html = (f'<div style="margin-bottom:12px;font-size:13px;color:#64748b">'
                       f'筛选: {filter_summary} '
@@ -926,17 +927,17 @@ def _build_pagination(report_id: int, current: int, total_pages: int,
     if total_pages <= 1:
         return ""
 
-    # 基础 URL
-    base_url = f"/report?id={report_id}&page_size={page_size}"
+    # 基础 URL（使用 &amp; 确保 HTML 中 & 被正确转义）
+    base_url = f"/report?id={report_id}&amp;page_size={page_size}"
     if sorts:
-        base_url += "&" + _build_sort_params(sorts)
+        base_url += "&amp;" + _build_sort_params(sorts)
     if filters:
-        base_url += "&" + _build_filter_params(filters)
+        base_url += "&amp;" + _build_filter_params(filters)
 
     parts = []
 
     if current > 1:
-        parts.append(f'<a href="{base_url}&page={current - 1}" class="nav-arrow">‹</a>')
+        parts.append(f'<a href="{base_url}&amp;page={current - 1}" class="nav-arrow">‹</a>')
     else:
         parts.append('<span class="disabled">‹</span>')
 
@@ -954,11 +955,11 @@ def _build_pagination(report_id: int, current: int, total_pages: int,
         if p == current:
             parts.append(f'<span class="active">{p}</span>')
         else:
-            parts.append(f'<a href="{base_url}&page={p}" class="page-btn">{p}</a>')
+            parts.append(f'<a href="{base_url}&amp;page={p}" class="page-btn">{p}</a>')
         prev = p
 
     if current < total_pages:
-        parts.append(f'<a href="{base_url}&page={current + 1}" class="nav-arrow">›</a>')
+        parts.append(f'<a href="{base_url}&amp;page={current + 1}" class="nav-arrow">›</a>')
     else:
         parts.append('<span class="disabled">›</span>')
 
@@ -967,7 +968,7 @@ def _build_pagination(report_id: int, current: int, total_pages: int,
         f'<input type="number" id="jump_page" min="1" max="{total_pages}" '
         f'value="{current}"> '
         f'<button class="btn btn-primary btn-sm" '
-        f'onclick="window.location.href=\'{base_url}&page=\' + '
+        f'onclick="window.location.href=\'{base_url}&amp;page=\' + '
         f"document.getElementById('jump_page').value\">GO</button>"
         f'</span>'
     )
