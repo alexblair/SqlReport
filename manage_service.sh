@@ -51,7 +51,7 @@ precheck() {
     fi
 
     if [[ ! -f "${PROJECT_DIR}/venv/bin/python" ]]; then
-        error "未找到 Python 虚拟环境 (venv/)，请先在项目目录执行: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+        error "未找到 Python 虚拟环境 (venv/)，请先在项目目录执行: python3 -m venv venv && source venv/bin/activate && pip install mysql-connector-python"
         exit 1
     fi
 
