@@ -16,6 +16,14 @@
         },
         {
             "enable": false,
+            "engine": "mysql",
+            "socket": "/var/run/mysqld/mysqld.sock",
+            "user": "root",
+            "password": "your_password",
+            "database": "sqlreport_config"
+        },
+        {
+            "enable": false,
             "engine": "sqlite3",
             "path": "config.db"
         }
