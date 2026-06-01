@@ -29,19 +29,10 @@ CONFIG_DB = os.environ.get("CONFIG_DB", "config.db")
 
 
 def get_config_db() -> sqlite3.Connection:
-    """创建并返回一个新的 SQLite 连接（每请求使用独立连接，线程安全）。
-
-    设置 timeout=10 秒等待锁释放，避免并发/网络文件系统上出现
-    "database is locked" 错误。如果设置 WAL 模式失败（例如数据库
-    被锁定），静默降级为 DELETE 日志模式，不影响正常使用。
-    """
-    conn = sqlite3.connect(CONFIG_DB, timeout=10)
+    """创建并返回一个新的 SQLite 连接（每请求使用独立连接，线程安全）。"""
+    conn = sqlite3.connect(CONFIG_DB)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=10000")
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-    except sqlite3.OperationalError:
-        pass  # 无法获取写锁设置 WAL，降级使用默认 journal 模式
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
