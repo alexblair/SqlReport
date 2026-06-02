@@ -832,6 +832,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   <a href="/export?id={report_id}{('&amp;'+_build_filter_params(filters)) if filters else ''}">
     <button type="button" class="btn btn-success btn-sm">导出 CSV</button>
   </a>
+  <a href="/export?id={report_id}&amp;format=json{('&amp;'+_build_filter_params(filters)) if filters else ''}">
+    <button type="button" class="btn btn-primary btn-sm">导出 JSON</button>
+  </a>
   <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
