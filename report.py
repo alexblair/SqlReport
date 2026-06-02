@@ -441,10 +441,10 @@ _PAGE_HEADER = """<!DOCTYPE html>
 
 _FOOTER = """</div>
 <script>
-function toggleDebug(btn) {
+function toggleSection(btn, label) {
   var content = btn.nextElementSibling;
   var hidden = content.classList.toggle("hidden");
-  btn.textContent = hidden ? "▶ Debug 信息" : "▼ Debug 信息";
+  btn.textContent = hidden ? "▶ " + label : "▼ " + label;
 }
 </script>
 </body></html>"""
@@ -703,8 +703,22 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         debug_lines.append(f'排序: {sort_desc}')
     debug_html = (
         '<div class="debug-info">'
-        '<button class="debug-toggle" onclick="toggleDebug(this)" type="button">▶ Debug 信息</button>'
+        '<button class="debug-toggle" onclick="toggleSection(this, \'Debug 信息\')" type="button">▶ Debug 信息</button>'
         '<div class="debug-content hidden">' + '<br>'.join(debug_lines) + '</div>'
+        '</div>')
+
+    # ---- 备注 ----
+    memo_raw = report.get("memo") or ""
+    if memo_raw:
+        memo_btn_text = "▼ 备注"
+        memo_hidden_cls = ""
+    else:
+        memo_btn_text = "▶ 备注"
+        memo_hidden_cls = " hidden"
+    memo_html = (
+        '<div class="debug-info">'
+        f'<button class="debug-toggle" onclick="toggleSection(this, \'备注\')" type="button">{memo_btn_text}</button>'
+        f'<div class="debug-content{memo_hidden_cls}">' + _escape(memo_raw) + '</div>'
         '</div>')
 
     # ---- 构建多字段筛选表单（单 Form，filter inputs 用 form 属性关联） ----
@@ -841,6 +855,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
             f'<h2>{_escape(report["name"])}</h2>' +
+            memo_html +
             debug_html +
             controls +
             clear_html +

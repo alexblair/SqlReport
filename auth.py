@@ -80,6 +80,8 @@ def load_sessions() -> None:
                 _sessions[s["token"]] = s["username"]
         finally:
             conn.close()
+    except KeyboardInterrupt:
+        raise  # Ctrl+C 正常传播
     except Exception as exc:
         print(f"[auth] session 加载失败（降级至纯内存）: {exc}")
 

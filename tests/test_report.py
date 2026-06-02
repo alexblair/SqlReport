@@ -41,6 +41,7 @@ def _make_conn():
             default_page_size INTEGER NOT NULL DEFAULT 20,
             pool_id INTEGER,
             category_id INTEGER,
+            memo TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -78,6 +79,7 @@ def _make_conn2():
             default_page_size INTEGER NOT NULL DEFAULT 20,
             pool_id INTEGER,
             category_id INTEGER,
+            memo TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -229,6 +231,46 @@ class TestReportExecution(unittest.TestCase):
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("查询执行失败", body)
         self.assertIn("连接超时", body)
+
+    @patch("report.execute_report")
+    def test_report_shows_memo_when_present(self, mock_exec):
+        """有备注时应在报表页显示备注内容（默认展开）"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        # 修改报表配置加入 memo
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo="这是报表备注说明")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn("这是报表备注说明", body)
+        self.assertIn("▼ 备注", body)  # 有内容时默认展开
+
+    @patch("report.execute_report")
+    def test_report_hides_memo_when_empty(self, mock_exec):
+        """无备注时备注区域应默认隐藏"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        # 确保 memo 为 None
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo=None)
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn("▶ 备注", body)  # 无内容时默认折叠
+
+    @patch("report.execute_report")
+    def test_report_memo_toggle_button(self, mock_exec):
+        """备注切换按钮应使用 toggleSection 函数"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo="测试备注")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn('toggleSection(this', body)
+        self.assertIn("备注", body)
 
 
 class TestReportResult(unittest.TestCase):

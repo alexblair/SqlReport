@@ -323,24 +323,28 @@ def setup_logging():
 
 def main():
     setup_logging()
-    # 初始化数据库
-    conn = db.get_config_db()
     try:
-        db.init_db(conn)
+        # 初始化数据库
+        conn = db.get_config_db()
+        try:
+            db.init_db(conn)
 
-        # 自动创建默认管理员（仅首次启动）
-        if not db.get_all_users(conn):
-            pw_hash = auth.hash_password("admin123")
-            db.add_user(conn, "admin", pw_hash)
-            logging.info("首次启动检测：默认管理员已创建")
-            logging.info("  用户名: admin")
-            logging.info("  密  码: admin123")
-            logging.warning("  ⚠️  请尽快登录 /config 修改密码")
-    finally:
-        conn.close()
+            # 自动创建默认管理员（仅首次启动）
+            if not db.get_all_users(conn):
+                pw_hash = auth.hash_password("admin123")
+                db.add_user(conn, "admin", pw_hash)
+                logging.info("首次启动检测：默认管理员已创建")
+                logging.info("  用户名: admin")
+                logging.info("  密  码: admin123")
+                logging.warning("  ⚠️  请尽快登录 /config 修改密码")
+        finally:
+            conn.close()
 
-    # 从 SQLite 恢复 session（使重启后用户无需重新登录）
-    auth.load_sessions()
+        # 从 SQLite 恢复 session（使重启后用户无需重新登录）
+        auth.load_sessions()
+    except KeyboardInterrupt:
+        logging.info("启动被用户中断")
+        sys.exit(0)
 
     # 创建 HTTP 服务器（允许地址重用，避免 Ctrl+Z 暂停后端口仍被占用）
     http.server.HTTPServer.allow_reuse_address = True

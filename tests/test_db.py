@@ -199,6 +199,7 @@ class TestReportCRUD(unittest.TestCase):
                 default_page_size INTEGER NOT NULL DEFAULT 20,
                 pool_id INTEGER,
                 category_id INTEGER,
+                memo TEXT,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
                 FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -250,6 +251,32 @@ class TestReportCRUD(unittest.TestCase):
         rpt = db.get_report(self.conn, rid)
         self.assertIsNotNone(rpt, "报表应保留，不应被级联删除")
         self.assertIsNone(rpt["pool_id"], "pool_id 应被置空")
+
+    def test_add_report_with_memo(self):
+        """新增报表带备注应正确存储和返回"""
+        rid = db.add_report(self.conn, "带备注报表", "SELECT 1", 20, self.pool_id, memo="这是备注内容")
+        rpt = db.get_report(self.conn, rid)
+        self.assertEqual(rpt["memo"], "这是备注内容")
+
+    def test_add_report_without_memo(self):
+        """新增报表不带备注，memo 应为 None"""
+        rid = db.add_report(self.conn, "无备注报表", "SELECT 1", 20, self.pool_id)
+        rpt = db.get_report(self.conn, rid)
+        self.assertIsNone(rpt["memo"])
+
+    def test_update_report_memo(self):
+        """更新报表的备注字段应生效"""
+        rid = db.add_report(self.conn, "改备注", "SELECT 1", 20, self.pool_id, memo="旧备注")
+        db.update_report(self.conn, rid, "改备注", "SELECT 1", 20, self.pool_id, memo="新备注")
+        rpt = db.get_report(self.conn, rid)
+        self.assertEqual(rpt["memo"], "新备注")
+
+    def test_update_report_clear_memo(self):
+        """将备注置空应存为 None"""
+        rid = db.add_report(self.conn, "清备注", "SELECT 1", 20, self.pool_id, memo="待清除")
+        db.update_report(self.conn, rid, "清备注", "SELECT 1", 20, self.pool_id, memo=None)
+        rpt = db.get_report(self.conn, rid)
+        self.assertIsNone(rpt["memo"])
 
 
 class TestMySQLManager(unittest.TestCase):

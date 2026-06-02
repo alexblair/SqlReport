@@ -45,6 +45,7 @@ def _make_conn():
             default_page_size INTEGER NOT NULL DEFAULT 20,
             pool_id INTEGER,
             category_id INTEGER,
+            memo TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -267,6 +268,45 @@ class TestReportFlow(unittest.TestCase):
         code, body, _ = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
         self.assertEqual(code, "200")
         self.assertIn("错误", body)
+
+    def test_add_report_form_contains_memo(self):
+        """新增报表表单应包含备注 textarea"""
+        code, body, _ = config.handle_request(self.conn, "GET", "/config/reports/add", "")
+        self.assertIn('name="memo"', body)
+        self.assertIn("备注", body)
+
+    def test_submit_add_report_with_memo(self):
+        """提交带备注的报表应正确存储"""
+        form = ("name=备注报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
+                "&memo=这是报表的备注说明")
+        code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
+        self.assertEqual(code, "302")
+        reports = db.get_all_reports(self.conn)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["memo"], "这是报表的备注说明")
+
+    def test_edit_report_form_prefills_memo(self):
+        """编辑报表表单应回填备注值"""
+        rid = db.add_report(self.conn, "备注报表", "SELECT 1", 20, 1, memo="已有备注")
+        code, body, _ = config.handle_request(self.conn, "GET", f"/config/reports/{rid}/edit", "")
+        self.assertIn("已有备注", body)
+
+    def test_submit_edit_report_with_memo(self):
+        """编辑报表时更新备注应生效"""
+        rid = db.add_report(self.conn, "改备注", "SELECT 1", 20, 1, memo="旧备注")
+        form = "name=改备注&sql_query=SELECT 1&default_page_size=20&pool_id=1&memo=新备注"
+        code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
+        self.assertEqual(code, "302")
+        rpt = db.get_report(self.conn, rid)
+        self.assertEqual(rpt["memo"], "新备注")
+
+    def test_submit_add_report_without_memo(self):
+        """提交不带备注的报表，memo 应存为 None"""
+        form = "name=无备注&sql_query=SELECT 1&default_page_size=20&pool_id=1"
+        code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
+        self.assertEqual(code, "302")
+        reports = db.get_all_reports(self.conn)
+        self.assertIsNone(reports[0]["memo"])
 
 
 class TestFlashMessage(unittest.TestCase):

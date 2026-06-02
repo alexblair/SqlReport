@@ -233,6 +233,7 @@ _SQLITE_SCHEMA = """
         default_page_size  INTEGER NOT NULL DEFAULT 20,
         pool_id            INTEGER,
         category_id        INTEGER,
+        memo               TEXT,
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -278,6 +279,7 @@ _MYSQL_SCHEMA = """
         default_page_size  INTEGER NOT NULL DEFAULT 20,
         pool_id            INTEGER,
         category_id        INTEGER,
+        memo               TEXT,
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -388,6 +390,16 @@ def _init_sqlite_migrations(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             conn.rollback()
 
+    # 迁移 5: 添加 memo 列到 report_configs
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    rpt_cols = {row[1] for row in cursor.fetchall()}
+    if "memo" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN memo TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -428,6 +440,19 @@ def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     if "parent_id" not in cat_cols:
         try:
             conn.execute("ALTER TABLE report_categories ADD COLUMN parent_id INTEGER")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 5: 添加 memo 列到 report_configs
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        rpt_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        rpt_cols = set()
+    if "memo" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN memo TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -577,12 +602,13 @@ def delete_user(conn: sqlite3.Connection, user_id: int) -> bool:
 
 def add_report(conn: sqlite3.Connection, name: str, sql_query: str,
                default_page_size: int, pool_id: Optional[int],
-               category_id: Optional[int] = None) -> int:
+               category_id: Optional[int] = None,
+               memo: Optional[str] = None) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,sort_order) VALUES (?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,sort_order) VALUES (?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, max_order + 1),
     )
     conn.commit()
     return cur.lastrowid
@@ -605,11 +631,12 @@ def get_all_reports(conn: sqlite3.Connection) -> list[dict]:
 def update_report(conn: sqlite3.Connection, report_id: int, name: str,
                   sql_query: str, default_page_size: int,
                   pool_id: Optional[int],
-                  category_id: Optional[int] = None) -> bool:
+                  category_id: Optional[int] = None,
+                  memo: Optional[str] = None) -> bool:
     """更新报表配置，影响行数 >0 返回 True。"""
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, report_id),
     )
     conn.commit()
     return cur.rowcount > 0

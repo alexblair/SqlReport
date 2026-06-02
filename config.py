@@ -312,6 +312,7 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
     sql_query = _escape(report["sql_query"] if report else "")
     default_page_size = str(report["default_page_size"]) if report else "20"
     cur_pool_id = report["pool_id"] if report else ""
+    memo_val = _escape(report.get("memo") or "") if report else ""
 
     if is_copy:
         name = _escape(report["name"] + " (副本)")
@@ -471,6 +472,9 @@ document.addEventListener("DOMContentLoaded", function() {
       <option value="">无分类</option>
       {category_options}
     </select>
+  </label>
+  <label>备注（非必填）:
+    <textarea name="memo" class="sql-textarea" placeholder="输入备注信息..." rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
   </label>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">保存</button>
@@ -665,6 +669,15 @@ function updateBatchCount() {{
                     move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
                 if idx < total - 1:
                     move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
+            # 备注截取前 15 个字
+            memo_raw = r.get("memo") or ""
+            if memo_raw:
+                memo_display = _escape(memo_raw[:15])
+                if len(memo_raw) > 15:
+                    memo_display += "..."
+            else:
+                memo_display = '<span style="color:#cbd5e1">—</span>'
+
             rows += f"""<tr>
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
   <td><strong>{_escape(r['name'])}</strong></td>
@@ -673,6 +686,7 @@ function updateBatchCount() {{
   </td>
   <td>{r['default_page_size']}</td>
   <td>{pool_badge}</td>
+  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px">{memo_display}</td>
   <td class="ops-cell">
     {move_btns}
     {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
@@ -757,7 +771,7 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>备注</th><th>操作</th>
 </tr></thead><tbody>
 {rows}
 </tbody></table>
@@ -777,9 +791,9 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>备注</th><th>操作</th>
 </tr></thead><tbody>
-{uncat_rows or '<tr><td colspan="6" class="empty-state">暂无未分类报表</td></tr>'}
+{uncat_rows or '<tr><td colspan="7" class="empty-state">暂无未分类报表</td></tr>'}
 </tbody></table>
 </div>
 </div>"""
@@ -1001,8 +1015,9 @@ def handle_report_add(conn, form_body: str) -> tuple[str, str]:
     try:
         pool_id = int(data["pool_id"]) if data.get("pool_id") else None
         category_id = int(data["category_id"]) if data.get("category_id") else None
+        memo = data.get("memo") or None
         rid = db.add_report(conn, data["name"], data["sql_query"],
-                            int(data["default_page_size"]), pool_id, category_id)
+                            int(data["default_page_size"]), pool_id, category_id, memo)
         return "302", f"/config?flash=报表 {data['name']} 已创建 (id={rid})"
     except Exception as e:
         return "200", render_report_form_page(conn, flash=f"错误: {e}")
@@ -1017,8 +1032,9 @@ def handle_report_edit(conn, report_id: int, form_body: str) -> tuple[str, str]:
     try:
         pool_id = int(data["pool_id"]) if data.get("pool_id") else None
         category_id = int(data["category_id"]) if data.get("category_id") else None
+        memo = data.get("memo") or None
         ok = db.update_report(conn, report_id, data["name"], data["sql_query"],
-                              int(data["default_page_size"]), pool_id, category_id)
+                              int(data["default_page_size"]), pool_id, category_id, memo)
         if ok:
             return "302", f"/config?flash=报表 {data['name']} 已更新"
         return "302", "/config?flash=错误: 更新失败"
@@ -1032,8 +1048,9 @@ def handle_report_copy(conn, report_id: int, form_body: str) -> tuple[str, str]:
     try:
         pool_id = int(data["pool_id"]) if data.get("pool_id") else None
         category_id = int(data["category_id"]) if data.get("category_id") else None
+        memo = data.get("memo") or None
         rid = db.add_report(conn, data["name"], data["sql_query"],
-                            int(data["default_page_size"]), pool_id, category_id)
+                            int(data["default_page_size"]), pool_id, category_id, memo)
         return "302", f"/config?flash=报表 {data['name']} 已创建（复制自 id={report_id}）"
     except Exception as e:
         return "200", render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True)
