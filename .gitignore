@@ -27,3 +27,5 @@ config.db
 .DS_Store
 Thumbs.db
 .opencode
+git-commit.sh
+git-purge.sh
