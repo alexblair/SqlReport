@@ -829,12 +829,32 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">刷新</button></noscript>
   </form>
-  <a href="/export?id={report_id}{('&amp;'+_build_filter_params(filters)) if filters else ''}">
-    <button type="button" class="btn btn-success btn-sm">导出 CSV</button>
-  </a>
-  <a href="/export?id={report_id}&amp;format=json{('&amp;'+_build_filter_params(filters)) if filters else ''}">
-    <button type="button" class="btn btn-primary btn-sm">导出 JSON</button>
-  </a>
+  <form method="get" action="/export" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <input type="hidden" name="id" value="{report_id}">
+    {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
+    {(''.join(f'<input type="hidden" name="f_{urllib.parse.quote(c, safe="")}" value="{_escape(q)}">' for c, q in filters)) if filters else ''}
+    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
+      格式:
+      <select name="format" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+      </select>
+    </label>
+    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
+      字符集:
+      <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
+        <option value="gbk">GBK</option>
+        <option value="utf8">UTF8</option>
+      </select>
+    </label>
+    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+      <input type="checkbox" name="json_no_quotes" value="1"> 数字无引号
+    </label>
+    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+      <input type="checkbox" name="zip" value="1"> 压缩包
+    </label>
+    <button type="submit" class="btn btn-success btn-sm" style="font-size:12px;padding:3px 10px">导出</button>
+  </form>
   <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>

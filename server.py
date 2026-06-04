@@ -258,8 +258,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         for key, val in headers.items():
             self.send_header(key, val)
         self.end_headers()
-        if code_int == 200:
-            self.wfile.write(body.encode("utf-8"))
+        if isinstance(body, bytes):
+            self.wfile.write(body)
         else:
             self.wfile.write(body.encode("utf-8"))
 
