@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 server.py — HTTP 服务器入口
 
@@ -280,7 +281,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             for k, v in extra_headers.items():
                 self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body.encode("utf-8"))
+        try:
+            self.wfile.write(body.encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_redirect(self, location: str):
         """发送 302 重定向"""

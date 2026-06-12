@@ -47,21 +47,43 @@ from report import _format_cell
 def _parse_filters(qs):
     """
     从 parse_qs 结果中解析多字段筛选参数（与 report.py 保持一致）。
+    返回 list[(col, op, val), ...]
     """
-    filters = []
+    # 第一步：收集筛选值 f_{col}=val
+    f_values: dict[str, str] = {}
     excl = frozenset(("f_col", "f_q", "filters"))
     for key, values in qs.items():
         if not key.startswith("f_") or key in excl:
             continue
         colname = urllib.parse.unquote(key[2:])
         if values and values[0]:
-            filters.append((colname, values[0]))
-    if not filters:
+            f_values[colname] = values[0]
+
+    # 第二步：收集操作符 op_{col}=op
+    op_values: dict[str, str] = {}
+    for key, values in qs.items():
+        if not key.startswith("op_") or key in ("op_col", "op_q"):
+            continue
+        colname = urllib.parse.unquote(key[3:])
+        if values and values[0] in report._OP_MAP:
+            op_values[colname] = values[0]
+
+    # 旧格式兼容
+    if not f_values:
         f_cols = qs.get("f_col", [])
         f_qs = qs.get("f_q", [])
         for c, q in zip(f_cols, f_qs):
             if q:
-                filters.append((c, q))
+                f_values[c] = q
+
+    filters = []
+    for col, val in f_values.items():
+        op = op_values.get(col, report.DEFAULT_OP)
+        filters.append((col, op, val))
+    for col, op in op_values.items():
+        if col not in f_values and op != "nofilter":
+            filters.append((col, op, ""))
+    filters = [(c, o, v) for c, o, v in filters if o != "nofilter"]
     return filters
 
 
@@ -70,7 +92,7 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     """
     执行查询并将结果导出为 CSV 字符串。
 
-    支持可选的 filters 参数（list[(col, q), ...]），
+    支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
@@ -146,7 +168,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     """
     执行查询并将结果导出为 JSON 字符串。
 
-    支持可选的 filters 参数（list[(col, q), ...]），
+    支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
@@ -273,6 +295,8 @@ def handle_export(conn, query: str,
       charset        — gbk 或 utf8（默认 gbk）
       json_no_quotes — 为 1 时 JSON 数值不加引号
       zip            — 为 1 时输出 ZIP 压缩包
+      f_COL          — 筛选值（多字段）
+      op_COL         — 筛选操作符（缺省为 contains）
 
     返回：
       (HTTP 状态码, 内容/错误信息, 响应头 dict)

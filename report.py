@@ -29,6 +29,27 @@ import db
 import html as html_mod
 from typing import Optional
 
+# ===================================================================
+# 筛选操作符定义
+# ===================================================================
+
+FILTER_OPS = [
+    ("nofilter", "不筛选", "不筛选"),
+    ("contains", "包含", "包含"),
+    ("eq",       "等于",   "="),
+    ("neq",      "不等于", "≠"),
+    ("gt",       "大于",   ">"),
+    ("lt",       "小于",   "<"),
+    ("gte",      "大于等于", "≥"),
+    ("lte",      "小于等于", "≤"),
+    ("isempty",  "为空",   "为空"),
+    ("notempty", "非空",   "非空"),
+]
+_OP_MAP: dict[str, tuple[str, str]] = {
+    code: (label, short) for code, label, short in FILTER_OPS
+}
+DEFAULT_OP = "contains"
+
 
 # ===================================================================
 # 缓存
@@ -104,25 +125,87 @@ def _safe_sort_key(val):
 def _filter_rows(rows: list[tuple], columns: list[str],
                  filters=None) -> list[tuple]:
     """
-    在内存中按多字段模糊筛选（AND 逻辑）。
+    在内存中按多字段筛选（AND 逻辑），支持多种操作符。
 
-    filters: list[(col, query), ...]
-    每对 (col, query) 对列做不区分大小写的 LIKE '%query%' 匹配。
-    多个条件之间为 AND 关系。
+    filters: list[(col, op, val), ...]
+    操作符说明：
+      contains  — 不区分大小写的 LIKE '%val%'
+      eq        — 字符串精确相等
+      neq       — 字符串不相等
+      gt / lt / gte / lte — 数值比较（尝试转 float）
+      isempty   — IS NULL OR = ''
+      notempty  — IS NOT NULL AND != ''
     """
     if not filters:
         return rows
     result = list(rows)
-    for col_name, q in filters:
+    for col_name, op, q in filters:
         if col_name not in columns:
             continue
         col_idx = columns.index(col_name)
-        q_lower = q.lower()
-        result = [
-            r for r in result
-            if q_lower in str(r[col_idx] if r[col_idx] is not None else "").lower()
-        ]
+
+        if op == "contains":
+            q_lower = q.lower()
+            result = [
+                r for r in result
+                if q_lower in str(r[col_idx] if r[col_idx] is not None else "").lower()
+            ]
+        elif op == "eq":
+            result = [
+                r for r in result
+                if str(r[col_idx] if r[col_idx] is not None else "") == q
+            ]
+        elif op == "neq":
+            result = [
+                r for r in result
+                if str(r[col_idx] if r[col_idx] is not None else "") != q
+            ]
+        elif op in ("gt", "lt", "gte", "lte"):
+            try:
+                q_num = float(q)
+            except (ValueError, TypeError):
+                continue
+            if op == "gt":
+                result = [
+                    r for r in result
+                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) > q_num
+                ]
+            elif op == "lt":
+                result = [
+                    r for r in result
+                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) < q_num
+                ]
+            elif op == "gte":
+                result = [
+                    r for r in result
+                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) >= q_num
+                ]
+            elif op == "lte":
+                result = [
+                    r for r in result
+                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) <= q_num
+                ]
+        elif op == "isempty":
+            result = [
+                r for r in result
+                if r[col_idx] is None or str(r[col_idx]).strip() == ""
+            ]
+        elif op == "notempty":
+            result = [
+                r for r in result
+                if r[col_idx] is not None and str(r[col_idx]).strip() != ""
+            ]
     return result
+
+
+def _try_float(val):
+    """尝试将值转为 float，失败返回 None"""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
 
 
 def _sort_rows(rows: list[tuple], columns: list[str],
@@ -152,18 +235,38 @@ def _sort_rows(rows: list[tuple], columns: list[str],
 # ===================================================================
 
 
+def _filter_hidden_inputs(filters) -> str:
+    """生成筛选参数的隐藏 input 标签（含操作符）"""
+    parts = []
+    for col, op, val in filters:
+        if op == "nofilter":
+            continue
+        fk = urllib.parse.quote(col, safe='')
+        parts.append(f'<input type="hidden" name="f_{fk}" value="{_escape(val)}">')
+        if op != DEFAULT_OP:
+            ok = urllib.parse.quote(col, safe='')
+            parts.append(f'<input type="hidden" name="op_{ok}" value="{_escape(op)}">')
+    return "".join(parts)
+
+
 def _build_filter_params(filters, skip_col=None):
     """
-    将 filters 列表编码为 URL 查询字符串（f_{col}=value 格式）。
+    将 filters 列表编码为 URL 查询字符串（f_{col}=value & op_{col}=op）。
 
     若指定 skip_col，则跳过该列的 filter 项（用于生成某列自己的排序链接时）。
+    filters: list[(col, op, val), ...]
     """
     parts = []
-    for col, q in filters:
+    for col, op, val in filters:
+        if op == "nofilter":
+            continue
         if skip_col is not None and col == skip_col:
             continue
-        k = "f_" + urllib.parse.quote(col, safe='')
-        parts.append(f"{k}={urllib.parse.quote(q, safe='')}")
+        fk = "f_" + urllib.parse.quote(col, safe='')
+        parts.append(f"{fk}={urllib.parse.quote(val, safe='')}")
+        if op != DEFAULT_OP:
+            ok = "op_" + urllib.parse.quote(col, safe='')
+            parts.append(f"{ok}={urllib.parse.quote(op, safe='')}")
     return "&".join(parts)
 
 
@@ -179,26 +282,53 @@ def _parse_filters(qs):
     """
     从 parse_qs 结果中解析多字段筛选参数。
 
-    新格式（优先）：f_{colname}=value  如 f_name=alice&f_age=30
-    旧格式（兼容）：f_col=name&f_q=alice（仅单字段有效）
-    返回 list[(col, q), ...]
+    新格式（推荐）：
+      f_{col}=value    筛选值
+      op_{col}=op      操作符（缺省为 contains）
+      例：f_age=100&op_age=gt   → age > 100
+          f_name=alice           → name 包含 alice
+
+    旧格式（兼容）：
+      f_col=name&f_q=alice（仅单字段有效）
+
+    返回 list[(col, op, val), ...]
     """
-    filters = []
+    # 第一步：收集筛选值 f_{col}=val
+    f_values: dict[str, str] = {}
     excl = frozenset(("f_col", "f_q", "filters"))
     for key, values in qs.items():
         if not key.startswith("f_") or key in excl:
             continue
         colname = urllib.parse.unquote(key[2:])
         if values and values[0]:
-            filters.append((colname, values[0]))
+            f_values[colname] = values[0]
+
+    # 第二步：收集操作符 op_{col}=op
+    op_values: dict[str, str] = {}
+    for key, values in qs.items():
+        if not key.startswith("op_") or key in ("op_col", "op_q"):
+            continue
+        colname = urllib.parse.unquote(key[3:])
+        if values and values[0] in _OP_MAP:
+            op_values[colname] = values[0]
 
     # 旧格式兼容
-    if not filters:
+    if not f_values:
         f_cols = qs.get("f_col", [])
         f_qs = qs.get("f_q", [])
         for c, q in zip(f_cols, f_qs):
             if q:
-                filters.append((c, q))
+                f_values[c] = q
+
+    filters = []
+    for col, val in f_values.items():
+        op = op_values.get(col, DEFAULT_OP)
+        filters.append((col, op, val))
+    # 单独的操作符也需要输出（如 isempty/notempty 可能无值）
+    for col, op in op_values.items():
+        if col not in f_values and op != "nofilter":
+            filters.append((col, op, ""))
+    filters = [(c, o, v) for c, o, v in filters if o != "nofilter"]
     return filters
 
 
@@ -446,6 +576,18 @@ function toggleSection(btn, label) {
   var hidden = content.classList.toggle("hidden");
   btn.textContent = hidden ? "▶ " + label : "▼ " + label;
 }
+function toggleFilterInput(inputName, select) {
+  var input = document.getElementsByName(inputName)[0];
+  if (!input) return;
+  var val = select.value;
+  if (val === 'nofilter' || val === 'isempty' || val === 'notempty') {
+    input.style.display = 'none';
+    input.disabled = true;
+  } else {
+    input.style.display = '';
+    input.disabled = false;
+  }
+}
 </script>
 </body></html>"""
 
@@ -476,7 +618,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
     sorts:   list[(col, dir), ...]  或 None
-    filters: list[(col, q), ...]    或 None
+    filters: list[(col, op, val), ...]  或 None
     """
     page = max(page, 1)
     page_size = max(page_size, 1)
@@ -696,7 +838,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                            f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
     debug_lines.append(f'SQL: <code>{_escape(report["sql_query"])}</code>')
     if filters:
-        filter_desc = " AND ".join(f'{_escape(c)} 包含 "{_escape(q)}"' for c, q in filters)
+        filter_desc = " AND ".join(f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"' for c, o, v in filters)
         debug_lines.append(f'筛选: {filter_desc}')
     if sorts:
         sort_desc = ", ".join(f'{_escape(c)} {"↑" if d == "asc" else "↓"}' for c, d in sorts)
@@ -729,63 +871,114 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     for col, dir_ in sorts:
         form_hidden.append(f'<input type="hidden" name="sort" value="{_escape(col)}">')
         form_hidden.append(f'<input type="hidden" name="dir" value="{_escape(dir_)}">')
+    # 筛选操作符（hidden，表单提交时保留）
+    for col, op, val in filters:
+        if op != DEFAULT_OP:
+            form_hidden.append(f'<input type="hidden" name="op_{urllib.parse.quote(col, safe="")}" value="{_escape(op)}">')
     form_hidden_str = "\n    ".join(form_hidden)
 
-    # ---- 构建表头（排序链接 + 筛选输入框） ----
+    # ---- 构建排序栏（显示当前排序列及其优先级） ----
+    sort_bar_parts = []
+    if sorts:
+        sort_bar_parts.append('<div class="sort-bar" style="margin-bottom:10px;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">')
+        sort_bar_parts.append('<span style="color:#475569;font-weight:500">排序:</span>')
+        for idx, (sc, sd) in enumerate(sorts, 1):
+            label = f'{_escape(sc)} {"↑" if sd == "asc" else "↓"}'
+            prio = chr(0x2460 + idx - 1) if idx <= 20 else f"#{idx}"
+            # 移除该列排序的 URL
+            rm_sorts = [(c, d) for c, d in sorts if c != sc]
+            rm_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
+            if rm_sorts:
+                rm_href += "&amp;" + _build_sort_params(rm_sorts)
+            if filters:
+                rm_href += "&amp;" + _build_filter_params(filters)
+            sort_bar_parts.append(
+                f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
+                f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
+                f'font-size:12px;border:1px solid #c7d2fe">'
+                f'<span style="font-weight:700;font-size:11px">{prio}</span> {label}'
+                f'<a href="{rm_href}" style="text-decoration:none;color:#94a3b8;margin-left:2px" '
+                f'title="移除排序">✕</a>'
+                f'</span>'
+            )
+        sort_bar_parts.append('</div>')
+    sort_bar_html = "".join(sort_bar_parts)
+
+    # ---- 构建表头（排序双箭头 + 筛选操作符下拉框 + 筛选输入框） ----
     thead_parts = ["<tr>"]
     for col in result.columns:
-        # ---- 排序链接 ----
-        # 点击当前列：ASC → DESC → 移除
+        # 当前排序列信息
         current_dir = None
-        for c, d in sorts:
+        sort_priority = 0
+        for idx, (c, d) in enumerate(sorts, 1):
             if c == col:
                 current_dir = d
+                sort_priority = idx
                 break
-        if current_dir == "asc":
-            new_dir = "desc"
-            arrow = " ▲"
-            remove_sort = False
-        elif current_dir == "desc":
-            new_dir = None      # 移除
-            arrow = " ▼"
-            remove_sort = True
-        else:
-            new_dir = "asc"
-            arrow = ""
-            remove_sort = False
 
-        # 构建排序 URL：移除其他列的 sort，保留当前列的 toggle
-        if remove_sort:
-            new_sorts = [(c, d) for c, d in sorts if c != col]
-        else:
-            # 只保留当前列的排序（移除其他）
-            new_sorts = [(col, new_dir)]
-
-        # 构建排序 URL，使用 &amp; 确保 HTML 属性中的 & 正确转义
-        sort_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-        if new_sorts:
-            sort_href += "&amp;" + _build_sort_params(new_sorts)
-        # 保留所有筛选参数
+        # 构建 ▲ (asc) 链接 — 替换所有排序列为该列升序
+        asc_sorts = [(col, "asc")]
+        asc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
+        asc_href += "&amp;" + _build_sort_params(asc_sorts)
         if filters:
-            sort_href += "&amp;" + _build_filter_params(filters)
+            asc_href += "&amp;" + _build_filter_params(filters)
+        asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
 
-        arrow_cls = "sort-arrow active" if current_dir else "sort-arrow"
+        # 构建 ▼ (desc) 链接
+        desc_sorts = [(col, "desc")]
+        desc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
+        desc_href += "&amp;" + _build_sort_params(desc_sorts)
+        if filters:
+            desc_href += "&amp;" + _build_filter_params(filters)
+        desc_cls = "sort-arrow active" if current_dir == "desc" else "sort-arrow"
 
-        # ---- 筛选输入 ----
+        # 排序优先级标示
+        priority_badge = ""
+        if sort_priority > 0:
+            prio_char = chr(0x2460 + sort_priority - 1) if sort_priority <= 20 else f"#{sort_priority}"
+            priority_badge = f'<span class="sort-prio" style="font-size:10px;color:#4f46e5;font-weight:700;margin-left:2px">{prio_char}</span>'
+
+        # ---- 筛选信息 ----
         cur_fval = ""
-        for c, q in filters:
+        cur_op = "nofilter"
+        for item in filters:
+            c, op, val = item
             if c == col:
-                cur_fval = _escape(q)
+                cur_fval = val
+                cur_op = op
                 break
-        # 列名作为表单字段名：f_{urlencoded_col}
+
+        # 筛选输入 name
         filter_input_name = "f_" + urllib.parse.quote(col, safe='')
+        filter_op_name = "op_" + urllib.parse.quote(col, safe='')
+
+        # 构建操作符下拉框选项
+        op_options = ""
+        for code, label, short in FILTER_OPS:
+            sel = ' selected' if code == cur_op else ''
+            op_options += f'<option value="{code}"{sel}>{_escape(label)}</option>'
+
+        # 输入框是否隐藏/禁用（不筛选/为空/非空不需要值）
+        input_hidden = cur_op in ("nofilter", "isempty", "notempty")
+        input_style = "display:none" if input_hidden else ""
+        input_disabled = "disabled" if input_hidden else ""
 
         thead_parts.append(f"""<th>
-  <a href="{sort_href}" class="sort-link">{_escape(col)}<span class="{arrow_cls}">{arrow}</span></a>
-  <input type="text" class="filter-input" form="{filter_form_id}"
-    name="{filter_input_name}" placeholder="筛选 {_escape(col)}..."
-    value="{cur_fval}"
-    onchange="document.getElementById('{filter_form_id}').submit()">
+  <div class="sort-links" style="display:inline-flex;align-items:center;gap:0">
+    <a href="{asc_href}" class="sort-link" title="升序">{_escape(col)}</a>
+    <a href="{asc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="升序"><span class="{asc_cls}">▲</span></a>
+    <a href="{desc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="降序"><span class="{desc_cls}">▼</span></a>
+    {priority_badge}
+  </div>
+  <div class="filter-row" style="display:flex;gap:2px;margin-top:6px;align-items:center">
+    <select class="filter-op" form="{filter_form_id}" name="{filter_op_name}"
+      style="padding:2px 2px;font-size:11px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;width:auto;min-width:52px;flex-shrink:0;cursor:pointer"
+      onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
+    <input type="text" class="filter-input" form="{filter_form_id}"
+      name="{filter_input_name}" placeholder="筛选 {_escape(col)}..."
+      value="{_escape(cur_fval)}"
+      style="{input_style}" {input_disabled}>
+  </div>
 </th>""")
     thead_parts.append("</tr>")
     thead_str = "".join(thead_parts)
@@ -820,7 +1013,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
     <input type="hidden" name="id" value="{report_id}">
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
-    {(''.join(f'<input type="hidden" name="f_{urllib.parse.quote(c, safe="")}" value="{_escape(q)}">' for c, q in filters)) if filters else ''}
+    {_filter_hidden_inputs(filters) if filters else ''}
     <label>每页行数:
       <select name="page_size" onchange="this.form.submit()">
         {''.join(f'<option value="{s}"{" selected" if qs_page_size == s else ""}>{s}</option>'
@@ -832,7 +1025,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   <form method="get" action="/export" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <input type="hidden" name="id" value="{report_id}">
     {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
-    {(''.join(f'<input type="hidden" name="f_{urllib.parse.quote(c, safe="")}" value="{_escape(q)}">' for c, q in filters)) if filters else ''}
+    {_filter_hidden_inputs(filters) if filters else ''}
     <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
       格式:
       <select name="format" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
@@ -860,13 +1053,26 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
 </div>"""
 
-    # ---- 筛选清除提示 ----
+    # ---- 筛选清除提示与筛选操作按钮 ----
+    clear_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
+    if sorts:
+        clear_href += "&amp;" + _build_sort_params(sorts)
+
+    filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+                         f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
+                         f'<a href="{clear_href}" class="btn btn-outline btn-sm">清除筛选</a>'
+                         f'</div>')
+
     clear_html = ""
     if filters:
-        clear_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-        if sorts:
-            clear_href += "&amp;" + _build_sort_params(sorts)
-        filter_summary = "、".join(f'{_escape(c)}="{_escape(q)}"' for c, q in filters)
+        filter_items = []
+        for c, o, v in filters:
+            op_label = _OP_MAP.get(o, (o, o))[1]
+            if o in ("isempty", "notempty"):
+                filter_items.append(f'{_escape(c)} ({op_label})')
+            else:
+                filter_items.append(f'{_escape(c)} {op_label} "{_escape(v)}"')
+        filter_summary = "、".join(filter_items)
         clear_html = (f'<div style="margin-bottom:12px;font-size:13px;color:#64748b">'
                       f'筛选: {filter_summary} '
                       f'<a href="{clear_href}" class="clear-filter">✕ 全部清除</a></div>')
@@ -881,6 +1087,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             memo_html +
             debug_html +
             controls +
+            sort_bar_html +
+            filter_action_html +
             clear_html +
             filter_form_html +
             '<div class="table-wrap"><table>' + thead_str + tbody + '</table></div>' +

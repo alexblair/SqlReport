@@ -29,3 +29,6 @@ Thumbs.db
 .opencode
 git-commit.sh
 git-purge.sh
+
+# CodeGraph
+.codegraph/

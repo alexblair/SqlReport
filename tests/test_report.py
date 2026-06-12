@@ -366,7 +366,7 @@ class TestExecuteReport(unittest.TestCase):
             sql_query="SELECT * FROM t",
             pool_config=pool,
             page=1, page_size=10,
-            filters=[("name", "e")],
+            filters=[("name", "contains", "e")],
         )
         # 包含 e/E: Charlie, Alice, dave, Eve → 4 条
         self.assertEqual(result.total, 4)
@@ -377,7 +377,7 @@ class TestExecuteReport(unittest.TestCase):
             sql_query="SELECT * FROM t",
             pool_config=pool,
             page=1, page_size=10,
-            filters=[("name", "e")],
+            filters=[("name", "contains", "e")],
             sorts=[("name", "asc")],
         )
         self.assertEqual(result2.total, 4)
@@ -390,7 +390,7 @@ class TestExecuteReport(unittest.TestCase):
             sql_query="SELECT * FROM t",
             pool_config=pool,
             page=1, page_size=10,
-            filters=[("name", "e")],
+            filters=[("name", "contains", "e")],
             sorts=[("name", "desc")],
         )
         self.assertEqual(result3.total, 4)
@@ -420,7 +420,7 @@ class TestExecuteReport(unittest.TestCase):
             report_id=50,
             sql_query="SELECT * FROM t",
             pool_config=pool,
-            filters=[("name", "alice"), ("age", "25")],
+            filters=[("name", "contains", "alice"), ("age", "contains", "25")],
         )
         self.assertEqual(result.total, 1)  # (1, Alice, 25)
         self.assertEqual(result.rows[0][0], 1)
@@ -431,7 +431,7 @@ class TestExecuteReport(unittest.TestCase):
             report_id=50,
             sql_query="SELECT * FROM t",
             pool_config=pool,
-            filters=[("name", "alice")],
+            filters=[("name", "contains", "alice")],
         )
         self.assertEqual(result2.total, 2)  # Alice(25) + Alice(40)
 
@@ -543,6 +543,390 @@ class TestExecuteReport(unittest.TestCase):
         call_sql = mock_exec_q.call_args[0][1]
         self.assertNotIn(";", call_sql.rstrip())
         self.assertEqual(result.total, 2)
+
+
+class TestNewFilterOperators(unittest.TestCase):
+    """新筛选操作符测试（eq, neq, gt, lt, isempty, notempty 等）"""
+
+    def setUp(self):
+        report._query_cache.clear()
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_contains(self, mock_exec_q, mock_create_conn):
+        """包含（默认操作符）"""
+        mock_exec_q.return_value = (["name"], [("Alice",), ("Bob",), ("Charlie",)])
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=90, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("name", "contains", "ali")])
+        self.assertEqual(result.total, 1)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_eq(self, mock_exec_q, mock_create_conn):
+        """等于"""
+        rows = [("Alice", 25), ("Bob", 30), ("alice", 35)]
+        mock_exec_q.return_value = (["name", "age"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=91, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("name", "eq", "Alice")])
+        self.assertEqual(result.total, 1)
+        self.assertEqual(result.rows[0][0], "Alice")
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_neq(self, mock_exec_q, mock_create_conn):
+        """不等于"""
+        rows = [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=92, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("name", "neq", "Bob")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_gt(self, mock_exec_q, mock_create_conn):
+        """大于"""
+        rows = [(1, "A", 10), (2, "B", 20), (3, "C", 30)]
+        mock_exec_q.return_value = (["id", "name", "val"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=93, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("val", "gt", "15")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_lt(self, mock_exec_q, mock_create_conn):
+        """小于"""
+        rows = [(1, 5), (2, 15), (3, 25)]
+        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=94, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("val", "lt", "20")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_gte(self, mock_exec_q, mock_create_conn):
+        """大于等于"""
+        rows = [(1, 10), (2, 20), (3, 30)]
+        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=95, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("val", "gte", "20")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_lte(self, mock_exec_q, mock_create_conn):
+        """小于等于"""
+        rows = [(1, 10), (2, 20), (3, 30)]
+        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=96, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("val", "lte", "20")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_isempty(self, mock_exec_q, mock_create_conn):
+        """为空"""
+        rows = [(1, "A"), (2, ""), (3, None), (4, "B")]
+        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=97, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("name", "isempty", "")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_notempty(self, mock_exec_q, mock_create_conn):
+        """非空"""
+        rows = [(1, "A"), (2, ""), (3, None), (4, "B")]
+        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        result = report.execute_report(report_id=98, sql_query="SELECT * FROM t",
+                                       pool_config=pool, filters=[("name", "notempty", "")])
+        self.assertEqual(result.total, 2)
+
+    @patch("db.create_mysql_connection")
+    @patch("report.db.execute_mysql_query")
+    def test_filter_combined_ops(self, mock_exec_q, mock_create_conn):
+        """多字段混合操作符（AND 逻辑）"""
+        rows = [
+            (1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35),
+            (4, "Alice", 40), (5, "dave", 25),
+        ]
+        mock_exec_q.return_value = (["id", "name", "age"], rows)
+        mock_conn = MagicMock()
+        mock_create_conn.return_value = mock_conn
+        pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+        # name 包含 "lice" AND age >= 30
+        result = report.execute_report(
+            report_id=99, sql_query="SELECT * FROM t", pool_config=pool,
+            filters=[("name", "contains", "lice"), ("age", "gte", "30")])
+        self.assertEqual(result.total, 1)
+        self.assertEqual(result.rows[0][0], 4)
+
+
+class TestSortBarUI(unittest.TestCase):
+    """排序栏 UI 测试（检查 HTML 输出）"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+        db._initialized = True
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+        db._initialized = False
+
+    @patch("report.execute_report")
+    def test_sort_bar_appears_when_sorted(self, mock_exec):
+        """有排序时应在表格上方显示排序栏"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        self.assertIn("sort-bar", body)
+        self.assertIn("↑", body)
+
+    @patch("report.execute_report")
+    def test_sort_arrows_in_header(self, mock_exec):
+        """表头应有 ▲ ▼ 两个排序箭头"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        # ▲ ▼ 应同时存在
+        self.assertIn("▲", body)
+        self.assertIn("▼", body)
+
+    @patch("report.execute_report")
+    def test_remove_sort_link_in_bar(self, mock_exec):
+        """排序栏中应有移除排序的 ✕ 按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=desc",
+            pool_override=self.mock_pool)
+        self.assertIn("✕", body)
+
+    @patch("report.execute_report")
+    def test_filter_op_dropdown(self, mock_exec):
+        """表头应有筛选操作符下拉框"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1",
+            pool_override=self.mock_pool)
+        self.assertIn("filter-op", body)
+        self.assertIn("value=\"contains\"", body)
+        self.assertIn("value=\"eq\"", body)
+        self.assertIn("value=\"isempty\"", body)
+
+    @patch("report.execute_report")
+    def test_filter_op_preserved_in_url(self, mock_exec):
+        """筛选操作符应在排序/分页链接中保留"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)],
+            total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&f_age=15&op_age=gt",
+            pool_override=self.mock_pool)
+        # op_age=gt 应出现在链接中
+        self.assertIn("op_age=gt", body)
+
+    @patch("report.execute_report")
+    def test_filter_input_hidden_for_isempty(self, mock_exec):
+        """isempty/notempty 操作符应隐藏输入框"""
+        # 模拟后端处理之后，isempty 会隐藏输入框但不影响 URL
+        mock_exec.return_value = report.ReportResult(
+            columns=["name"], rows=[("A",)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&f_name=&op_name=isempty",
+            pool_override=self.mock_pool)
+        # isempty 应在操作符选项中 selected
+        self.assertIn('value="isempty" selected', body)
+
+
+class TestParseFiltersNewFormat(unittest.TestCase):
+    """_parse_filters 新格式测试"""
+
+    def test_op_col_parameter(self):
+        """传递 op_COL 应正确解析操作符"""
+        qs = {"f_age": ["100"], "op_age": ["gt"], "f_name": ["ali"]}
+        result = report._parse_filters(qs)
+        self.assertIn(("age", "gt", "100"), result)
+        self.assertIn(("name", "contains", "ali"), result)
+
+    def test_op_only_no_value(self):
+        """只有 op_COL 无 f_COL 时，也应添加过滤条件（用于 isempty）"""
+        qs = {"op_name": ["isempty"]}
+        result = report._parse_filters(qs)
+        self.assertIn(("name", "isempty", ""), result)
+
+    def test_backward_compat_old_format(self):
+        """旧格式 f_col + f_q 仍应被正确解析"""
+        qs = {"f_col": ["name"], "f_q": ["alice"]}
+        result = report._parse_filters(qs)
+        self.assertIn(("name", "contains", "alice"), result)
+
+    def test_backward_compat_no_operator(self):
+        """无 op_COL 时默认为 contains"""
+        qs = {"f_name": ["alice"]}
+        result = report._parse_filters(qs)
+        self.assertIn(("name", "contains", "alice"), result)
+
+    def test_op_col_unknown_operator(self):
+        """未知操作符应使用默认（contains）"""
+        qs = {"f_age": ["10"], "op_age": ["unknown_op"]}
+        result = report._parse_filters(qs)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], "contains")
+
+
+class TestNofilter(unittest.TestCase):
+    """不筛选（nofilter）相关测试"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+        db._initialized = True
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+        db._initialized = False
+
+    def test_parse_filters_skips_nofilter(self):
+        """op_COL=nofilter 不应产生过滤条件"""
+        qs = {"op_name": ["nofilter"]}
+        result = report._parse_filters(qs)
+        self.assertEqual(result, [])
+
+    def test_parse_filters_skips_nofilter_with_value(self):
+        """f_COL + op_COL=nofilter 时应跳过该列"""
+        qs = {"f_age": ["100"], "op_age": ["nofilter"]}
+        result = report._parse_filters(qs)
+        self.assertEqual(result, [])
+
+    def test_build_filter_params_skips_nofilter(self):
+        """_build_filter_params 应跳过 nofilter 条目"""
+        url = report._build_filter_params([("name", "nofilter", "")])
+        self.assertEqual(url, "")
+
+    def test_build_filter_params_nofilter_mixed(self):
+        """nofilter 与其他操作符混合时只输出非 nofilter"""
+        url = report._build_filter_params([
+            ("name", "nofilter", ""),
+            ("age", "gt", "100"),
+        ])
+        self.assertNotIn("name", url)
+        self.assertIn("age", url)
+        self.assertIn("op_age=gt", url)
+
+    @patch("report.execute_report")
+    def test_nofilter_in_html(self, mock_exec):
+        """nofilter 应出现在操作符下拉框中"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1",
+            pool_override=self.mock_pool)
+        self.assertIn('value="nofilter"', body)
+
+    @patch("report.execute_report")
+    def test_nofilter_selected_by_default(self, mock_exec):
+        """无筛选时操作符默认显示不筛选"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1",
+            pool_override=self.mock_pool)
+        self.assertIn('value="nofilter" selected', body)
+
+    @patch("report.execute_report")
+    def test_filter_button_in_html(self, mock_exec):
+        """页面上应有筛选按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1",
+            pool_override=self.mock_pool)
+        self.assertIn('type="submit"', body)
+        self.assertIn('form="ff"', body)
+        self.assertIn('筛选', body)
+
+    @patch("report.execute_report")
+    def test_clear_filter_button_in_html(self, mock_exec):
+        """页面上应有清除筛选按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1",
+            pool_override=self.mock_pool)
+        self.assertIn('清除筛选', body)
+
+
+class TestBuildFilterParamsNewFormat(unittest.TestCase):
+    """_build_filter_params 新格式测试"""
+
+    def test_default_op_not_encoded(self):
+        """默认操作符 contains 不应出现在 URL 中"""
+        url = report._build_filter_params([("name", "contains", "ali")])
+        self.assertNotIn("op_name", url)
+        self.assertIn("f_name=", url)
+
+    def test_nondefault_op_encoded(self):
+        """非默认操作符应在 URL 中出现"""
+        url = report._build_filter_params([("age", "gt", "100")])
+        self.assertIn("op_age=gt", url)
+        self.assertIn("f_age=100", url)
+
+    def test_skip_col(self):
+        """skip_col 应跳过指定列的参数"""
+        url = report._build_filter_params(
+            [("name", "contains", "ali"), ("age", "gt", "100")], skip_col="name")
+        self.assertNotIn("name", url)
+        self.assertIn("age", url)
+        self.assertIn("op_age=gt", url)
 
 
 if __name__ == "__main__":
