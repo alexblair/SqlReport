@@ -161,17 +161,24 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         if path == "/logout":
             return self._handle_logout()
 
-        if path.startswith("/config"):
-            return self._handle_config(method, path, query)
+        # ---- 以下路径需要数据库连接 ----
+        # 在 _handle 中统一创建 config_db 连接，传递给各子处理器，
+        # 避免每个子处理器各自创建连接（同一个请求只需一次连接）
+        conn = db.get_config_db()
+        try:
+            if path.startswith("/config"):
+                return self._handle_config(method, path, query, conn)
 
-        if path.startswith("/report"):
-            return self._handle_report(method, path, query)
+            if path.startswith("/report"):
+                return self._handle_report(method, path, query, conn)
 
-        if path.startswith("/export"):
-            return self._handle_export(method, path, query)
+            if path.startswith("/export"):
+                return self._handle_export(method, path, query, conn)
 
-        # 404
-        self._send_html(404, "<h1>404 — 页面不存在</h1>")
+            # 404
+            self._send_html(404, "<h1>404 — 页面不存在</h1>")
+        finally:
+            conn.close()
 
     # ---- 认证 ----
 
@@ -223,36 +230,24 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     # ---- 各功能路由 ----
 
-    def _handle_config(self, method: str, path: str, query: str):
-        """委托给 config.py"""
+    def _handle_config(self, method: str, path: str, query: str, conn):
+        """委托给 config.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
-        conn = db.get_config_db()
-        try:
-            code, body, headers = config.handle_request(conn, method, path, query, form_body)
-        finally:
-            conn.close()
+        code, body, headers = config.handle_request(conn, method, path, query, form_body)
 
         if code == "302":
             self._send_redirect(body)
         else:
             self._send_html(int(code), body, headers)
 
-    def _handle_report(self, method: str, path: str, query: str):
-        """委托给 report.py"""
-        conn = db.get_config_db()
-        try:
-            code, body, headers = report.handle_request(conn, method, path, query)
-        finally:
-            conn.close()
+    def _handle_report(self, method: str, path: str, query: str, conn):
+        """委托给 report.py，使用 _handle() 传入的共享连接"""
+        code, body, headers = report.handle_request(conn, method, path, query)
         self._send_html(int(code), body, headers)
 
-    def _handle_export(self, method: str, path: str, query: str):
-        """委托给 export.py"""
-        conn = db.get_config_db()
-        try:
-            code, body, headers = export_mod.handle_export(conn, query)
-        finally:
-            conn.close()
+    def _handle_export(self, method: str, path: str, query: str, conn):
+        """委托给 export.py，使用 _handle() 传入的共享连接"""
+        code, body, headers = export_mod.handle_export(conn, query)
 
         code_int = int(code)
         self.send_response(code_int)

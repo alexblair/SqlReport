@@ -51,7 +51,6 @@ def _make_conn():
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
     """)
-    db._initialized = True
     return conn
 
 
@@ -95,7 +94,6 @@ class TestPoolFlow(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_overview_contains_pool_section(self):
         """总览页面应包含连接池配置区块"""
@@ -176,7 +174,6 @@ class TestUserFlow(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_overview_contains_user_section(self):
         code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
@@ -226,7 +223,6 @@ class TestReportFlow(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_overview_contains_report_section(self):
         code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
@@ -317,7 +313,6 @@ class TestFlashMessage(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_flash_shown_on_overview(self):
         """查询参数 flash 应在总览页展示"""
@@ -333,7 +328,6 @@ class TestUnknownAction(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_unknown_path(self):
         code, body, headers = config.handle_request(self.conn, "GET", "/config/unknown/action", "")
@@ -348,7 +342,6 @@ class TestChineseRedirect(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_chinese_flash_is_urlencoded(self):
         """中文 flash 消息在 Location 中应为 URL 编码"""

@@ -278,7 +278,7 @@ def _build_sort_params(sorts):
     return "&".join(parts)
 
 
-def _parse_filters(qs):
+def parse_filters(qs):
     """
     从 parse_qs 结果中解析多字段筛选参数。
 
@@ -330,6 +330,9 @@ def _parse_filters(qs):
             filters.append((col, op, ""))
     filters = [(c, o, v) for c, o, v in filters if o != "nofilter"]
     return filters
+
+
+_parse_filters = parse_filters  # 向后兼容别名
 
 
 def _parse_sorts(qs):
@@ -1025,10 +1028,11 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        pool_override: Optional[dict] = None,
                        sorts=None, filters=None,
                        refresh: bool = False,
-                       display_columns: list[str] = None) -> str:
+                       cols_raw: str = None) -> str:
     """
     渲染报表数据展示页，支持多字段排序/筛选/自定义列。
-    display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
+    cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
+              为 None 表示全部显示。
     """
     report = db.get_report(conn, report_id)
     if not report:
@@ -1065,6 +1069,13 @@ def render_report_page(conn, report_id: int, page: int = 1,
                 f'<br><small>连接池: {_escape(str(pool_name))}'
                 f' ({_escape(str(pool_host))}:{pool_port}, 用户: {_escape(str(pool_user))})'
                 f'</small></div>' + _FOOTER)
+
+    # 从原始 cols 字符串解析自定义列（利用 execute_report 已获取的列名）
+    all_cols = result.columns
+    if cols_raw:
+        display_columns = _parse_cols({"cols": [cols_raw]}, all_cols)
+    else:
+        display_columns = None
 
     return _build_report_html(conn, report, result, pool_config,
                               sorts or [], filters or [], refresh,
@@ -1676,29 +1687,13 @@ def handle_request(conn, method: str, path: str, query: str,
     # 多字段筛选
     filters = _parse_filters(qs)
 
-    # 自定义列顺序/可见性
-    cols = None
-    if "id" in qs and qs["id"][0]:
-        try:
-            rid = int(qs["id"][0])
-            r = db.get_report(conn, rid)
-            if r:
-                from db import execute_mysql_query, create_mysql_connection
-                pool = db.get_pool(conn, r["pool_id"]) if r.get("pool_id") else None
-                if pool:
-                    conn_mysql = create_mysql_connection(pool)
-                    try:
-                        all_cols, _ = execute_mysql_query(conn_mysql, r["sql_query"].rstrip("; \t\n\r"))
-                        cols = _parse_cols(qs, all_cols)
-                    finally:
-                        conn_mysql.close()
-        except Exception:
-            pass
+    # 自定义列顺序/可见性（原始参数字符串，推迟到 render_report_page 中解析）
+    cols_raw = _qs_val(qs, "cols")
 
     # 刷新缓存
     refresh = _qs_val(qs, "refresh") or ""
     refresh_flag = refresh in ("1", "true", "yes")
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
-                              sorts, filters, refresh_flag, cols)
+                              sorts, filters, refresh_flag, cols_raw)
     return "200", html, {}

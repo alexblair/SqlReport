@@ -19,12 +19,9 @@ class TestInitDB(unittest.TestCase):
         self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
         self.engine_patcher.start()
         self.conn = sqlite3.connect(":memory:")
-        # 重置全局标志，允许重复初始化
-        db._initialized = False
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
         self.engine_patcher.stop()
 
     def test_init_db_creates_tables(self):
@@ -64,11 +61,9 @@ class TestConnectionPoolCRUD(unittest.TestCase):
                 sort_order INTEGER NOT NULL DEFAULT 0
             );
         """)
-        db._initialized = True
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_add_and_get_pool(self):
         """新增连接池后应能通过 id 查询到"""
@@ -134,11 +129,9 @@ class TestUserCRUD(unittest.TestCase):
                 password_hash TEXT NOT NULL
             );
         """)
-        db._initialized = True
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_add_and_get_user(self):
         """新增用户后应能通过用户名查询到"""
@@ -211,11 +204,9 @@ class TestReportCRUD(unittest.TestCase):
             ("testpool", "h", 3306, "u", "p", "d"),
         )
         self.pool_id = 1
-        db._initialized = True
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_add_and_get_report(self):
         rid = db.add_report(self.conn, "报表A", "SELECT * FROM t", 20, self.pool_id)
@@ -339,12 +330,10 @@ class TestSessionCRUD(unittest.TestCase):
         self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
         self.engine_patcher.start()
         self.conn = sqlite3.connect(":memory:")
-        db._initialized = False
         db.init_db(self.conn)
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
         self.engine_patcher.stop()
 
     def test_add_and_get_session(self):

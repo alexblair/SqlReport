@@ -62,9 +62,14 @@ def _connect_sqlite() -> sqlite3.Connection:
 class _MySQLRow:
     """MySQL 行包装，同时支持 dict 键访问和整数索引（兼容 sqlite3.Row）。"""
 
-    def __init__(self, data: dict):
-        self._data = data
-        self._keys = list(data.keys())
+    def __init__(self, data):
+        if isinstance(data, dict):
+            self._data = data
+            self._keys = list(data.keys())
+        else:
+            # Accept sequences (tuples/lists) for SHOW COLUMNS results etc.
+            self._keys = list(range(len(data)))
+            self._data = dict(zip(self._keys, data))
 
     def __getitem__(self, key):
         if isinstance(key, (int, slice)):

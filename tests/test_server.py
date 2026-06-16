@@ -14,9 +14,12 @@ import urllib.request
 import urllib.error
 import http.server
 import os
+import tempfile
 
-# 使用独立的测试数据库，不碰生产 config.db
-os.environ["CONFIG_DB"] = "test_config.db"
+# 创建临时测试数据库文件，不碰生产 config.db
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False, prefix="test_server_")
+_tmp_db.close()
+os.environ["CONFIG_DB"] = _tmp_db.name
 
 import sqlite3
 import db
@@ -67,9 +70,10 @@ class TestServerIntegration(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         _stop_server()
-        # 清理测试数据库文件（独立于生产 config.db）
-        if os.path.exists("test_config.db"):
-            os.remove("test_config.db")
+        # 清理临时测试数据库文件
+        db_path = _tmp_db.name
+        if os.path.exists(db_path):
+            os.remove(db_path)
 
     def test_1_login_page_accessible(self):
         """登录页无需认证即可访问"""

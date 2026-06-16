@@ -294,30 +294,8 @@ def _render_user_form(user: dict = None) -> str:
 </div>"""
 
 
-def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> str:
-    """渲染报表编辑/新增/复制表单"""
-    is_edit = report is not None and not copy_mode
-    is_copy = report is not None and copy_mode
-    if is_edit:
-        action_url = f"/config/reports/{report['id']}/edit"
-        title = "编辑报表"
-    elif is_copy:
-        action_url = f"/config/reports/{report['id']}/copy"
-        title = "复制报表"
-    else:
-        action_url = "/config/reports/add"
-        title = "新增报表"
-
-    name = _escape(report["name"] if report else "")
-    sql_query = _escape(report["sql_query"] if report else "")
-    default_page_size = str(report["default_page_size"]) if report else "20"
-    cur_pool_id = report["pool_id"] if report else ""
-    memo_val = _escape(report.get("memo") or "") if report else ""
-
-    if is_copy:
-        name = _escape(report["name"] + " (副本)")
-
-    # 生成连接池选择列表
+def _report_form_pool_options(conn, cur_pool_id, is_edit):
+    """生成连接池下拉选项和默认提示"""
     pools = db.get_all_pools(conn)
     pool_options = ""
     for p in pools:
@@ -329,25 +307,30 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
     else:
         no_pool_opt = '<option value="">-- 请选择 --</option>'
     required_attr = "" if is_edit else "required"
+    return pool_options, no_pool_opt, required_attr
 
-    # 生成分类选择列表（树形结构）
-    cur_cat_id = report["category_id"] if report and report.get("category_id") else ""
+
+def _render_cat_opts(nodes, depth, cur_cat_id):
+    """递归生成分类选项 HTML（树形缩进）"""
+    html = ""
+    for node in nodes:
+        indent = "　" * depth
+        sel = ' selected' if cur_cat_id != "" and str(node["id"]) == str(cur_cat_id) else ''
+        html += f'<option value="{node["id"]}"{sel}>{indent}{_escape(node["name"])}</option>'
+        if node["children"]:
+            html += _render_cat_opts(node["children"], depth + 1, cur_cat_id)
+    return html
+
+
+def _report_form_cat_options(conn, cur_cat_id):
+    """生成报表分类选择列表 HTML"""
     cat_tree = db.get_category_tree(conn)
-    category_options = ""
-    def _render_cat_opts(nodes, depth=0):
-        html = ""
-        for node in nodes:
-            indent = "　" * depth
-            sel = ' selected' if cur_cat_id != "" and str(node["id"]) == str(cur_cat_id) else ''
-            html += f'<option value="{node["id"]}"{sel}>{indent}{_escape(node["name"])}</option>'
-            if node["children"]:
-                html += _render_cat_opts(node["children"], depth + 1)
-        return html
-    category_options = _render_cat_opts(cat_tree)
+    return _render_cat_opts(cat_tree, 0, cur_cat_id)
 
-    # ---- SQL 编辑器 JavaScript ----
-    _sql_editor_js = r"""
-(function(){
+
+def _report_form_js_highlight():
+    """返回 SQL 语法高亮 JS（h + highlight 函数）"""
+    return r"""
 function h(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -371,6 +354,12 @@ function highlight(txt) {
     return m;
   });
 }
+"""
+
+
+def _report_form_js_formatter():
+    """返回 SQL 格式化 JS（fmt 函数）"""
+    return r"""
 function fmt(t) {
   if (!t || !t.trim()) return t;
   var s = t.replace(/\s*;\s*$/,""), lines = [], indent = 0, clauseCount = 0;
@@ -407,7 +396,12 @@ function fmt(t) {
   }
   return lines.join("\n") + ";";
 }
+"""
 
+
+def _report_form_js_editor_api():
+    """返回 SQL 编辑器 UI 交互 JS（formatSQL、togglePreview、事件监听）"""
+    return r"""
 window.formatSQL = function(btn) {
   var label = btn.closest("label");
   var ta = label.querySelector(".sql-textarea");
@@ -445,9 +439,12 @@ document.addEventListener("DOMContentLoaded", function() {
     });
   });
 });
-})();
 """
 
+
+def _report_form_html(title, action_url, name, sql_query, default_page_size,
+                       required_attr, no_pool_opt, pool_options, category_options, memo_val):
+    """构建报表表单完整 HTML（含 SQL 编辑器 JS）"""
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form">
@@ -481,8 +478,46 @@ document.addEventListener("DOMContentLoaded", function() {
     <a href="/config" class="cancel">取消</a>
   </div>
 </form>
-<script>{_sql_editor_js}</script>
+<script>
+(function(){{
+{_report_form_js_highlight()}
+{_report_form_js_formatter()}
+{_report_form_js_editor_api()}
+}})();
+</script>
 </div>"""
+
+
+def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> str:
+    """渲染报表编辑/新增/复制表单"""
+    is_edit = report is not None and not copy_mode
+    is_copy = report is not None and copy_mode
+    if is_edit:
+        action_url = f"/config/reports/{report['id']}/edit"
+        title = "编辑报表"
+    elif is_copy:
+        action_url = f"/config/reports/{report['id']}/copy"
+        title = "复制报表"
+    else:
+        action_url = "/config/reports/add"
+        title = "新增报表"
+
+    name = _escape(report["name"] if report else "")
+    sql_query = _escape(report["sql_query"] if report else "")
+    default_page_size = str(report["default_page_size"]) if report else "20"
+    cur_pool_id = report["pool_id"] if report else ""
+    memo_val = _escape(report.get("memo") or "") if report else ""
+
+    if is_copy:
+        name = _escape(report["name"] + " (副本)")
+
+    pool_options, no_pool_opt, required_attr = _report_form_pool_options(
+        conn, cur_pool_id, is_edit)
+    category_options = _report_form_cat_options(
+        conn, report.get("category_id") if report else "")
+
+    return _report_form_html(title, action_url, name, sql_query, default_page_size,
+                              required_attr, no_pool_opt, pool_options, category_options, memo_val)
 
 
 def _render_pool_section(conn) -> str:

@@ -41,50 +41,7 @@ from decimal import Decimal
 from typing import Optional, Union
 import db
 import report
-from report import _format_cell
-
-
-def _parse_filters(qs):
-    """
-    从 parse_qs 结果中解析多字段筛选参数（与 report.py 保持一致）。
-    返回 list[(col, op, val), ...]
-    """
-    # 第一步：收集筛选值 f_{col}=val
-    f_values: dict[str, str] = {}
-    excl = frozenset(("f_col", "f_q", "filters"))
-    for key, values in qs.items():
-        if not key.startswith("f_") or key in excl:
-            continue
-        colname = urllib.parse.unquote(key[2:])
-        if values and values[0]:
-            f_values[colname] = values[0]
-
-    # 第二步：收集操作符 op_{col}=op
-    op_values: dict[str, str] = {}
-    for key, values in qs.items():
-        if not key.startswith("op_") or key in ("op_col", "op_q"):
-            continue
-        colname = urllib.parse.unquote(key[3:])
-        if values and values[0] in report._OP_MAP:
-            op_values[colname] = values[0]
-
-    # 旧格式兼容
-    if not f_values:
-        f_cols = qs.get("f_col", [])
-        f_qs = qs.get("f_q", [])
-        for c, q in zip(f_cols, f_qs):
-            if q:
-                f_values[c] = q
-
-    filters = []
-    for col, val in f_values.items():
-        op = op_values.get(col, report.DEFAULT_OP)
-        filters.append((col, op, val))
-    for col, op in op_values.items():
-        if col not in f_values and op != "nofilter":
-            filters.append((col, op, ""))
-    filters = [(c, o, v) for c, o, v in filters if o != "nofilter"]
-    return filters
+from report import _format_cell, parse_filters
 
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
@@ -114,11 +71,21 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
         output_columns = all_columns
         display_indices = list(range(len(all_columns)))
     else:
-        # 仅保留实际存在的列名，保持用户指定顺序
+        # 仅保留实际存在的列名，去重并保持用户指定顺序
         valid_set = set(all_columns)
-        output_columns = [c for c in columns if c in valid_set]
-        col_index_map = {name: idx for idx, name in enumerate(all_columns)}
-        display_indices = [col_index_map[c] for c in output_columns]
+        seen = set()
+        output_columns = []
+        for c in columns:
+            if c in valid_set and c not in seen:
+                output_columns.append(c)
+                seen.add(c)
+        # 所有列名均无效时回退到全部列
+        if not output_columns:
+            output_columns = all_columns
+            display_indices = list(range(len(all_columns)))
+        else:
+            col_index_map = {name: idx for idx, name in enumerate(all_columns)}
+            display_indices = [col_index_map[c] for c in output_columns]
 
     output = io.StringIO()
     # 写入 BOM，便于 Excel 识别编码（UTF-8 时有效，GBK 编码时由调用方处理）
@@ -211,10 +178,21 @@ def export_report_to_json(sql_query: str, pool_config: dict,
         output_columns = all_columns
         display_indices = list(range(len(all_columns)))
     else:
+        # 仅保留实际存在的列名，去重并保持用户指定顺序
         valid_set = set(all_columns)
-        output_columns = [c for c in columns if c in valid_set]
-        col_index_map = {name: idx for idx, name in enumerate(all_columns)}
-        display_indices = [col_index_map[c] for c in output_columns]
+        seen = set()
+        output_columns = []
+        for c in columns:
+            if c in valid_set and c not in seen:
+                output_columns.append(c)
+                seen.add(c)
+        # 所有列名均无效时回退到全部列
+        if not output_columns:
+            output_columns = all_columns
+            display_indices = list(range(len(all_columns)))
+        else:
+            col_index_map = {name: idx for idx, name in enumerate(all_columns)}
+            display_indices = [col_index_map[c] for c in output_columns]
 
     # 构建行对象数组
     rows_data = []
@@ -349,7 +327,7 @@ def handle_export(conn, query: str,
             return "404", f"报表 '{report_config['name']}' 关联的连接池不存在", {}
 
     # 解析筛选参数（从查询字符串，与报表页面一致）
-    filters = _parse_filters(qs)
+    filters = parse_filters(qs)
 
     # 解析自定义列参数
     custom_columns = None

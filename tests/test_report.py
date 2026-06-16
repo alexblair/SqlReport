@@ -47,7 +47,6 @@ def _make_conn():
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
     """)
-    db._initialized = True
     return conn
 
 
@@ -85,7 +84,6 @@ def _make_conn2():
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
     """)
-    db._initialized = True
     return conn
 
 
@@ -100,7 +98,6 @@ class TestReportSelector(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_selector_lists_reports(self):
         """报表选择页应列出所有报表"""
@@ -122,12 +119,10 @@ class TestReportSelector(unittest.TestCase):
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER,
             sort_order INTEGER NOT NULL DEFAULT 0,FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL, FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL);
         """)
-        db._initialized = True
         code, body, _ = report.handle_request(conn2, "GET", "/report", "")
         self.assertEqual(code, "200")
         self.assertIn("选择报表", body)
         conn2.close()
-        db._initialized = False
 
 
 class TestReportExecution(unittest.TestCase):
@@ -143,7 +138,6 @@ class TestReportExecution(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     @patch("report.execute_report")
     def test_report_renders_table(self, mock_exec):
@@ -699,14 +693,12 @@ class TestSortBarUI(unittest.TestCase):
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
         """)
-        db._initialized = True
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     @patch("report.execute_report")
     def test_sort_bar_appears_when_sorted(self, mock_exec):
@@ -826,14 +818,12 @@ class TestNofilter(unittest.TestCase):
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
         """)
-        db._initialized = True
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_parse_filters_skips_nofilter(self):
         """op_COL=nofilter 不应产生过滤条件"""
@@ -940,14 +930,12 @@ class TestFieldSettingsPanel(unittest.TestCase):
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
         """)
-        db._initialized = True
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     @patch("report.execute_report")
     def test_field_settings_button_present(self, mock_exec):
@@ -1079,14 +1067,12 @@ class TestSortSettingsPanel(unittest.TestCase):
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
         """)
-        db._initialized = True
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     @patch("report.execute_report")
     def test_sort_settings_button_present(self, mock_exec):
@@ -1218,14 +1204,12 @@ class TestCombinationScenarios(unittest.TestCase):
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
             CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
         """)
-        db._initialized = True
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
 
     def tearDown(self):
         self.conn.close()
-        db._initialized = False
 
     def test_bug_fix_sort_remove_preserves_cols(self):
         """BUG验证: 排序栏✕按钮移除排序时不应丢失 cols 参数"""
