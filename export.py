@@ -88,33 +88,46 @@ def _parse_filters(qs):
 
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
-                         filters=None) -> str:
+                         filters=None,
+                         columns: list[str] = None) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
     支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
+    columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
     """
     conn = db.create_mysql_connection(pool_config)
     try:
-        columns, rows = db.execute_mysql_query(conn, sql_query)
+        all_columns, rows = db.execute_mysql_query(conn, sql_query)
     finally:
         conn.close()
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = report._filter_rows(rows, columns, filters or [])
+    filtered = report._filter_rows(rows, all_columns, filters or [])
+
+    # 确定输出列（按用户自定义顺序）
+    if columns is None:
+        output_columns = all_columns
+        display_indices = list(range(len(all_columns)))
+    else:
+        # 仅保留实际存在的列名，保持用户指定顺序
+        valid_set = set(all_columns)
+        output_columns = [c for c in columns if c in valid_set]
+        col_index_map = {name: idx for idx, name in enumerate(all_columns)}
+        display_indices = [col_index_map[c] for c in output_columns]
 
     output = io.StringIO()
     # 写入 BOM，便于 Excel 识别编码（UTF-8 时有效，GBK 编码时由调用方处理）
     output.write("\ufeff")
     writer = csv.writer(output, delimiter=",", quotechar='"',
                         quoting=csv.QUOTE_ALL, lineterminator="\n")
-    writer.writerow(columns)
+    writer.writerow(output_columns)
     for row in filtered:
-        writer.writerow(row)
+        writer.writerow([row[i] for i in display_indices])
 
     return output.getvalue()
 
@@ -164,12 +177,14 @@ def _no_quote_value(val):
 def export_report_to_json(sql_query: str, pool_config: dict,
                           report_name: str,
                           filters=None,
-                          json_no_quotes: bool = False) -> str:
+                          json_no_quotes: bool = False,
+                          columns: list[str] = None) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
     支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
+    columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
     （不加引号），而非全部转为字符串。
@@ -184,24 +199,34 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     """
     conn = db.create_mysql_connection(pool_config)
     try:
-        columns, rows = db.execute_mysql_query(conn, sql_query)
+        all_columns, rows = db.execute_mysql_query(conn, sql_query)
     finally:
         conn.close()
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = report._filter_rows(rows, columns, filters or [])
+    filtered = report._filter_rows(rows, all_columns, filters or [])
+
+    # 确定输出列（按用户自定义顺序）
+    if columns is None:
+        output_columns = all_columns
+        display_indices = list(range(len(all_columns)))
+    else:
+        valid_set = set(all_columns)
+        output_columns = [c for c in columns if c in valid_set]
+        col_index_map = {name: idx for idx, name in enumerate(all_columns)}
+        display_indices = [col_index_map[c] for c in output_columns]
 
     # 构建行对象数组
     rows_data = []
     for row in filtered:
         obj = {}
-        for i, col in enumerate(columns):
+        for col, idx in zip(output_columns, display_indices):
             if json_no_quotes:
                 # 保留原始数值类型
-                obj[col] = _no_quote_value(row[i])
+                obj[col] = _no_quote_value(row[idx])
             else:
                 # 全部转为字符串（原有行为）
-                obj[col] = _format_cell(row[i])
+                obj[col] = _format_cell(row[idx])
         rows_data.append(obj)
 
     # 顶层结构：以报表名（清理后）作为数据键
@@ -326,6 +351,13 @@ def handle_export(conn, query: str,
     # 解析筛选参数（从查询字符串，与报表页面一致）
     filters = _parse_filters(qs)
 
+    # 解析自定义列参数
+    custom_columns = None
+    use_custom_cols = qs.get("use_custom_cols", [None])[0] == "1"
+    cols_raw = qs.get("cols", [])
+    if use_custom_cols and cols_raw and cols_raw[0]:
+        custom_columns = [urllib.parse.unquote(c) for c in cols_raw[0].split(",")]
+
     # 解析导出选项
     export_format = "csv"
     fmt_vals = qs.get("format", [])
@@ -350,10 +382,12 @@ def handle_export(conn, query: str,
         if export_format == "json":
             content = export_report_to_json(
                 report_config["sql_query"], pool_config,
-                report_config["name"], filters, json_no_quotes)
+                report_config["name"], filters, json_no_quotes,
+                custom_columns)
         else:
             content = export_report_to_csv(
-                report_config["sql_query"], pool_config, filters)
+                report_config["sql_query"], pool_config, filters,
+                custom_columns)
     except Exception as e:
         return "500", f"导出失败: {e}", {}
 

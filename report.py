@@ -343,6 +343,39 @@ def _parse_sorts(qs):
     return [(c, d) for c, d in sorts if d in ("asc", "desc")]
 
 
+def _parse_cols(qs, all_columns: list[str]) -> list[str]:
+    """
+    从 parse_qs 结果中解析自定义列顺序参数。
+
+    格式：cols=col1,col2,col3
+    返回实际要显示的列名列表（按用户指定顺序）。
+    仅保留 all_columns 中存在的列名，忽略无效列名。
+    若未传 cols 参数或为空，返回 all_columns（默认显示全部）。
+    """
+    cols_raw = qs.get("cols", [])
+    if not cols_raw or not cols_raw[0]:
+        return list(all_columns)
+    requested = [urllib.parse.unquote(c) for c in cols_raw[0].split(",")]
+    valid_set = set(all_columns)
+    seen = set()
+    result = []
+    for c in requested:
+        if c in valid_set and c not in seen:
+            result.append(c)
+            seen.add(c)
+    return result if result else list(all_columns)
+
+
+def _build_cols_param(display_columns: list[str], all_columns: list[str]) -> str:
+    """
+    构建 cols URL 查询参数字符串。
+    仅在用户自定义了列顺序或隐藏了列时生成参数，否则返回空字符串。
+    """
+    if display_columns == list(all_columns):
+        return ""
+    return "cols=" + urllib.parse.quote(",".join(display_columns), safe='')
+
+
 def _format_cell(val) -> str:
     """
     格式化表格单元格值。
@@ -588,6 +621,113 @@ function toggleFilterInput(inputName, select) {
     input.disabled = false;
   }
 }
+function toggleFieldItem(checkbox) {
+  var label = checkbox.closest('.field-item');
+  if (label) {
+    label.style.background = checkbox.checked ? '#f8fafc' : '#fff';
+  }
+}
+function moveField(btn, dir) {
+  var item = btn.closest('.field-item');
+  var list = document.getElementById('fieldList');
+  var items = Array.from(list.children);
+  var idx = items.indexOf(item);
+  var target = idx + dir;
+  if (target < 0 || target >= items.length) return;
+  if (dir === -1) {
+    list.insertBefore(item, items[target]);
+  } else {
+    list.insertBefore(item, items[target].nextSibling);
+  }
+  updateMoveButtons();
+}
+function updateMoveButtons() {
+  var list = document.getElementById('fieldList');
+  var items = Array.from(list.children);
+  items.forEach(function(item, i) {
+    var up = item.querySelector('.field-up');
+    var down = item.querySelector('.field-down');
+    if (up) up.disabled = (i === 0);
+    if (down) down.disabled = (i === items.length - 1);
+  });
+}
+function selectAllFields(checked) {
+  var list = document.getElementById('fieldList');
+  var checkboxes = list.querySelectorAll('input[type="checkbox"]');
+  checkboxes.forEach(function(cb) {
+    cb.checked = checked;
+    toggleFieldItem(cb);
+  });
+}
+function applyFieldSettings() {
+  var list = document.getElementById('fieldList');
+  var items = Array.from(list.children);
+  var cols = [];
+  items.forEach(function(item) {
+    var cb = item.querySelector('input[type="checkbox"]');
+    if (cb && cb.checked) {
+      var colInput = item.querySelector('input[name="col_order"]');
+      if (colInput) cols.push(colInput.value);
+    }
+  });
+  var reportId = new URLSearchParams(window.location.search).get('id');
+  var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
+  var sorts = [];
+  var filters = [];
+  var params = new URLSearchParams(window.location.search);
+  params.forEach(function(val, key) {
+    if (key === 'sort') sorts.push(val);
+    if (key === 'dir') sorts.push(val);
+    if (key.startsWith('f_')) filters.push({key: key, val: val});
+    if (key.startsWith('op_')) filters.push({key: key, val: val});
+  });
+  var url = '/report?id=' + reportId;
+  if (pageSize) url += '&page_size=' + pageSize;
+  for (var i = 0; i < sorts.length; i += 2) {
+    url += '&sort=' + encodeURIComponent(sorts[i]) + '&dir=' + encodeURIComponent(sorts[i+1]);
+  }
+  filters.forEach(function(f) {
+    url += '&' + f.key + '=' + encodeURIComponent(f.val);
+  });
+  if (cols.length > 0 && cols.length < items.length) {
+    url += '&cols=' + encodeURIComponent(cols.join(','));
+}
+window.location.href = url;
+}
+var _dragSrcEl = null;
+function initDragHandlers() {
+  var list = document.getElementById('fieldList');
+  if (!list) return;
+  list.addEventListener('dragstart', function(e) {
+    var item = e.target.closest('.field-item');
+    if (!item) return;
+    _dragSrcEl = item;
+    item.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+  list.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var item = e.target.closest('.field-item');
+    if (!item || item === _dragSrcEl) return;
+    var rect = item.getBoundingClientRect();
+    var midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      list.insertBefore(_dragSrcEl, item);
+    } else {
+      list.insertBefore(_dragSrcEl, item.nextSibling);
+    }
+  });
+  list.addEventListener('dragend', function(e) {
+    if (_dragSrcEl) {
+      _dragSrcEl.style.opacity = '';
+      _dragSrcEl = null;
+    }
+    updateMoveButtons();
+  });
+}
+document.addEventListener('DOMContentLoaded', initDragHandlers);
 </script>
 </body></html>"""
 
@@ -765,9 +905,11 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        page_size: Optional[int] = None,
                        pool_override: Optional[dict] = None,
                        sorts=None, filters=None,
-                       refresh: bool = False) -> str:
+                       refresh: bool = False,
+                       display_columns: list[str] = None) -> str:
     """
-    渲染报表数据展示页，支持多字段排序/筛选。
+    渲染报表数据展示页，支持多字段排序/筛选/自定义列。
+    display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
     """
     report = db.get_report(conn, report_id)
     if not report:
@@ -806,7 +948,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
                 f'</small></div>' + _FOOTER)
 
     return _build_report_html(conn, report, result, pool_config,
-                              sorts or [], filters or [], refresh)
+                              sorts or [], filters or [], refresh,
+                              display_columns)
 
 
 # ===================================================================
@@ -817,14 +960,20 @@ def render_report_page(conn, report_id: int, page: int = 1,
 def _build_report_html(conn, report: dict, result: ReportResult,
                        pool_config: dict = None,
                        sorts=None, filters=None,
-                       refresh: bool = False) -> str:
+                       refresh: bool = False,
+                       display_columns: list[str] = None) -> str:
     """
     构建完整的报表 HTML。sorts/filters 均为列表。
+    display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
     """
     sorts = sorts or []
     filters = filters or []
     report_id = report["id"]
     qs_page_size = result.page_size
+    all_columns = list(result.columns)
+    if display_columns is None:
+        display_columns = all_columns
+    cols_param = _build_cols_param(display_columns, all_columns)
 
     # ---- Debug 信息 ----
     debug_lines = []
@@ -875,6 +1024,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     for col, op, val in filters:
         if op != DEFAULT_OP:
             form_hidden.append(f'<input type="hidden" name="op_{urllib.parse.quote(col, safe="")}" value="{_escape(op)}">')
+    # 自定义列排序/隐藏（hidden，表单提交时保留）
+    if cols_param:
+        form_hidden.append(f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">')
     form_hidden_str = "\n    ".join(form_hidden)
 
     # ---- 构建排序栏（显示当前排序列及其优先级） ----
@@ -906,7 +1058,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     # ---- 构建表头（排序双箭头 + 筛选操作符下拉框 + 筛选输入框） ----
     thead_parts = ["<tr>"]
-    for col in result.columns:
+    for col in display_columns:
         # 当前排序列信息
         current_dir = None
         sort_priority = 0
@@ -922,6 +1074,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         asc_href += "&amp;" + _build_sort_params(asc_sorts)
         if filters:
             asc_href += "&amp;" + _build_filter_params(filters)
+        if cols_param:
+            asc_href += "&amp;" + cols_param
         asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
 
         # 构建 ▼ (desc) 链接
@@ -930,6 +1084,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         desc_href += "&amp;" + _build_sort_params(desc_sorts)
         if filters:
             desc_href += "&amp;" + _build_filter_params(filters)
+        if cols_param:
+            desc_href += "&amp;" + cols_param
         desc_cls = "sort-arrow active" if current_dir == "desc" else "sort-arrow"
 
         # 排序优先级标示
@@ -984,6 +1140,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     thead_str = "".join(thead_parts)
 
     # ---- 数据行 ----
+    # 构建列名到索引的映射，用于按 display_columns 顺序提取数据
+    col_index_map = {name: idx for idx, name in enumerate(all_columns)}
+    display_indices = [col_index_map[c] for c in display_columns]
     tbody = ""
     if not result.rows:
         tbody = ('<tr class="empty-state-row">'
@@ -991,11 +1150,12 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                  '<div class="icon">📭</div>暂无数据</div></td></tr>')
     else:
         for row in result.rows:
-            tbody += "<tr>" + "".join(f"<td>{_escape(v)}</td>" for v in row) + "</tr>"
+            cells = "".join(f"<td>{_escape(row[i])}</td>" for i in display_indices)
+            tbody += "<tr>" + cells + "</tr>"
 
     # ---- 分页 ----
     pagination = _build_pagination(report_id, result.page, result.total_pages,
-                                   result.page_size, result.total, sorts, filters)
+                                   result.page_size, result.total, sorts, filters, cols_param)
 
     # ---- 缓存状态 ----
     cached = _query_cache.get(report_id, report["sql_query"])
@@ -1007,13 +1167,15 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         cache_badge = '<span class="cache-badge">未缓存</span>'
 
     # ---- 控制栏 ----
-    # 控制栏表单：携带所有状态（筛选+排序）
+    # 控制栏表单：携带所有状态（筛选+排序+自定义列）
+    cols_hidden = f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">' if cols_param else ""
     controls = f"""
 <div class="controls">
   <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
     <input type="hidden" name="id" value="{report_id}">
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {_filter_hidden_inputs(filters) if filters else ''}
+    {cols_hidden}
     <label>每页行数:
       <select name="page_size" onchange="this.form.submit()">
         {''.join(f'<option value="{s}"{" selected" if qs_page_size == s else ""}>{s}</option>'
@@ -1026,6 +1188,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     <input type="hidden" name="id" value="{report_id}">
     {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {_filter_hidden_inputs(filters) if filters else ''}
+    {cols_hidden}
     <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
       格式:
       <select name="format" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
@@ -1046,9 +1209,13 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
       <input type="checkbox" name="zip" value="1"> 压缩包
     </label>
+    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+      <input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段
+    </label>
     <button type="submit" class="btn btn-success btn-sm" style="font-size:12px;padding:3px 10px">导出</button>
   </form>
-  <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
+  <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
+  <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
 </div>"""
@@ -1057,6 +1224,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     clear_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
     if sorts:
         clear_href += "&amp;" + _build_sort_params(sorts)
+    if cols_param:
+        clear_href += "&amp;" + cols_param
 
     filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
@@ -1077,6 +1246,50 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                       f'筛选: {filter_summary} '
                       f'<a href="{clear_href}" class="clear-filter">✕ 全部清除</a></div>')
 
+    # ---- 字段设置面板 ----
+    field_settings_items = []
+    for idx, col in enumerate(all_columns):
+        checked = "checked" if col in display_columns else ""
+        # 找到当前列在 display_columns 中的位置（用于排序箭头）
+        pos = display_columns.index(col) if col in display_columns else -1
+        up_disabled = "disabled" if pos <= 0 else ""
+        down_disabled = "disabled" if pos >= len(display_columns) - 1 or pos < 0 else ""
+        field_settings_items.append(
+            f'<label class="field-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
+            f'border:1px solid #e2e8f0;border-radius:6px;background:{'#f8fafc' if col in display_columns else '#fff'};'
+            f'cursor:grab;user-select:none">'
+            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
+            f'<input type="checkbox" name="col_visible" value="{_escape(col)}" {checked} '
+            f'onchange="toggleFieldItem(this)" onclick="event.stopPropagation()">'
+            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(col)}</span>'
+            f'<input type="hidden" name="col_order" value="{_escape(col)}">'
+            f'<button type="button" class="field-up" {up_disabled} onclick="moveField(this,-1)" '
+            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
+            f'cursor:pointer;background:#fff;color:#475569">▲</button>'
+            f'<button type="button" class="field-down" {down_disabled} onclick="moveField(this,1)" '
+            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
+            f'cursor:pointer;background:#fff;color:#475569">▼</button>'
+            f'</label>'
+        )
+    field_settings_html = (
+        '<div id="fieldSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
+        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        '<h3 style="margin:0;font-size:15px;color:#1e293b">字段设置</h3>'
+        '<button type="button" onclick="document.getElementById(\'fieldSettingsPanel\').style.display=\'none\'" '
+        'style="padding:4px 10px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff">收起</button>'
+        '</div>'
+        '<div id="fieldList" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">'
+        + "".join(field_settings_items) +
+        '</div>'
+        '<div style="display:flex;gap:8px;margin-top:12px">'
+        '<button type="button" onclick="selectAllFields(true)" class="btn btn-outline btn-sm">全选</button>'
+        '<button type="button" onclick="selectAllFields(false)" class="btn btn-outline btn-sm">全不选</button>'
+        '<button type="button" onclick="applyFieldSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
+        '</div>'
+        '</div>'
+    )
+
     # ---- 单 Form（filter inputs 通过 form 属性关联到此 form） ----
     filter_form_html = f'<form id="{filter_form_id}" method="get" action="/report" style="display:none">\n  {form_hidden_str}\n</form>'
 
@@ -1087,6 +1300,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             memo_html +
             debug_html +
             controls +
+            field_settings_html +
             sort_bar_html +
             filter_action_html +
             clear_html +
@@ -1166,8 +1380,8 @@ def _build_report_switcher(conn, current_id: int = None) -> str:
 
 def _build_pagination(report_id: int, current: int, total_pages: int,
                       page_size: int, total_rows: int,
-                      sorts=None, filters=None) -> str:
-    """构建分页 HTML，携带多字段排序/筛选参数"""
+                      sorts=None, filters=None, cols_param: str = '') -> str:
+    """构建分页 HTML，携带多字段排序/筛选/自定义列参数"""
     sorts = sorts or []
     filters = filters or []
     if total_pages <= 1:
@@ -1179,6 +1393,8 @@ def _build_pagination(report_id: int, current: int, total_pages: int,
         base_url += "&amp;" + _build_sort_params(sorts)
     if filters:
         base_url += "&amp;" + _build_filter_params(filters)
+    if cols_param:
+        base_url += "&amp;" + cols_param
 
     parts = []
 
@@ -1263,10 +1479,29 @@ def handle_request(conn, method: str, path: str, query: str,
     # 多字段筛选
     filters = _parse_filters(qs)
 
+    # 自定义列顺序/可见性
+    cols = None
+    if "id" in qs and qs["id"][0]:
+        try:
+            rid = int(qs["id"][0])
+            r = db.get_report(conn, rid)
+            if r:
+                from db import execute_mysql_query, create_mysql_connection
+                pool = db.get_pool(conn, r["pool_id"]) if r.get("pool_id") else None
+                if pool:
+                    conn_mysql = create_mysql_connection(pool)
+                    try:
+                        all_cols, _ = execute_mysql_query(conn_mysql, r["sql_query"].rstrip("; \t\n\r"))
+                        cols = _parse_cols(qs, all_cols)
+                    finally:
+                        conn_mysql.close()
+        except Exception:
+            pass
+
     # 刷新缓存
     refresh = _qs_val(qs, "refresh") or ""
     refresh_flag = refresh in ("1", "true", "yes")
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
-                              sorts, filters, refresh_flag)
+                              sorts, filters, refresh_flag, cols)
     return "200", html, {}
