@@ -727,7 +727,126 @@ function initDragHandlers() {
     updateMoveButtons();
   });
 }
-document.addEventListener('DOMContentLoaded', initDragHandlers);
+document.addEventListener('DOMContentLoaded', function() {
+  initDragHandlers();
+  initSortDragHandlers();
+});
+
+function initSortDragHandlers() {
+  var list = document.getElementById('sortList');
+  if (!list) return;
+  list.addEventListener('dragstart', function(e) {
+    var item = e.target.closest('.sort-item');
+    if (!item) return;
+    _dragSrcEl = item;
+    item.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+  list.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var item = e.target.closest('.sort-item');
+    if (!item || item === _dragSrcEl) return;
+    var rect = item.getBoundingClientRect();
+    var midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      list.insertBefore(_dragSrcEl, item);
+    } else {
+      list.insertBefore(_dragSrcEl, item.nextSibling);
+    }
+  });
+  list.addEventListener('dragend', function(e) {
+    if (_dragSrcEl) {
+      _dragSrcEl.style.opacity = '';
+      _dragSrcEl = null;
+    }
+    updateSortMoveButtons();
+  });
+}
+
+// ---- 排序管理面板 ----
+function moveSortItem(btn, dir) {
+  var item = btn.closest('.sort-item');
+  var list = document.getElementById('sortList');
+  if (!list || !item) return;
+  var items = Array.from(list.children);
+  var idx = items.indexOf(item);
+  var target = idx + dir;
+  if (target < 0 || target >= items.length) return;
+  list.insertBefore(item, dir === -1 ? items[target] : items[target].nextSibling);
+  updateSortMoveButtons();
+}
+function updateSortMoveButtons() {
+  var list = document.getElementById('sortList');
+  if (!list) return;
+  var items = Array.from(list.children);
+  items.forEach(function(item, i) {
+    var up = item.querySelector('.sort-up');
+    var down = item.querySelector('.sort-down');
+    var num = item.querySelector('.sort-num');
+    if (up) up.disabled = (i === 0);
+    if (down) down.disabled = (i === items.length - 1);
+    if (num) num.textContent = i + 1;
+  });
+}
+function removeSortItem(btn) {
+  var item = btn.closest('.sort-item');
+  if (item) item.parentNode.removeChild(item);
+  updateSortMoveButtons();
+}
+function addSortItem() {
+  var col = document.getElementById('newSortCol').value;
+  var dir = document.getElementById('newSortDir').value;
+  if (!col) return;
+  var list = document.getElementById('sortList');
+  var existing = Array.from(list.querySelectorAll('input[name="sort_col"]')).some(function(inp) {
+    return inp.value === col;
+  });
+  if (existing) return;
+  var div = document.createElement('div');
+  div.className = 'sort-item';
+  div.draggable = true;
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:grab;user-select:none';
+  var icon = dir === 'asc' ? '↑' : '↓';
+  div.innerHTML = '<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
+    + '<span class="sort-num" style="font-weight:700;font-size:11px;color:#4f46e5;min-width:20px">' + (list.children.length + 1) + '</span>'
+    + '<span style="flex:1;font-size:13px;color:#1e293b">' + col + ' ' + icon + '</span>'
+    + '<input type="hidden" name="sort_col" value="' + col + '">'
+    + '<input type="hidden" name="sort_dir" value="' + dir + '">'
+    + '<button type="button" class="sort-up" onclick="moveSortItem(this,-1)" style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff;color:#475569">▲</button>'
+    + '<button type="button" class="sort-down" onclick="moveSortItem(this,1)" style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff;color:#475569">▼</button>'
+    + '<button type="button" onclick="removeSortItem(this)" style="padding:2px 6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;background:transparent;color:#dc2626">✕</button>';
+  list.appendChild(div);
+  updateSortMoveButtons();
+  document.getElementById('newSortCol').value = '';
+}
+function applySortSettings() {
+  var list = document.getElementById('sortList');
+  var items = Array.from(list.children);
+  var sorts = [];
+  items.forEach(function(item) {
+    var col = item.querySelector('input[name="sort_col"]').value;
+    var dir = item.querySelector('input[name="sort_dir"]').value;
+    sorts.push({col: col, dir: dir});
+  });
+  var reportId = new URLSearchParams(window.location.search).get('id');
+  var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
+  var cols = new URLSearchParams(window.location.search).get('cols') || '';
+  var url = '/report?id=' + reportId;
+  if (pageSize) url += '&page_size=' + pageSize;
+  sorts.forEach(function(s) {
+    url += '&sort=' + encodeURIComponent(s.col) + '&dir=' + encodeURIComponent(s.dir);
+  });
+  var params = new URLSearchParams(window.location.search);
+  params.forEach(function(val, key) {
+    if (key.startsWith('f_') || key.startsWith('op_')) {
+      url += '&' + key + '=' + encodeURIComponent(val);
+    }
+  });
+  if (cols) url += '&cols=' + encodeURIComponent(cols);
+  window.location.href = url;
+}
 </script>
 </body></html>"""
 
@@ -1044,6 +1163,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                 rm_href += "&amp;" + _build_sort_params(rm_sorts)
             if filters:
                 rm_href += "&amp;" + _build_filter_params(filters)
+            if cols_param:
+                rm_href += "&amp;" + cols_param
             sort_bar_parts.append(
                 f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
                 f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
@@ -1068,8 +1189,16 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                 sort_priority = idx
                 break
 
-        # 构建 ▲ (asc) 链接 — 替换所有排序列为该列升序
-        asc_sorts = [(col, "asc")]
+        # 构建 ▲ (asc) 链接 — 追加/切换多字段排序
+        asc_sorts = list(sorts)
+        found_asc = False
+        for i, (c, d) in enumerate(asc_sorts):
+            if c == col:
+                asc_sorts[i] = (col, "asc")
+                found_asc = True
+                break
+        if not found_asc:
+            asc_sorts.append((col, "asc"))
         asc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
         asc_href += "&amp;" + _build_sort_params(asc_sorts)
         if filters:
@@ -1078,8 +1207,16 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             asc_href += "&amp;" + cols_param
         asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
 
-        # 构建 ▼ (desc) 链接
-        desc_sorts = [(col, "desc")]
+        # 构建 ▼ (desc) 链接 — 追加/切换多字段排序
+        desc_sorts = list(sorts)
+        found_desc = False
+        for i, (c, d) in enumerate(desc_sorts):
+            if c == col:
+                desc_sorts[i] = (col, "desc")
+                found_desc = True
+                break
+        if not found_desc:
+            desc_sorts.append((col, "desc"))
         desc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
         desc_href += "&amp;" + _build_sort_params(desc_sorts)
         if filters:
@@ -1215,6 +1352,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     <button type="submit" class="btn btn-success btn-sm" style="font-size:12px;padding:3px 10px">导出</button>
   </form>
   <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
+  <button type="button" onclick="document.getElementById('sortSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⇅ 排序设置</button>
   <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
@@ -1290,6 +1428,64 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         '</div>'
     )
 
+    # ---- 排序管理面板 ----
+    sort_settings_items = []
+    for idx, (sc, sd) in enumerate(sorts):
+        up_disabled = "disabled" if idx == 0 else ""
+        down_disabled = "disabled" if idx == len(sorts) - 1 else ""
+        icon = "↑" if sd == "asc" else "↓"
+        sort_settings_items.append(
+            f'<div class="sort-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
+            f'border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:grab;user-select:none">'
+            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
+            f'<span class="sort-num" style="font-weight:700;font-size:11px;color:#4f46e5;min-width:20px">{idx + 1}</span>'
+            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(sc)} {icon}</span>'
+            f'<input type="hidden" name="sort_col" value="{_escape(sc)}">'
+            f'<input type="hidden" name="sort_dir" value="{_escape(sd)}">'
+            f'<button type="button" class="sort-up" {up_disabled} onclick="moveSortItem(this,-1)" '
+            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
+            f'cursor:pointer;background:#fff;color:#475569">▲</button>'
+            f'<button type="button" class="sort-down" {down_disabled} onclick="moveSortItem(this,1)" '
+            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
+            f'cursor:pointer;background:#fff;color:#475569">▼</button>'
+            f'<button type="button" onclick="removeSortItem(this)" '
+            f'style="padding:2px 6px;font-size:11px;border:none;border-radius:4px;'
+            f'cursor:pointer;background:transparent;color:#dc2626">✕</button>'
+            f'</div>'
+        )
+    col_options = "".join(f'<option value="{_escape(c)}">{_escape(c)}</option>' for c in all_columns)
+    sort_settings_html = (
+        '<div id="sortSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
+        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        '<h3 style="margin:0;font-size:15px;color:#1e293b">排序设置</h3>'
+        '<button type="button" onclick="document.getElementById(\'sortSettingsPanel\').style.display=\'none\'" '
+        'style="padding:4px 10px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff">收起</button>'
+        '</div>'
+        '<div id="sortList" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:8px">'
+        + ("".join(sort_settings_items) if sort_settings_items
+           else '<div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
+        '</div>'
+        '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:#f8fafc;'
+        'border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
+        '<select id="newSortCol" style="flex:1;padding:4px 8px;border:1px solid #e2e8f0;'
+        'border-radius:4px;font-size:13px">'
+        '<option value="">-- 添加排序字段 --</option>'
+        + col_options +
+        '</select>'
+        '<select id="newSortDir" style="padding:4px 8px;border:1px solid #e2e8f0;'
+        'border-radius:4px;font-size:13px">'
+        '<option value="asc">↑ 升序</option>'
+        '<option value="desc">↓ 降序</option>'
+        '</select>'
+        '<button type="button" onclick="addSortItem()" class="btn btn-primary btn-sm">添加</button>'
+        '</div>'
+        '<div style="display:flex;gap:8px;margin-top:8px">'
+        '<button type="button" onclick="applySortSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
+        '</div>'
+        '</div>'
+    )
+
     # ---- 单 Form（filter inputs 通过 form 属性关联到此 form） ----
     filter_form_html = f'<form id="{filter_form_id}" method="get" action="/report" style="display:none">\n  {form_hidden_str}\n</form>'
 
@@ -1301,6 +1497,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             debug_html +
             controls +
             field_settings_html +
+            sort_settings_html +
             sort_bar_html +
             filter_action_html +
             clear_html +

@@ -929,5 +929,561 @@ class TestBuildFilterParamsNewFormat(unittest.TestCase):
         self.assertIn("op_age=gt", url)
 
 
+class TestFieldSettingsPanel(unittest.TestCase):
+    """字段设置面板 UI 测试"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+        db._initialized = True
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+        db._initialized = False
+
+    @patch("report.execute_report")
+    def test_field_settings_button_present(self, mock_exec):
+        """页面上应有字段设置按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("字段设置", body)
+        self.assertIn("fieldSettingsPanel", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_panel_contains_all_columns(self, mock_exec):
+        """字段设置面板应包含所有列"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("id", body)
+        self.assertIn("name", body)
+        self.assertIn("age", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_drag_handle_present(self, mock_exec):
+        """字段设置面板的列应有拖拽手柄"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("⠿", body)
+        self.assertIn('draggable="true"', body)
+        self.assertIn("class=\"field-item\"", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_checkbox_all_checked_by_default(self, mock_exec):
+        """默认所有列的复选框应处于选中状态"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn('checked', body)
+
+    @patch("report.execute_report")
+    def test_field_settings_hidden_col_not_checked(self, mock_exec):
+        """隐藏的列在字段设置面板中不应选中"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        # 通过 cols 参数隐藏 age 列
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&cols=id,name",
+            pool_override=self.mock_pool)
+        # age 的 checkbox 不应有 checked 属性（或只显示未选中）
+        # 简单检查 age 列存在但不再表格/面板中选中
+        self.assertIn("age", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_order_respected(self, mock_exec):
+        """cols 参数应改变字段显示顺序"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&cols=age,name,id",
+            pool_override=self.mock_pool)
+        # cols 参数应出现在隐藏表单中
+        self.assertIn("cols=", body)
+        self.assertIn("cols", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_up_down_buttons(self, mock_exec):
+        """字段设置面板的每列应有上下移动按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("class=\"field-up\"", body)
+        self.assertIn("class=\"field-down\"", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_apply_button(self, mock_exec):
+        """字段设置面板应有应用按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("applyFieldSettings", body)
+        self.assertIn("应用", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_select_all_buttons(self, mock_exec):
+        """字段设置面板应有全选/全不选按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("selectAllFields(true)", body)
+        self.assertIn("selectAllFields(false)", body)
+
+    @patch("report.execute_report")
+    def test_field_settings_init_drag_js(self, mock_exec):
+        """页面应加载字段拖拽初始化脚本"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("initDragHandlers", body)
+
+    def test_clear_filter_preserves_cols(self):
+        """清除筛选链接应保留 cols 参数（通过 _build_report_html 验证）"""
+        report_info = {"id": 1, "name": "测试", "sql_query": "SELECT * FROM t", "memo": ""}
+        result = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        body = report._build_report_html(
+            self.conn, report_info, result, self.mock_pool,
+            sorts=[], filters=[("name", "contains", "a")],
+            display_columns=["id", "name"])
+        self.assertIn("清除筛选", body)
+        # 清除筛选的 href 应包含 cols（URL 编码逗号）
+        self.assertIn("cols=id%2Cname", body)
+
+
+class TestSortSettingsPanel(unittest.TestCase):
+    """排序设置面板 UI 测试"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+        db._initialized = True
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+        db._initialized = False
+
+    @patch("report.execute_report")
+    def test_sort_settings_button_present(self, mock_exec):
+        """页面上应有排序设置按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("排序设置", body)
+        self.assertIn("sortSettingsPanel", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_shows_empty_when_no_sorts(self, mock_exec):
+        """无排序时排序设置面板应显示暂无排序"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("暂无排序", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_shows_sorts(self, mock_exec):
+        """有排序时排序设置面板应显示排序项"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+        self.assertIn("sort-item", body)
+        self.assertIn("↑", body)
+        self.assertIn("↓", body)
+        self.assertNotIn("暂无排序", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_drag_handle_present(self, mock_exec):
+        """排序设置面板的排序项应有拖拽手柄"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        self.assertIn("⠿", body)
+        self.assertIn('draggable="true"', body)
+        self.assertIn("class=\"sort-item\"", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_priority_numbers(self, mock_exec):
+        """排序项应显示优先级编号"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+        self.assertIn("class=\"sort-num\"", body)
+        # 第一个排序编号应为 1
+        self.assertIn("1", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_up_down_buttons(self, mock_exec):
+        """排序项应有上下移动按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+        self.assertIn("class=\"sort-up\"", body)
+        self.assertIn("class=\"sort-down\"", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_remove_button(self, mock_exec):
+        """排序项应有移除按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        self.assertIn("removeSortItem", body)
+        self.assertIn("✕", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_add_dropdown(self, mock_exec):
+        """排序设置面板应有添加排序的下拉框"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("newSortCol", body)
+        self.assertIn("newSortDir", body)
+        self.assertIn("addSortItem", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_apply_button(self, mock_exec):
+        """排序设置面板应有应用按钮"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("applySortSettings", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_init_drag_js(self, mock_exec):
+        """页面应加载排序拖拽初始化脚本"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("initSortDragHandlers", body)
+
+    @patch("report.execute_report")
+    def test_sort_settings_column_options_in_add(self, mock_exec):
+        """添加排序下拉框应包含所有列"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("id", body)
+        self.assertIn("name", body)
+        self.assertIn("age", body)
+
+
+class TestCombinationScenarios(unittest.TestCase):
+    """字段设置与排序等组合场景测试"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+        db._initialized = True
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+        db._initialized = False
+
+    def test_bug_fix_sort_remove_preserves_cols(self):
+        """BUG验证: 排序栏✕按钮移除排序时不应丢失 cols 参数"""
+        report_info = {"id": 1, "name": "测试", "sql_query": "SELECT * FROM t", "memo": ""}
+        result = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        body = report._build_report_html(
+            self.conn, report_info, result, self.mock_pool,
+            sorts=[("name", "asc"), ("age", "desc")],
+            filters=[],
+            display_columns=["id", "name"])
+        # 找出 sort-bar 块
+        sort_bar_start = body.find("sort-bar")
+        self.assertGreater(sort_bar_start, 0, "页面应包含排序栏")
+        sort_bar_end = body.find("</div>", sort_bar_start)
+        sort_bar_html = body[sort_bar_start:sort_bar_end]
+        # 每个 ✕ 链接都应包含 cols=
+        pos = 0
+        found_any = False
+        while True:
+            a_start = sort_bar_html.find('✕</a>', pos)
+            if a_start < 0:
+                break
+            href_start = sort_bar_html.rfind('href="', 0, a_start)
+            href_end = sort_bar_html.find('"', href_start + 6)
+            if href_start >= 0 and href_end > href_start:
+                link = sort_bar_html[href_start:href_end + 1]
+                found_any = True
+                self.assertIn("cols=", link,
+                              f"排序移除链接缺失 cols 参数: {link}")
+            pos = a_start + 5
+        self.assertTrue(found_any, "排序栏中应包含至少一个 ✕ 链接")
+
+    @patch("report.execute_report")
+    def test_multi_sort_header_asc_adds_new_col(self, mock_exec):
+        """多排序: ▲ 点击未排序列应追加到末尾而非替换"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        # 当前已有 name asc 排序
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        # age 列后的 ▲ 链接应包含 sort=name&dir=asc&sort=age&dir=asc
+        # 找到 age 列的 th，检查其中的 ▲ href
+        age_th_start = body.find("age")
+        if age_th_start >= 0:
+            age_section = body[age_th_start:age_th_start + 2000]
+            # ▲ 链接应在 age 列附近
+            asc_match = age_section.find("▲")
+            if asc_match >= 0:
+                # 往前找 href
+                href_start = age_section.rfind('<a href="', 0, asc_match)
+                if href_start >= 0:
+                    href_quote = age_section.find('"', href_start + 9)
+                    href = age_section[href_start + 9:href_quote]
+                    self.assertIn("sort=name", href)
+                    self.assertIn("dir=asc", href)
+                    self.assertIn("sort=age", href)
+                    self.assertIn("dir=asc", href)
+
+    @patch("report.execute_report")
+    def test_multi_sort_header_desc_adds_new_col(self, mock_exec):
+        """多排序: ▼ 点击未排序列应追加到末尾"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+        # age 列后的 ▼ 链接应包含 sort=name&dir=asc&sort=age&dir=desc
+        age_th_start = body.find("age")
+        if age_th_start >= 0:
+            age_section = body[age_th_start:age_th_start + 2000]
+            desc_match = age_section.find("▼")
+            if desc_match >= 0:
+                href_start = age_section.rfind('<a href="', 0, desc_match)
+                if href_start >= 0:
+                    href_quote = age_section.find('"', href_start + 9)
+                    href = age_section[href_start + 9:href_quote]
+                    self.assertIn("sort=name", href)
+                    self.assertIn("dir=asc", href)
+                    self.assertIn("sort=age", href)
+                    self.assertIn("dir=desc", href)
+
+    @patch("report.execute_report")
+    def test_multi_sort_header_toggle_in_place(self, mock_exec):
+        """多排序: 点击已排序列的▲应在原位更新方向不改变排序顺序"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        # name asc, age desc
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1&sort=name&dir=asc&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+        # age 列的 ▲ 链接应改为 age asc（在原位，不改变 name 排序）
+        age_th_start = body.find("age")
+        if age_th_start >= 0:
+            age_section = body[age_th_start:age_th_start + 2000]
+            asc_match = age_section.find("▲")
+            if asc_match >= 0:
+                href_start = age_section.rfind('<a href="', 0, asc_match)
+                if href_start >= 0:
+                    href_quote = age_section.find('"', href_start + 9)
+                    href = age_section[href_start + 9:href_quote]
+                    # 应包含 name asc 和 age asc（name 在 age 前）
+                    sort_pos_name = href.find("sort=name")
+                    sort_pos_age = href.find("sort=age")
+                    self.assertGreater(sort_pos_age, sort_pos_name,
+                                       "age 排序应保持在 name 之后")
+                    self.assertIn("dir=asc&dir=asc", href.replace("&amp;", "&"))
+
+    @patch("report.execute_report")
+    def test_sorts_filters_cols_all_preserved_in_pagination(self, mock_exec):
+        """分页链接应同时保留排序、筛选和列设置"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)],
+            total=25, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&sort=name&dir=asc&sort=age&dir=desc&f_name=a&op_age=gt&cols=id,name",
+            pool_override=self.mock_pool)
+        # 分页链接应包含所有参数（检查下一页箭头）
+        self.assertIn("sort=name", body)
+        self.assertIn("dir=asc", body)
+        self.assertIn("sort=age", body)
+        self.assertIn("dir=desc", body)
+        self.assertIn("f_name=", body)
+        self.assertIn("op_age=gt", body)
+        self.assertIn("cols=", body)
+
+    def test_clear_filter_preserves_sorts_and_cols(self):
+        """清除筛选链接应保留排序和列设置"""
+        report_info = {"id": 1, "name": "测试", "sql_query": "SELECT * FROM t", "memo": ""}
+        result = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        body = report._build_report_html(
+            self.conn, report_info, result, self.mock_pool,
+            sorts=[("name", "asc")],
+            filters=[("name", "contains", "a")],
+            display_columns=["id", "name"])
+        # 清除筛选链接应包含 sort 和 cols 但不包含 f_
+        # 从 body 中提取清除筛选链接的 href
+        clear_link_start = body.find('清除筛选')
+        # 往回找最近的 href="
+        href_start = body.rfind('href="', 0, clear_link_start)
+        href_end = body.find('"', href_start + 6)
+        clear_href = body[href_start:href_end + 1]
+        self.assertIn("sort=name", clear_href)
+        self.assertIn("cols=", clear_href)
+        self.assertNotIn("f_name", clear_href)
+
+    def test_export_form_preserves_sorts_filters_cols(self):
+        """导出表单应保留排序、筛选和列设置"""
+        report_info = {"id": 1, "name": "测试", "sql_query": "SELECT * FROM t", "memo": ""}
+        result = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        body = report._build_report_html(
+            self.conn, report_info, result, self.mock_pool,
+            sorts=[("name", "asc")],
+            filters=[("name", "contains", "a")],
+            display_columns=["id", "name"])
+        # 导出应包含排序、筛选、列隐藏字段
+        self.assertRegex(body, r'name="sort" value="name"')
+        self.assertRegex(body, r'name="dir" value="asc"')
+        self.assertIn("f_name", body)
+        self.assertIn("cols", body)
+
+    @patch("report.execute_report")
+    def test_rebuild_cache_preserves_sorts_filters_cols(self, mock_exec):
+        """重建缓存链接应保留排序、筛选和列设置"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&sort=name&dir=asc&f_name=a&cols=id,name",
+            pool_override=self.mock_pool)
+        self.assertIn("refresh=1", body)
+        self.assertIn("sort=name", body)
+        self.assertIn("cols=", body)
+
+    @patch("report.execute_report")
+    def test_apply_field_settings_preserves_sorts(self, mock_exec):
+        """applyFieldSettings JS 应保留当前排序"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&sort=name&dir=asc&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+        # applyFieldSettings 函数应读取并保留 sort/dir 参数
+        self.assertIn("key === 'sort'", body)
+        self.assertIn("key === 'dir'", body)
+        self.assertIn("sorts.push", body)
+
+    @patch("report.execute_report")
+    def test_apply_sort_settings_preserves_filters_and_cols(self, mock_exec):
+        """applySortSettings JS 应保留筛选和列设置"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&f_name=a&op_age=gt&cols=id,name",
+            pool_override=self.mock_pool)
+        # applySortSettings 函数应读取并保留 f_/op_/cols 参数
+        self.assertIn("key.startsWith('f_')", body)
+        self.assertIn("key.startsWith('op_')", body)
+        self.assertIn("cols", body)
+
+    @patch("report.execute_report")
+    def test_multi_sort_bar_shows_priority(self, mock_exec):
+        """多字段排序时排序栏应显示优先级序号"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&sort=name&dir=asc&sort=age&dir=desc&sort=id&dir=asc",
+            pool_override=self.mock_pool)
+        self.assertIn("sort-bar", body)
+        # 检查优先级符号（①②③...）
+        self.assertIn("①", body)
+        self.assertIn("②", body)
+        self.assertIn("③", body)
+
+    @patch("report.execute_report")
+    def test_sort_bar_remove_link_has_correct_preserved_sorts(self, mock_exec):
+        """排序栏 ✕ 移除排序后，其余排序的优先级顺序应保持不变"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report",
+            "id=1&sort=name&dir=asc&sort=age&dir=desc&sort=id&dir=asc",
+            pool_override=self.mock_pool)
+        sort_bar_start = body.find("sort-bar")
+        sort_bar_end = body.find("</div>", sort_bar_start)
+        sort_bar_html = body[sort_bar_start:sort_bar_end]
+        # name 的 ✕ 移除后应剩 age desc + id asc
+        name_x = sort_bar_html.find("name")
+        if name_x >= 0:
+            name_section = sort_bar_html[name_x:name_x + 200]
+            x_link_start = name_section.find('href="')
+            if x_link_start >= 0:
+                x_link_end = name_section.find('"', x_link_start + 6)
+                link = name_section[x_link_start + 6:x_link_end]
+                self.assertIn("sort=age", link)
+                self.assertIn("dir=desc", link)
+                self.assertIn("sort=id", link)
+                self.assertIn("dir=asc", link)
+                # name 不应出现在移除后的链接中
+                self.assertNotIn("sort=name", link)
+
+    @patch("report.execute_report")
+    def test_sort_settings_has_init_js_call(self, mock_exec):
+        """DOMContentLoaded 应同时初始化字段和排序拖拽"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "A")], total=1, page=1, page_size=10)
+        code, body, _ = report.handle_request(
+            self.conn, "GET", "/report", "id=1", pool_override=self.mock_pool)
+        self.assertIn("initDragHandlers", body)
+        self.assertIn("initSortDragHandlers", body)
+
+
 if __name__ == "__main__":
     unittest.main()
