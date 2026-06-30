@@ -1150,11 +1150,11 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     for col, dir_ in sorts:
         form_hidden.append(f'<input type="hidden" name="sort" value="{_escape(col)}">')
         form_hidden.append(f'<input type="hidden" name="dir" value="{_escape(dir_)}">')
-    # 筛选操作符（hidden，表单提交时保留）
-    for col, op, val in filters:
-        if op != DEFAULT_OP:
-            form_hidden.append(f'<input type="hidden" name="op_{urllib.parse.quote(col, safe="")}" value="{_escape(op)}">')
     # 自定义列排序/隐藏（hidden，表单提交时保留）
+    #
+    # 注意：筛选操作符不再通过隐藏 input 保留，因为可见的筛选下拉框（form="ff"）已经
+    # 在表单提交时提供操作符值。隐藏的 op_ 输入在 DOM 中排在可见下拉框之前，会导致
+    # 其旧值覆盖用户选择的新值（如"不筛选"被忽略）。见 AGENTS.md 中的 bug 记录。
     if cols_param:
         form_hidden.append(f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">')
     form_hidden_str = "\n    ".join(form_hidden)
