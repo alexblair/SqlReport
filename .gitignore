@@ -32,3 +32,6 @@ git-purge.sh
 
 # CodeGraph
 .codegraph/
+
+# 代理指引（本地使用，不提交）
+AGENTS.md
