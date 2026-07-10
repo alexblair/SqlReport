@@ -28,6 +28,7 @@
 | **CSV 导出** | 一键导出完整查询结果，UTF-8 BOM 确保 Excel 正确识别中文 |
 | **纯标准库** | 仅依赖 `mysql-connector-python`，其余全部使用 Python 内置模块 |
 | **配置存储双引擎** | 支持 SQLite / MySQL 两种配置存储方案，通过 `app_config.json` 切换 |
+| **编辑-查看双向关联** | 报表页一键跳转编辑页，编辑页可直接查看报表或实时预览未保存的 SQL |
 
 ## ✨ Features
 
@@ -44,6 +45,7 @@
 | **CSV Export** | One-click export of full query results, UTF-8 BOM for Excel compatibility |
 | **Pure Stdlib** | Only depends on `mysql-connector-python`; everything else is Python built-in |
 | **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
+| **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
 
 ---
 
@@ -176,6 +178,9 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 - **报表** — 配置 SQL 查询、绑定的连接池、默认每页行数、所属分类
 - **分类** — 无限层级树形管理，支持拖拽式调序
 
+- 【查看】按钮：点击新窗口打开报表查看页面
+- 【预览】按钮：点击新窗口以当前表单中的 SQL（未保存）实时预览查询结果
+
 报表配置页特色：
 - 分类树形展示，缩进表示层级
 - 每个报表行内带有上下移动按钮
@@ -190,6 +195,7 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 - 点击列头排序（支持多列）
 - 任意列模糊搜索
 - 强制刷新缓存（重新查询数据库）
+- 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面
 
 ### CSV 导出 `/export`
 

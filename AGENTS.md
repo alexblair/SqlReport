@@ -63,12 +63,19 @@ repo-root/
 - Connection pool CRUD (add/delete/modify pools).
 - User CRUD (add/delete/modify users).
 - Report config CRUD (MySQL query, default page size, which pool to use).
+- 【查看】button on edit form → opens report view in new window.
+- 【预览】button on edit form → POST `/report/preview` with form data, renders report using unsaved SQL without saving.
 
 ### Report page features
 - Report selector (tabs or dropdown).
 - Table display with configurable page size (default from config, user can override).
 - Full pagination: show total pages, jump to any page.
 - CSV export (quoted fields, comma-separated).
+- 【编辑】button on report card header → opens `/config/reports/{id}/edit` in new window.
+
+### Preview endpoint
+- `POST /report/preview` — accepts form-encoded `id` and `sql_query`, renders the report page with `sql_override` (no cache bypass for the overridden SQL).
+- `render_report_page()` and `_build_report_html()` accept `sql_override: str = None` parameter; when set, it replaces `report["sql_query"]` for query execution and debug display.
 
 ---
 
