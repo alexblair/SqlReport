@@ -365,5 +365,54 @@ class TestChineseRedirect(unittest.TestCase):
         self.assertIn("/config?flash=", location)
 
 
+class TestReportFormButtons(unittest.TestCase):
+    """报表编辑表单【查看】和【预览】按钮测试"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "测试池", "h", 3306, "u", "p", "d")
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_edit_form_has_view_button(self):
+        """编辑报表表单应包含【查看】按钮，链接到 /report?id={id}"""
+        rid = db.add_report(self.conn, "可查看报表", "SELECT 1", 20, 1)
+        code, body, _ = config.handle_request(self.conn, "GET",
+                                               f"/config/reports/{rid}/edit", "")
+        self.assertEqual(code, "200")
+        self.assertIn(f'/report?id={rid}', body)
+        self.assertIn('查看', body)
+        self.assertIn('target="_blank"', body)
+        self.assertIn('rel="noopener"', body)
+
+    def test_edit_form_has_preview_button(self):
+        """编辑报表表单应包含【预览】按钮"""
+        rid = db.add_report(self.conn, "可预览报表", "SELECT 1", 20, 1)
+        code, body, _ = config.handle_request(self.conn, "GET",
+                                               f"/config/reports/{rid}/edit", "")
+        self.assertIn('预览', body)
+        self.assertIn("previewReport(this.form)", body)
+        self.assertIn("/report/preview", body)
+
+    def test_add_form_has_no_view_or_preview_button(self):
+        """新增报表表单不应包含【查看】和【预览】按钮"""
+        code, body, _ = config.handle_request(self.conn, "GET",
+                                               "/config/reports/add", "")
+        self.assertNotIn('onclick="previewReport(this.form)"', body)
+        self.assertNotIn('name="id"', body)
+        # "查看"链接（target="_blank"）在 JS 高亮预览功能中存在，判断方式改为检查具体按钮
+        self.assertNotIn('/report?id=', body)
+
+    def test_edit_form_has_hidden_id_input(self):
+        """编辑报表表单应包含隐藏的 id 输入"""
+        rid = db.add_report(self.conn, "ID测试", "SELECT 1", 20, 1)
+        code, body, _ = config.handle_request(self.conn, "GET",
+                                               f"/config/reports/{rid}/edit", "")
+        self.assertIn(f'value="{rid}"', body)
+        self.assertIn('type="hidden"', body)
+        self.assertIn('name="id"', body)
+
+
 if __name__ == "__main__":
     unittest.main()

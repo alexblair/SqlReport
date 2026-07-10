@@ -443,11 +443,18 @@ document.addEventListener("DOMContentLoaded", function() {
 
 
 def _report_form_html(title, action_url, name, sql_query, default_page_size,
-                       required_attr, no_pool_opt, pool_options, category_options, memo_val):
-    """构建报表表单完整 HTML（含 SQL 编辑器 JS）"""
+                       required_attr, no_pool_opt, pool_options, category_options, memo_val,
+                       is_edit=False, report_id=None):
+    """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）"""
+    view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
+                if is_edit and report_id else "")
+    preview_btn = (f'<button type="button" class="btn btn-outline btn-sm" onclick="previewReport(this.form)">预览</button>'
+                   if is_edit and report_id else "")
+    hidden_id = f'<input type="hidden" name="id" value="{report_id}">' if is_edit and report_id else ""
     return f"""<div class="card">
 <h2>{title}</h2>
-<form method="post" action="{action_url}" class="config-form">
+<form method="post" action="{action_url}" class="config-form" data-action="{action_url}">
+  {hidden_id}
   <label>报表名称: <input type="text" name="name" value="{name}" required></label>
   <label>SQL 查询语句:
     <textarea name="sql_query" class="sql-textarea" placeholder="输入 MySQL 语句..." spellcheck="false" rows="8">{sql_query}</textarea>
@@ -475,6 +482,8 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   </label>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">保存</button>
+    {view_btn}
+    {preview_btn}
     <a href="/config" class="cancel">取消</a>
   </div>
 </form>
@@ -484,6 +493,13 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
 {_report_form_js_formatter()}
 {_report_form_js_editor_api()}
 }})();
+function previewReport(form) {{
+    form.target = '_blank';
+    form.action = '/report/preview';
+    form.submit();
+    form.target = '';
+    form.action = form.getAttribute('data-action');
+}}
 </script>
 </div>"""
 
@@ -517,7 +533,8 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
         conn, report.get("category_id") if report else "")
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
-                              required_attr, no_pool_opt, pool_options, category_options, memo_val)
+                              required_attr, no_pool_opt, pool_options, category_options, memo_val,
+                              is_edit=is_edit, report_id=report["id"] if report else None)
 
 
 def _render_pool_section(conn) -> str:

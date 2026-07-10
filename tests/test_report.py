@@ -1469,5 +1469,89 @@ class TestCombinationScenarios(unittest.TestCase):
         self.assertIn("initSortDragHandlers", body)
 
 
+class TestEditButtonOnReportPage(unittest.TestCase):
+    """报表页面【编辑】按钮测试"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "测试池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "可编辑报表", "SELECT 1", 20, 1)
+
+    def tearDown(self):
+        self.conn.close()
+
+    @patch("report.execute_report")
+    def test_edit_button_present(self, mock_exec):
+        """报表页应包含【编辑】按钮，链接到 /config/reports/{id}/edit"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["c"], rows=[("v",)], total=1, page=1, page_size=20,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override={"host": "h"})
+        self.assertEqual(code, "200")
+        self.assertIn('/config/reports/1/edit', body)
+        self.assertIn('编辑', body)
+        self.assertIn('target="_blank"', body)
+        self.assertIn('rel="noopener"', body)
+
+    @patch("report.execute_report")
+    def test_edit_button_links_correct_report(self, mock_exec):
+        """有多个报表时编辑按钮应指向对应报表"""
+        db.add_report(self.conn, "第二个报表", "SELECT 2", 30, 1)
+        mock_exec.return_value = report.ReportResult(
+            columns=["c"], rows=[("v",)], total=1, page=1, page_size=20,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=2", pool_override={"host": "h"})
+        self.assertIn('/config/reports/2/edit', body)
+        self.assertNotIn('/config/reports/1/edit', body)
+
+
+class TestPreviewEndpoint(unittest.TestCase):
+    """报表预览 POST 接口测试"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "测试池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "预览报表", "SELECT original", 20, 1)
+
+    def tearDown(self):
+        self.conn.close()
+
+    @patch("report.execute_report")
+    def test_preview_uses_override_sql(self, mock_exec):
+        """预览应使用表单中的 SQL 而非已保存的 SQL"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["c"], rows=[("preview_data",)], total=1, page=1, page_size=20,
+        )
+        form_body = "id=1&sql_query=SELECT+override_sql&name=预览报表&default_page_size=20"
+        code, body, _ = report.handle_request(self.conn, "POST", "/report/preview",
+                                               "", form_body)
+        self.assertEqual(code, "200")
+        # 应使用 override SQL 进行查询
+        actual_sql = mock_exec.call_args[0][1]
+        self.assertEqual(actual_sql, "SELECT override_sql")
+        self.assertIn("preview_data", body)
+
+    @patch("report.execute_report")
+    def test_preview_shows_preview_badge(self, mock_exec):
+        """预览模式应显示预览标签"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["c"], rows=[("v",)], total=1, page=1, page_size=20,
+        )
+        form_body = "id=1&sql_query=SELECT+preview_sql"
+        code, body, _ = report.handle_request(self.conn, "POST", "/report/preview",
+                                               "", form_body)
+        self.assertIn("预览模式", body)
+
+    @patch("report.execute_report")
+    def test_preview_missing_id_returns_selector(self, mock_exec):
+        """预览缺少 id 参数应返回报表选择页"""
+        form_body = "sql_query=SELECT+test"
+        code, body, _ = report.handle_request(self.conn, "POST", "/report/preview",
+                                               "", form_body)
+        self.assertIn("可用报表列表", body)
+
+
 if __name__ == "__main__":
     unittest.main()

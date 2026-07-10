@@ -16,6 +16,7 @@ URL 路由：
   GET /report?id=N&f_name=alice     → name 列模糊筛选
   GET /report?id=N&f_name=alice&f_age=30 → 多字段同时筛选
   GET /report?id=N&refresh=1        → 强制刷新缓存
+  POST /report/preview              → 预览模式：不保存配置，临时以 POST 表单中的 SQL 查看
 
 兼容旧格式：
   GET /report?id=N&f_col=name&f_q=alice →（自动转为 f_name=alice）
@@ -1028,11 +1029,13 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        pool_override: Optional[dict] = None,
                        sorts=None, filters=None,
                        refresh: bool = False,
-                       cols_raw: str = None) -> str:
+                       cols_raw: str = None,
+                       sql_override: str = None) -> str:
     """
     渲染报表数据展示页，支持多字段排序/筛选/自定义列。
     cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
               为 None 表示全部显示。
+    sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL，不保存到数据库。
     """
     report = db.get_report(conn, report_id)
     if not report:
@@ -1056,8 +1059,9 @@ def render_report_page(conn, report_id: int, page: int = 1,
                     f'<div class="flash flash-error">错误: 报表 "{_escape(report["name"])}" 关联的连接池不存在</div>' +
                     _FOOTER)
 
+    actual_sql = sql_override or report["sql_query"]
     try:
-        result = execute_report(report_id, report["sql_query"], pool_config,
+        result = execute_report(report_id, actual_sql, pool_config,
                                 page, page_size, sorts or [], filters or [], refresh)
     except Exception as e:
         pool_name = pool_config.get("name", "?")
@@ -1079,7 +1083,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
 
     return _build_report_html(conn, report, result, pool_config,
                               sorts or [], filters or [], refresh,
-                              display_columns)
+                              display_columns, sql_override)
 
 
 # ===================================================================
@@ -1091,14 +1095,17 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                        pool_config: dict = None,
                        sorts=None, filters=None,
                        refresh: bool = False,
-                       display_columns: list[str] = None) -> str:
+                       display_columns: list[str] = None,
+                       sql_override: str = None) -> str:
     """
     构建完整的报表 HTML。sorts/filters 均为列表。
     display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
+    sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL。
     """
     sorts = sorts or []
     filters = filters or []
     report_id = report["id"]
+    actual_sql = sql_override or report["sql_query"]
     qs_page_size = result.page_size
     all_columns = list(result.columns)
     if display_columns is None:
@@ -1115,7 +1122,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         pdb = pool_config.get("database", "?")
         debug_lines.append(f'连接池: {_escape(str(pname))} ({_escape(str(phost))}:{pport})'
                            f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
-    debug_lines.append(f'SQL: <code>{_escape(report["sql_query"])}</code>')
+    debug_lines.append(f'SQL: <code>{_escape(actual_sql)}</code>')
     if filters:
         filter_desc = " AND ".join(f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"' for c, o, v in filters)
         debug_lines.append(f'筛选: {filter_desc}')
@@ -1306,7 +1313,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                                    result.page_size, result.total, sorts, filters, cols_param)
 
     # ---- 缓存状态 ----
-    cached = _query_cache.get(report_id, report["sql_query"])
+    cached = _query_cache.get(report_id, actual_sql)
     if cached:
         cache_badge = ('<span class="cache-badge fresh">'
                        f'缓存中 ({int(time.time() - cached.timestamp)}s 前刷新)'
@@ -1504,6 +1511,12 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
             f'<h2>{_escape(report["name"])}</h2>' +
+            ('<div class="preview-badge" style="background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600">'
+             '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
+             '</div>' if sql_override else '') +
+            f'<div style="margin-bottom:10px">'
+            f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
+            f'</div>' +
             memo_html +
             debug_html +
             controls +
@@ -1656,8 +1669,20 @@ def handle_request(conn, method: str, path: str, query: str,
                    pool_override: Optional[dict] = None) -> tuple[str, str, dict]:
     """
     报表页面请求入口。
-    解析多字段排序/筛选/刷新缓存等参数。
+    解析多字段排序/刷新缓存等参数。
+    支持 POST 预览模式（/report/preview），不保存配置，临时查看。
     """
+    # 预览模式：不保存配置，临时以表单中的 SQL 在新窗口中查看
+    if path == "/report/preview" and method == "POST":
+        form_data = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
+        try:
+            preview_id_str = form_data.get("id", [None])[0] or ""
+            preview_id = int(preview_id_str)
+        except (ValueError, TypeError, IndexError):
+            return "200", render_report_selector(conn), {}
+        sql_override = form_data.get("sql_query", [None])[0] or ""
+        return "200", render_report_page(conn, preview_id, sql_override=sql_override), {}
+
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
     if "id" not in qs or not qs["id"][0]:
