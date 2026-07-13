@@ -42,6 +42,7 @@ def _make_conn():
             pool_id INTEGER,
             category_id INTEGER,
             memo TEXT,
+            result_names TEXT DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -79,6 +80,7 @@ def _make_conn2():
             pool_id INTEGER,
             category_id INTEGER,
             memo TEXT,
+            result_names TEXT DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -116,7 +118,7 @@ class TestReportSelector(unittest.TestCase):
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL,
                 sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER,
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL, FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL);
         """)
         code, body, _ = report.handle_request(conn2, "GET", "/report", "")
@@ -301,7 +303,7 @@ class TestExecuteReport(unittest.TestCase):
         """execute_report 应缓存原始 SQL 并返回正确分页结果"""
         # 模拟 100 条全量数据
         all_rows = [(i, f"Name{i}") for i in range(1, 101)]
-        mock_exec_q.return_value = (["id", "name"], all_rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name"], "rows": all_rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -347,7 +349,7 @@ class TestExecuteReport(unittest.TestCase):
             (3, "Charlie"), (1, "Alice"), (2, "Bob"),
             (4, "dave"),    (5, "Eve"),
         ]
-        mock_exec_q.return_value = (["id", "name"], all_rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name"], "rows": all_rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -402,7 +404,7 @@ class TestExecuteReport(unittest.TestCase):
             (1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35),
             (4, "Alice", 40), (5, "dave", 25),
         ]
-        mock_exec_q.return_value = (["id", "name", "age"], all_rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name", "age"], "rows": all_rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -437,7 +439,7 @@ class TestExecuteReport(unittest.TestCase):
             (1, "Alice", 30), (2, "Bob", 25), (3, "Alice", 25),
             (4, "Bob", 35),   (5, "Charlie", 30),
         ]
-        mock_exec_q.return_value = (["id", "name", "age"], all_rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name", "age"], "rows": all_rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -476,7 +478,7 @@ class TestExecuteReport(unittest.TestCase):
     @patch("report.db.execute_mysql_query")
     def test_execute_refresh_clears_cache(self, mock_exec_q, mock_create_conn):
         """refresh=True 应重新查询数据库"""
-        mock_exec_q.return_value = (["id"], [(1,), (2,)])
+        mock_exec_q.return_value = [{"columns": ["id"], "rows": [(1,), (2,)]}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -502,7 +504,7 @@ class TestExecuteReport(unittest.TestCase):
     @patch("report.db.execute_mysql_query")
     def test_execute_min_page(self, mock_exec_q, mock_create_conn):
         """page 小于 1 时应自动修正为 1"""
-        mock_exec_q.return_value = (["id"], [(1,), (2,)])
+        mock_exec_q.return_value = [{"columns": ["id"], "rows": [(1,), (2,)]}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -520,7 +522,7 @@ class TestExecuteReport(unittest.TestCase):
     @patch("report.db.execute_mysql_query")
     def test_execute_with_trailing_semicolon(self, mock_exec_q, mock_create_conn):
         """SQL 末尾带分号时应正确去除再传给 db.execute_mysql_query"""
-        mock_exec_q.return_value = (["id"], [(1,), (2,)])
+        mock_exec_q.return_value = [{"columns": ["id"], "rows": [(1,), (2,)]}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
 
@@ -549,7 +551,7 @@ class TestNewFilterOperators(unittest.TestCase):
     @patch("report.db.execute_mysql_query")
     def test_filter_contains(self, mock_exec_q, mock_create_conn):
         """包含（默认操作符）"""
-        mock_exec_q.return_value = (["name"], [("Alice",), ("Bob",), ("Charlie",)])
+        mock_exec_q.return_value = [{"columns": ["name"], "rows": [("Alice",), ("Bob",), ("Charlie",)]}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -562,7 +564,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_eq(self, mock_exec_q, mock_create_conn):
         """等于"""
         rows = [("Alice", 25), ("Bob", 30), ("alice", 35)]
-        mock_exec_q.return_value = (["name", "age"], rows)
+        mock_exec_q.return_value = [{"columns": ["name", "age"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -576,7 +578,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_neq(self, mock_exec_q, mock_create_conn):
         """不等于"""
         rows = [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
-        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -589,7 +591,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_gt(self, mock_exec_q, mock_create_conn):
         """大于"""
         rows = [(1, "A", 10), (2, "B", 20), (3, "C", 30)]
-        mock_exec_q.return_value = (["id", "name", "val"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name", "val"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -602,7 +604,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_lt(self, mock_exec_q, mock_create_conn):
         """小于"""
         rows = [(1, 5), (2, 15), (3, 25)]
-        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "val"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -615,7 +617,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_gte(self, mock_exec_q, mock_create_conn):
         """大于等于"""
         rows = [(1, 10), (2, 20), (3, 30)]
-        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "val"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -628,7 +630,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_lte(self, mock_exec_q, mock_create_conn):
         """小于等于"""
         rows = [(1, 10), (2, 20), (3, 30)]
-        mock_exec_q.return_value = (["id", "val"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "val"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -641,7 +643,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_isempty(self, mock_exec_q, mock_create_conn):
         """为空"""
         rows = [(1, "A"), (2, ""), (3, None), (4, "B")]
-        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -654,7 +656,7 @@ class TestNewFilterOperators(unittest.TestCase):
     def test_filter_notempty(self, mock_exec_q, mock_create_conn):
         """非空"""
         rows = [(1, "A"), (2, ""), (3, None), (4, "B")]
-        mock_exec_q.return_value = (["id", "name"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -670,7 +672,7 @@ class TestNewFilterOperators(unittest.TestCase):
             (1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35),
             (4, "Alice", 40), (5, "dave", 25),
         ]
-        mock_exec_q.return_value = (["id", "name", "age"], rows)
+        mock_exec_q.return_value = [{"columns": ["id", "name", "age"], "rows": rows}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
         pool = {"host": "h", "port": 3306, "user": "u", "password": "p", "database": "d"}
@@ -691,7 +693,7 @@ class TestSortBarUI(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -816,7 +818,7 @@ class TestNofilter(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -928,7 +930,7 @@ class TestFieldSettingsPanel(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1065,7 +1067,7 @@ class TestSortSettingsPanel(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1202,7 +1204,7 @@ class TestCombinationScenarios(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)

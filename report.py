@@ -58,14 +58,15 @@ DEFAULT_OP = "contains"
 
 
 class CachedResult:
-    """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据。"""
+    """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据（支持多结果集）。"""
 
-    __slots__ = ("columns", "rows", "sql_query", "timestamp")
+    __slots__ = ("results", "sql_query", "timestamp")
 
-    def __init__(self, columns: list[str], rows: list[tuple],
-                 sql_query: str):
-        self.columns = columns
-        self.rows = rows
+    def __init__(self, results: list[dict], sql_query: str):
+        """
+        results: [{"columns": [...], "rows": [...]}, ...]
+        """
+        self.results = results
         self.sql_query = sql_query
         self.timestamp = time.time()
 
@@ -96,9 +97,9 @@ class QueryCache:
             return None
         return cached
 
-    def set(self, report_id: int, columns: list[str],
-            rows: list[tuple], sql_query: str) -> None:
-        self._cache[report_id] = CachedResult(columns, rows, sql_query)
+    def set(self, report_id: int, results: list[dict],
+            sql_query: str) -> None:
+        self._cache[report_id] = CachedResult(results, sql_query)
 
     def invalidate(self, report_id: int) -> None:
         self._cache.pop(report_id, None)
@@ -513,6 +514,10 @@ _CSS = """
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 12px; color: #334155;
   }
+  .debug-info pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px; color: #334155;
+  }
   .debug-toggle {
     display:inline-flex; align-items:center; gap:4px; font-size:12px;
     color:#94a3b8; cursor:pointer; background:none; border:1px solid #e2e8f0;
@@ -521,6 +526,11 @@ _CSS = """
   .debug-toggle:hover { color:#475569; background:#f1f5f9; }
   .debug-content { padding: 0 16px 12px; }
   .debug-content.hidden { display: none; }
+  .sql-hl-keyword { font-weight:700; color:#7c3aed; }
+  .sql-hl-string { color:#059669; }
+  .sql-hl-number { color:#d97706; }
+  .sql-hl-comment { color:#94a3b8; font-style:italic; }
+  .sql-hl-function { font-weight:600; color:#2563eb; }
   .pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
   .pagination a, .pagination .page-btn, .pagination .page-span {
     display: inline-flex; align-items: center; justify-content: center;
@@ -606,7 +616,7 @@ _PAGE_HEADER = """<!DOCTYPE html>
 <div class="container">
 """
 
-_FOOTER = """</div>
+_FOOTER = r"""</div>
 <script>
 function toggleSection(btn, label) {
   var content = btn.nextElementSibling;
@@ -676,6 +686,7 @@ function applyFieldSettings() {
   });
   var reportId = new URLSearchParams(window.location.search).get('id');
   var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
+  var resultIdx = new URLSearchParams(window.location.search).get('result') || '';
   var sorts = [];
   var filters = [];
   var params = new URLSearchParams(window.location.search);
@@ -687,6 +698,7 @@ function applyFieldSettings() {
   });
   var url = '/report?id=' + reportId;
   if (pageSize) url += '&page_size=' + pageSize;
+  if (resultIdx) url += '&result=' + encodeURIComponent(resultIdx);
   for (var i = 0; i < sorts.length; i += 2) {
     url += '&sort=' + encodeURIComponent(sorts[i]) + '&dir=' + encodeURIComponent(sorts[i+1]);
   }
@@ -695,8 +707,8 @@ function applyFieldSettings() {
   });
   if (cols.length > 0 && cols.length < items.length) {
     url += '&cols=' + encodeURIComponent(cols.join(','));
-}
-window.location.href = url;
+  }
+  window.location.href = url;
 }
 var _dragSrcEl = null;
 function initDragHandlers() {
@@ -830,15 +842,17 @@ function applySortSettings() {
   var items = Array.from(list.children);
   var sorts = [];
   items.forEach(function(item) {
-    var col = item.querySelector('input[name="sort_col"]').value;
-    var dir = item.querySelector('input[name="sort_dir"]').value;
-    sorts.push({col: col, dir: dir});
+    var colInput = item.querySelector('input[name="sort_col"]');
+    if (!colInput) return;
+    sorts.push({col: colInput.value, dir: item.querySelector('input[name="sort_dir"]').value});
   });
   var reportId = new URLSearchParams(window.location.search).get('id');
   var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
+  var resultIdx = new URLSearchParams(window.location.search).get('result') || '';
   var cols = new URLSearchParams(window.location.search).get('cols') || '';
   var url = '/report?id=' + reportId;
   if (pageSize) url += '&page_size=' + pageSize;
+  if (resultIdx) url += '&result=' + encodeURIComponent(resultIdx);
   sorts.forEach(function(s) {
     url += '&sort=' + encodeURIComponent(s.col) + '&dir=' + encodeURIComponent(s.dir);
   });
@@ -851,6 +865,96 @@ function applySortSettings() {
   if (cols) url += '&cols=' + encodeURIComponent(cols);
   window.location.href = url;
 }
+function switchResult(sel) {
+  var rid = sel.dataset.reportId;
+  var currIdx = parseInt(sel.dataset.activeIndex);
+  var targetIdx = parseInt(sel.value);
+  var swi = sel.dataset.swi;
+  var ps = sel.dataset.pageSize;
+  var so = sel.dataset.sqlOverride;
+  if (targetIdx === currIdx) return;
+  var key = 'rstate_' + rid;
+  sessionStorage.setItem(key + '_' + currIdx, window.location.href);
+  var saved = sessionStorage.getItem(key + '_' + targetIdx);
+  if (saved) {
+    window.location.href = saved;
+  } else {
+    var base = '/' + swi + '?id=' + rid + '&page_size=' + ps;
+    if (so) base += '&sql_query=' + encodeURIComponent(so);
+    base += '&result=' + targetIdx;
+    window.location.href = base;
+  }
+}
+// ---- SQL 格式化与高亮 ----
+function h(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function highlight(txt) {
+  var s = txt.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  var kw = 'SELECT|FROM|WHERE|AND|OR|NOT|IN|IS|NULL|LIKE|BETWEEN|EXISTS|AS|ON|JOIN|INNER|OUTER|LEFT|RIGHT|CROSS|FULL|NATURAL|USING|GROUP|BY|HAVING|ORDER|ASC|DESC|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|DROP|ALTER|ADD|COLUMN|INDEX|UNIQUE|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|UNION|ALL|EXCEPT|INTERSECT|WITH|RECURSIVE|REPLACE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE|DATABASE|IF|EXISTS|GRANT|REVOKE';
+  var re = new RegExp(
+    "('(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\")|" +
+    "(--[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|" +
+    "\\b(\\d+(?:\\.\\d+)?)\\b|" +
+    "\\b(" + kw + ")\\b|" +
+    "\\b(\\w+)\\s*\\(",
+    "gi"
+  );
+  return s.replace(re, function(m, str, cmt, num, kw, fn) {
+    if (str) return '<span class="sql-hl-string">' + str + '</span>';
+    if (cmt) return '<span class="sql-hl-comment">' + cmt + '</span>';
+    if (num) return '<span class="sql-hl-number">' + num + '</span>';
+    if (kw) return '<span class="sql-hl-keyword">' + kw + '</span>';
+    if (fn)  return '<span class="sql-hl-function">' + fn + '</span>';
+    return m;
+  });
+}
+function fmt(t) {
+  if (!t || !t.trim()) return t;
+  var s = t.replace(/\s*;\s*$/,""), lines = [], indent = 0, clauseCount = 0;
+  var parts = s.split(/\b(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|FULL\s+JOIN|NATURAL\s+JOIN|INSERT\s+INTO|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|GROUP\s+BY|ORDER\s+BY|UNION\s+ALL|SELECT|FROM|WHERE|JOIN|ON|AND|OR|GROUP|BY|HAVING|ORDER|LIMIT|OFFSET|UNION|VALUES|SET|CASE|WHEN|THEN|ELSE|END|INTO)\b/i);
+  for (var i = 0; i < (parts ? parts.length : 0); i++) {
+    var p = parts[i];
+    if (!p || !p.trim()) continue;
+    var w = p.trim(), u = w.toUpperCase();
+    function pad() {
+      if (indent === 0) return "";
+      if (indent === 1) return "  ";
+      return Array(indent + 1).join("  ");
+    }
+    if (u === "SELECT") { indent = indent === 0 ? 1 : (clauseCount > 0 && indent++); lines.push(pad() + "SELECT"); indent = 2; clauseCount++; }
+    else if (u === "FROM" || u === "INNER JOIN" || u === "LEFT JOIN" || u === "RIGHT JOIN" || u === "CROSS JOIN" || u === "FULL JOIN" || u === "NATURAL JOIN" || u === "JOIN") { indent = Math.max(1, indent - 1); lines.push(pad() + w); indent = 2; }
+    else if (u === "ON") { lines.push(pad() + w); indent = 2; }
+    else if (u === "WHERE") { indent = Math.max(1, indent - 1); lines.push(pad() + "WHERE"); indent = 2; }
+    else if (u === "AND" || u === "OR") { lines.push(pad() + w); indent = 2; }
+    else if (u === "GROUP BY" || u === "GROUP") { indent = Math.max(1, indent - 1); lines.push(pad() + "GROUP BY"); indent = 2; }
+    else if (u === "HAVING") { indent = Math.max(1, indent - 1); lines.push(pad() + "HAVING"); indent = 2; }
+    else if (u === "ORDER BY" || u === "ORDER") { indent = Math.max(1, indent - 1); lines.push(pad() + "ORDER BY"); indent = 2; }
+    else if (u === "LIMIT") { indent = Math.max(1, indent - 1); lines.push(pad() + "LIMIT"); indent = 1; }
+    else if (u === "OFFSET") { lines.push(pad() + "OFFSET"); indent = 1; }
+    else if (u === "UNION" || u === "UNION ALL") { indent = 0; lines.push(""); lines.push(w); }
+    else if (u === "VALUES") { lines.push(pad() + "VALUES"); indent = 2; }
+    else if (u === "SET") { lines.push(pad() + "SET"); indent = 2; }
+    else if (u === "DELETE FROM" || u === "INSERT INTO" || u === "CREATE TABLE" || u === "DROP TABLE" || u === "ALTER TABLE") { indent = 0; lines.push(w); indent = 2; }
+    else if (u === "CASE") { lines.push(pad() + "CASE"); indent++; }
+    else if (u === "WHEN") { lines.push(pad() + "WHEN"); indent = 2; }
+    else if (u === "THEN" || u === "ELSE") { lines.push(pad() + w); }
+    else if (u === "END") { indent = Math.max(1, indent - 1); lines.push(pad() + "END"); }
+    else if (u === "INTO") { lines.push(pad() + "INTO"); indent = 1; }
+    else { lines.push(pad() + w); }
+  }
+  return lines.join("\n") + ";";
+}
+function formatDebugSQL() {
+  var pres = document.querySelectorAll('.sql-debug');
+  pres.forEach(function(pre) {
+    var raw = pre.textContent;
+    if (!raw || !raw.trim()) return;
+    var formatted = fmt(raw);
+    pre.innerHTML = highlight(h(formatted));
+  });
+}
+document.addEventListener('DOMContentLoaded', formatDebugSQL);
 </script>
 </body></html>"""
 
@@ -861,27 +965,85 @@ function applySortSettings() {
 
 
 class ReportResult:
-    """封装报表查询结果"""
+    """封装报表查询结果（支持多结果集）"""
 
-    def __init__(self, columns: list[str], rows: list[tuple],
-                 total: int, page: int, page_size: int):
-        self.columns = columns
-        self.rows = rows
-        self.total = total
+    __slots__ = ("results", "active_index", "page", "page_size")
+
+    def __init__(self, results=None, active_index: int = 0,
+                 page: int = 1, page_size: int = 20, **kwargs):
+        """
+        新式调用：results=[{"columns":..., "rows":..., "total":N}, ...], active_index
+        旧式兼容：results=columns(list[str]), active_index=rows(list[tuple]), total=total
+
+        当第一个参数是 str 列表时自动识别为旧式调用。
+        """
+        total = kwargs.pop("total", None)
+        columns_kw = kwargs.pop("columns", None)
+        rows_kw = kwargs.pop("rows", None)
+        if kwargs:
+            raise TypeError(f"不支持的参数: {kwargs}")
+
+        if columns_kw is not None or rows_kw is not None:
+            # 旧式兼容：columns=..., rows=... 关键字参数
+            cols = columns_kw or []
+            rws = rows_kw or []
+            self.results = [{
+                "columns": cols,
+                "rows": rws,
+                "total": total if total is not None else len(rws)
+            }]
+            self.active_index = 0
+        elif results is not None and isinstance(results[0], str):
+            # 旧式兼容：results 其实是 columns，active_index 其实是 rows
+            cols = results
+            rws = active_index if isinstance(active_index, (list, tuple)) else []
+            self.results = [{
+                "columns": cols,
+                "rows": rws,
+                "total": total if total is not None else len(rws)
+            }]
+            self.active_index = 0
+        else:
+            # 新式：results 是 [{"columns":..., "rows":..., "total":...}, ...]
+            self.results = results if results is not None else [{"columns": [], "rows": [], "total": 0}]
+            self.active_index = active_index
         self.page = page
         self.page_size = page_size
-        self.total_pages = math.ceil(total / page_size) if page_size > 0 else 1
+
+    @property
+    def columns(self) -> list[str]:
+        """当前激活结果的列名"""
+        return self.results[self.active_index]["columns"]
+
+    @property
+    def rows(self) -> list[tuple]:
+        """当前激活结果的行数据"""
+        return self.results[self.active_index]["rows"]
+
+    @property
+    def total(self) -> int:
+        """当前激活结果的总行数"""
+        return self.results[self.active_index]["total"]
+
+    @property
+    def total_pages(self) -> int:
+        """当前激活结果的总页数"""
+        t = self.total
+        ps = self.page_size
+        return math.ceil(t / ps) if ps > 0 else 1
 
 
 def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    page: int = 1, page_size: int = 20,
                    sorts=None, filters=None,
-                   refresh: bool = False) -> ReportResult:
+                   refresh: bool = False,
+                   active_index: int = 0) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
     sorts:   list[(col, dir), ...]  或 None
     filters: list[(col, op, val), ...]  或 None
+    active_index: 当前渲染的结果索引
     """
     page = max(page, 1)
     page_size = max(page_size, 1)
@@ -894,24 +1056,36 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         clean_sql = sql_query.rstrip("; \t\n\r")
         conn = db.create_mysql_connection(pool_config)
         try:
-            columns, all_rows = db.execute_mysql_query(conn, clean_sql)
+            all_results = db.execute_mysql_query(conn, clean_sql)
         finally:
             conn.close()
-        _query_cache.set(report_id, columns, all_rows, sql_query)
+        _query_cache.set(report_id, all_results, sql_query)
     else:
-        columns = cached.columns
-        all_rows = cached.rows
+        all_results = cached.results
 
-    # 多字段筛选（AND）
-    filtered = _filter_rows(all_rows, columns, filters or [])
-    # 多字段排序
-    sorted_rows = _sort_rows(filtered, columns, sorts or [])
+    # 对每个结果集独立执行筛选、排序、分页
+    report_results = []
+    for i, res in enumerate(all_results):
+        columns = res["columns"]
+        all_rows = res["rows"]
 
-    total = len(sorted_rows)
-    offset = (page - 1) * page_size
-    page_rows = sorted_rows[offset:offset + page_size]
+        filtered = _filter_rows(all_rows, columns, filters or [])
+        sorted_rows = _sort_rows(filtered, columns, sorts or [])
 
-    return ReportResult(columns, page_rows, total, page, page_size)
+        total = len(sorted_rows)
+        if i == active_index:
+            offset = (page - 1) * page_size
+            page_rows = sorted_rows[offset:offset + page_size]
+        else:
+            page_rows = sorted_rows
+
+        report_results.append({
+            "columns": columns,
+            "rows": page_rows if i == active_index else sorted_rows,
+            "total": total,
+        })
+
+    return ReportResult(report_results, active_index, page, page_size)
 
 
 # ===================================================================
@@ -1030,12 +1204,15 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        sorts=None, filters=None,
                        refresh: bool = False,
                        cols_raw: str = None,
-                       sql_override: str = None) -> str:
+                       sql_override: str = None,
+                       active_index: int = 0,
+                       result_names_override: str = None) -> str:
     """
-    渲染报表数据展示页，支持多字段排序/筛选/自定义列。
+    渲染报表数据展示页，支持多字段排序/筛选/自定义列/多结果集。
     cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
               为 None 表示全部显示。
     sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL，不保存到数据库。
+    active_index: 当前激活的结果集索引。
     """
     report = db.get_report(conn, report_id)
     if not report:
@@ -1062,7 +1239,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
     actual_sql = sql_override or report["sql_query"]
     try:
         result = execute_report(report_id, actual_sql, pool_config,
-                                page, page_size, sorts or [], filters or [], refresh)
+                                page, page_size, sorts or [], filters or [], refresh,
+                                active_index)
     except Exception as e:
         pool_name = pool_config.get("name", "?")
         pool_host = pool_config.get("host", "?")
@@ -1083,7 +1261,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
 
     return _build_report_html(conn, report, result, pool_config,
                               sorts or [], filters or [], refresh,
-                              display_columns, sql_override)
+                              display_columns, sql_override, active_index,
+                              result_names_override=result_names_override)
 
 
 # ===================================================================
@@ -1096,11 +1275,15 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                        sorts=None, filters=None,
                        refresh: bool = False,
                        display_columns: list[str] = None,
-                       sql_override: str = None) -> str:
+                       sql_override: str = None,
+                       active_index: int = 0,
+                       result_names_override: str = None) -> str:
     """
-    构建完整的报表 HTML。sorts/filters 均为列表。
+    构建完整的报表 HTML，支持多结果集下拉切换。
+    sorts/filters 均为列表。
     display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
     sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL。
+    active_index: 当前激活的结果集索引。
     """
     sorts = sorts or []
     filters = filters or []
@@ -1112,6 +1295,43 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         display_columns = all_columns
     cols_param = _build_cols_param(display_columns, all_columns)
 
+    # ---- 多结果集 ----
+    num_results = len(result.results)
+    # 解析 result_names（每行一个名称，JSON 格式字符串）
+    result_names_raw = result_names_override if result_names_override else (report.get("result_names", "") or "")
+    result_names_list = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
+    # 补齐或截断到实际结果数
+    result_names = []
+    for i in range(num_results):
+        if i < len(result_names_list):
+            result_names.append(result_names_list[i])
+        else:
+            result_names.append(f"结果{i + 1}")
+    swi = ("report" if not sql_override else "report/preview")
+    result_selector_html = ""
+    if num_results > 1:
+        opts = "".join(
+            f'<option value="{i}"{" selected" if i == active_index else ""}>{_escape(result_names[i])}</option>'
+            for i in range(num_results)
+        )
+        # 构建基础 URL（仅保留 id/page_size/sql_override，不携带筛选排序列）
+        qs_parts = [f"id={report_id}", f"page_size={qs_page_size}"]
+        if sql_override:
+            qs_parts.append(f"sql_query={urllib.parse.quote(sql_override)}")
+        base_qs = "&".join(qs_parts)
+        result_selector_html = (
+            f'<div class="result-selector" style="margin-bottom:12px;display:flex;align-items:center;gap:8px">'
+            f'<label style="font-size:13px;color:#475569;font-weight:500">结果视图:</label>'
+            f'<select id="resultSwitcher"'
+            f' data-report-id="{report_id}" data-active-index="{active_index}"'
+            f' data-swi="{_escape(swi)}" data-page-size="{qs_page_size}"'
+            f' data-sql-override="{_escape(sql_override or "")}"'
+            f' onchange="switchResult(this)"'
+            f' style="padding:4px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">'
+            f'{opts}</select>'
+            f'</div>'
+        )
+
     # ---- Debug 信息 ----
     debug_lines = []
     if pool_config:
@@ -1122,7 +1342,14 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         pdb = pool_config.get("database", "?")
         debug_lines.append(f'连接池: {_escape(str(pname))} ({_escape(str(phost))}:{pport})'
                            f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
-    debug_lines.append(f'SQL: <code>{_escape(actual_sql)}</code>')
+    debug_lines.append(
+        f'SQL: <pre class="sql-debug" style="white-space:pre-wrap;word-break:break-all;'
+        f'background:#f1f5f9;padding:8px 10px;border-radius:4px;font-size:13px;'
+        f'line-height:1.6;margin:4px 0;border:1px solid #e2e8f0;overflow-x:auto">'
+        f'{_escape(actual_sql)}</pre>'
+    )
+    if num_results > 1:
+        debug_lines.append(f'结果: {active_index + 1}/{num_results} ({result_names[active_index]})')
     if filters:
         filter_desc = " AND ".join(f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"' for c, o, v in filters)
         debug_lines.append(f'筛选: {filter_desc}')
@@ -1149,10 +1376,15 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         f'<div class="debug-content{memo_hidden_cls}">' + _escape(memo_raw) + '</div>'
         '</div>')
 
+    # ---- 结果参数（多结果集时附加到 URL） ----
+    result_param = f"result={active_index}" if num_results > 1 else ""
+
     # ---- 构建多字段筛选表单（单 Form，filter inputs 用 form 属性关联） ----
     filter_form_id = "ff"
     form_hidden = [f'<input type="hidden" name="id" value="{report_id}">',
                    f'<input type="hidden" name="page_size" value="{qs_page_size}">']
+    if result_param:
+        form_hidden.append(f'<input type="hidden" name="result" value="{active_index}">')
     # 排序状态（hidden，表单提交时保留）
     for col, dir_ in sorts:
         form_hidden.append(f'<input type="hidden" name="sort" value="{_escape(col)}">')
@@ -1183,6 +1415,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                 rm_href += "&amp;" + _build_filter_params(filters)
             if cols_param:
                 rm_href += "&amp;" + cols_param
+            if result_param:
+                rm_href += "&amp;" + result_param
             sort_bar_parts.append(
                 f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
                 f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
@@ -1223,6 +1457,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             asc_href += "&amp;" + _build_filter_params(filters)
         if cols_param:
             asc_href += "&amp;" + cols_param
+        if result_param:
+            asc_href += "&amp;" + result_param
         asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
 
         # 构建 ▼ (desc) 链接 — 追加/切换多字段排序
@@ -1241,6 +1477,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             desc_href += "&amp;" + _build_filter_params(filters)
         if cols_param:
             desc_href += "&amp;" + cols_param
+        if result_param:
+            desc_href += "&amp;" + result_param
         desc_cls = "sort-arrow active" if current_dir == "desc" else "sort-arrow"
 
         # 排序优先级标示
@@ -1310,7 +1548,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     # ---- 分页 ----
     pagination = _build_pagination(report_id, result.page, result.total_pages,
-                                   result.page_size, result.total, sorts, filters, cols_param)
+                                   result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "")
 
     # ---- 缓存状态 ----
     cached = _query_cache.get(report_id, actual_sql)
@@ -1328,6 +1566,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 <div class="controls">
   <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
     <input type="hidden" name="id" value="{report_id}">
+    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {_filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
@@ -1341,6 +1580,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   </form>
   <form method="get" action="/export" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <input type="hidden" name="id" value="{report_id}">
+    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
     {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {_filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
@@ -1371,7 +1611,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
   </form>
   <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
   <button type="button" onclick="document.getElementById('sortSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⇅ 排序设置</button>
-  <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
+   <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}{'&amp;'+result_param if result_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
   {cache_badge}
   <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
 </div>"""
@@ -1382,6 +1622,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         clear_href += "&amp;" + _build_sort_params(sorts)
     if cols_param:
         clear_href += "&amp;" + cols_param
+    if result_param:
+        clear_href += "&amp;" + result_param
 
     filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
@@ -1519,6 +1761,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             f'</div>' +
             memo_html +
             debug_html +
+            result_selector_html +
             controls +
             field_settings_html +
             sort_settings_html +
@@ -1601,8 +1844,9 @@ def _build_report_switcher(conn, current_id: int = None) -> str:
 
 def _build_pagination(report_id: int, current: int, total_pages: int,
                       page_size: int, total_rows: int,
-                      sorts=None, filters=None, cols_param: str = '') -> str:
-    """构建分页 HTML，携带多字段排序/筛选/自定义列参数"""
+                      sorts=None, filters=None, cols_param: str = '',
+                      result_param: str = '') -> str:
+    """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数"""
     sorts = sorts or []
     filters = filters or []
     if total_pages <= 1:
@@ -1615,6 +1859,9 @@ def _build_pagination(report_id: int, current: int, total_pages: int,
     if filters:
         base_url += "&amp;" + _build_filter_params(filters)
     if cols_param:
+        base_url += "&amp;" + cols_param
+    if result_param:
+        base_url += "&amp;" + result_param
         base_url += "&amp;" + cols_param
 
     parts = []
@@ -1681,7 +1928,16 @@ def handle_request(conn, method: str, path: str, query: str,
         except (ValueError, TypeError, IndexError):
             return "200", render_report_selector(conn), {}
         sql_override = form_data.get("sql_query", [None])[0] or ""
-        return "200", render_report_page(conn, preview_id, sql_override=sql_override), {}
+        preview_result = 0
+        if "result" in form_data and form_data["result"][0]:
+            try:
+                preview_result = max(0, int(form_data["result"][0]))
+            except ValueError:
+                pass
+        preview_names = form_data.get("result_names", [None])[0]
+        return "200", render_report_page(conn, preview_id, sql_override=sql_override,
+                                         active_index=preview_result,
+                                         result_names_override=preview_names or None), {}
 
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
@@ -1719,6 +1975,14 @@ def handle_request(conn, method: str, path: str, query: str,
     refresh = _qs_val(qs, "refresh") or ""
     refresh_flag = refresh in ("1", "true", "yes")
 
+    # 多结果集索引
+    active_index = 0
+    if "result" in qs and qs["result"][0]:
+        try:
+            active_index = max(0, int(qs["result"][0]))
+        except ValueError:
+            pass
+
     html = render_report_page(conn, report_id, page, page_size, pool_override,
-                              sorts, filters, refresh_flag, cols_raw)
+                              sorts, filters, refresh_flag, cols_raw, active_index=active_index)
     return "200", html, {}

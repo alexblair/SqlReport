@@ -46,6 +46,7 @@ def _make_conn():
             pool_id INTEGER,
             category_id INTEGER,
             memo TEXT,
+            result_names TEXT DEFAULT '',
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL

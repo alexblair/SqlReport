@@ -270,6 +270,7 @@ class BaseStateMachineTest(unittest.TestCase):
                 pool_id INTEGER,
                 category_id INTEGER,
                 memo TEXT,
+                result_names TEXT DEFAULT '',
                 sort_order INTEGER NOT NULL DEFAULT 0);
         """)
         return conn
@@ -297,9 +298,7 @@ class BaseStateMachineTest(unittest.TestCase):
         if total is None:
             total = len(rows)
         mock_exec.return_value = report.ReportResult(
-            columns=list(self.COLUMNS),
-            rows=rows,
-            total=total,
+            results=[{"columns": list(self.COLUMNS), "rows": rows, "total": total}],
             page=page,
             page_size=page_size,
         )
@@ -861,9 +860,8 @@ class TestStateMachine(BaseStateMachineTest):
         report_info = {"id": 1, "name": "测试报表",
                        "sql_query": "SELECT * FROM t", "memo": ""}
         result = report.ReportResult(
-            columns=["id", "name", "age", "email"],
-            rows=[(1, "A", 25, "a@x.com")],
-            total=1, page=1, page_size=10,
+            results=[{"columns": ["id", "name", "age", "email"], "rows": [(1, "A", 25, "a@x.com")], "total": 1}],
+            page=1, page_size=10,
         )
         body = report._build_report_html(
             self.conn, report_info, result, self.MOCK_POOL,

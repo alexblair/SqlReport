@@ -239,6 +239,7 @@ _SQLITE_SCHEMA = """
         pool_id            INTEGER,
         category_id        INTEGER,
         memo               TEXT,
+        result_names       TEXT DEFAULT '',
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -285,6 +286,7 @@ _MYSQL_SCHEMA = """
         pool_id            INTEGER,
         category_id        INTEGER,
         memo               TEXT,
+        result_names       TEXT,
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -405,6 +407,16 @@ def _init_sqlite_migrations(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             conn.rollback()
 
+    # 迁移 6: 添加 result_names 列到 report_configs
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    rpt_cols = {row[1] for row in cursor.fetchall()}
+    if "result_names" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN result_names TEXT DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -458,6 +470,19 @@ def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     if "memo" not in rpt_cols:
         try:
             conn.execute("ALTER TABLE report_configs ADD COLUMN memo TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 6: 添加 result_names 列到 report_configs
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        rpt_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        rpt_cols = set()
+    if "result_names" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN result_names TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -608,12 +633,13 @@ def delete_user(conn: sqlite3.Connection, user_id: int) -> bool:
 def add_report(conn: sqlite3.Connection, name: str, sql_query: str,
                default_page_size: int, pool_id: Optional[int],
                category_id: Optional[int] = None,
-               memo: Optional[str] = None) -> int:
+               memo: Optional[str] = None,
+               result_names: Optional[str] = None) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,sort_order) VALUES (?,?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', max_order + 1),
     )
     conn.commit()
     return cur.lastrowid
@@ -637,11 +663,12 @@ def update_report(conn: sqlite3.Connection, report_id: int, name: str,
                   sql_query: str, default_page_size: int,
                   pool_id: Optional[int],
                   category_id: Optional[int] = None,
-                  memo: Optional[str] = None) -> bool:
+                  memo: Optional[str] = None,
+                  result_names: Optional[str] = None) -> bool:
     """更新报表配置，影响行数 >0 返回 True。"""
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', report_id),
     )
     conn.commit()
     return cur.rowcount > 0
@@ -891,18 +918,120 @@ def create_mysql_connection(pool_config: dict) -> object:
     return mysql.connector.connect(**config)
 
 
-def execute_mysql_query(conn, sql: str, params: tuple = ()) -> tuple[list[str], list[tuple]]:
+def _split_sql_statements(sql: str) -> list[str]:
     """
-    在 MySQL 连接上执行 SQL 查询。
+    将 SQL 按 ; 拆分为多条语句，同时正确处理引号和注释内部的 ;。
 
-    返回 (列名列表, 数据行列表)。适用于 SELECT 查询。
+    支持以下上下文中 ; 不作为分隔符：
+    - 单引号字符串 '...'
+    - 双引号字符串 "..."
+    - 反引号标识符 `...`
+    - 行注释 -- ...
+    - 行注释 # ...
+    - 块注释 /* ... */
+
+    正确处理的转义场景：
+    - '' （两个连续单引号 = 转义的单引号）
+    - 反斜杠转义
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    i = 0
+    n = len(sql)
+
+    def _consume_quoted(delim: str) -> None:
+        """消费以 delim 包裹的字符串字面量，处理转义"""
+        nonlocal i
+        current.append(delim)
+        i += 1
+        while i < n:
+            c2 = sql[i]
+            current.append(c2)
+            i += 1
+            if c2 == delim:
+                # '' / "" / `` = 转义的引号，字符串继续
+                if i < n and sql[i] == delim:
+                    current.append(delim)
+                    i += 1
+                    continue
+                break
+            # 反斜杠转义下一个字符
+            if c2 == "\\" and i < n:
+                current.append(sql[i])
+                i += 1
+
+    while i < n:
+        c = sql[i]
+        # 单引号 / 双引号 / 反引号
+        if c in ("'", '"', '`'):
+            _consume_quoted(c)
+        # 行注释 --
+        elif c == '-' and i + 1 < n and sql[i + 1] == '-':
+            current.append(c)
+            i += 1
+            while i < n and sql[i] != '\n':
+                current.append(sql[i])
+                i += 1
+        # 行注释 #
+        elif c == '#':
+            current.append(c)
+            i += 1
+            while i < n and sql[i] != '\n':
+                current.append(sql[i])
+                i += 1
+        # 块注释 /* */
+        elif c == '/' and i + 1 < n and sql[i + 1] == '*':
+            current.append(c)
+            i += 1
+            while i < n - 1:
+                current.append(sql[i])
+                if sql[i] == '*' and sql[i + 1] == '/':
+                    current.append('/')
+                    i += 2
+                    break
+                i += 1
+        # 分号（语句分隔符）
+        elif c == ';':
+            stmt = ''.join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+            i += 1
+        else:
+            current.append(c)
+            i += 1
+    # 最后一段
+    remaining = ''.join(current).strip()
+    if remaining:
+        statements.append(remaining)
+    return statements
+
+
+def execute_mysql_query(conn, sql: str, params: tuple = ()) -> list[dict]:
+    """
+    在 MySQL 连接上执行 SQL 查询。支持多段 SQL（用 ; 分隔）。
+
+    逐条执行每段 SQL，跳过 DDL/DML（cur.description is None）等不返回结果集的语句，
+    收集所有 SELECT / 查询类语句的结果。
+
+    返回 list[dict]，每项包含 {"columns": list[str], "rows": list[tuple]}。
+    若整个 SQL 中没有任何结果集返回，抛出 RuntimeError。
     """
     cur = conn.cursor()
-    cur.execute(sql, params)
-    columns = [desc[0] for desc in cur.description]
-    rows = cur.fetchall()
+    results: list[dict] = []
+    for statement in _split_sql_statements(sql):
+        stmt = statement.strip()
+        if not stmt:
+            continue
+        cur.execute(stmt, params)
+        if cur.description is not None:
+            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+            results.append({"columns": columns, "rows": rows})
     cur.close()
-    return columns, rows
+    if not results:
+        raise RuntimeError("查询未返回任何结果集（SQL 中缺少 SELECT 语句）")
+    return results
 
 
 def count_mysql_query(conn, sql: str, params: tuple = ()) -> int:

@@ -46,20 +46,26 @@ from report import _format_cell, parse_filters
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
                          filters=None,
-                         columns: list[str] = None) -> str:
+                         columns: list[str] = None,
+                         result_index: int = 0) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
     支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
+    result_index: 多结果集时选择第几个结果（默认 0）。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
     """
     conn = db.create_mysql_connection(pool_config)
     try:
-        all_columns, rows = db.execute_mysql_query(conn, sql_query)
+        results = db.execute_mysql_query(conn, sql_query)
+        if result_index >= len(results):
+            result_index = 0
+        all_columns = results[result_index]["columns"]
+        rows = results[result_index]["rows"]
     finally:
         conn.close()
 
@@ -145,13 +151,15 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                           report_name: str,
                           filters=None,
                           json_no_quotes: bool = False,
-                          columns: list[str] = None) -> str:
+                          columns: list[str] = None,
+                          result_index: int = 0) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
     支持可选的 filters 参数（list[(col, op, val), ...]），
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
+    result_index: 多结果集时选择第几个结果（默认 0）。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
     （不加引号），而非全部转为字符串。
@@ -166,7 +174,11 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     """
     conn = db.create_mysql_connection(pool_config)
     try:
-        all_columns, rows = db.execute_mysql_query(conn, sql_query)
+        results = db.execute_mysql_query(conn, sql_query)
+        if result_index >= len(results):
+            result_index = 0
+        all_columns = results[result_index]["columns"]
+        rows = results[result_index]["rows"]
     finally:
         conn.close()
 
@@ -355,17 +367,25 @@ def handle_export(conn, query: str,
     if qs.get("zip", [None])[0] == "1":
         is_zip = True
 
+    # 多结果集索引
+    result_index = 0
+    if "result" in qs and qs["result"][0]:
+        try:
+            result_index = max(0, int(qs["result"][0]))
+        except ValueError:
+            pass
+
     # 执行导出
     try:
         if export_format == "json":
             content = export_report_to_json(
                 report_config["sql_query"], pool_config,
                 report_config["name"], filters, json_no_quotes,
-                custom_columns)
+                custom_columns, result_index)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,
-                custom_columns)
+                custom_columns, result_index)
     except Exception as e:
         return "500", f"导出失败: {e}", {}
 

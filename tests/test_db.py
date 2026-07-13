@@ -193,6 +193,7 @@ class TestReportCRUD(unittest.TestCase):
                 pool_id INTEGER,
                 category_id INTEGER,
                 memo TEXT,
+                result_names TEXT DEFAULT '',
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
                 FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -285,9 +286,10 @@ class TestMySQLManager(unittest.TestCase):
 
         conn = db.create_mysql_connection({"host": "h", "port": 3306, "user": "u",
                                            "password": "p", "database": "d"})
-        columns, rows = db.execute_mysql_query(conn, "SELECT * FROM t")
-        self.assertEqual(columns, ["id", "name"])
-        self.assertEqual(rows, [(1, "Alice"), (2, "Bob")])
+        results = db.execute_mysql_query(conn, "SELECT * FROM t")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["columns"], ["id", "name"])
+        self.assertEqual(results[0]["rows"], [(1, "Alice"), (2, "Bob")])
         mock_cursor.execute.assert_called_once_with("SELECT * FROM t", ())
 
     @patch("db.create_mysql_connection")
