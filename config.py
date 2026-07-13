@@ -788,7 +788,7 @@ function updateBatchCount() {{
 </div>"""
 
     cat_list_html = ""
-    roots = db.get_category_tree(conn)
+    cat_tree = db.get_category_tree(conn)
     def _render_tree(nodes, depth=0):
         html = ""
         for node in nodes:
@@ -796,7 +796,7 @@ function updateBatchCount() {{
             if node["children"]:
                 html += _render_tree(node["children"], depth + 1)
         return html
-    cat_list_html = _render_tree(roots)
+    cat_list_html = _render_tree(cat_tree)
 
     if not cat_list_html and not all_reports:
         cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
@@ -814,17 +814,21 @@ function updateBatchCount() {{
 </div>
 </div>"""
 
-    # 各分类下的报表展示
+    # 各分类下的报表展示（按分类树遍历，保持与分类管理区一致的顺序）
+    report_lookup: dict[int, list] = {entry["id"]: entry.get("reports", []) for entry in cat_reports}
     tab_html = ""
-    for entry in cat_reports:
-        reports = entry.get("reports", [])
-        if reports:
-            rows = _render_report_rows(reports, in_category=True)
-            depth = _get_depth(entry, all_cats)
-            indent = "　" * depth
-            tab_html += f"""<div class="section">
+
+    def _render_report_sections(nodes: list[dict], depth: int = 0) -> str:
+        """递归遍历分类树，按树形顺序渲染各分类下的报表表格"""
+        html = ""
+        for node in nodes:
+            reports = report_lookup.get(node["id"], [])
+            if reports:
+                indent = "　" * depth
+                rows = _render_report_rows(reports, in_category=True)
+                html += f"""<div class="section">
 <div class="section-title">
-  <span>📊 {indent}{_escape(entry['name'])} <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span></span>
+  <span>📊 {indent}{_escape(node['name'])} <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span></span>
 </div>
 <div class="table-wrap">
 <table><thead><tr>
@@ -835,6 +839,11 @@ function updateBatchCount() {{
 </tbody></table>
 </div>
 </div>"""
+            if node["children"]:
+                html += _render_report_sections(node["children"], depth + 1)
+        return html
+
+    tab_html = _render_report_sections(cat_tree)
 
     # 未分类报表
     uncat_rows = _render_report_rows(unclassified_reports)
