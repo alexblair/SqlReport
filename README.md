@@ -77,8 +77,10 @@ cd SqlReport
 python3 -m venv venv
 source venv/bin/activate
 
-# 安装唯一外部依赖 / Install the only external dependency
-pip install mysql-connector-python
+# 安装外部依赖 / Install external dependencies
+pip install mysql-connector-python redis
+#   - mysql-connector-python: MySQL 查询连接器（必需）
+#   - redis: Redis 快照缓存（可选，启用后需在 app_config.json 设置 "enable": true）
 
 # 启动服务 / Start the server
 python server.py
