@@ -240,6 +240,8 @@ _SQLITE_SCHEMA = """
         category_id        INTEGER,
         memo               TEXT,
         result_names       TEXT DEFAULT '',
+        prefer_cache       INTEGER NOT NULL DEFAULT 1,
+        cache_ttl_hours    INTEGER NOT NULL DEFAULT 0,
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -287,6 +289,8 @@ _MYSQL_SCHEMA = """
         category_id        INTEGER,
         memo               TEXT,
         result_names       TEXT,
+        prefer_cache       TINYINT NOT NULL DEFAULT 1,
+        cache_ttl_hours    INTEGER NOT NULL DEFAULT 0,
         sort_order         INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
         FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -417,6 +421,22 @@ def _init_sqlite_migrations(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             conn.rollback()
 
+    # 迁移 7: 添加 prefer_cache 和 cache_ttl_hours 列到 report_configs
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    rpt_cols = {row[1] for row in cursor.fetchall()}
+    if "prefer_cache" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN prefer_cache INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except sqlite3.OperationalError:
+            conn.rollback()
+    if "cache_ttl_hours" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN cache_ttl_hours INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -483,6 +503,25 @@ def _init_mysql_migrations(conn: _MySQLConnection) -> None:
     if "result_names" not in rpt_cols:
         try:
             conn.execute("ALTER TABLE report_configs ADD COLUMN result_names TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 7: 添加 prefer_cache 和 cache_ttl_hours 列到 report_configs
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        rpt_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        rpt_cols = set()
+    if "prefer_cache" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN prefer_cache TINYINT NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "cache_ttl_hours" not in rpt_cols:
+        try:
+            conn.execute("ALTER TABLE report_configs ADD COLUMN cache_ttl_hours INTEGER NOT NULL DEFAULT 0")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -634,12 +673,14 @@ def add_report(conn: sqlite3.Connection, name: str, sql_query: str,
                default_page_size: int, pool_id: Optional[int],
                category_id: Optional[int] = None,
                memo: Optional[str] = None,
-               result_names: Optional[str] = None) -> int:
+               result_names: Optional[str] = None,
+               prefer_cache: int = 1,
+               cache_ttl_hours: int = 0) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,sort_order) VALUES (?,?,?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, max_order + 1),
     )
     conn.commit()
     return cur.lastrowid
@@ -664,11 +705,13 @@ def update_report(conn: sqlite3.Connection, report_id: int, name: str,
                   pool_id: Optional[int],
                   category_id: Optional[int] = None,
                   memo: Optional[str] = None,
-                  result_names: Optional[str] = None) -> bool:
+                  result_names: Optional[str] = None,
+                  prefer_cache: int = 1,
+                  cache_ttl_hours: int = 0) -> bool:
     """更新报表配置，影响行数 >0 返回 True。"""
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, report_id),
     )
     conn.commit()
     return cur.rowcount > 0
@@ -719,6 +762,36 @@ def batch_update_report_pool(conn: sqlite3.Connection, report_ids: list[int], po
     cur = conn.execute(
         f"UPDATE report_configs SET pool_id=? WHERE id IN ({placeholders})",
         [pool_id] + report_ids,
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def batch_update_report_cache(
+    conn: sqlite3.Connection,
+    report_ids: list[int],
+    prefer_cache: Optional[int],
+    cache_ttl_hours: Optional[int],
+) -> int:
+    """
+    批量更新报表的缓存配置（开关 + TTL），返回更新的行数。
+
+    只更新 non-None 的字段，保留 None 字段的原值。
+    """
+    sets = []
+    params = []
+    if prefer_cache is not None:
+        sets.append("prefer_cache=?")
+        params.append(prefer_cache)
+    if cache_ttl_hours is not None:
+        sets.append("cache_ttl_hours=?")
+        params.append(cache_ttl_hours)
+    if not sets:
+        return 0
+    placeholders = ",".join("?" for _ in report_ids)
+    cur = conn.execute(
+        f"UPDATE report_configs SET {','.join(sets)} WHERE id IN ({placeholders})",
+        params + report_ids,
     )
     conn.commit()
     return cur.rowcount

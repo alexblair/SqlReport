@@ -998,8 +998,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         )
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
-            "category_id,memo,result_names,sort_order) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1),
+            "category_id,memo,result_names,prefer_cache,cache_ttl_hours,sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1, 0, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 
@@ -1014,8 +1015,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.assertEqual(rid, 2)
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
-            "category_id,memo,result_names,sort_order) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 6),
+            "category_id,memo,result_names,prefer_cache,cache_ttl_hours,sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 1, 0, 6),
         )
 
     def test_get_report_found(self):
@@ -1023,7 +1025,8 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.fetchone.return_value = {
             "id": 1, "name": "报表A", "sql_query": "SELECT 1",
             "default_page_size": 20, "pool_id": 1, "category_id": None,
-            "memo": None, "result_names": "", "sort_order": 1,
+            "memo": None, "result_names": "", "prefer_cache": 1,
+            "cache_ttl_hours": 0, "sort_order": 1,
         }
         rpt = db.get_report(self.conn, 1)
         self.assertIsNotNone(rpt)
@@ -1043,10 +1046,12 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.fetchall.return_value = [
             {"id": 1, "name": "r1", "sql_query": "SELECT 1",
              "default_page_size": 10, "pool_id": None, "category_id": None,
-             "memo": None, "result_names": "", "sort_order": 1},
+             "memo": None, "result_names": "", "prefer_cache": 1,
+             "cache_ttl_hours": 0, "sort_order": 1},
             {"id": 2, "name": "r2", "sql_query": "SELECT 2",
              "default_page_size": 20, "pool_id": 1, "category_id": None,
-             "memo": "备注", "result_names": "", "sort_order": 2},
+             "memo": "备注", "result_names": "", "prefer_cache": 1,
+             "cache_ttl_hours": 0, "sort_order": 2},
         ]
         reports = db.get_all_reports(self.conn)
         self.assertEqual(len(reports), 2)
@@ -1063,8 +1068,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.assertTrue(ok)
         self.mock_cursor.execute.assert_called_once_with(
             "UPDATE report_configs SET name=%s,sql_query=%s,default_page_size=%s,"
-            "pool_id=%s,category_id=%s,memo=%s,result_names=%s WHERE id=%s",
-            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1),
+            "pool_id=%s,category_id=%s,memo=%s,result_names=%s,"
+            "prefer_cache=%s,cache_ttl_hours=%s WHERE id=%s",
+            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1, 0, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 

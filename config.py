@@ -30,7 +30,7 @@ import html as html_mod
 # /config/pools/{id}/move-up, /config/pools/{id}/move-down, /config/reports/batch-pool
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
-    r"(?:/(add|batch-pool|batch-set-category)|/(\d+)/(edit|delete|copy|move-up|move-down))?$"
+    r"(?:/(add|batch-pool|batch-set-category|batch-cache)|/(\d+)/(edit|delete|copy|move-up|move-down))?$"
 )
 
 
@@ -39,7 +39,7 @@ def parse_config_path(path: str) -> dict:
     解析配置页 URL 路径，返回动作参数字典。
 
     返回格式:
-      {"section": "pools|users|reports", "action": "list|add|batch-pool|edit|delete|copy|move-up|move-down",
+      {"section": "pools|users|reports", "action": "list|add|batch-pool|batch-set-category|batch-cache|edit|delete|copy|move-up|move-down",
        "id": int|None}
     """
     match = _PATH_PATTERN.match(path)
@@ -445,13 +445,15 @@ document.addEventListener("DOMContentLoaded", function() {
 def _report_form_html(title, action_url, name, sql_query, default_page_size,
                        required_attr, no_pool_opt, pool_options, category_options, memo_val,
                        result_names_val='',
-                       is_edit=False, report_id=None):
+                       is_edit=False, report_id=None,
+                       prefer_cache=1, cache_ttl_hours=0):
     """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）"""
     view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
                 if is_edit and report_id else "")
     preview_btn = (f'<button type="button" class="btn btn-outline btn-sm" onclick="previewReport(this.form)">预览</button>'
                    if is_edit and report_id else "")
     hidden_id = f'<input type="hidden" name="id" value="{report_id}">' if is_edit and report_id else ""
+    cache_checked = ' checked' if prefer_cache else ''
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form" data-action="{action_url}">
@@ -483,6 +485,17 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   </label>
   <label>结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
     <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
+  </label>
+  <label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">
+    <input type="hidden" name="prefer_cache" value="0">
+    <input type="checkbox" name="prefer_cache" value="1"{cache_checked}>
+    <span style="font-weight:600">启用 Redis 缓存</span>
+    <span style="color:#94a3b8;font-weight:400;font-size:13px">（优先使用缓存数据加速访问）</span>
+  </label>
+  <label>缓存 TTL（小时）:
+    <input type="number" name="cache_ttl_hours" value="{cache_ttl_hours}" min="0" step="1"
+           style="width:120px">
+    <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
   </label>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">保存</button>
@@ -537,10 +550,14 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
     category_options = _report_form_cat_options(
         conn, report.get("category_id") if report else "")
 
+    prefer_cache = int(report.get("prefer_cache", 1)) if report else 1
+    cache_ttl_hours = int(report.get("cache_ttl_hours", 0)) if report else 0
+
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
                               result_names_val=result_names_val,
-                              is_edit=is_edit, report_id=report["id"] if report else None)
+                              is_edit=is_edit, report_id=report["id"] if report else None,
+                              prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
 
 
 def _render_pool_section(conn) -> str:
@@ -647,8 +664,21 @@ def _render_category_section(conn) -> str:
   <select id="batch_cat_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
     {cat_opts}
   </select>
-  <button type="button" class="btn btn-success btn-sm"
+   <button type="button" class="btn btn-success btn-sm"
     onclick="batchSetCategory()">批量设置分类</button>
+   <select id="batch_cache_switch" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+     <option value="">不改变</option>
+     <option value="1">启用缓存</option>
+     <option value="0">关闭缓存</option>
+   </select>
+   <input type="checkbox" id="batch_modify_ttl" onchange="toggleTtlInput()">
+   <label for="batch_modify_ttl" style="font-size:13px">修改TTL</label>
+   <input type="number" id="batch_cache_ttl" value="0" min="0" step="1"
+     style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;width:80px;opacity:0.5"
+     disabled>
+   <span style="font-size:12px;color:#94a3b8">小时（0=永久）</span>
+   <button type="button" class="btn btn-info btn-sm"
+     onclick="batchUpdateCache()">批量更新缓存配置</button>
 </div>
 <script>
 function batchUpdatePool() {{
@@ -697,6 +727,49 @@ function batchSetCategory() {{
   document.body.appendChild(form);
   form.submit();
 }}
+function toggleTtlInput() {{
+  var cb = document.getElementById('batch_modify_ttl');
+  var inp = document.getElementById('batch_cache_ttl');
+  inp.disabled = !cb.checked;
+  inp.style.opacity = cb.checked ? '1' : '0.5';
+}}
+function batchUpdateCache() {{
+  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
+  var ids = [];
+  for (var i = 0; i < checkboxes.length; i++) {{
+    ids.push(checkboxes[i].value);
+  }}
+  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
+  var cacheSwitch = document.getElementById('batch_cache_switch').value;
+  var modifyTtl = document.getElementById('batch_modify_ttl').checked;
+  if (cacheSwitch === '' && !modifyTtl) {{
+    alert('请选择缓存开关或勾选修改TTL');
+    return;
+  }}
+  if (!confirm(`确定批量更新 ${{ids.length}} 个报表的缓存配置？`)) return;
+  var form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/config/reports/batch-cache';
+  ids.forEach(function(id) {{
+    var inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'report_ids'; inp.value = id;
+    form.appendChild(inp);
+  }});
+  var inp = document.createElement('input');
+  inp.type = 'hidden'; inp.name = 'cache_switch'; inp.value = cacheSwitch;
+  form.appendChild(inp);
+  if (modifyTtl) {{
+    var inp2 = document.createElement('input');
+    inp2.type = 'hidden'; inp2.name = 'modify_ttl'; inp2.value = '1';
+    form.appendChild(inp2);
+    var inp3 = document.createElement('input');
+    inp3.type = 'hidden'; inp3.name = 'cache_ttl_hours';
+    inp3.value = document.getElementById('batch_cache_ttl').value;
+    form.appendChild(inp3);
+  }}
+  document.body.appendChild(form);
+  form.submit();
+}}
 function updateBatchCount() {{
   var n = document.querySelectorAll('.report-checkbox:checked').length;
   document.getElementById('batch_count').textContent = n;
@@ -736,6 +809,15 @@ function updateBatchCount() {{
             else:
                 memo_display = '<span style="color:#cbd5e1">—</span>'
 
+            prefer_cache = int(r.get("prefer_cache", 1))
+            prefer_cache_display = (
+                '<span style="color:#059669;font-weight:600">是</span>'
+                if prefer_cache
+                else '<span style="color:#94a3b8">否</span>'
+            )
+            cache_ttl_hours = int(r.get("cache_ttl_hours", 0))
+            cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span style="color:#cbd5e1">—</span>'
+
             rows += f"""<tr>
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
    <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a></strong></td>
@@ -744,6 +826,8 @@ function updateBatchCount() {{
   </td>
   <td>{r['default_page_size']}</td>
   <td>{pool_badge}</td>
+  <td style="text-align:center">{prefer_cache_display}</td>
+  <td style="text-align:center">{cache_ttl_display}</td>
   <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px">{memo_display}</td>
   <td class="ops-cell">
     {move_btns}
@@ -833,7 +917,7 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>备注</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
 </tr></thead><tbody>
 {rows}
 </tbody></table>
@@ -858,9 +942,9 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>备注</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
 </tr></thead><tbody>
-{uncat_rows or '<tr><td colspan="7" class="empty-state">暂无未分类报表</td></tr>'}
+{uncat_rows or '<tr><td colspan="9" class="empty-state">暂无未分类报表</td></tr>'}
 </tbody></table>
 </div>
 </div>"""
@@ -984,7 +1068,7 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
 def _parse_form_data(form_body: str) -> dict:
     """解析 URL 编码的表单数据"""
     parsed = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-    return {k: v[0] if v else "" for k, v in parsed.items()}
+    return {k: v[-1] if v else "" for k, v in parsed.items()}
 
 
 def handle_pool_add(conn, form_body: str) -> tuple[str, str]:
@@ -1084,9 +1168,12 @@ def handle_report_add(conn, form_body: str) -> tuple[str, str]:
         category_id = int(data["category_id"]) if data.get("category_id") else None
         memo = data.get("memo") or None
         result_names = data.get("result_names") or ""
+        prefer_cache = int(data.get("prefer_cache", 1) or 0)
+        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
         rid = db.add_report(conn, data["name"], data["sql_query"],
                             int(data["default_page_size"]), pool_id, category_id, memo,
-                            result_names=result_names)
+                            result_names=result_names,
+                            prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
         return "302", f"/config?flash=报表 {data['name']} 已创建 (id={rid})"
     except Exception as e:
         return "200", render_report_form_page(conn, flash=f"错误: {e}")
@@ -1103,9 +1190,12 @@ def handle_report_edit(conn, report_id: int, form_body: str) -> tuple[str, str]:
         category_id = int(data["category_id"]) if data.get("category_id") else None
         memo = data.get("memo") or None
         result_names = data.get("result_names") or ""
+        prefer_cache = int(data.get("prefer_cache", 1) or 0)
+        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
         ok = db.update_report(conn, report_id, data["name"], data["sql_query"],
                               int(data["default_page_size"]), pool_id, category_id, memo,
-                              result_names=result_names)
+                              result_names=result_names,
+                              prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
         if ok:
             return "302", f"/config?flash=报表 {data['name']} 已更新"
         return "302", "/config?flash=错误: 更新失败"
@@ -1121,9 +1211,12 @@ def handle_report_copy(conn, report_id: int, form_body: str) -> tuple[str, str]:
         category_id = int(data["category_id"]) if data.get("category_id") else None
         memo = data.get("memo") or None
         result_names = data.get("result_names") or ""
+        prefer_cache = int(data.get("prefer_cache", 1) or 0)
+        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
         rid = db.add_report(conn, data["name"], data["sql_query"],
                             int(data["default_page_size"]), pool_id, category_id, memo,
-                            result_names=result_names)
+                            result_names=result_names,
+                            prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
         return "302", f"/config?flash=报表 {data['name']} 已创建（复制自 id={report_id}）"
     except Exception as e:
         return "200", render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True)
@@ -1217,6 +1310,60 @@ def handle_batch_pool(conn, form_body: str) -> tuple[str, str]:
     n = db.batch_update_report_pool(conn, report_ids, pool_id)
     pool_label = pool_id if pool_id else "无"
     return "302", f"/config?flash=已更新 {n} 个报表的连接池为 (id={pool_label})"
+
+
+def handle_batch_cache(conn, form_body: str) -> tuple[str, str]:
+    """处理报表批量更新缓存配置"""
+    data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+    report_ids = [int(v) for v in data.get("report_ids", []) if v]
+    if not report_ids:
+        return "302", "/config?flash=错误: 未选择报表"
+
+    cache_switch = data.get("cache_switch", [""])[0]
+    modify_ttl = data.get("modify_ttl", [""])[0] == "1"
+
+    prefer_cache = None
+    if cache_switch == "1":
+        prefer_cache = 1
+    elif cache_switch == "0":
+        prefer_cache = 0
+
+    cache_ttl_hours = None
+    if modify_ttl:
+        ttl_val = data.get("cache_ttl_hours", ["0"])[0]
+        cache_ttl_hours = int(ttl_val) if ttl_val else 0
+
+    affected = db.batch_update_report_cache(conn, report_ids, prefer_cache, cache_ttl_hours)
+
+    redis_updated = 0
+    redis_failed = 0
+    try:
+        import redis_cache
+        mgr = redis_cache.get_redis_manager()
+        if mgr and mgr.available:
+            prefix = mgr._config.get("key_prefix", "sr")
+            for rid in report_ids:
+                try:
+                    keys = mgr.scan_snapshots(prefix, rid)
+                    if cache_switch == "0":
+                        for k in keys:
+                            mgr.delete_snapshot(k)
+                        redis_updated += 1
+                    elif modify_ttl and cache_ttl_hours is not None:
+                        for k in keys:
+                            mgr.set_expiration(k, cache_ttl_hours)
+                        redis_updated += 1
+                except Exception:
+                    redis_failed += 1
+    except Exception:
+        pass
+
+    parts = [f"已更新 {affected} 个报表的缓存配置"]
+    if redis_updated > 0:
+        parts.append(f"Redis 成功 {redis_updated}")
+    if redis_failed > 0:
+        parts.append(f"Redis 失败 {redis_failed}")
+    return "302", f"/config?flash={'，'.join(parts)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1319,6 +1466,9 @@ def handle_request(conn, method: str, path: str, query: str,
                 return _redirect_or_render(code, result)
             elif route["action"] == "batch-set-category":
                 code, result = handle_batch_set_category(conn, form_body or "")
+                return _redirect_or_render(code, result)
+            elif route["action"] == "batch-cache":
+                code, result = handle_batch_cache(conn, form_body or "")
                 return _redirect_or_render(code, result)
             elif route["action"] in ("move-up", "move-down") and route["id"]:
                 direction = "up" if route["action"] == "move-up" else "down"

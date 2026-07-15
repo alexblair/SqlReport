@@ -142,3 +142,23 @@ def get_log_config() -> tuple[bool, str]:
     enabled = cfg.get("enable", False)
     path = cfg.get("path", "run.log")
     return bool(enabled), str(path)
+
+
+def get_redis_config() -> dict:
+    """解析 redis 配置段。
+
+    配置文件示例:
+        "redis": {
+            "enable": false,
+            "host": "127.0.0.1",
+            "port": 6379,
+            "db": 0,
+            "password": "",
+            "key_prefix": "sr",
+            "default_ttl_hours": 24,
+            "socket_timeout": 5
+        }
+
+    缺失或未启用时返回 {"enable": False}。
+    """
+    return get_config().get("redis", {"enable": False})

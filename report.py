@@ -29,6 +29,7 @@ from decimal import Decimal
 import db
 import html as html_mod
 from typing import Optional
+import redis_cache
 
 # ===================================================================
 # 筛选操作符定义
@@ -60,15 +61,20 @@ DEFAULT_OP = "contains"
 class CachedResult:
     """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据（支持多结果集）。"""
 
-    __slots__ = ("results", "sql_query", "timestamp")
+    __slots__ = ("results", "sql_query", "timestamp", "source", "source_timestamp")
 
-    def __init__(self, results: list[dict], sql_query: str):
+    def __init__(self, results: list[dict], sql_query: str,
+                 source: str = None, source_timestamp: float = None):
         """
         results: [{"columns": [...], "rows": [...]}, ...]
+        source: 数据原始来源（redis / mysql），F5 刷新后保留源头信息
+        source_timestamp: 原始来源的时间戳（Redis 快照的 updated_at）
         """
         self.results = results
         self.sql_query = sql_query
         self.timestamp = time.time()
+        self.source = source
+        self.source_timestamp = source_timestamp
 
 
 class QueryCache:
@@ -98,8 +104,10 @@ class QueryCache:
         return cached
 
     def set(self, report_id: int, results: list[dict],
-            sql_query: str) -> None:
-        self._cache[report_id] = CachedResult(results, sql_query)
+            sql_query: str, source: str = None,
+            source_timestamp: float = None) -> None:
+        self._cache[report_id] = CachedResult(results, sql_query, source,
+                                               source_timestamp)
 
     def invalidate(self, report_id: int) -> None:
         self._cache.pop(report_id, None)
@@ -967,7 +975,7 @@ document.addEventListener('DOMContentLoaded', formatDebugSQL);
 class ReportResult:
     """封装报表查询结果（支持多结果集）"""
 
-    __slots__ = ("results", "active_index", "page", "page_size")
+    __slots__ = ("results", "active_index", "page", "page_size", "cache_info")
 
     def __init__(self, results=None, active_index: int = 0,
                  page: int = 1, page_size: int = 20, **kwargs):
@@ -980,6 +988,7 @@ class ReportResult:
         total = kwargs.pop("total", None)
         columns_kw = kwargs.pop("columns", None)
         rows_kw = kwargs.pop("rows", None)
+        self.cache_info = kwargs.pop("cache_info", None)
         if kwargs:
             raise TypeError(f"不支持的参数: {kwargs}")
 
@@ -1037,31 +1046,162 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    page: int = 1, page_size: int = 20,
                    sorts=None, filters=None,
                    refresh: bool = False,
-                   active_index: int = 0) -> ReportResult:
+                   active_index: int = 0,
+                   report: Optional[dict] = None) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
+
+    集成 Redis 缓存层：
+    - 若报表启用了 prefer_cache 且 Redis 可用，优先读取 Redis 快照
+    - 缓存重建时使用分布式锁避免重复查询
+    - Redis 不可用时降级到 MySQL
+    - MySQL 失败时兜底读取过期 Redis 快照
 
     sorts:   list[(col, dir), ...]  或 None
     filters: list[(col, op, val), ...]  或 None
     active_index: 当前渲染的结果索引
+    report: 报表配置 dict（必须包含 prefer_cache/cache_ttl_hours，由调用方传入）
     """
     page = max(page, 1)
     page_size = max(page_size, 1)
 
+    prefer_cache = bool(report.get("prefer_cache", 0)) if report else False
+    # 预览模式（SQL 来自表单而非数据库）时不写入 Redis
+    is_preview = report is not None and sql_query != report.get("sql_query", "")
+    cache_ttl_hours = int(report.get("cache_ttl_hours", 0)) if report else 0
+    redis_avail = redis_cache.redis_available() if prefer_cache else False
+    cache_info = None  # 缓存状态信息
+
+    # 计算配置版本（仅当 Redis 可用时）
+    config_version = None
+    snapshot_key = None
+    lock_key = None
+    redis_prefix = ""
+    if redis_avail and report:
+        mgr = redis_cache.get_redis_manager()
+        redis_prefix = mgr._config.get("key_prefix", "sr") if mgr else "sr"
+        pool_id = report.get("pool_id")
+        config_version = redis_cache.compute_config_version(sql_query, pool_id)
+        snapshot_key = redis_cache.build_snapshot_key(redis_prefix, report_id, config_version)
+        lock_key = redis_cache.build_lock_key(redis_prefix, report_id, config_version)
+
+    # 强制刷新：清除各层缓存
     if refresh:
         _query_cache.invalidate(report_id)
+        if redis_avail and snapshot_key:
+            mgr = redis_cache.get_redis_manager()
+            if mgr:
+                mgr.delete_snapshot(snapshot_key)
 
+    # ---- 尝试从进程内缓存获取 ----
     cached = _query_cache.get(report_id, sql_query)
-    if cached is None:
-        clean_sql = sql_query.rstrip("; \t\n\r")
-        conn = db.create_mysql_connection(pool_config)
-        try:
-            all_results = db.execute_mysql_query(conn, clean_sql)
-        finally:
-            conn.close()
-        _query_cache.set(report_id, all_results, sql_query)
-    else:
+    if cached is not None:
         all_results = cached.results
+        # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示
+        if cached.source == "redis":
+            cache_info = {
+                "source": "redis",
+                "timestamp": cached.source_timestamp or cached.timestamp,
+                "cached_at": cached.timestamp,
+            }
+        else:
+            cache_info = {"source": "process", "timestamp": cached.timestamp}
+    else:
+        # ---- 尝试从 Redis 快照获取 ----
+        redis_hit = False
+        if redis_avail and snapshot_key:
+            mgr = redis_cache.get_redis_manager()
+            if mgr:
+                snapshot = mgr.get_snapshot(snapshot_key)
+                if snapshot is not None:
+                    all_results = snapshot.results
+                    _query_cache.set(report_id, all_results, sql_query,
+                                     source="redis",
+                                     source_timestamp=snapshot.updated_at)
+                    redis_hit = True
+                    cache_info = {
+                        "source": "redis",
+                        "timestamp": snapshot.updated_at,
+                        "fresh": True,
+                    }
+
+        if not redis_hit:
+            # ---- 检查是否需要走 Redis 重建锁 ----
+            lock_acquired = True  # 默认：无锁场景直接查 MySQL
+            _mgr = redis_cache.get_redis_manager() if (redis_avail and snapshot_key and lock_key) else None
+            if _mgr:
+                lock_acquired = _mgr.acquire_lock(lock_key)
+                if not lock_acquired:
+                    # 锁已被占用 → 等待锁释放后重新读取 Redis
+                    lock_acquired = _mgr.wait_for_lock(lock_key)
+                    if lock_acquired:
+                        # 获取到锁后先检查 Redis 是否已有数据（可能已被其他进程写入）
+                        _snap = _mgr.get_snapshot(snapshot_key)
+                        if _snap is not None:
+                            all_results = _snap.results
+                            _query_cache.set(report_id, all_results, sql_query,
+                                             source="redis",
+                                             source_timestamp=_snap.updated_at)
+                            redis_hit = True
+                            cache_info = {
+                                "source": "redis",
+                                "timestamp": _snap.updated_at,
+                                "fresh": True,
+                            }
+
+            if not redis_hit:
+                # ---- MySQL 查询 ----
+                clean_sql = sql_query.rstrip("; \t\n\r")
+                conn = db.create_mysql_connection(pool_config)
+                try:
+                    all_results = db.execute_mysql_query(conn, clean_sql)
+                except Exception as e:
+                    # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
+                    if _mgr and snapshot_key:
+                        _snap = _mgr.get_snapshot(snapshot_key)
+                        if _snap is not None:
+                            all_results = _snap.results
+                            cache_info = {
+                                "source": "redis_fallback",
+                                "timestamp": _snap.updated_at,
+                                "fresh": False,
+                            }
+                    if cache_info is None:
+                        raise
+                finally:
+                    conn.close()
+
+                if cache_info is None:
+                    # MySQL 查询成功 → 写入各层缓存
+                    _snap_ts = time.time()
+                    _redis_written = False
+                    if _mgr and prefer_cache and not is_preview:
+                        _snap = redis_cache.ReportSnapshot(
+                            results=all_results,
+                            sql_query=sql_query,
+                            updated_at=_snap_ts,
+                            config_version=config_version or "",
+                        )
+                        _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
+                        _redis_written = True
+                    _query_cache.set(report_id, all_results, sql_query,
+                                     source="redis" if _redis_written else None,
+                                     source_timestamp=_snap_ts if _redis_written else None)
+                    if _redis_written:
+                        cache_info = {
+                            "source": "redis",
+                            "timestamp": _snap_ts,
+                            "fresh": True,
+                        }
+                    else:
+                        cache_info = {"source": "mysql"}
+
+            # 释放 Redis 重建锁
+            if _mgr and lock_key:
+                _mgr.release_lock(lock_key)
+            else:
+                # 兜底读成功，不写入进程缓存（数据可能过期）
+                pass
 
     # 对每个结果集独立执行筛选、排序、分页
     report_results = []
@@ -1085,7 +1225,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             "total": total,
         })
 
-    return ReportResult(report_results, active_index, page, page_size)
+    return ReportResult(report_results, active_index, page, page_size,
+                        cache_info=cache_info)
 
 
 # ===================================================================
@@ -1240,7 +1381,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
     try:
         result = execute_report(report_id, actual_sql, pool_config,
                                 page, page_size, sorts or [], filters or [], refresh,
-                                active_index)
+                                active_index, report)
     except Exception as e:
         pool_name = pool_config.get("name", "?")
         pool_host = pool_config.get("host", "?")
@@ -1263,6 +1404,33 @@ def render_report_page(conn, report_id: int, page: int = 1,
                               sorts or [], filters or [], refresh,
                               display_columns, sql_override, active_index,
                               result_names_override=result_names_override)
+
+
+def _build_redis_banners(cache_info: Optional[dict]) -> str:
+    """构建 Redis 降级/兜底提示横幅。"""
+    if not cache_info:
+        return ""
+    src = cache_info.get("source", "")
+    banners = []
+
+    if src == "redis":
+        ts = cache_info.get("timestamp")
+        if ts:
+            from datetime import datetime
+            dt_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            banners.append(
+                f'<div class="flash flash-info">'
+                f'数据来自 Redis 快照（{_escape(dt_str)}）</div>'
+            )
+    elif src == "mysql":
+        if not redis_cache.redis_available():
+            banners.append(
+                '<div class="flash flash-info">'
+                'Redis 不可用，已切换至直连 MySQL 模式'
+                '</div>'
+            )
+
+    return "".join(banners)
 
 
 # ===================================================================
@@ -1551,11 +1719,28 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                                    result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "")
 
     # ---- 缓存状态 ----
-    cached = _query_cache.get(report_id, actual_sql)
-    if cached:
-        cache_badge = ('<span class="cache-badge fresh">'
-                       f'缓存中 ({int(time.time() - cached.timestamp)}s 前刷新)'
-                       '</span>')
+    cache_info = result.cache_info
+    if cache_info:
+        src = cache_info.get("source", "")
+        ts = cache_info.get("timestamp")
+        if src == "redis":
+            age = int(time.time() - ts) if ts else 0
+            cache_badge = ('<span class="cache-badge fresh">'
+                           f'Redis 快照 ({age}s 前)'
+                           '</span>')
+        elif src == "redis_fallback":
+            age = int(time.time() - ts) if ts else 0
+            cache_badge = ('<span class="cache-badge" '
+                           'style="background:#fef3c7;color:#92400e">'
+                           f'缓存快照（{age}s 前，MySQL 不可用）'
+                           '</span>')
+        elif src == "process":
+            age = int(time.time() - ts) if ts else 0
+            cache_badge = ('<span class="cache-badge fresh">'
+                           f'进程缓存 ({age}s 前刷新)'
+                           '</span>')
+        else:
+            cache_badge = '<span class="cache-badge">直连 MySQL</span>'
     else:
         cache_badge = '<span class="cache-badge">未缓存</span>'
 
@@ -1762,6 +1947,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             memo_html +
             debug_html +
             result_selector_html +
+            _build_redis_banners(result.cache_info) +
             controls +
             field_settings_html +
             sort_settings_html +

@@ -47,6 +47,8 @@ def _make_conn():
             category_id INTEGER,
             memo TEXT,
             result_names TEXT DEFAULT '',
+            prefer_cache INTEGER NOT NULL DEFAULT 1,
+            cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -304,6 +306,29 @@ class TestReportFlow(unittest.TestCase):
         self.assertEqual(code, "302")
         reports = db.get_all_reports(self.conn)
         self.assertIsNone(reports[0]["memo"])
+
+
+    def test_submit_edit_report_redis_cache_enabled(self):
+        """编辑报表时勾选 Redis 缓存应正确保存 prefer_cache=1（hidden+checkbox 同时提交时的 v[-1] 修复验证）"""
+        rid = db.add_report(self.conn, "缓存报表", "SELECT 1", 20, 1, prefer_cache=0, cache_ttl_hours=0)
+        # 模拟浏览器提交：hidden(0) + checkbox(1) + ttl
+        form = "name=缓存报表&sql_query=SELECT 1&default_page_size=20&pool_id=1&prefer_cache=0&prefer_cache=1&cache_ttl_hours=24"
+        code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
+        self.assertEqual(code, "302")
+        rpt = db.get_report(self.conn, rid)
+        self.assertEqual(rpt["prefer_cache"], 1)
+        self.assertEqual(rpt["cache_ttl_hours"], 24)
+
+    def test_submit_edit_report_redis_cache_disabled(self):
+        """编辑报表时取消勾选 Redis 缓存应正确保存 prefer_cache=0"""
+        rid = db.add_report(self.conn, "无缓存报表", "SELECT 1", 20, 1, prefer_cache=1, cache_ttl_hours=24)
+        # 模拟浏览器提交：仅 hidden(0) 提交（checkbox 未勾选时不提交）
+        form = "name=无缓存报表&sql_query=SELECT 1&default_page_size=20&pool_id=1&prefer_cache=0&cache_ttl_hours=0"
+        code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
+        self.assertEqual(code, "302")
+        rpt = db.get_report(self.conn, rid)
+        self.assertEqual(rpt["prefer_cache"], 0)
+        self.assertEqual(rpt["cache_ttl_hours"], 0)
 
 
 class TestFlashMessage(unittest.TestCase):

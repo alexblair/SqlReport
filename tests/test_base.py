@@ -59,6 +59,8 @@ _SQL_CREATE_REPORT_CONFIGS = """CREATE TABLE IF NOT EXISTS report_configs (
     category_id        INTEGER,
     memo               TEXT,
     result_names       TEXT DEFAULT '',
+    prefer_cache       INTEGER NOT NULL DEFAULT 1,
+    cache_ttl_hours    INTEGER NOT NULL DEFAULT 0,
     sort_order         INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
     FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
@@ -185,9 +187,9 @@ class BaseReportTest(BaseConfigTest):
 
         # 添加测试报表（引用上述连接池和分类）
         self.conn.execute(
-            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,sort_order) "
-            "VALUES (?,?,?,?,?,?,?)",
-            ("测试报表", "SELECT * FROM test_table", 20, self.pool_id, self.category_id, "测试备注", 1),
+            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,prefer_cache,cache_ttl_hours,sort_order) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("测试报表", "SELECT * FROM test_table", 20, self.pool_id, self.category_id, "测试备注", 1, 0, 1),
         )
         self.report_id = 1
         self.conn.commit()

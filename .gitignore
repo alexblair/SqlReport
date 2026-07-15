@@ -33,5 +33,10 @@ git-purge.sh
 # CodeGraph
 .codegraph/
 
+# 文档与规范（本地使用，不提交）
+docs/
+SPEC.md
+CONTEXT.md
+
 # 代理指引（本地使用，不提交）
 AGENTS.md
