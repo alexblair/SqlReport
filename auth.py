@@ -45,10 +45,13 @@ def verify_password(password: str, stored: str) -> bool:
     校验密码是否与存储的哈希匹配。
 
     使用 hmac.compare_digest 进行常量时间比较，防止时序攻击。
+    传入 None 或非字符串时安全返回 False。
     """
+    if not isinstance(password, str):
+        return False
     try:
         salt, hex_digest = stored.split("$", 1)
-    except ValueError:
+    except (ValueError, AttributeError):
         return False
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _HASH_ITERATIONS)
     return hmac.compare_digest(digest.hex(), hex_digest)

@@ -19,7 +19,22 @@ URL 路由约定：
 import re
 import urllib.parse
 import db
+import auth
+import redis_cache
 import html as html_mod
+# 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
+from render import (
+    build_pool_form_html,
+    build_user_form_html,
+    build_category_opts_html,
+    build_pool_section_html,
+    build_user_section_html,
+    build_category_section_html,
+    render_page_header,
+    render_page_footer,
+    _SQL_HIGHLIGHT_JS,
+    _SQL_FORMATTER_JS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -67,70 +82,13 @@ def parse_config_path(path: str) -> dict:
 # HTML 模板片段
 # ---------------------------------------------------------------------------
 
-_CSS = """
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    background: #f1f5f9; color: #1e293b; min-height: 100vh;
-  }
-  .navbar {
-    background: linear-gradient(135deg, #1e293b, #334155);
-    padding: 0 24px; height: 60px; display: flex; align-items: center; gap: 24px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12); position: sticky; top: 0; z-index: 100;
-  }
-  .navbar .brand { color: #fff; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; text-decoration: none; }
-  .navbar .brand span { color: #818cf8; }
-  .navbar a:not(.brand) {
-    color: #cbd5e1; text-decoration: none; font-size: 14px; font-weight: 500;
-    padding: 6px 14px; border-radius: 6px; transition: background 0.2s, color 0.2s;
-  }
-  .navbar a:not(.brand):hover { background: rgba(255,255,255,0.1); color: #fff; }
-  .navbar .nav-active { color: #fff !important; background: rgba(255,255,255,0.12); }
-  .navbar .spacer { flex: 1; }
-  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-  .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06); padding: 24px; margin-bottom: 20px; animation: fadeUp 0.3s ease-out; }
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-  h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.3px; }
-  h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
+_CONFIG_EXTRA_CSS = """
   .section-title {
     font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px;
     padding-bottom: 12px; border-bottom: 2px solid #e2e8f0;
     display: flex; align-items: center; justify-content: space-between;
   }
   .section-title .actions { display: flex; gap: 8px; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
-    text-decoration: none; cursor: pointer; transition: all 0.15s; border: none;
-  }
-  .btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 2px 8px rgba(79,70,229,0.3); }
-  .btn-primary:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,0.35); }
-  .btn-success { background: #059669; color: #fff; box-shadow: 0 2px 8px rgba(5,150,105,0.3); }
-  .btn-success:hover { background: #047857; transform: translateY(-1px); }
-  .btn-danger { background: #dc2626; color: #fff; box-shadow: 0 2px 8px rgba(220,38,38,0.3); }
-  .btn-danger:hover { background: #b91c1c; transform: translateY(-1px); }
-  .btn-outline { background: transparent; color: #475569; border: 1px solid #e2e8f0; }
-  .btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
-  .btn-sm { padding: 5px 12px; font-size: 13px; }
-  table {
-    border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
-  }
-  th {
-    background: #f8fafc; color: #475569; font-weight: 600; font-size: 13px;
-    text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 14px;
-    border-bottom: 2px solid #e2e8f0; text-align: left; white-space: nowrap;
-  }
-  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; text-align: left; }
-  tbody tr:hover { background: #f8fafc; }
-  tbody tr:last-child td { border-bottom: none; }
-  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
-  .flash {
-    padding: 14px 18px; border-radius: 8px; margin-bottom: 16px;
-    font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
-  }
-  .flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-  .flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-  .flash-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
   form.config-form { max-width: 560px; }
   .config-form label {
     display: block; margin-top: 16px; font-weight: 600; color: #334155; font-size: 14px;
@@ -176,13 +134,11 @@ _CSS = """
   }
   .sql-preview.show { display: block; }
   .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
-  /* 语法高亮颜色 */
   .sql-hl-keyword  { color: #7c3aed; font-weight: 600; }
   .sql-hl-function { color: #2563eb; }
   .sql-hl-number   { color: #059669; }
   .sql-hl-string   { color: #b91c1c; }
   .sql-hl-comment  { color: #94a3b8; font-style: italic; }
-  .empty-state { text-align: center; color: #94a3b8; padding: 32px 14px; font-size: 14px; }
   .section + .section { margin-top: 8px; }
   .ops-cell { white-space: nowrap; }
   .ops-cell form { display: inline; }
@@ -192,27 +148,6 @@ _CSS = """
   }
   .badge-pool { background: #eef2ff; color: #4f46e5; }
 """
-
-_HEADER = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Web 报表工具 - 配置</title>
-<style>""" + _CSS + """</style>
-</head>
-<body>
-<div class="navbar">
-  <a href="/config" class="brand">My<span>Report</span></a>
-  <div class="spacer"></div>
-  <a href="/report">报表页</a>
-  <a href="/config" class="nav-active">配置管理</a>
-  <a href="/logout">退出</a>
-</div>
-<div class="container">
-"""
-
-_FOOTER = "</div></body></html>"
 
 
 def _escape(text: str) -> str:
@@ -232,66 +167,12 @@ def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm") -> str:
 
 def _render_pool_form(pool: dict = None, copy_mode: bool = False) -> str:
     """渲染连接池编辑/新增/复制表单"""
-    is_edit = pool is not None and not copy_mode
-    is_copy = pool is not None and copy_mode
-    if is_edit:
-        action_url = f"/config/pools/{pool['id']}/edit"
-        title = "编辑连接池"
-    elif is_copy:
-        action_url = f"/config/pools/{pool['id']}/copy"
-        title = "复制连接池"
-    else:
-        action_url = "/config/pools/add"
-        title = "新增连接池"
-
-    name = _escape(pool["name"] if pool else "")
-    host = _escape(pool["host"] if pool else "")
-    port = str(pool["port"]) if pool else "3306"
-    user = _escape(pool["user"] if pool else "")
-    password = _escape(pool["password"] if (pool and is_edit) else "")
-    database = _escape(pool["database"] if pool else "")
-
-    if is_copy:
-        # 复制时自动加后缀，允许用户改名
-        name = _escape(pool["name"] + " (副本)")
-        password = _escape(pool["password"])
-
-    return f"""<div class="card">
-<h2>{title}</h2>
-<form method="post" action="{action_url}" class="config-form">
-  <label>名称: <input type="text" name="name" value="{name}" required></label>
-  <label>主机地址: <input type="text" name="host" value="{host}" placeholder="例如 127.0.0.1" required></label>
-  <label>端口: <input type="number" name="port" value="{port}" required></label>
-  <label>用户名: <input type="text" name="user" value="{user}" required></label>
-  <label>密码: <input type="password" name="password" value="{password}" required></label>
-  <label>数据库: <input type="text" name="database" value="{database}" required></label>
-  <div class="form-actions">
-    <button type="submit" class="btn btn-primary">保存</button>
-    <a href="/config" class="cancel">取消</a>
-  </div>
-</form>
-</div>"""
+    return build_pool_form_html(pool, copy_mode)
 
 
 def _render_user_form(user: dict = None) -> str:
     """渲染用户编辑/新增表单"""
-    is_edit = user is not None
-    action_url = f"/config/users/{user['id']}/edit" if is_edit else "/config/users/add"
-    title = "编辑用户" if is_edit else "新增用户"
-    username = _escape(user["username"] if is_edit else "")
-    pw_required = "" if is_edit else "required"
-    pw_hint = ' <span style="color:#94a3b8;font-weight:400;font-size:13px">留空则不修改密码</span>' if is_edit else ""
-    return f"""<div class="card">
-<h2>{title}</h2>
-<form method="post" action="{action_url}" class="config-form">
-  <label>用户名: <input type="text" name="username" value="{username}" required></label>
-  <label>密码: <input type="password" name="password" value="" {pw_required}>{pw_hint}</label>
-  <div class="form-actions">
-    <button type="submit" class="btn btn-primary">保存</button>
-    <a href="/config" class="cancel">取消</a>
-  </div>
-</form>
-</div>"""
+    return build_user_form_html(user)
 
 
 def _report_form_pool_options(conn, cur_pool_id, is_edit):
@@ -312,14 +193,7 @@ def _report_form_pool_options(conn, cur_pool_id, is_edit):
 
 def _render_cat_opts(nodes, depth, cur_cat_id):
     """递归生成分类选项 HTML（树形缩进）"""
-    html = ""
-    for node in nodes:
-        indent = "　" * depth
-        sel = ' selected' if cur_cat_id != "" and str(node["id"]) == str(cur_cat_id) else ''
-        html += f'<option value="{node["id"]}"{sel}>{indent}{_escape(node["name"])}</option>'
-        if node["children"]:
-            html += _render_cat_opts(node["children"], depth + 1, cur_cat_id)
-    return html
+    return build_category_opts_html(nodes, depth, cur_cat_id)
 
 
 def _report_form_cat_options(conn, cur_cat_id):
@@ -329,74 +203,13 @@ def _report_form_cat_options(conn, cur_cat_id):
 
 
 def _report_form_js_highlight():
-    """返回 SQL 语法高亮 JS（h + highlight 函数）"""
-    return r"""
-function h(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function highlight(txt) {
-  var s = txt.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-  var kw = 'SELECT|FROM|WHERE|AND|OR|NOT|IN|IS|NULL|LIKE|BETWEEN|EXISTS|AS|ON|JOIN|INNER|OUTER|LEFT|RIGHT|CROSS|FULL|NATURAL|USING|GROUP|BY|HAVING|ORDER|ASC|DESC|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|DROP|ALTER|ADD|COLUMN|INDEX|UNIQUE|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|UNION|ALL|EXCEPT|INTERSECT|WITH|RECURSIVE|REPLACE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE|DATABASE|IF|EXISTS|GRANT|REVOKE';
-  var re = new RegExp(
-    "('(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\")|" +
-    "(--[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|" +
-    "\\b(\\d+(?:\\.\\d+)?)\\b|" +
-    "\\b(" + kw + ")\\b|" +
-    "\\b(\\w+)\\s*\\(",
-    "gi"
-  );
-  return s.replace(re, function(m, str, cmt, num, kw, fn) {
-    if (str) return '<span class="sql-hl-string">' + str + '</span>';
-    if (cmt) return '<span class="sql-hl-comment">' + cmt + '</span>';
-    if (num) return '<span class="sql-hl-number">' + num + '</span>';
-    if (kw) return '<span class="sql-hl-keyword">' + kw + '</span>';
-    if (fn)  return '<span class="sql-hl-function">' + fn + '</span>';
-    return m;
-  });
-}
-"""
+    """返回 SQL 语法高亮 JS（h + highlight 函数，统一引用 render.py 共享常量）"""
+    return _SQL_HIGHLIGHT_JS
 
 
 def _report_form_js_formatter():
-    """返回 SQL 格式化 JS（fmt 函数）"""
-    return r"""
-function fmt(t) {
-  if (!t || !t.trim()) return t;
-  var s = t.replace(/\s*;\s*$/,""), lines = [], indent = 0, clauseCount = 0;
-  var parts = s.split(/\b(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|FULL\s+JOIN|NATURAL\s+JOIN|INSERT\s+INTO|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|GROUP\s+BY|ORDER\s+BY|UNION\s+ALL|SELECT|FROM|WHERE|JOIN|ON|AND|OR|GROUP|BY|HAVING|ORDER|LIMIT|OFFSET|UNION|VALUES|SET|CASE|WHEN|THEN|ELSE|END|INTO)\b/i);
-  for (var i = 0; i < (parts ? parts.length : 0); i++) {
-    var p = parts[i];
-    if (!p || !p.trim()) continue;
-    var w = p.trim(), u = w.toUpperCase();
-    function pad() {
-      if (indent === 0) return "";
-      if (indent === 1) return "  ";
-      return Array(indent + 1).join("  ");
-    }
-    if (u === "SELECT") { indent = indent === 0 ? 1 : (clauseCount > 0 && indent++); lines.push(pad() + "SELECT"); indent = 2; clauseCount++; }
-    else if (u === "FROM" || u === "INNER JOIN" || u === "LEFT JOIN" || u === "RIGHT JOIN" || u === "CROSS JOIN" || u === "FULL JOIN" || u === "NATURAL JOIN" || u === "JOIN") { indent = Math.max(1, indent - 1); lines.push(pad() + w); indent = 2; }
-    else if (u === "ON") { lines.push(pad() + w); indent = 2; }
-    else if (u === "WHERE") { indent = Math.max(1, indent - 1); lines.push(pad() + "WHERE"); indent = 2; }
-    else if (u === "AND" || u === "OR") { lines.push(pad() + w); indent = 2; }
-    else if (u === "GROUP BY" || u === "GROUP") { indent = Math.max(1, indent - 1); lines.push(pad() + "GROUP BY"); indent = 2; }
-    else if (u === "HAVING") { indent = Math.max(1, indent - 1); lines.push(pad() + "HAVING"); indent = 2; }
-    else if (u === "ORDER BY" || u === "ORDER") { indent = Math.max(1, indent - 1); lines.push(pad() + "ORDER BY"); indent = 2; }
-    else if (u === "LIMIT") { indent = Math.max(1, indent - 1); lines.push(pad() + "LIMIT"); indent = 1; }
-    else if (u === "OFFSET") { lines.push(pad() + "OFFSET"); indent = 1; }
-    else if (u === "UNION" || u === "UNION ALL") { indent = 0; lines.push(""); lines.push(w); }
-    else if (u === "VALUES") { lines.push(pad() + "VALUES"); indent = 2; }
-    else if (u === "SET") { lines.push(pad() + "SET"); indent = 2; }
-    else if (u === "DELETE FROM" || u === "INSERT INTO" || u === "CREATE TABLE" || u === "DROP TABLE" || u === "ALTER TABLE") { indent = 0; lines.push(w); indent = 2; }
-    else if (u === "CASE") { lines.push(pad() + "CASE"); indent++; }
-    else if (u === "WHEN") { lines.push(pad() + "WHEN"); indent = 2; }
-    else if (u === "THEN" || u === "ELSE") { lines.push(pad() + w); }
-    else if (u === "END") { indent = Math.max(1, indent - 1); lines.push(pad() + "END"); }
-    else if (u === "INTO") { lines.push(pad() + "INTO"); indent = 1; }
-    else { lines.push(pad() + w); }
-  }
-  return lines.join("\n") + ";";
-}
-"""
+    """返回 SQL 格式化 JS（fmt 函数，统一引用 render.py 共享常量）"""
+    return _SQL_FORMATTER_JS
 
 
 def _report_form_js_editor_api():
@@ -563,75 +376,13 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
 def _render_pool_section(conn) -> str:
     """渲染连接池配置列表（含复制、排序）"""
     pools = db.get_all_pools(conn)
-    rows = ""
-    pool_count = len(pools)
-    for i, p in enumerate(pools):
-        move_btns = ""
-        if pool_count > 1:
-            if i > 0:
-                move_btns += f'<form method="post" action="/config/pools/{p["id"]}/move-up" style="display:inline">' \
-                             f'<button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-            if i < pool_count - 1:
-                move_btns += f'<form method="post" action="/config/pools/{p["id"]}/move-down" style="display:inline">' \
-                             f'<button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-        rows += f"""<tr>
-  <td><strong>{_escape(p['name'])}</strong></td>
-  <td><span class="badge badge-pool">{_escape(p['host'])}:{p['port']}</span></td>
-  <td>{_escape(p['user'])}</td>
-  <td>{_escape(p['database'])}</td>
-  <td class="ops-cell">
-    {move_btns}
-    {_link_btn(f"/config/pools/{p['id']}/edit", "编辑")}
-    {_link_btn(f"/config/pools/{p['id']}/copy", "复制")}
-    <form method="post" action="/config/pools/{p['id']}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除连接池 {_escape(p['name'])}？')">
-      <button type="submit" class="btn btn-danger btn-sm">删除</button>
-    </form>
-  </td>
-</tr>"""
-    return f"""<div class="section">
-<div class="section-title">
-  <span>📦 连接池配置</span>
-  <span class="actions">{_link_btn("/config/pools/add", "新增连接池", "btn btn-primary btn-sm")}</span>
-</div>
-<div class="table-wrap">
-<table><thead><tr>
-  <th>名称</th><th>地址</th><th>用户</th><th>数据库</th><th>操作</th>
-</tr></thead><tbody>
-{rows or '<tr><td colspan="5" class="empty-state">暂无连接池配置</td></tr>'}
-</tbody></table>
-</div>
-</div>"""
+    return build_pool_section_html(pools)
 
 
 def _render_user_section(conn) -> str:
     """渲染用户配置列表"""
     users = db.get_all_users(conn)
-    rows = ""
-    for u in users:
-        rows += f"""<tr>
-  <td><strong>{_escape(u['username'])}</strong></td>
-  <td class="ops-cell">
-    {_link_btn(f"/config/users/{u['id']}/edit", "编辑")}
-    <form method="post" action="/config/users/{u['id']}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除用户 {_escape(u['username'])}？')">
-      <button type="submit" class="btn btn-danger btn-sm">删除</button>
-    </form>
-  </td>
-</tr>"""
-    return f"""<div class="section">
-<div class="section-title">
-  <span>👤 用户配置</span>
-  <span class="actions">{_link_btn("/config/users/add", "新增用户", "btn btn-primary btn-sm")}</span>
-</div>
-<div class="table-wrap">
-<table><thead><tr>
-  <th>用户名</th><th>操作</th>
-</tr></thead><tbody>
-{rows or '<tr><td colspan="2" class="empty-state">暂无用户</td></tr>'}
-</tbody></table>
-</div>
-</div>"""
+    return build_user_section_html(users)
 
 
 def _render_category_section(conn) -> str:
@@ -640,316 +391,9 @@ def _render_category_section(conn) -> str:
     all_cats = db.get_all_categories(conn)
     all_reports = db.get_all_reports(conn)
     pools = db.get_all_pools(conn)
-    report_count = len(all_reports)
-
-    # 批量操作：连接池选择 + 分类选择
-    pool_opts = '<option value="">-- 请选择 --</option>'
-    for p in pools:
-        pool_opts += f'<option value="{p["id"]}">{_escape(p["name"])}</option>'
-    cat_opts = '<option value="">-- 请选择分类 --</option>'
-    for c in all_cats:
-        prefix = "　" * _get_depth(c, all_cats)
-        cat_opts += f'<option value="{c["id"]}">{prefix}{_escape(c["name"])}</option>'
-    cat_opts += '<option value="-1">无分类</option>'
-    batch_bar = f"""
-<div class="batch-bar" style="display:flex;align-items:center;gap:12px;padding:10px 0;margin-bottom:8px;flex-wrap:wrap">
-  <span style="font-size:14px;color:#475569;font-weight:500">
-    <span id="batch_count">0</span> 项已选
-  </span>
-  <select id="batch_pool_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
-    {pool_opts}
-  </select>
-  <button type="button" class="btn btn-primary btn-sm"
-    onclick="batchUpdatePool()">批量修改连接池</button>
-  <select id="batch_cat_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
-    {cat_opts}
-  </select>
-   <button type="button" class="btn btn-success btn-sm"
-    onclick="batchSetCategory()">批量设置分类</button>
-   <select id="batch_cache_switch" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
-     <option value="">不改变</option>
-     <option value="1">启用缓存</option>
-     <option value="0">关闭缓存</option>
-   </select>
-   <input type="checkbox" id="batch_modify_ttl" onchange="toggleTtlInput()">
-   <label for="batch_modify_ttl" style="font-size:13px">修改TTL</label>
-   <input type="number" id="batch_cache_ttl" value="0" min="0" step="1"
-     style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;width:80px;opacity:0.5"
-     disabled>
-   <span style="font-size:12px;color:#94a3b8">小时（0=永久）</span>
-   <button type="button" class="btn btn-info btn-sm"
-     onclick="batchUpdateCache()">批量更新缓存配置</button>
-</div>
-<script>
-function batchUpdatePool() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
-  var poolId = document.getElementById('batch_pool_id').value;
-  if (!poolId) {{ alert('请选择目标连接池'); return; }}
-  var form = document.createElement('form');
-  form.method = 'POST';
-  form.action = '/config/reports/batch-pool';
-  ids.forEach(function(id) {{
-    var inp = document.createElement('input');
-    inp.type = 'hidden'; inp.name = 'report_ids'; inp.value = id;
-    form.appendChild(inp);
-  }});
-  var inp = document.createElement('input');
-  inp.type = 'hidden'; inp.name = 'pool_id'; inp.value = poolId;
-  form.appendChild(inp);
-  document.body.appendChild(form);
-  form.submit();
-}}
-function batchSetCategory() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
-  var catId = document.getElementById('batch_cat_id').value;
-  if (!catId) {{ alert('请选择目标分类'); return; }}
-  var form = document.createElement('form');
-  form.method = 'POST';
-  form.action = '/config/reports/batch-set-category';
-  ids.forEach(function(id) {{
-    var inp = document.createElement('input');
-    inp.type = 'hidden'; inp.name = 'report_ids'; inp.value = id;
-    form.appendChild(inp);
-  }});
-  var inp = document.createElement('input');
-  inp.type = 'hidden'; inp.name = 'category_id'; inp.value = catId === '-1' ? '' : catId;
-  form.appendChild(inp);
-  document.body.appendChild(form);
-  form.submit();
-}}
-function toggleTtlInput() {{
-  var cb = document.getElementById('batch_modify_ttl');
-  var inp = document.getElementById('batch_cache_ttl');
-  inp.disabled = !cb.checked;
-  inp.style.opacity = cb.checked ? '1' : '0.5';
-}}
-function batchUpdateCache() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
-  var cacheSwitch = document.getElementById('batch_cache_switch').value;
-  var modifyTtl = document.getElementById('batch_modify_ttl').checked;
-  if (cacheSwitch === '' && !modifyTtl) {{
-    alert('请选择缓存开关或勾选修改TTL');
-    return;
-  }}
-  if (!confirm(`确定批量更新 ${{ids.length}} 个报表的缓存配置？`)) return;
-  var form = document.createElement('form');
-  form.method = 'POST';
-  form.action = '/config/reports/batch-cache';
-  ids.forEach(function(id) {{
-    var inp = document.createElement('input');
-    inp.type = 'hidden'; inp.name = 'report_ids'; inp.value = id;
-    form.appendChild(inp);
-  }});
-  var inp = document.createElement('input');
-  inp.type = 'hidden'; inp.name = 'cache_switch'; inp.value = cacheSwitch;
-  form.appendChild(inp);
-  if (modifyTtl) {{
-    var inp2 = document.createElement('input');
-    inp2.type = 'hidden'; inp2.name = 'modify_ttl'; inp2.value = '1';
-    form.appendChild(inp2);
-    var inp3 = document.createElement('input');
-    inp3.type = 'hidden'; inp3.name = 'cache_ttl_hours';
-    inp3.value = document.getElementById('batch_cache_ttl').value;
-    form.appendChild(inp3);
-  }}
-  document.body.appendChild(form);
-  form.submit();
-}}
-function updateBatchCount() {{
-  var n = document.querySelectorAll('.report-checkbox:checked').length;
-  document.getElementById('batch_count').textContent = n;
-}}
-</script>"""
-
-    def _render_report_rows(report_list, in_category=False):
-        """渲染报表列表行（含调序按钮）"""
-        rows = ""
-        total = len(report_list)
-        for idx, r in enumerate(report_list):
-            rpt_id = r["id"]
-            pool_name = ""
-            pool_id = r["pool_id"]
-            if pool_id is not None:
-                pool = db.get_pool(conn, pool_id)
-                if pool:
-                    pool_name = pool["name"]
-            pool_badge = (
-                f'<span class="badge badge-pool">{_escape(pool_name)}</span>'
-                if pool_name
-                else '<span style="color:#dc2626;font-size:13px">连接池已删除</span>'
-            )
-            # 调序按钮
-            move_btns = ""
-            if total > 1:
-                if idx > 0:
-                    move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-                if idx < total - 1:
-                    move_btns += f'<form method="post" action="/config/reports/{rpt_id}/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-            # 备注截取前 15 个字
-            memo_raw = r.get("memo") or ""
-            if memo_raw:
-                memo_display = _escape(memo_raw[:15])
-                if len(memo_raw) > 15:
-                    memo_display += "..."
-            else:
-                memo_display = '<span style="color:#cbd5e1">—</span>'
-
-            prefer_cache = int(r.get("prefer_cache", 1))
-            prefer_cache_display = (
-                '<span style="color:#059669;font-weight:600">是</span>'
-                if prefer_cache
-                else '<span style="color:#94a3b8">否</span>'
-            )
-            cache_ttl_hours = int(r.get("cache_ttl_hours", 0))
-            cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span style="color:#cbd5e1">—</span>'
-
-            rows += f"""<tr>
-  <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
-   <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a></strong></td>
-  <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">
-    <code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r['sql_query'][:80])}{'...' if len(r['sql_query']) > 80 else ''}</code>
-  </td>
-  <td>{r['default_page_size']}</td>
-  <td>{pool_badge}</td>
-  <td style="text-align:center">{prefer_cache_display}</td>
-  <td style="text-align:center">{cache_ttl_display}</td>
-  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px">{memo_display}</td>
-  <td class="ops-cell">
-    {move_btns}
-    {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
-    {_link_btn(f"/config/reports/{rpt_id}/copy", "复制")}
-    <form method="post" action="/config/reports/{rpt_id}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除报表 {_escape(r['name'])}？')">
-      <button type="submit" class="btn btn-danger btn-sm">删除</button>
-    </form>
-  </td>
-</tr>"""
-        return rows
-
-    # 构建分类区域
-    cat_areas = ""
-
-    # 分类列表（树形结构）
-    def _render_cat_item(cat, depth=0):
-        children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
-        has_children = len(children) > 0
-        move_btns = ""
-        siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
-        idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
-        n = len(siblings)
-        if n > 1:
-            if idx > 0:
-                move_btns += f'<form method="post" action="/config/categories/{cat["id"]}/move-up" style="display:inline">' \
-                             f'<button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> '
-            if idx < n - 1:
-                move_btns += f'<form method="post" action="/config/categories/{cat["id"]}/move-down" style="display:inline">' \
-                             f'<button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> '
-        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>' if has_children else ""
-        return f"""<div style="padding:8px {8 + depth * 24}px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9">
-  <span style="font-size:14px;font-weight:500">{_escape(cat["name"])}{badge}</span>
-  <span style="flex:1"></span>
-  {move_btns}
-  {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
-  <form method="post" action="/config/categories/{cat['id']}/delete" style="display:inline"
-        onsubmit="return confirm('确定删除分类 {_escape(cat['name'])}？分类下的报表和子分类将变为未分类。')">
-    <button type="submit" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:12px">删除</button>
-  </form>
-</div>"""
-
-    cat_list_html = ""
     cat_tree = db.get_category_tree(conn)
-    def _render_tree(nodes, depth=0):
-        html = ""
-        for node in nodes:
-            html += _render_cat_item(node, depth)
-            if node["children"]:
-                html += _render_tree(node["children"], depth + 1)
-        return html
-    cat_list_html = _render_tree(cat_tree)
-
-    if not cat_list_html and not all_reports:
-        cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
-
-    cat_areas += f"""<div class="section">
-<div class="section-title">
-  <span>📁 报表分类</span>
-  <span class="actions">
-    {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
-    {_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")}
-  </span>
-</div>
-<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
-  {cat_list_html}
-</div>
-</div>"""
-
-    # 各分类下的报表展示（按分类树遍历，保持与分类管理区一致的顺序）
-    report_lookup: dict[int, list] = {entry["id"]: entry.get("reports", []) for entry in cat_reports}
-    tab_html = ""
-
-    def _render_report_sections(nodes: list[dict], depth: int = 0) -> str:
-        """递归遍历分类树，按树形顺序渲染各分类下的报表表格"""
-        html = ""
-        for node in nodes:
-            reports = report_lookup.get(node["id"], [])
-            if reports:
-                indent = "　" * depth
-                rows = _render_report_rows(reports, in_category=True)
-                html += f"""<div class="section">
-<div class="section-title">
-  <span>📊 {indent}{_escape(node['name'])} <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span></span>
-</div>
-<div class="table-wrap">
-<table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
-</tr></thead><tbody>
-{rows}
-</tbody></table>
-</div>
-</div>"""
-            if node["children"]:
-                html += _render_report_sections(node["children"], depth + 1)
-        return html
-
-    tab_html = _render_report_sections(cat_tree)
-
-    # 未分类报表
-    uncat_rows = _render_report_rows(unclassified_reports)
-    uncat_section = ""
-    if unclassified_reports or all_reports:
-        uncat_section = f"""<div class="section">
-<div class="section-title">
-  <span>📋 未分类报表 <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(unclassified_reports)} 个报表)</span></span>
-  <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
-</div>
-{batch_bar}
-<div class="table-wrap">
-<table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
-</tr></thead><tbody>
-{uncat_rows or '<tr><td colspan="9" class="empty-state">暂无未分类报表</td></tr>'}
-</tbody></table>
-</div>
-</div>"""
-
-    return cat_areas + tab_html + uncat_section
+    return build_category_section_html(cat_reports, unclassified_reports, all_cats,
+                                       all_reports, pools, cat_tree)
 
 
 def render_overview(conn, flash: str = None) -> str:
@@ -958,7 +402,9 @@ def render_overview(conn, flash: str = None) -> str:
     if flash:
         css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
         flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
-    body = _HEADER + flash_html + _render_pool_section(conn) + _render_user_section(conn) + _render_category_section(conn) + _FOOTER
+    body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html + _render_pool_section(conn) + _render_user_section(conn)
+            + _render_category_section(conn) + render_page_footer())
     return body
 
 
@@ -968,7 +414,8 @@ def render_pool_form_page(conn, pool_id: int = None, flash: str = None, copy_mod
     if pool_id and not pool:
         return render_overview(conn, flash="错误: 连接池不存在")
     flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
-    return _HEADER + flash_html + _render_pool_form(pool, copy_mode) + _FOOTER
+    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html + _render_pool_form(pool, copy_mode) + render_page_footer())
 
 
 def render_user_form_page(conn, user_id: int = None, flash: str = None) -> str:
@@ -977,7 +424,8 @@ def render_user_form_page(conn, user_id: int = None, flash: str = None) -> str:
     if user_id and not user:
         return render_overview(conn, flash="错误: 用户不存在")
     flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
-    return _HEADER + flash_html + _render_user_form(user) + _FOOTER
+    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html + _render_user_form(user) + render_page_footer())
 
 
 def render_category_form_page(conn, category_id: int = None, flash: str = None) -> str:
@@ -1030,7 +478,8 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None) 
   </div>
 </form>
 </div>"""
-    return _HEADER + flash_html + form_html + _FOOTER
+    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html + form_html + render_page_footer())
 
 
 def _get_depth(cat: dict, all_cats: list[dict]) -> int:
@@ -1057,7 +506,8 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
     if report_id and not report:
         return render_overview(conn, flash="错误: 报表不存在")
     flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
-    return _HEADER + flash_html + _render_report_form(conn, report, copy_mode) + _FOOTER
+    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html + _render_report_form(conn, report, copy_mode) + render_page_footer())
 
 
 # ---------------------------------------------------------------------------
@@ -1127,7 +577,6 @@ def handle_pool_delete(conn, pool_id: int) -> tuple[str, str]:
 def handle_user_add(conn, form_body: str) -> tuple[str, str]:
     """处理新增用户表单提交"""
     data = _parse_form_data(form_body)
-    import auth
     try:
         pw_hash = auth.hash_password(data["password"])
         uid = db.add_user(conn, data["username"], pw_hash)
@@ -1138,7 +587,6 @@ def handle_user_add(conn, form_body: str) -> tuple[str, str]:
 
 def handle_user_edit(conn, user_id: int, form_body: str) -> tuple[str, str]:
     """处理编辑用户表单提交"""
-    import auth
     data = _parse_form_data(form_body)
     target = db.get_user_by_id(conn, user_id)
     if not target:
@@ -1338,7 +786,6 @@ def handle_batch_cache(conn, form_body: str) -> tuple[str, str]:
     redis_updated = 0
     redis_failed = 0
     try:
-        import redis_cache
         mgr = redis_cache.get_redis_manager()
         if mgr and mgr.available:
             prefix = mgr._config.get("key_prefix", "sr")

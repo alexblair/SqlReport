@@ -301,7 +301,11 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         """委托给 report.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
         code, body, headers = report.handle_request(conn, method, path, query, form_body)
-        self._send_html(int(code), body, headers)
+
+        if code == "302":
+            self._send_redirect(body)
+        else:
+            self._send_html(int(code), body, headers)
 
     def _handle_export(self, method: str, path: str, query: str, conn):
         """委托给 export.py，使用 _handle() 传入的共享连接"""

@@ -273,6 +273,7 @@ class TestGlobalManager(unittest.TestCase):
     """全局管理器测试（patch redis_cache.get_redis_config）"""
 
     def setUp(self):
+        reset_redis_manager()  # 清除之前测试可能留下的缓存管理器
         self.config_patcher = patch(
             "redis_cache.get_redis_config",
             return_value={

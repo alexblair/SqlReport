@@ -25,36 +25,27 @@ URL 路由：
 import urllib.parse
 import math
 import time
-from decimal import Decimal
 import db
-import html as html_mod
 from typing import Optional
 import redis_cache
 
-# ===================================================================
-# 筛选操作符定义
-# ===================================================================
-
-FILTER_OPS = [
-    ("nofilter", "不筛选", "不筛选"),
-    ("contains", "包含", "包含"),
-    ("eq",       "等于",   "="),
-    ("neq",      "不等于", "≠"),
-    ("gt",       "大于",   ">"),
-    ("lt",       "小于",   "<"),
-    ("gte",      "大于等于", "≥"),
-    ("lte",      "小于等于", "≤"),
-    ("isempty",  "为空",   "为空"),
-    ("notempty", "非空",   "非空"),
-]
-_OP_MAP: dict[str, tuple[str, str]] = {
-    code: (label, short) for code, label, short in FILTER_OPS
-}
-DEFAULT_OP = "contains"
-
+# 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
+from render import (
+    _OP_MAP, DEFAULT_OP, _escape, format_cell,
+    build_filter_params as _build_filter_params,
+    build_cols_param as _build_cols_param,
+    build_pagination_html as _build_pagination,
+    build_redis_banners_html as _build_redis_banners,
+    build_debug_section_html, build_memo_section_html,
+    build_result_selector_html, build_cache_badge_html,
+    build_sort_bar_html, build_table_header_html, build_table_body_html,
+    build_controls_bar_html, build_field_settings_panel_html,
+    build_sort_settings_panel_html, build_filter_form_html,
+    build_filter_action_html, build_report_switcher_html,
+)
 
 # ===================================================================
-# 缓存
+# 缓存（FILTER_OPS / _OP_MAP / DEFAULT_OP 已移至 render.py）
 # ===================================================================
 
 
@@ -225,6 +216,8 @@ def _sort_rows(rows: list[tuple], columns: list[str],
 
     sorts: list[(col, dir), ...]  按优先级从高到低
     使用稳定排序，从最低优先级到最高优先级依次排序。
+    调用方应保证 sorts 中无重复列名（由 _parse_sorts 去重）。
+    None 值始终排在最后，不受升降序影响。
     """
     if not sorts:
         return rows
@@ -235,57 +228,17 @@ def _sort_rows(rows: list[tuple], columns: list[str],
             continue
         col_idx = columns.index(col_name)
         reverse = dir_.lower() == "desc"
-        result = sorted(result, key=lambda r, c=col_idx: _safe_sort_key(r[c]),
-                        reverse=reverse)
+        # 分离 None 值与非 None 值，确保 None 始终最后
+        none_part = [r for r in result if r[col_idx] is None]
+        not_none_part = [r for r in result if r[col_idx] is not None]
+        not_none_part.sort(key=lambda r, c=col_idx: str(r[c]), reverse=reverse)
+        result = not_none_part + none_part
     return result
 
 
 # ===================================================================
-# URL 参数工具
+# URL 参数工具（URL 工具函数已移至 render.py，通过别名保持 API 兼容）
 # ===================================================================
-
-
-def _filter_hidden_inputs(filters) -> str:
-    """生成筛选参数的隐藏 input 标签（含操作符）"""
-    parts = []
-    for col, op, val in filters:
-        if op == "nofilter":
-            continue
-        fk = urllib.parse.quote(col, safe='')
-        parts.append(f'<input type="hidden" name="f_{fk}" value="{_escape(val)}">')
-        if op != DEFAULT_OP:
-            ok = urllib.parse.quote(col, safe='')
-            parts.append(f'<input type="hidden" name="op_{ok}" value="{_escape(op)}">')
-    return "".join(parts)
-
-
-def _build_filter_params(filters, skip_col=None):
-    """
-    将 filters 列表编码为 URL 查询字符串（f_{col}=value & op_{col}=op）。
-
-    若指定 skip_col，则跳过该列的 filter 项（用于生成某列自己的排序链接时）。
-    filters: list[(col, op, val), ...]
-    """
-    parts = []
-    for col, op, val in filters:
-        if op == "nofilter":
-            continue
-        if skip_col is not None and col == skip_col:
-            continue
-        fk = "f_" + urllib.parse.quote(col, safe='')
-        parts.append(f"{fk}={urllib.parse.quote(val, safe='')}")
-        if op != DEFAULT_OP:
-            ok = "op_" + urllib.parse.quote(col, safe='')
-            parts.append(f"{ok}={urllib.parse.quote(op, safe='')}")
-    return "&".join(parts)
-
-
-def _build_sort_params(sorts):
-    """将 sorts 列表编码为 URL 查询字符串（sort=col&dir=asc 重复）。"""
-    parts = []
-    for col, dir_ in sorts:
-        parts.append(f"sort={urllib.parse.quote(col, safe='')}&dir={urllib.parse.quote(dir_, safe='')}")
-    return "&".join(parts)
 
 
 def parse_filters(qs):
@@ -350,10 +303,24 @@ def _parse_sorts(qs):
     从 parse_qs 结果中解析多字段排序参数。
 
     格式：sort=col1&dir=asc&sort=col2&dir=desc  (repeated)
-    返回 list[(col, dir), ...]
+    返回 list[(col, dir), ...] 按原始优先级从低到高排列。
+    同一列名重复时，保留第一个出现的位置优先级，使用最后一个方向。
     """
-    sorts = list(zip(qs.get("sort", []), qs.get("dir", [])))
-    return [(c, d) for c, d in sorts if d in ("asc", "desc")]
+    sorts = [(c, d) for c, d in
+             zip(qs.get("sort", []), qs.get("dir", []))
+             if d in ("asc", "desc")]
+    # 去重：保留第一出现的位置，使用最后一出现的方向
+    result: list[tuple[str, str]] = []
+    for c, d in sorts:
+        found = False
+        for i, (xc, xd) in enumerate(result):
+            if xc == c:
+                result[i] = (c, d)
+                found = True
+                break
+        if not found:
+            result.append((c, d))
+    return result
 
 
 def _parse_cols(qs, all_columns: list[str]) -> list[str]:
@@ -377,51 +344,6 @@ def _parse_cols(qs, all_columns: list[str]) -> list[str]:
             result.append(c)
             seen.add(c)
     return result if result else list(all_columns)
-
-
-def _build_cols_param(display_columns: list[str], all_columns: list[str]) -> str:
-    """
-    构建 cols URL 查询参数字符串。
-    仅在用户自定义了列顺序或隐藏了列时生成参数，否则返回空字符串。
-    """
-    if display_columns == list(all_columns):
-        return ""
-    return "cols=" + urllib.parse.quote(",".join(display_columns), safe='')
-
-
-def format_cell(val) -> str:
-    """
-    格式化表格单元格值。
-
-    - Decimal：避免科学计数法（如 0E-10 → 0）
-    - float：如果 str() 产生科学计数法，重新格式化为全小数形式
-    - None：返回空字符串
-    - 其余：str() 原样输出
-    """
-    if val is None:
-        return ""
-    if isinstance(val, Decimal):
-        if val == 0:
-            return "0"
-        s = format(val, "f")
-    elif isinstance(val, float):
-        s = str(val)
-        # float 的 str() 可能产生科学计数法（如 1e-10），重新格式化为全小数
-        if "e" in s or "E" in s:
-            s = f"{val:.15f}"
-    else:
-        return str(val)
-    # 去除尾部多余的 0 和小数点
-    if "." in s:
-        s = s.rstrip("0").rstrip(".")
-        if s == "-0" or s == "":
-            s = "0"
-    return s
-
-
-def _escape(val) -> str:
-    """HTML 转义（自动格式化数值避免科学计数法）"""
-    return html_mod.escape(format_cell(val))
 
 
 def _qs_val(qs: dict, key: str, default: str = None) -> Optional[str]:
@@ -1039,7 +961,11 @@ class ReportResult:
         """当前激活结果的总页数"""
         t = self.total
         ps = self.page_size
-        return math.ceil(t / ps) if ps > 0 else 1
+        if ps <= 0:
+            return 1
+        if t <= 0:
+            return 1
+        return math.ceil(t / ps)
 
 
 def execute_report(report_id: int, sql_query: str, pool_config: dict,
@@ -1406,33 +1332,6 @@ def render_report_page(conn, report_id: int, page: int = 1,
                               result_names_override=result_names_override)
 
 
-def _build_redis_banners(cache_info: Optional[dict]) -> str:
-    """构建 Redis 降级/兜底提示横幅。"""
-    if not cache_info:
-        return ""
-    src = cache_info.get("source", "")
-    banners = []
-
-    if src == "redis":
-        ts = cache_info.get("timestamp")
-        if ts:
-            from datetime import datetime
-            dt_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-            banners.append(
-                f'<div class="flash flash-info">'
-                f'数据来自 Redis 快照（{_escape(dt_str)}）</div>'
-            )
-    elif src == "mysql":
-        if not redis_cache.redis_available():
-            banners.append(
-                '<div class="flash flash-info">'
-                'Redis 不可用，已切换至直连 MySQL 模式'
-                '</div>'
-            )
-
-    return "".join(banners)
-
-
 # ===================================================================
 # HTML 构建（核心）
 # ===================================================================
@@ -1476,464 +1375,60 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         else:
             result_names.append(f"结果{i + 1}")
     swi = ("report" if not sql_override else "report/preview")
-    result_selector_html = ""
-    if num_results > 1:
-        opts = "".join(
-            f'<option value="{i}"{" selected" if i == active_index else ""}>{_escape(result_names[i])}</option>'
-            for i in range(num_results)
-        )
-        # 构建基础 URL（仅保留 id/page_size/sql_override，不携带筛选排序列）
-        qs_parts = [f"id={report_id}", f"page_size={qs_page_size}"]
-        if sql_override:
-            qs_parts.append(f"sql_query={urllib.parse.quote(sql_override)}")
-        base_qs = "&".join(qs_parts)
-        result_selector_html = (
-            f'<div class="result-selector" style="margin-bottom:12px;display:flex;align-items:center;gap:8px">'
-            f'<label style="font-size:13px;color:#475569;font-weight:500">结果视图:</label>'
-            f'<select id="resultSwitcher"'
-            f' data-report-id="{report_id}" data-active-index="{active_index}"'
-            f' data-swi="{_escape(swi)}" data-page-size="{qs_page_size}"'
-            f' data-sql-override="{_escape(sql_override or "")}"'
-            f' onchange="switchResult(this)"'
-            f' style="padding:4px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">'
-            f'{opts}</select>'
-            f'</div>'
-        )
+    result_selector_html = build_result_selector_html(
+        report_id, qs_page_size, result_names, active_index, sql_override, swi)
 
-    # ---- Debug 信息 ----
-    debug_lines = []
-    if pool_config:
-        pname = pool_config.get("name", "?")
-        phost = pool_config.get("host", "?")
-        pport = pool_config.get("port", "?")
-        puser = pool_config.get("user", "?")
-        pdb = pool_config.get("database", "?")
-        debug_lines.append(f'连接池: {_escape(str(pname))} ({_escape(str(phost))}:{pport})'
-                           f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
-    debug_lines.append(
-        f'SQL: <pre class="sql-debug" style="white-space:pre-wrap;word-break:break-all;'
-        f'background:#f1f5f9;padding:8px 10px;border-radius:4px;font-size:13px;'
-        f'line-height:1.6;margin:4px 0;border:1px solid #e2e8f0;overflow-x:auto">'
-        f'{_escape(actual_sql)}</pre>'
-    )
-    if num_results > 1:
-        debug_lines.append(f'结果: {active_index + 1}/{num_results} ({result_names[active_index]})')
-    if filters:
-        filter_desc = " AND ".join(f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"' for c, o, v in filters)
-        debug_lines.append(f'筛选: {filter_desc}')
-    if sorts:
-        sort_desc = ", ".join(f'{_escape(c)} {"↑" if d == "asc" else "↓"}' for c, d in sorts)
-        debug_lines.append(f'排序: {sort_desc}')
-    debug_html = (
-        '<div class="debug-info">'
-        '<button class="debug-toggle" onclick="toggleSection(this, \'Debug 信息\')" type="button">▶ Debug 信息</button>'
-        '<div class="debug-content hidden">' + '<br>'.join(debug_lines) + '</div>'
-        '</div>')
-
-    # ---- 备注 ----
-    memo_raw = report.get("memo") or ""
-    if memo_raw:
-        memo_btn_text = "▼ 备注"
-        memo_hidden_cls = ""
-    else:
-        memo_btn_text = "▶ 备注"
-        memo_hidden_cls = " hidden"
-    memo_html = (
-        '<div class="debug-info">'
-        f'<button class="debug-toggle" onclick="toggleSection(this, \'备注\')" type="button">{memo_btn_text}</button>'
-        f'<div class="debug-content{memo_hidden_cls}">' + _escape(memo_raw) + '</div>'
-        '</div>')
+    # ---- Debug 信息、备注均委托给 render.py 渲染 ----
+    debug_html = build_debug_section_html(
+        pool_config, actual_sql, active_index, num_results, result_names, filters, sorts)
+    memo_html = build_memo_section_html(report.get("memo") or "")
 
     # ---- 结果参数（多结果集时附加到 URL） ----
     result_param = f"result={active_index}" if num_results > 1 else ""
 
-    # ---- 构建多字段筛选表单（单 Form，filter inputs 用 form 属性关联） ----
+    # ---- 构建表单隐藏字段（排序、列等状态通过隐藏 input 保留） ----
     filter_form_id = "ff"
     form_hidden = [f'<input type="hidden" name="id" value="{report_id}">',
                    f'<input type="hidden" name="page_size" value="{qs_page_size}">']
     if result_param:
         form_hidden.append(f'<input type="hidden" name="result" value="{active_index}">')
-    # 排序状态（hidden，表单提交时保留）
     for col, dir_ in sorts:
         form_hidden.append(f'<input type="hidden" name="sort" value="{_escape(col)}">')
         form_hidden.append(f'<input type="hidden" name="dir" value="{_escape(dir_)}">')
-    # 自定义列排序/隐藏（hidden，表单提交时保留）
-    #
-    # 注意：筛选操作符不再通过隐藏 input 保留，因为可见的筛选下拉框（form="ff"）已经
-    # 在表单提交时提供操作符值。隐藏的 op_ 输入在 DOM 中排在可见下拉框之前，会导致
-    # 其旧值覆盖用户选择的新值（如"不筛选"被忽略）。见 AGENTS.md 中的 bug 记录。
     if cols_param:
         form_hidden.append(f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">')
     form_hidden_str = "\n    ".join(form_hidden)
 
-    # ---- 构建排序栏（显示当前排序列及其优先级） ----
-    sort_bar_parts = []
-    if sorts:
-        sort_bar_parts.append('<div class="sort-bar" style="margin-bottom:10px;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">')
-        sort_bar_parts.append('<span style="color:#475569;font-weight:500">排序:</span>')
-        for idx, (sc, sd) in enumerate(sorts, 1):
-            label = f'{_escape(sc)} {"↑" if sd == "asc" else "↓"}'
-            prio = chr(0x2460 + idx - 1) if idx <= 20 else f"#{idx}"
-            # 移除该列排序的 URL
-            rm_sorts = [(c, d) for c, d in sorts if c != sc]
-            rm_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-            if rm_sorts:
-                rm_href += "&amp;" + _build_sort_params(rm_sorts)
-            if filters:
-                rm_href += "&amp;" + _build_filter_params(filters)
-            if cols_param:
-                rm_href += "&amp;" + cols_param
-            if result_param:
-                rm_href += "&amp;" + result_param
-            sort_bar_parts.append(
-                f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
-                f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
-                f'font-size:12px;border:1px solid #c7d2fe">'
-                f'<span style="font-weight:700;font-size:11px">{prio}</span> {label}'
-                f'<a href="{rm_href}" style="text-decoration:none;color:#94a3b8;margin-left:2px" '
-                f'title="移除排序">✕</a>'
-                f'</span>'
-            )
-        sort_bar_parts.append('</div>')
-    sort_bar_html = "".join(sort_bar_parts)
+    # ---- 排序栏、表头、数据行、缓存标记、控制栏、面板均由 render.py 渲染 ----
+    sort_bar_html = build_sort_bar_html(
+        report_id, qs_page_size, sorts, filters, cols_param, result_param)
+    thead_str = build_table_header_html(
+        all_columns, display_columns, sorts, filters, report_id, qs_page_size, cols_param, result_param)
 
-    # ---- 构建表头（排序双箭头 + 筛选操作符下拉框 + 筛选输入框） ----
-    thead_parts = ["<tr>"]
-    for col in display_columns:
-        # 当前排序列信息
-        current_dir = None
-        sort_priority = 0
-        for idx, (c, d) in enumerate(sorts, 1):
-            if c == col:
-                current_dir = d
-                sort_priority = idx
-                break
-
-        # 构建 ▲ (asc) 链接 — 追加/切换多字段排序
-        asc_sorts = list(sorts)
-        found_asc = False
-        for i, (c, d) in enumerate(asc_sorts):
-            if c == col:
-                asc_sorts[i] = (col, "asc")
-                found_asc = True
-                break
-        if not found_asc:
-            asc_sorts.append((col, "asc"))
-        asc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-        asc_href += "&amp;" + _build_sort_params(asc_sorts)
-        if filters:
-            asc_href += "&amp;" + _build_filter_params(filters)
-        if cols_param:
-            asc_href += "&amp;" + cols_param
-        if result_param:
-            asc_href += "&amp;" + result_param
-        asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
-
-        # 构建 ▼ (desc) 链接 — 追加/切换多字段排序
-        desc_sorts = list(sorts)
-        found_desc = False
-        for i, (c, d) in enumerate(desc_sorts):
-            if c == col:
-                desc_sorts[i] = (col, "desc")
-                found_desc = True
-                break
-        if not found_desc:
-            desc_sorts.append((col, "desc"))
-        desc_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-        desc_href += "&amp;" + _build_sort_params(desc_sorts)
-        if filters:
-            desc_href += "&amp;" + _build_filter_params(filters)
-        if cols_param:
-            desc_href += "&amp;" + cols_param
-        if result_param:
-            desc_href += "&amp;" + result_param
-        desc_cls = "sort-arrow active" if current_dir == "desc" else "sort-arrow"
-
-        # 排序优先级标示
-        priority_badge = ""
-        if sort_priority > 0:
-            prio_char = chr(0x2460 + sort_priority - 1) if sort_priority <= 20 else f"#{sort_priority}"
-            priority_badge = f'<span class="sort-prio" style="font-size:10px;color:#4f46e5;font-weight:700;margin-left:2px">{prio_char}</span>'
-
-        # ---- 筛选信息 ----
-        cur_fval = ""
-        cur_op = "nofilter"
-        for item in filters:
-            c, op, val = item
-            if c == col:
-                cur_fval = val
-                cur_op = op
-                break
-
-        # 筛选输入 name
-        filter_input_name = "f_" + urllib.parse.quote(col, safe='')
-        filter_op_name = "op_" + urllib.parse.quote(col, safe='')
-
-        # 构建操作符下拉框选项
-        op_options = ""
-        for code, label, short in FILTER_OPS:
-            sel = ' selected' if code == cur_op else ''
-            op_options += f'<option value="{code}"{sel}>{_escape(label)}</option>'
-
-        # 输入框是否隐藏/禁用（不筛选/为空/非空不需要值）
-        input_hidden = cur_op in ("nofilter", "isempty", "notempty")
-        input_style = "display:none" if input_hidden else ""
-        input_disabled = "disabled" if input_hidden else ""
-
-        thead_parts.append(f"""<th>
-  <div class="sort-links" style="display:inline-flex;align-items:center;gap:0">
-    <a href="{asc_href}" class="sort-link" title="升序">{_escape(col)}</a>
-    <a href="{asc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="升序"><span class="{asc_cls}">▲</span></a>
-    <a href="{desc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="降序"><span class="{desc_cls}">▼</span></a>
-    {priority_badge}
-  </div>
-  <div class="filter-row" style="display:flex;gap:2px;margin-top:6px;align-items:center">
-    <select class="filter-op" form="{filter_form_id}" name="{filter_op_name}"
-      style="padding:2px 2px;font-size:11px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;width:auto;min-width:52px;flex-shrink:0;cursor:pointer"
-      onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
-    <input type="text" class="filter-input" form="{filter_form_id}"
-      name="{filter_input_name}" placeholder="筛选 {_escape(col)}..."
-      value="{_escape(cur_fval)}"
-      style="{input_style}" {input_disabled}>
-  </div>
-</th>""")
-    thead_parts.append("</tr>")
-    thead_str = "".join(thead_parts)
-
-    # ---- 数据行 ----
-    # 构建列名到索引的映射，用于按 display_columns 顺序提取数据
     col_index_map = {name: idx for idx, name in enumerate(all_columns)}
     display_indices = [col_index_map[c] for c in display_columns]
-    tbody = ""
-    if not result.rows:
-        tbody = ('<tr class="empty-state-row">'
-                 '<td colspan="999"><div class="empty-state">'
-                 '<div class="icon">📭</div>暂无数据</div></td></tr>')
-    else:
-        for row in result.rows:
-            cells = "".join(f"<td>{_escape(row[i])}</td>" for i in display_indices)
-            tbody += "<tr>" + cells + "</tr>"
+    tbody = build_table_body_html(result.rows, display_indices)
 
-    # ---- 分页 ----
     pagination = _build_pagination(report_id, result.page, result.total_pages,
                                    result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "")
 
-    # ---- 缓存状态 ----
-    cache_info = result.cache_info
-    if cache_info:
-        src = cache_info.get("source", "")
-        ts = cache_info.get("timestamp")
-        if src == "redis":
-            age = int(time.time() - ts) if ts else 0
-            cache_badge = ('<span class="cache-badge fresh">'
-                           f'Redis 快照 ({age}s 前)'
-                           '</span>')
-        elif src == "redis_fallback":
-            age = int(time.time() - ts) if ts else 0
-            cache_badge = ('<span class="cache-badge" '
-                           'style="background:#fef3c7;color:#92400e">'
-                           f'缓存快照（{age}s 前，MySQL 不可用）'
-                           '</span>')
-        elif src == "process":
-            age = int(time.time() - ts) if ts else 0
-            cache_badge = ('<span class="cache-badge fresh">'
-                           f'进程缓存 ({age}s 前刷新)'
-                           '</span>')
-        else:
-            cache_badge = '<span class="cache-badge">直连 MySQL</span>'
-    else:
-        cache_badge = '<span class="cache-badge">未缓存</span>'
+    cache_badge = build_cache_badge_html(result.cache_info,
+        prefer_cache=bool(report.get("prefer_cache")),
+        cache_ttl_hours=int(report.get("cache_ttl_hours") or 0))
 
-    # ---- 控制栏 ----
-    # 控制栏表单：携带所有状态（筛选+排序+自定义列）
-    cols_hidden = f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">' if cols_param else ""
-    controls = f"""
-<div class="controls">
-  <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
-    <input type="hidden" name="id" value="{report_id}">
-    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
-    {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
-    {_filter_hidden_inputs(filters) if filters else ''}
-    {cols_hidden}
-    <label>每页行数:
-      <select name="page_size" onchange="this.form.submit()">
-        {''.join(f'<option value="{s}"{" selected" if qs_page_size == s else ""}>{s}</option>'
-                 for s in [10, 20, 50, 100, 200])}
-      </select>
-    </label>
-    <noscript><button type="submit" class="btn btn-primary btn-sm">刷新</button></noscript>
-  </form>
-  <form method="get" action="/export" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
-    <input type="hidden" name="id" value="{report_id}">
-    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
-    {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
-    {_filter_hidden_inputs(filters) if filters else ''}
-    {cols_hidden}
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
-      格式:
-      <select name="format" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="csv">CSV</option>
-        <option value="json">JSON</option>
-      </select>
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
-      字符集:
-      <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="gbk">GBK</option>
-        <option value="utf8">UTF8</option>
-      </select>
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="json_no_quotes" value="1"> 数字无引号
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="zip" value="1"> 压缩包
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段
-    </label>
-    <button type="submit" class="btn btn-success btn-sm" style="font-size:12px;padding:3px 10px">导出</button>
-  </form>
-  <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
-  <button type="button" onclick="document.getElementById('sortSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⇅ 排序设置</button>
-   <a href="/report?id={report_id}&amp;page_size={qs_page_size}{('&amp;'+_build_sort_params(sorts)) if sorts else ''}{('&amp;'+_build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}{'&amp;'+result_param if result_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
-  {cache_badge}
-  <span class="stat">共 {result.total} 行，{result.total_pages} 页</span>
-</div>"""
+    controls = build_controls_bar_html(
+        report_id, qs_page_size, sorts, filters, cols_param, display_columns,
+        active_index, cache_badge, result.total, result.total_pages,
+        result_param=result_param)
 
-    # ---- 筛选清除提示与筛选操作按钮 ----
-    clear_href = f"/report?id={report_id}&amp;page_size={qs_page_size}"
-    if sorts:
-        clear_href += "&amp;" + _build_sort_params(sorts)
-    if cols_param:
-        clear_href += "&amp;" + cols_param
-    if result_param:
-        clear_href += "&amp;" + result_param
+    filter_action_html, clear_html = build_filter_action_html(
+        report_id, qs_page_size, sorts, cols_param, result_param, filters)
 
-    filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-                         f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
-                         f'<a href="{clear_href}" class="btn btn-outline btn-sm">清除筛选</a>'
-                         f'</div>')
+    field_settings_html = build_field_settings_panel_html(all_columns, display_columns)
+    sort_settings_html = build_sort_settings_panel_html(sorts, all_columns)
+    filter_form_html = build_filter_form_html(filter_form_id, form_hidden_str)
 
-    clear_html = ""
-    if filters:
-        filter_items = []
-        for c, o, v in filters:
-            op_label = _OP_MAP.get(o, (o, o))[1]
-            if o in ("isempty", "notempty"):
-                filter_items.append(f'{_escape(c)} ({op_label})')
-            else:
-                filter_items.append(f'{_escape(c)} {op_label} "{_escape(v)}"')
-        filter_summary = "、".join(filter_items)
-        clear_html = (f'<div style="margin-bottom:12px;font-size:13px;color:#64748b">'
-                      f'筛选: {filter_summary} '
-                      f'<a href="{clear_href}" class="clear-filter">✕ 全部清除</a></div>')
-
-    # ---- 字段设置面板 ----
-    field_settings_items = []
-    for idx, col in enumerate(all_columns):
-        checked = "checked" if col in display_columns else ""
-        # 找到当前列在 display_columns 中的位置（用于排序箭头）
-        pos = display_columns.index(col) if col in display_columns else -1
-        up_disabled = "disabled" if pos <= 0 else ""
-        down_disabled = "disabled" if pos >= len(display_columns) - 1 or pos < 0 else ""
-        field_settings_items.append(
-            f'<label class="field-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
-            f'border:1px solid #e2e8f0;border-radius:6px;background:{'#f8fafc' if col in display_columns else '#fff'};'
-            f'cursor:grab;user-select:none">'
-            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
-            f'<input type="checkbox" name="col_visible" value="{_escape(col)}" {checked} '
-            f'onchange="toggleFieldItem(this)" onclick="event.stopPropagation()">'
-            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(col)}</span>'
-            f'<input type="hidden" name="col_order" value="{_escape(col)}">'
-            f'<button type="button" class="field-up" {up_disabled} onclick="moveField(this,-1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▲</button>'
-            f'<button type="button" class="field-down" {down_disabled} onclick="moveField(this,1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▼</button>'
-            f'</label>'
-        )
-    field_settings_html = (
-        '<div id="fieldSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
-        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        '<h3 style="margin:0;font-size:15px;color:#1e293b">字段设置</h3>'
-        '<button type="button" onclick="document.getElementById(\'fieldSettingsPanel\').style.display=\'none\'" '
-        'style="padding:4px 10px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff">收起</button>'
-        '</div>'
-        '<div id="fieldList" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">'
-        + "".join(field_settings_items) +
-        '</div>'
-        '<div style="display:flex;gap:8px;margin-top:12px">'
-        '<button type="button" onclick="selectAllFields(true)" class="btn btn-outline btn-sm">全选</button>'
-        '<button type="button" onclick="selectAllFields(false)" class="btn btn-outline btn-sm">全不选</button>'
-        '<button type="button" onclick="applyFieldSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
-        '</div>'
-        '</div>'
-    )
-
-    # ---- 排序管理面板 ----
-    sort_settings_items = []
-    for idx, (sc, sd) in enumerate(sorts):
-        up_disabled = "disabled" if idx == 0 else ""
-        down_disabled = "disabled" if idx == len(sorts) - 1 else ""
-        icon = "↑" if sd == "asc" else "↓"
-        sort_settings_items.append(
-            f'<div class="sort-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
-            f'border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:grab;user-select:none">'
-            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
-            f'<span class="sort-num" style="font-weight:700;font-size:11px;color:#4f46e5;min-width:20px">{idx + 1}</span>'
-            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(sc)} {icon}</span>'
-            f'<input type="hidden" name="sort_col" value="{_escape(sc)}">'
-            f'<input type="hidden" name="sort_dir" value="{_escape(sd)}">'
-            f'<button type="button" class="sort-up" {up_disabled} onclick="moveSortItem(this,-1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▲</button>'
-            f'<button type="button" class="sort-down" {down_disabled} onclick="moveSortItem(this,1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▼</button>'
-            f'<button type="button" onclick="removeSortItem(this)" '
-            f'style="padding:2px 6px;font-size:11px;border:none;border-radius:4px;'
-            f'cursor:pointer;background:transparent;color:#dc2626">✕</button>'
-            f'</div>'
-        )
-    col_options = "".join(f'<option value="{_escape(c)}">{_escape(c)}</option>' for c in all_columns)
-    sort_settings_html = (
-        '<div id="sortSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
-        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        '<h3 style="margin:0;font-size:15px;color:#1e293b">排序设置</h3>'
-        '<button type="button" onclick="document.getElementById(\'sortSettingsPanel\').style.display=\'none\'" '
-        'style="padding:4px 10px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff">收起</button>'
-        '</div>'
-        '<div id="sortList" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:8px">'
-        + ("".join(sort_settings_items) if sort_settings_items
-           else '<div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
-        '</div>'
-        '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:#f8fafc;'
-        'border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
-        '<select id="newSortCol" style="flex:1;padding:4px 8px;border:1px solid #e2e8f0;'
-        'border-radius:4px;font-size:13px">'
-        '<option value="">-- 添加排序字段 --</option>'
-        + col_options +
-        '</select>'
-        '<select id="newSortDir" style="padding:4px 8px;border:1px solid #e2e8f0;'
-        'border-radius:4px;font-size:13px">'
-        '<option value="asc">↑ 升序</option>'
-        '<option value="desc">↓ 降序</option>'
-        '</select>'
-        '<button type="button" onclick="addSortItem()" class="btn btn-primary btn-sm">添加</button>'
-        '</div>'
-        '<div style="display:flex;gap:8px;margin-top:8px">'
-        '<button type="button" onclick="applySortSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
-        '</div>'
-        '</div>'
-    )
-
-    # ---- 单 Form（filter inputs 通过 form 属性关联到此 form） ----
-    filter_form_html = f'<form id="{filter_form_id}" method="get" action="/report" style="display:none">\n  {form_hidden_str}\n</form>'
-
+    # ---- 组装最终 HTML ----
     body = (_PAGE_HEADER +
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
@@ -1965,135 +1460,13 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 def _build_report_switcher(conn, current_id: int = None) -> str:
     """构建报表切换下拉框（按分类层级树状呈现）"""
     reports = db.get_all_reports(conn)
-    cat_reports: dict[int, list] = {}
-    uncategorized: list = []
-    for r in reports:
-        cid = r.get("category_id")
-        if cid is not None:
-            cat_reports.setdefault(cid, []).append(r)
-        else:
-            uncategorized.append(r)
-
     all_cats = db.get_all_categories(conn)
     cat_tree = db.get_category_tree(conn)
-
-    def _cat_depth(cat_id: int) -> int:
-        d = 0
-        seen = set()
-        c = next((x for x in all_cats if x["id"] == cat_id), None)
-        while c and c.get("parent_id") is not None:
-            if c["parent_id"] in seen:
-                break
-            seen.add(c["parent_id"])
-            d += 1
-            c = next((x for x in all_cats if x["id"] == c["parent_id"]), None)
-        return d
-
-    def _render_tree_switcher(nodes: list[dict], depth: int = 0) -> str:
-        html = ""
-        for node in nodes:
-            indent = "　" * depth
-            cid = node["id"]
-            rpts = cat_reports.get(cid, [])
-            if rpts or node["children"]:
-                label = f"{indent}{node['name']}"
-                html += f'<optgroup label="{_escape(label)}">'
-                for r in rpts:
-                    sel = ' selected' if r["id"] == current_id else ''
-                    html += f'<option value="{r["id"]}"{sel}>{_escape(r["name"])}</option>'
-                if node["children"]:
-                    html += _render_tree_switcher(node["children"], depth + 1)
-                html += "</optgroup>"
-            else:
-                html += f'<option value="" disabled style="color:#94a3b8;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</option>'
-                if node["children"]:
-                    html += _render_tree_switcher(node["children"], depth + 1)
-        return html
-
-    options = _render_tree_switcher(cat_tree)
-    for r in uncategorized:
-        sel = ' selected' if r["id"] == current_id else ''
-        options += f'<option value="{r["id"]}"{sel}>(未分类) {_escape(r["name"])}</option>'
-
-    return f"""<div class="card" style="margin-bottom:16px">
-  <div class="report-select">
-    <form method="get" action="/report">
-      <label style="font-size:14px;color:#475569;font-weight:500;margin-bottom:6px;display:block">切换报表:</label>
-      <select name="id" onchange="this.form.submit()" style="width:100%">
-        <option value="">-- 选择报表 --</option>
-        {options}
-      </select>
-    </form>
-  </div>
-</div>"""
-
-
-def _build_pagination(report_id: int, current: int, total_pages: int,
-                      page_size: int, total_rows: int,
-                      sorts=None, filters=None, cols_param: str = '',
-                      result_param: str = '') -> str:
-    """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数"""
-    sorts = sorts or []
-    filters = filters or []
-    if total_pages <= 1:
-        return ""
-
-    # 基础 URL（使用 &amp; 确保 HTML 中 & 被正确转义）
-    base_url = f"/report?id={report_id}&amp;page_size={page_size}"
-    if sorts:
-        base_url += "&amp;" + _build_sort_params(sorts)
-    if filters:
-        base_url += "&amp;" + _build_filter_params(filters)
-    if cols_param:
-        base_url += "&amp;" + cols_param
-    if result_param:
-        base_url += "&amp;" + result_param
-        base_url += "&amp;" + cols_param
-
-    parts = []
-
-    if current > 1:
-        parts.append(f'<a href="{base_url}&amp;page={current - 1}" class="nav-arrow">‹</a>')
-    else:
-        parts.append('<span class="disabled">‹</span>')
-
-    pages_to_show = set()
-    pages_to_show.add(1)
-    pages_to_show.add(total_pages)
-    for i in range(max(1, current - 3), min(total_pages, current + 3) + 1):
-        pages_to_show.add(i)
-
-    sorted_pages = sorted(pages_to_show)
-    prev = 0
-    for p in sorted_pages:
-        if p - prev > 1:
-            parts.append('<span class="disabled">…</span>')
-        if p == current:
-            parts.append(f'<span class="active">{p}</span>')
-        else:
-            parts.append(f'<a href="{base_url}&amp;page={p}" class="page-btn">{p}</a>')
-        prev = p
-
-    if current < total_pages:
-        parts.append(f'<a href="{base_url}&amp;page={current + 1}" class="nav-arrow">›</a>')
-    else:
-        parts.append('<span class="disabled">›</span>')
-
-    jump = (
-        f'<span class="jump-box">跳转到: '
-        f'<input type="number" id="jump_page" min="1" max="{total_pages}" '
-        f'value="{current}"> '
-        f'<button class="btn btn-primary btn-sm" '
-        f'onclick="window.location.href=\'{base_url}&amp;page=\' + '
-        f"document.getElementById('jump_page').value\">GO</button>"
-        f'</span>'
-    )
-
-    return f'<div class="pagination">{" ".join(parts)}{jump}</div>'
+    return build_report_switcher_html(reports, all_cats, cat_tree, current_id)
 
 
 # ===================================================================
-# 入口
+# 入口（_build_pagination 已移至 render.py，通过别名保持 API 兼容）
 # ===================================================================
 
 
@@ -2168,6 +1541,31 @@ def handle_request(conn, method: str, path: str, query: str,
             active_index = max(0, int(qs["result"][0]))
         except ValueError:
             pass
+
+    # 刷新缓存：预填缓存后重定向到不带 refresh 参数的 URL，避免 F5 反复清空缓存
+    if refresh_flag:
+        report = db.get_report(conn, report_id)
+        if report:
+            try:
+                if pool_override:
+                    pool_config = pool_override
+                else:
+                    pool_id = report.get("pool_id")
+                    if pool_id:
+                        pool_config = db.get_pool(conn, pool_id)
+                    else:
+                        pool_config = None
+                if pool_config:
+                    actual_sql = report["sql_query"]
+                    execute_report(report_id, actual_sql, pool_config,
+                                   page, page_size, sorts or [], filters or [], True,
+                                   active_index, report)
+            except Exception:
+                pass  # 缓存清除失败不影响重定向，错误将在下一页显示
+        qs.pop("refresh", None)
+        new_qs = urllib.parse.urlencode(qs, doseq=True)
+        new_url = f"/report?{new_qs}" if new_qs else f"/report?id={report_id}"
+        return "302", new_url, {}
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
                               sorts, filters, refresh_flag, cols_raw, active_index=active_index)
