@@ -41,7 +41,7 @@ from decimal import Decimal
 from typing import Optional, Union
 import db
 import report
-from report import _format_cell, parse_filters
+from report import format_cell, parse_filters
 
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
@@ -115,7 +115,7 @@ class _JsonNoQuoteEncoder(json.JSONEncoder):
     """
     def default(self, obj):
         if isinstance(obj, Decimal):
-            # 与 _format_cell 保持一致的数值格式化，但返回数值类型
+            # 与 format_cell 保持一致的数值格式化，但返回数值类型
             if obj == 0:
                 return 0
             s = format(obj, "f").rstrip("0").rstrip(".")
@@ -216,7 +216,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                 obj[col] = _no_quote_value(row[idx])
             else:
                 # 全部转为字符串（原有行为）
-                obj[col] = _format_cell(row[idx])
+                obj[col] = format_cell(row[idx])
         rows_data.append(obj)
 
     # 顶层结构：以报表名（清理后）作为数据键

@@ -389,7 +389,7 @@ def _build_cols_param(display_columns: list[str], all_columns: list[str]) -> str
     return "cols=" + urllib.parse.quote(",".join(display_columns), safe='')
 
 
-def _format_cell(val) -> str:
+def format_cell(val) -> str:
     """
     格式化表格单元格值。
 
@@ -421,7 +421,7 @@ def _format_cell(val) -> str:
 
 def _escape(val) -> str:
     """HTML 转义（自动格式化数值避免科学计数法）"""
-    return html_mod.escape(_format_cell(val))
+    return html_mod.escape(format_cell(val))
 
 
 def _qs_val(qs: dict, key: str, default: str = None) -> Optional[str]:

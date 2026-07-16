@@ -21,7 +21,7 @@ from decimal import Decimal
 import mysql.connector
 
 import db
-from report import _format_cell
+from report import format_cell
 
 
 # ---------------------------------------------------------------------------
@@ -1577,80 +1577,80 @@ class TestMySQLRowAllNull(MockMySQLMixin, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 组合矩阵测试：混合类型与 _format_cell 兼容性
+# 组合矩阵测试：混合类型与 format_cell 兼容性
 # ---------------------------------------------------------------------------
 
 class TestMySQLMixedTypes(MockMySQLMixin, unittest.TestCase):
     """
-    测试混合数据类型在 _MySQLRow 和 _format_cell 下的兼容性。
+    测试混合数据类型在 _MySQLRow 和 format_cell 下的兼容性。
 
-    _format_cell 负责将单元格值格式化为显示字符串，需要处理
+    format_cell 负责将单元格值格式化为显示字符串，需要处理
     int/float/None/Decimal/bytes 等多种类型。
     """
 
-    def test_format_cell_with_none(self):
-        """_format_cell(None) 应返回空字符串。"""
-        self.assertEqual(_format_cell(None), "")
+    def testformat_cell_with_none(self):
+        """format_cell(None) 应返回空字符串。"""
+        self.assertEqual(format_cell(None), "")
 
-    def test_format_cell_with_int(self):
-        """_format_cell(int) 应返回整数字符串。"""
-        self.assertEqual(_format_cell(42), "42")
-        self.assertEqual(_format_cell(0), "0")
-        self.assertEqual(_format_cell(-1), "-1")
+    def testformat_cell_with_int(self):
+        """format_cell(int) 应返回整数字符串。"""
+        self.assertEqual(format_cell(42), "42")
+        self.assertEqual(format_cell(0), "0")
+        self.assertEqual(format_cell(-1), "-1")
 
-    def test_format_cell_with_large_int(self):
-        """_format_cell(超大整数) 不应使用科学计数法。"""
+    def testformat_cell_with_large_int(self):
+        """format_cell(超大整数) 不应使用科学计数法。"""
         val = 12345678901234567890
-        self.assertEqual(_format_cell(val), "12345678901234567890")
+        self.assertEqual(format_cell(val), "12345678901234567890")
 
-    def test_format_cell_with_float(self):
-        """_format_cell(float) 应返回浮点数字符串。"""
-        self.assertEqual(_format_cell(3.14), "3.14")
-        self.assertEqual(_format_cell(0.0), "0")
+    def testformat_cell_with_float(self):
+        """format_cell(float) 应返回浮点数字符串。"""
+        self.assertEqual(format_cell(3.14), "3.14")
+        self.assertEqual(format_cell(0.0), "0")
 
-    def test_format_cell_with_float_scientific(self):
-        """_format_cell(科学计数法浮点数) 应转为全小数。"""
-        result = _format_cell(1e-10)
+    def testformat_cell_with_float_scientific(self):
+        """format_cell(科学计数法浮点数) 应转为全小数。"""
+        result = format_cell(1e-10)
         self.assertNotIn("e", result.lower())
         self.assertAlmostEqual(float(result), 1e-10)
 
-    def test_format_cell_with_negative_exponent(self):
-        """_format_cell(极小正浮点数) 应避免科学计数法。"""
-        # 使用 1e-9 测试科学计数法转换（在 _format_cell 的 15 位精度范围内）
-        result = _format_cell(1.23456e-9)
+    def testformat_cell_with_negative_exponent(self):
+        """format_cell(极小正浮点数) 应避免科学计数法。"""
+        # 使用 1e-9 测试科学计数法转换（在 format_cell 的 15 位精度范围内）
+        result = format_cell(1.23456e-9)
         self.assertNotIn("e", result.lower())
         self.assertAlmostEqual(float(result), 1.23456e-9)
 
-    def test_format_cell_with_decimal_zero(self):
-        """_format_cell(Decimal(0)) 应返回 '0'。"""
-        self.assertEqual(_format_cell(Decimal("0")), "0")
-        self.assertEqual(_format_cell(Decimal("0.0")), "0")
+    def testformat_cell_with_decimal_zero(self):
+        """format_cell(Decimal(0)) 应返回 '0'。"""
+        self.assertEqual(format_cell(Decimal("0")), "0")
+        self.assertEqual(format_cell(Decimal("0.0")), "0")
 
-    def test_format_cell_with_decimal(self):
-        """_format_cell(Decimal) 应返回格式化的十进制数字符串。"""
-        self.assertEqual(_format_cell(Decimal("3.14159")), "3.14159")
-        self.assertEqual(_format_cell(Decimal("100.500")), "100.5")
-        self.assertEqual(_format_cell(Decimal("-0.00100")), "-0.001")
+    def testformat_cell_with_decimal(self):
+        """format_cell(Decimal) 应返回格式化的十进制数字符串。"""
+        self.assertEqual(format_cell(Decimal("3.14159")), "3.14159")
+        self.assertEqual(format_cell(Decimal("100.500")), "100.5")
+        self.assertEqual(format_cell(Decimal("-0.00100")), "-0.001")
 
-    def test_format_cell_with_bytes(self):
-        """_format_cell(bytes) 应返回字符串表示。"""
-        result = _format_cell(b"hello")
+    def testformat_cell_with_bytes(self):
+        """format_cell(bytes) 应返回字符串表示。"""
+        result = format_cell(b"hello")
         self.assertIsInstance(result, str)
         self.assertIn("hello", result)
 
-    def test_format_cell_with_empty_string(self):
-        """_format_cell('') 应返回空字符串。"""
-        self.assertEqual(_format_cell(""), "")
+    def testformat_cell_with_empty_string(self):
+        """format_cell('') 应返回空字符串。"""
+        self.assertEqual(format_cell(""), "")
 
-    def test_format_cell_with_numeric_string(self):
-        """_format_cell(纯数字字符串) 应保持字符串原样。"""
-        self.assertEqual(_format_cell("007"), "007")
-        self.assertEqual(_format_cell("3.14"), "3.14")
+    def testformat_cell_with_numeric_string(self):
+        """format_cell(纯数字字符串) 应保持字符串原样。"""
+        self.assertEqual(format_cell("007"), "007")
+        self.assertEqual(format_cell("3.14"), "3.14")
 
-    def test_format_cell_with_bool(self):
-        """_format_cell(bool) 应返回 'True' 或 'False'。"""
-        self.assertEqual(_format_cell(True), "True")
-        self.assertEqual(_format_cell(False), "False")
+    def testformat_cell_with_bool(self):
+        """format_cell(bool) 应返回 'True' 或 'False'。"""
+        self.assertEqual(format_cell(True), "True")
+        self.assertEqual(format_cell(False), "False")
 
     def test_mysql_row_mixed_types_roundtrip(self):
         """_MySQLRow 包含混合类型时，各字段类型应保持不变。"""
@@ -1674,7 +1674,7 @@ class TestMySQLMixedTypes(MockMySQLMixin, unittest.TestCase):
     def test_execute_mysql_query_mock_mixed_types(self, mock_exec):
         """
         模拟 execute_mysql_query 返回混合类型数据，
-        验证 _format_cell 能正确处理各类型值。
+        验证 format_cell 能正确处理各类型值。
         """
         # 模拟 execute_mysql_query 返回 list[dict]（多结果集格式）
         columns = ["id", "name", "score", "memo", "rate", "data"]
@@ -1692,27 +1692,27 @@ class TestMySQLMixedTypes(MockMySQLMixin, unittest.TestCase):
         # 验证列名正确
         self.assertEqual(cols, columns)
 
-        # 验证每行的每个字段都能被 _format_cell 正确格式化
+        # 验证每行的每个字段都能被 format_cell 正确格式化
         for row in data_rows:
             for cell in row:
-                formatted = _format_cell(cell)
+                formatted = format_cell(cell)
                 self.assertIsInstance(formatted, str)
 
         # 验证具体格式化结果
         alice_row = data_rows[0]
-        self.assertEqual(_format_cell(alice_row[0]), "1")        # int
-        self.assertEqual(_format_cell(alice_row[1]), "Alice")    # str
-        self.assertEqual(_format_cell(alice_row[2]), "95.5")     # float
-        self.assertEqual(_format_cell(alice_row[3]), "")         # None
-        self.assertEqual(_format_cell(alice_row[4]), "3.14159")  # Decimal
+        self.assertEqual(format_cell(alice_row[0]), "1")        # int
+        self.assertEqual(format_cell(alice_row[1]), "Alice")    # str
+        self.assertEqual(format_cell(alice_row[2]), "95.5")     # float
+        self.assertEqual(format_cell(alice_row[3]), "")         # None
+        self.assertEqual(format_cell(alice_row[4]), "3.14159")  # Decimal
 
         # 验证中文正确传递
         chinese_row = data_rows[2]
-        self.assertEqual(_format_cell(chinese_row[1]), "报表测试")
+        self.assertEqual(format_cell(chinese_row[1]), "报表测试")
 
         # 验证科学计数法转为全小数
         bob_row = data_rows[1]
-        score_str = _format_cell(bob_row[2])
+        score_str = format_cell(bob_row[2])
         self.assertNotIn("e", score_str.lower())
         self.assertAlmostEqual(float(score_str), 1e-10)
 
