@@ -149,6 +149,84 @@ class TestServerIntegration(unittest.TestCase):
         self.assertIn("配置管理", html)
 
 
+class TestRouteTable(unittest.TestCase):
+    """路由表测试"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.routes = srv.ROUTES
+
+    def test_route_table_exists(self):
+        """路由表应定义且非空"""
+        self.assertTrue(hasattr(srv, "ROUTES"))
+        self.assertGreater(len(self.routes), 0)
+
+    def test_exact_path_routes(self):
+        """精确路径路由应正确匹配"""
+        for name, method, path in [
+            ("login_get", "GET", "/login"),
+            ("home", "GET", "/"),
+            ("logout", "GET", "/logout"),
+        ]:
+            with self.subTest(name=name):
+                self.assertIsNotNone(
+                    srv._match_route(method, path),
+                    f"{method} {path} 未匹配任何路由",
+                )
+
+    def test_prefix_path_routes(self):
+        """前缀路径路由应匹配子路径"""
+        for name, method, path in [
+            ("config_root", "GET", "/config"),
+            ("config_sub", "POST", "/config/pools/1/edit"),
+            ("report_root", "GET", "/report"),
+            ("report_sub", "POST", "/report"),
+            ("export_root", "GET", "/export"),
+            ("export_sub", "GET", "/export"),
+        ]:
+            with self.subTest(name=name):
+                self.assertIsNotNone(
+                    srv._match_route(method, path),
+                    f"{method} {path} 未匹配任何路由",
+                )
+
+    def test_no_match_returns_none(self):
+        """不存在的路径应返回 None"""
+        self.assertIsNone(srv._match_route("GET", "/nonexistent"))
+        self.assertIsNone(srv._match_route("DELETE", "/login"))
+        self.assertIsNone(srv._match_route("PUT", "/"))
+
+    def test_auth_routes_require_auth(self):
+        """需要认证的路由应标记 needs_auth=True"""
+        for path in ["/", "/logout", "/config", "/report", "/export"]:
+            route = srv._match_route("GET", path)
+            self.assertIsNotNone(route, f"{path} 未匹配任何路由")
+            self.assertTrue(
+                route.needs_auth,
+                f"{path} 应需要认证但未标记",
+            )
+
+    def test_public_routes_no_auth(self):
+        """无需认证的路由应标记 needs_auth=False"""
+        for method, path in [("GET", "/login"), ("POST", "/login")]:
+            route = srv._match_route(method, path)
+            self.assertIsNotNone(route, f"{method} {path} 未匹配任何路由")
+            self.assertFalse(route.needs_auth, f"{path} 不应需要认证")
+
+    def test_route_method_restriction(self):
+        """路由应限制 HTTP 方法"""
+        self.assertIsNone(srv._match_route("POST", "/"))
+        self.assertIsNone(srv._match_route("DELETE", "/login"))
+        self.assertIsNone(srv._match_route("PUT", "/logout"))
+
+    def test_db_routes_require_db(self):
+        """需要数据库的路由应标记 needs_db=True"""
+        for path in ["/config", "/report", "/export"]:
+            route = srv._match_route("GET", path)
+            self.assertIsNotNone(route, f"{path} 未匹配任何路由")
+            self.assertTrue(route.needs_db, f"{path} 应需要数据库但未标记")
+
+
 class TestLoginPage(unittest.TestCase):
     """登录页渲染测试"""
 

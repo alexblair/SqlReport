@@ -20,6 +20,7 @@ server.py — HTTP 服务器入口
 
 import sys
 import os
+import re
 import logging
 import urllib.parse
 import http.server
@@ -119,6 +120,74 @@ def _render_login_page(error: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# 路由表
+# ---------------------------------------------------------------------------
+
+
+class RouteEntry:
+    """路由条目。
+
+    将 URL 路径模式与处理方法绑定，附带认证和数据库需求标记。
+    所有路由按 ROUTES 列表的顺序进行匹配，首次匹配优先。
+    """
+
+    __slots__ = ("pattern", "method", "needs_auth", "needs_db", "handler")
+
+    def __init__(self, pattern: str, method: str,
+                 needs_auth: bool, needs_db: bool, handler: str):
+        """
+        初始化路由条目。
+
+        Args:
+            pattern: URL 路径正则模式（如 r'^/login$'）。
+            method: HTTP 方法（GET/POST），'*' 表示任意方法。
+            needs_auth: 是否需要用户认证。
+            needs_db: 是否需要数据库连接。
+            handler: 处理方法名（ReportHandler 的方法名）。
+        """
+        self.pattern = re.compile(pattern)
+        self.method = method
+        self.needs_auth = needs_auth
+        self.needs_db = needs_db
+        self.handler = handler
+
+    def __repr__(self) -> str:
+        return (f"Route({self.method} {self.pattern.pattern}, "
+                f"auth={self.needs_auth}, db={self.needs_db})")
+
+
+# 路由表 — 顺序优先，首次匹配即生效
+ROUTES = [
+    RouteEntry(r"^/login$", "GET", False, False, "_handle_login_get"),
+    RouteEntry(r"^/login$", "POST", False, False, "_handle_login"),
+    RouteEntry(r"^/?$", "GET", True, False, "_handle_home_redirect"),
+    RouteEntry(r"^/logout$", "GET", True, False, "_handle_logout"),
+    RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
+    RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
+    RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
+]
+
+
+def _match_route(method: str, path: str) -> RouteEntry | None:
+    """在路由表中查找匹配的路由条目。
+
+    Args:
+        method: HTTP 方法（GET/POST）。
+        path: URL 路径。
+
+    Returns:
+        匹配的 RouteEntry，未匹配返回 None。
+    """
+    for route in ROUTES:
+        if not route.pattern.search(path):
+            continue
+        if route.method != "*" and method != route.method:
+            continue
+        return route
+    return None
+
+
+# ---------------------------------------------------------------------------
 # 请求处理器
 # ---------------------------------------------------------------------------
 
@@ -139,46 +208,26 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self._handle("POST")
 
     def _handle(self, method: str):
-        """统一处理方法入口"""
+        """基于路由表分发请求"""
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         query = parsed.query
 
-        # ---- 无需认证的路径 ----
-        if path == "/login" and method == "GET":
-            return self._send_html(200, _render_login_page())
+        route = _match_route(method, path)
+        if route is None:
+            return self._send_html(404, "<h1>404 — 页面不存在</h1>")
 
-        if path == "/login" and method == "POST":
-            return self._handle_login()
-
-        # ---- 以下路径需要认证 ----
-        if not self._authenticate():
+        if route.needs_auth and not self._authenticate():
             return
 
-        if path in ("/", ""):
-            return self._send_redirect("/report")
-
-        if path == "/logout":
-            return self._handle_logout()
-
-        # ---- 以下路径需要数据库连接 ----
-        # 在 _handle 中统一创建 config_db 连接，传递给各子处理器，
-        # 避免每个子处理器各自创建连接（同一个请求只需一次连接）
-        conn = db.get_config_db()
-        try:
-            if path.startswith("/config"):
-                return self._handle_config(method, path, query, conn)
-
-            if path.startswith("/report"):
-                return self._handle_report(method, path, query, conn)
-
-            if path.startswith("/export"):
-                return self._handle_export(method, path, query, conn)
-
-            # 404
-            self._send_html(404, "<h1>404 — 页面不存在</h1>")
-        finally:
-            conn.close()
+        if route.needs_db:
+            conn = db.get_config_db()
+            try:
+                getattr(self, route.handler)(method, path, query, conn)
+            finally:
+                conn.close()
+        else:
+            getattr(self, route.handler)(method, path, query, None)
 
     # ---- 认证 ----
 
@@ -193,7 +242,15 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_login(self):
+    def _handle_login_get(self, method, path, query, conn=None):
+        """显示登录页"""
+        self._send_html(200, _render_login_page())
+
+    def _handle_home_redirect(self, method, path, query, conn=None):
+        """首页重定向到 /report"""
+        self._send_redirect("/report")
+
+    def _handle_login(self, method=None, path=None, query=None, conn=None):
         """处理登录表单提交"""
         form_body = self._read_body()
         data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
@@ -216,7 +273,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         # 登录失败
         self._send_html(200, _render_login_page("用户名或密码错误"))
 
-    def _handle_logout(self):
+    def _handle_logout(self, method=None, path=None, query=None, conn=None):
         """处理退出"""
         cookie_header = self.headers.get("Cookie", "")
         cookies = auth.parse_cookie(cookie_header)
