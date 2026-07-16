@@ -173,11 +173,14 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     }
     """
     conn = db.create_mysql_connection(pool_config)
-    results = db.execute_mysql_query(conn, sql_query)
-    if result_index >= len(results):
-        result_index = 0
-    all_columns = results[result_index]["columns"]
-    rows = results[result_index]["rows"]
+    try:
+        results = db.execute_mysql_query(conn, sql_query)
+        if result_index >= len(results):
+            result_index = 0
+        all_columns = results[result_index]["columns"]
+        rows = results[result_index]["rows"]
+    finally:
+        conn.close()
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
     filtered = report._filter_rows(rows, all_columns, filters or [])

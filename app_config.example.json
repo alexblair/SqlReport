@@ -9,6 +9,17 @@
         "path": "run.log"
     },
 
+    "redis": {
+        "enable": false,
+        "host": "127.0.0.1",
+        "port": 6379,
+        "db": 0,
+        "password": "",
+        "key_prefix": "sr",
+        "default_ttl_hours": 24,
+        "socket_timeout": 5
+    },
+
     "config_db": [
         {
             "enable": true,
