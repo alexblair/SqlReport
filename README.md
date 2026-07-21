@@ -73,17 +73,25 @@
 git clone https://github.com/alexblair/SqlReport.git
 cd SqlReport
 
-# 创建虚拟环境 / Create virtual environment
+# 一键安装（创建 venv + 安装依赖）/ One-click setup (venv + deps)
+./install.sh
+
+# 激活虚拟环境后启动服务 / Activate venv, then start the server
+source venv/bin/activate
+python server.py
+```
+
+一键安装脚本 `install.sh` 会自动创建虚拟环境并安装 `requirements.txt` 中的所有依赖。你也可以手动安装：
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
 
 # 安装外部依赖 / Install external dependencies
-pip install mysql-connector-python redis
+pip install -r requirements.txt
+# 或手动逐个安装: pip install mysql-connector-python redis
 #   - mysql-connector-python: MySQL 查询连接器（必需）
 #   - redis: Redis 快照缓存（可选，启用后需在 app_config.json 设置 "enable": true）
-
-# 启动服务 / Start the server
-python server.py
 ```
 
 服务默认监听 `http://0.0.0.0:8000`。
@@ -253,6 +261,8 @@ SqlReport/
 │   ├── test_server.py
 │   └── test_state_machine.py
 ├── config.db              # SQLite 配置数据库（自动创建，不提交）
+├── install.sh             # 自动化依赖安装脚本（venv + pip install）
+├── requirements.txt       # pip 依赖清单
 ├── manage_service.sh      # Systemd 服务管理脚本
 ├── git-purge.sh           # Git 仓库重写工具（清理历史/更改作者/代理支持）
 └── AGENTS.md              # AI 开发代理指引
@@ -304,6 +314,15 @@ Issues and PRs are welcome!
 3. 提交修改 (`git commit -m 'Add amazing feature'`)
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 创建 Pull Request
+
+---
+
+## 📐 开发规范 / Development Standards
+
+- **依赖同步规则**：新增或删减 pip 依赖包时，必须同步更新以下三处文件：
+  1. `requirements.txt` — 依赖清单
+  2. `README.md` — 安装说明章节
+  3. `install.sh` — 安装脚本中的 `pip install` 命令（若有变更）
 
 ---
 

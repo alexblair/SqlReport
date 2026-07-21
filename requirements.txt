@@ -1,0 +1,7 @@
+# SqlReport 外部依赖清单
+# 安装方式: pip install -r requirements.txt
+# 说明：
+#   mysql-connector-python — MySQL 查询连接器（必需）
+#   redis                — Redis 快照缓存（可选，未安装时缓存功能自动降级）
+mysql-connector-python
+redis
