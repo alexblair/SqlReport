@@ -136,6 +136,24 @@ _SQLITE_SCHEMA = """
         username   TEXT NOT NULL,
         created_at REAL NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS api_endpoints (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id        INTEGER NOT NULL,
+        name             TEXT    NOT NULL,
+        url_path         TEXT    UNIQUE NOT NULL,
+        output_format    TEXT    NOT NULL DEFAULT 'json',
+        columns          TEXT,
+        filters          TEXT,
+        sorts            TEXT,
+        row_limit        INTEGER DEFAULT 0,
+        api_key          TEXT,
+        allowed_origins  TEXT,
+        enabled          INTEGER NOT NULL DEFAULT 1,
+        created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+    );
 """
 
 _MYSQL_SCHEMA = """
@@ -184,6 +202,24 @@ _MYSQL_SCHEMA = """
         token      VARCHAR(255) PRIMARY KEY,
         username   VARCHAR(255) NOT NULL,
         created_at DOUBLE NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS api_endpoints (
+        id               INTEGER AUTO_INCREMENT PRIMARY KEY,
+        report_id        INTEGER NOT NULL,
+        name             VARCHAR(255) NOT NULL,
+        url_path         VARCHAR(512) UNIQUE NOT NULL,
+        output_format    VARCHAR(10) NOT NULL DEFAULT 'json',
+        columns          TEXT,
+        filters          TEXT,
+        sorts            TEXT,
+        row_limit        INTEGER DEFAULT 0,
+        api_key          VARCHAR(255),
+        allowed_origins  TEXT,
+        enabled          TINYINT NOT NULL DEFAULT 1,
+        created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -328,6 +364,27 @@ def _init_sqlite_migrations(conn) -> None:
             conn.rollback()
 
 
+    # 迁移 8: 创建 api_endpoints 表
+    conn.execute("""CREATE TABLE IF NOT EXISTS api_endpoints (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id        INTEGER NOT NULL,
+        name             TEXT    NOT NULL,
+        url_path         TEXT    UNIQUE NOT NULL,
+        output_format    TEXT    NOT NULL DEFAULT 'json',
+        columns          TEXT,
+        filters          TEXT,
+        sorts            TEXT,
+        row_limit        INTEGER DEFAULT 0,
+        api_key          TEXT,
+        allowed_origins  TEXT,
+        enabled          INTEGER NOT NULL DEFAULT 1,
+        created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+    )""")
+    conn.commit()
+
+
 def _init_mysql_migrations(conn) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
     from query_executor import _MySQLConnection, _connect_mysql_config, execute_mysql_query
@@ -417,6 +474,31 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+
+    # 迁移 8: 创建 api_endpoints 表
+    try:
+        cursor = conn.execute("SHOW TABLES LIKE 'api_endpoints'")
+        if not cursor.fetchone():
+            conn.execute("""CREATE TABLE api_endpoints (
+                id               INTEGER AUTO_INCREMENT PRIMARY KEY,
+                report_id        INTEGER NOT NULL,
+                name             VARCHAR(255) NOT NULL,
+                url_path         VARCHAR(512) UNIQUE NOT NULL,
+                output_format    VARCHAR(10) NOT NULL DEFAULT 'json',
+                columns          TEXT,
+                filters          TEXT,
+                sorts            TEXT,
+                row_limit        INTEGER DEFAULT 0,
+                api_key          VARCHAR(255),
+                allowed_origins  TEXT,
+                enabled          TINYINT NOT NULL DEFAULT 1,
+                created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+            conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -893,3 +975,147 @@ def clear_sessions(conn) -> None:
     """清空所有 session 记录。"""
     conn.execute("DELETE FROM sessions")
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# API 端点 CRUD
+# ---------------------------------------------------------------------------
+
+
+def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
+                     output_format: str = 'json',
+                     columns: str = None, filters: str = None,
+                     sorts: str = None, row_limit: int = 0,
+                     api_key: str = None,
+                     allowed_origins: str = None,
+                     enabled: int = 1) -> int:
+    """
+    新增 API 端点配置，返回自增 id。
+
+    参数:
+        report_id: 关联报表 ID
+        name: 显示名称
+        url_path: 自定义 URL 路径，必须以 /api/ 开头，全局唯一
+        output_format: json 或 csv
+        columns: 字段列表逗号分隔，None=全部字段
+        filters: JSON 字符串，[{"col":"...","op":"...","val":"..."}, ...]
+        sorts: JSON 字符串，[{"col":"...","dir":"..."}, ...]
+        row_limit: 最大返回行数，0=不限制
+        api_key: 鉴权密钥，None=无需鉴权
+        allowed_origins: CORS 允许来源逗号分隔
+    """
+    cur = conn.execute(
+        """INSERT INTO api_endpoints
+           (report_id, name, url_path, output_format, columns, filters,
+            sorts, row_limit, api_key, allowed_origins, enabled)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (report_id, name, url_path, output_format, columns, filters,
+         sorts, row_limit, api_key, allowed_origins, enabled),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_api_endpoint(conn, endpoint_id: int) -> dict | None:
+    """根据 id 查询 API 端点，不存在返回 None。"""
+    row = conn.execute(
+        "SELECT * FROM api_endpoints WHERE id=?", (endpoint_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_api_endpoint_by_path(conn, url_path: str) -> dict | None:
+    """根据 URL 路径查询 API 端点（仅已启用），不存在返回 None。"""
+    row = conn.execute(
+        "SELECT * FROM api_endpoints WHERE url_path=? AND enabled=1",
+        (url_path,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_api_endpoints_by_report(conn, report_id: int) -> list[dict]:
+    """根据报表 ID 查询该报表下的所有 API 端点列表。"""
+    rows = conn.execute(
+        "SELECT * FROM api_endpoints WHERE report_id=? ORDER BY id",
+        (report_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_api_endpoints(conn) -> list[dict]:
+    """返回所有 API 端点列表。"""
+    rows = conn.execute("SELECT * FROM api_endpoints ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_api_endpoint(conn, endpoint_id: int,
+                        name: str = None, url_path: str = None,
+                        output_format: str = None,
+                        columns: str = None, filters: str = None,
+                        sorts: str = None, row_limit: int = None,
+                        api_key: str = None,
+                        allowed_origins: str = None,
+                        enabled: int = None) -> bool:
+    """
+    更新 API 端点配置。仅更新非 None 的字段，影响行数 >0 返回 True。
+    """
+    sets = []
+    params = []
+    if name is not None:
+        sets.append("name=?")
+        params.append(name)
+    if url_path is not None:
+        sets.append("url_path=?")
+        params.append(url_path)
+    if output_format is not None:
+        sets.append("output_format=?")
+        params.append(output_format)
+    if columns is not None:
+        sets.append("columns=?")
+        params.append(columns)
+    if filters is not None:
+        sets.append("filters=?")
+        params.append(filters)
+    if sorts is not None:
+        sets.append("sorts=?")
+        params.append(sorts)
+    if row_limit is not None:
+        sets.append("row_limit=?")
+        params.append(row_limit)
+    if api_key is not None:
+        sets.append("api_key=?")
+        params.append(api_key)
+    if allowed_origins is not None:
+        sets.append("allowed_origins=?")
+        params.append(allowed_origins)
+    if enabled is not None:
+        sets.append("enabled=?")
+        params.append(enabled)
+    if not sets:
+        return False
+    engine = _get_engine()
+    if engine != "mysql":
+        sets.append("updated_at=datetime('now','localtime')")
+    params.append(endpoint_id)
+    cur = conn.execute(
+        f"UPDATE api_endpoints SET {','.join(sets)} WHERE id=?",
+        params,
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_api_endpoint(conn, endpoint_id: int) -> bool:
+    """删除 API 端点，影响行数 >0 返回 True。"""
+    cur = conn.execute("DELETE FROM api_endpoints WHERE id=?", (endpoint_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_api_endpoints_by_report(conn, report_id: int) -> int:
+    """删除某报表下的所有 API 端点，返回删除行数。"""
+    cur = conn.execute(
+        "DELETE FROM api_endpoints WHERE report_id=?", (report_id,)
+    )
+    conn.commit()
+    return cur.rowcount

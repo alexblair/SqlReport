@@ -85,18 +85,20 @@ def parse_state_from_html(html):
 
     # ---- 1. 从 hidden input 提取筛选参数 ----
     # 匹配 <input type="hidden" name="f_COL" value="VAL">
+    # 注意：hidden input 的 name 属性是 URL 编码形式（如 f_%E7%94%A8%E6%88%B7%E5%90%8D），
+    # 因此 col_name 需要从 URL 编码的 name 中 unquote 解码。
     hidden_f_pattern = re.compile(
         r'<input\s+type="hidden"\s+name="(f_[^"]+)"\s+value="([^"]*)"',
         re.IGNORECASE
     )
     for match in hidden_f_pattern.finditer(html):
-        name = match.group(1)
+        name_encoded = match.group(1)
         value = match.group(2)
-        col_name = urllib.parse.unquote(name[2:])  # 去掉 'f_' 前缀
-        # 查找对应的 op_COL hidden input
+        col_name = urllib.parse.unquote(name_encoded[2:])
+        # 查找对应的 op_COL hidden input（op_ 后跟 URL 编码的列名，不是解码后的列名）
         op = "contains"
         op_pattern = re.compile(
-            r'<input\s+type="hidden"\s+name="op_' + re.escape(col_name)
+            r'<input\s+type="hidden"\s+name="op_' + re.escape(name_encoded[2:])
             + r'"\s+value="([^"]*)"',
             re.IGNORECASE
         )
@@ -191,9 +193,9 @@ def build_report_url(params):
     page_size = params.get("page_size", 10)
     parts.append(f"page_size={page_size}")
 
-    # 排序
+    # 排序（dir_ 必须 URL 编码，与 production build_sort_params 保持一致）
     for col, dir_ in params.get("sorts", []):
-        parts.append(f"sort={urllib.parse.quote(col, safe='')}&dir={dir_}")
+        parts.append(f"sort={urllib.parse.quote(col, safe='')}&dir={urllib.parse.quote(dir_, safe='')}")
 
     # 筛选
     for col, op, val in params.get("filters", []):
@@ -404,6 +406,9 @@ class BaseStateMachineTest(unittest.TestCase):
         自动跳过以下链接类型：
         - 清除筛选链接（href 中无任何 f_ 参数，有意不含筛选参数）
         - exclude_hrefs 中指定的模式
+
+        注意：params 由 parse_qs 解析，其 key 已自动解码（无 URL 编码），
+        因此直接用 col 拼接，不要再对 col 做 quote。
         """
         if exclude_hrefs is None:
             exclude_hrefs = []
@@ -425,11 +430,12 @@ class BaseStateMachineTest(unittest.TestCase):
             for col, op, val in filters:
                 if op == "nofilter":
                     continue
-                f_key = "f_" + urllib.parse.quote(col, safe='')
+                # params 中 key 已被 parse_qs 解码，直接用原值比较
+                f_key = "f_" + col
                 self.assertIn(f_key, params,
                               f"链接 {href[:80]} 缺少筛选 {f_key}")
                 if op != "contains":
-                    op_key = "op_" + urllib.parse.quote(col, safe='')
+                    op_key = "op_" + col
                     self.assertIn(op_key, params,
                                   f"链接 {href[:80]} 缺少操作符 {op_key}")
 
@@ -1436,6 +1442,120 @@ class TestStateMachine(BaseStateMachineTest):
                           f"重建缓存链接 {href[:80]} 应保留 cols")
             self.assertIn("refresh=1", norm,
                           f"重建缓存链接 {href[:80]} 应包含 refresh=1")
+
+
+# ===================================================================
+# 中文字符参数测试
+# ===================================================================
+
+class TestChineseParams(BaseStateMachineTest):
+    """测试中文字段名在排序/筛选/自定义列中的正确处理。"""
+
+    COLUMNS = ["用户名", "单位名", "处置商类型", "处置商显示（按类型）",
+               "phone", "shelf_apply_id", "缴纳备注", "保证金金额", "缴纳时间"]
+
+    ROWS_FOR_PAGINATION = [
+        (f"用户{i}", f"单位{i}", "机构", "全部", f"138{i:04d}",
+         f"SA{i:04d}", "已缴纳", 1000.00 + i, "2024-01-15")
+        for i in range(1, 51)
+    ]
+
+    # 9 列的 mock 数据
+    COLUMNS_9 = ["用户名", "单位名", "处置商类型", "处置商显示（按类型）",
+                 "phone", "shelf_apply_id", "缴纳备注", "保证金金额", "缴纳时间"]
+
+    def _mock_execute_report(self, mock_exec, rows=None, total=None, page=1,
+                              page_size=50):
+        """设置 mock_exec 返回值，使用中文列名。"""
+        if rows is None:
+            rows = [(f"用户{i}", f"单位{i}", "机构", "全部", f"138{i:04d}",
+                     f"SA{i:04d}", "已缴纳", 1000.00 + i, "2024-01-15")
+                    for i in range(1, 51)]
+        if total is None:
+            total = len(rows)
+        mock_exec.return_value = report.ReportResult(
+            results=[{"columns": list(self.COLUMNS_9), "rows": rows, "total": total}],
+            page=page,
+            page_size=page_size,
+        )
+
+    @patch("report.execute_report")
+    def test_chinese_sort_single(self, mock_exec):
+        """中文字段名排序参数正确生成链接。"""
+        html = self._render(
+            "id=1&page_size=50&sort=用户名&dir=asc",
+            mock_exec)
+
+        # 检查 HTML 中不包含乱码或转义错误
+        self.assertIn("用户名", html, "HTML 应包含汉字 用户名")
+
+        # 验证排序保留
+        self.assertAllLinksPreserveSorts(html, [("用户名", "asc")])
+        # 分页链接应保留排序
+        pag_links = self._get_pagination_hrefs(html)
+        for link in pag_links:
+            self.assertIn("sort=%E7%94%A8%E6%88%B7%E5%90%8D", link,
+                          f"分页链接 {link[:80]} 应保留排序参数")
+
+    @patch("report.execute_report")
+    def test_chinese_sort_filter_cols(self, mock_exec):
+        """中文字段名排序+筛选+自定义列全部共存。"""
+        html = self._render(
+            "id=1&page_size=50"
+            "&sort=用户名&dir=asc"
+            "&f_处置商类型=机构&op_处置商类型=eq"
+            "&f_单位名=&op_单位名=notempty"
+            "&cols=用户名,单位名,处置商类型,phone,缴纳时间",
+            mock_exec)
+
+        # 验证筛选保留
+        self.assertAllLinksPreserveFilters(
+            html, [("处置商类型", "eq", "机构"), ("单位名", "notempty", "")])
+
+        # 验证排序保留
+        self.assertAllLinksPreserveSorts(html, [("用户名", "asc")])
+
+        # 验证 cols 参数
+        hrefs = self._get_hrefs(html)
+        report_links = [h for h in hrefs if "/report?" in h]
+        # 至少某些链接应包含 cols
+        has_cols = any("cols=" in h for h in report_links)
+        self.assertTrue(has_cols, "链接中应包含 cols 参数")
+
+    @patch("report.execute_report")
+    def test_chinese_full_url_roundtrip(self, mock_exec):
+        """模拟用户提供的完整 URL，验证 HTML 结构完整。"""
+        qs = (
+            "id=1&page_size=50"
+            "&sort=%E7%94%A8%E6%88%B7%E5%90%8D&dir=asc"
+            "&f_%E5%A4%84%E7%BD%AE%E5%95%86%E7%B1%BB%E5%9E%8B=%E6%9C%BA%E6%9E%84"
+            "&op_%E5%A4%84%E7%BD%AE%E5%95%86%E7%B1%BB%E5%9E%8B=eq"
+            "&f_%E5%8D%95%E4%BD%8D%E5%90%8D=&op_%E5%8D%95%E4%BD%8D%E5%90%8D=notempty"
+            "&f_%E5%A4%84%E7%BD%AE%E5%95%86%E6%98%BE%E7%A4%BA%EF%BC%88%E6%8C%89%E7%B1%BB%E5%9E%8B%EF%BC%89="
+            "&op_%E5%A4%84%E7%BD%AE%E5%95%86%E6%98%BE%E7%A4%BA%EF%BC%88%E6%8C%89%E7%B1%BB%E5%9E%8B%EF%BC%89=notempty"
+            "&f_%E7%BC%B4%E7%BA%B3%E5%A4%87%E6%B3%A8=&op_%E7%BC%B4%E7%BA%B3%E5%A4%87%E6%B3%A8=notempty"
+            "&cols=%E7%94%A8%E6%88%B7%E5%90%8D%2C%E5%8D%95%E4%BD%8D%E5%90%8D%2C%E5%A4%84%E7%BD%AE%E5%95%86%E7%B1%BB%E5%9E%8B%2C%E5%A4%84%E7%BD%AE%E5%95%86%E6%98%BE%E7%A4%BA%EF%BC%88%E6%8C%89%E7%B1%BB%E5%9E%8B%EF%BC%89%2Cphone%2Cshelf_apply_id%2C%E7%BC%B4%E7%BA%B3%E5%A4%87%E6%B3%A8%2C%E4%BF%9D%E8%AF%81%E9%87%91%E9%87%91%E9%A2%9D%2C%E7%BC%B4%E7%BA%B3%E6%97%B6%E9%97%B4"
+        )
+        html = self._render(qs, mock_exec)
+
+        # HTML 应该包含一些中文字符
+        self.assertIn("用户名", html)
+        self.assertIn("处置商类型", html)
+        self.assertIn("单位名", html)
+
+        # 静态检查: HTML 标签必须完整闭合（非空标签）
+        open_tags = html.count("<table")
+        close_tags = html.count("</table>")
+        self.assertEqual(open_tags, close_tags,
+                         f"table 标签不匹配: {open_tags} 开 / {close_tags} 闭")
+
+        # 排序链接应包含 URL 编码的中文
+        hrefs = self._get_hrefs(html)
+        for href in hrefs:
+            if "sort=" in href.replace("&amp;", "&"):
+                # sort 参数应包含 URL 编码的汉字
+                self.assertIn("%E7%94%A8%E6%88%B7%E5%90%8D", href,
+                              f"排序链接 {href[:80]} 应包含编码后的汉字")
 
 
 if __name__ == "__main__":

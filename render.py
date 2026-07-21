@@ -16,6 +16,7 @@ import string
 import html as html_mod
 import urllib.parse
 import time
+import json
 from decimal import Decimal
 import redis_cache
 
@@ -109,6 +110,53 @@ function toggleFilterInput(inputName, select) {
     input.style.display = '';
     input.disabled = false;
   }
+}
+function copyRulesJson() {
+  var el = document.getElementById('current-rules-json');
+  if (!el) return;
+  var text = el.value || el.textContent || el.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(function(){});
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+function applyRulesJson() {
+  var ta = document.getElementById('current-rules-json');
+  if (!ta) return;
+  var text = ta.value.trim();
+  if (!text) { alert('请输入规则 JSON'); return; }
+  var rules;
+  try { rules = JSON.parse(text); } catch (e) {
+    alert('JSON 格式错误: ' + e.message); return;
+  }
+  var params = new URLSearchParams(window.location.search);
+  var keysToRemove = [];
+  params.forEach(function(_, k) {
+    if (k.startsWith('f_') || k.startsWith('op_') || k.startsWith('s_') || k === 'cols' || k === 'page') {
+      keysToRemove.push(k);
+    }
+  });
+  keysToRemove.forEach(function(k) { params.delete(k); });
+  if (rules.filters && rules.filters.length) {
+    rules.filters.forEach(function(f) {
+      params.set('f_' + f.col, f.val || '');
+      if (f.op && f.op !== 'contains') params.set('op_' + f.col, f.op);
+    });
+  }
+  if (rules.sorts && rules.sorts.length) {
+    rules.sorts.forEach(function(s) { params.set('s_' + s.col, s.dir || 'asc'); });
+  }
+  if (rules.columns) params.set('cols', rules.columns);
+  params.set('page', '1');
+  window.location.href = '?' + params.toString();
 }
 """
 
@@ -538,6 +586,82 @@ def build_debug_section_html(pool_config, actual_sql, active_index,
         '<div class="debug-content hidden">' + '<br>'.join(debug_lines) + '</div>'
         '</div>')
     return debug_html
+
+
+def build_current_rules_section_html(filters, sorts, display_columns: list[str],
+                                     all_columns: list[str]) -> str:
+    """
+    构建当前规则输出折叠区 HTML。
+    展示当前报表使用的筛选/排序/字段规则为 JSON 格式，提供复制按钮，
+    方便用户将规则粘贴到 API 接口配置表单。
+    """
+    sorts = sorts or []
+    filters = filters or []
+
+    # 构建 JSON 规则对象
+    rules = {}
+    if filters:
+        rules["filters"] = [
+            {"col": c, "op": o, "val": v}
+            for c, o, v in filters
+        ]
+    if sorts:
+        rules["sorts"] = [
+            {"col": c, "dir": d}
+            for c, d in sorts
+        ]
+    if display_columns and display_columns != all_columns:
+        rules["columns"] = ",".join(display_columns)
+    else:
+        rules["columns"] = ""
+
+    rules_json = json.dumps(rules, indent=2, ensure_ascii=False)
+
+    # 可读摘要
+    summary_parts = []
+    if filters:
+        filter_summary = " AND ".join(
+            f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"'
+            for c, o, v in filters
+        )
+        summary_parts.append(f'筛选: {filter_summary}')
+    if sorts:
+        sort_summary = ", ".join(
+            f'{_escape(c)} {"↑" if d == "asc" else "↓"}'
+            for c, d in sorts
+        )
+        summary_parts.append(f'排序: {sort_summary}')
+    if display_columns and display_columns != all_columns:
+        summary_parts.append(f'字段: {", ".join(_escape(c) for c in display_columns)}')
+    if not summary_parts:
+        summary_parts.append("无自定义规则（显示全部字段和数据）")
+
+    html = (
+        '<div class="debug-info" style="margin-top:8px">'
+        '<button class="debug-toggle" onclick="toggleSection(this, \'当前规则\')" type="button">▶ 当前规则</button>'
+        '<div class="debug-content hidden">'
+        '<div style="margin-bottom:8px;line-height:1.6">'
+        + '<br>'.join(summary_parts) +
+        '</div>'
+        '<div style="position:relative">'
+        '<textarea id="current-rules-json" style="width:100%;background:#1e293b;color:#e2e8f0;padding:12px;'
+        'border-radius:6px;font-size:13px;line-height:1.5;font-family:monospace;border:1px solid #334155;'
+        'resize:vertical;margin:0;min-height:80px" spellcheck="false">'
+        f'{_escape(rules_json)}</textarea>'
+        '<div style="margin-top:6px;display:flex;gap:6px">'
+        '<button onclick="copyRulesJson()" style="padding:4px 10px;font-size:12px;background:#4f46e5;color:#fff;border:none;'
+        'border-radius:4px;cursor:pointer">复制</button>'
+        '<button onclick="applyRulesJson()" style="padding:4px 10px;font-size:12px;background:#059669;color:#fff;border:none;'
+        'border-radius:4px;cursor:pointer">应用</button>'
+        '</div>'
+        '</div>'
+        '<div style="margin-top:6px;font-size:12px;color:#94a3b8">'
+        '提示: 在 API 接口配置中填入以上 JSON 规则，即可复用当前报表的筛选/排序/字段设置。'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
+    return html
 
 
 def build_memo_section_html(memo_raw: str) -> str:
@@ -1531,3 +1655,244 @@ function updateBatchCount() {{
 </div>"""
 
     return cat_areas + tab_html + uncat_section
+
+
+# ===================================================================
+# API 端点管理渲染函数
+# ===================================================================
+
+
+def build_api_endpoints_list_html(api_endpoints: list[dict],
+                                   report_id: int) -> str:
+    """
+    渲染报表编辑表单中的 API 接口列表区块。
+
+    参数:
+        api_endpoints: API 端点列表
+        report_id: 关联报表 ID
+    """
+    rows = ""
+    for ep in api_endpoints:
+        ep_id = ep["id"]
+        ep_name = _escape(ep.get("name", ""))
+        ep_path = _escape(ep.get("url_path", ""))
+        ep_format = _escape(ep.get("output_format", "json"))
+        enabled = int(ep.get("enabled", 1))
+        enabled_badge = ('<span style="color:#059669;font-weight:600">启用</span>'
+                         if enabled else
+                         '<span style="color:#dc2626;font-weight:600">禁用</span>')
+        api_key_raw = ep.get("api_key") or ""
+        api_key_display = _mask_api_key(api_key_raw) if api_key_raw else "—"
+        rows += f"""<tr>
+  <td><strong>{ep_name}</strong></td>
+  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
+  <td>{ep_format}</td>
+  <td>{enabled_badge}</td>
+  <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
+  <td class="ops-cell">
+    {_link_btn(f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit", "编辑")}
+    <form method="post" action="/config/reports/{report_id}/api_endpoints/{ep_id}/delete" style="display:inline"
+          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
+      <button type="submit" class="btn btn-danger btn-sm">删除</button>
+    </form>
+  </td>
+</tr>"""
+    return f"""<div class="section" style="margin-top:24px">
+<div class="section-title" style="font-size:16px">
+  <span>🔌 API 接口</span>
+  <span class="actions">{_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")}</span>
+</div>
+<div class="table-wrap">
+<table><thead><tr>
+  <th>名称</th><th>URL 路径</th><th>格式</th><th>状态</th><th>API Key</th><th>操作</th>
+</tr></thead><tbody>
+{rows or '<tr><td colspan="6" class="empty-state">暂无 API 接口配置</td></tr>'}
+</tbody></table>
+</div>
+</div>"""
+
+
+def _mask_api_key(key: str) -> str:
+    """
+    对 API Key 进行掩码显示。
+
+    保留前4个字符和后4个字符，中间用 *** 替代。
+    短密钥则全部显示后4位以 *** 开头。
+    """
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return key[:2] + "***" + key[-2:]
+    return key[:4] + "***" + key[-4:]
+
+
+def build_api_endpoint_form_html(report_id: int, report_name: str,
+                                 endpoint: dict = None,
+                                 flash: str = None) -> str:
+    """
+    渲染 API 端点编辑/新增表单。
+
+    参数:
+        report_id: 关联报表 ID
+        report_name: 关联报表名称（显示用）
+        endpoint: 现有端点配置（None 表示新增）
+        flash: 错误消息
+    """
+    is_edit = endpoint is not None
+    if is_edit:
+        ep_id = endpoint["id"]
+        action_url = f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit"
+        title = "编辑 API 接口"
+    else:
+        action_url = f"/config/reports/{report_id}/api_endpoints/new"
+        title = "新增 API 接口"
+
+    if flash:
+        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
+        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
+    else:
+        flash_html = ""
+
+    name = _escape(endpoint["name"]) if is_edit else ""
+    url_path = endpoint["url_path"] if is_edit else ""
+    # 从完整 URL 路径中剥离 /api/ 前缀，仅保留用户输入的后段
+    if url_path.startswith("/api/"):
+        url_path_short = url_path[5:]
+    elif url_path.startswith("/api"):
+        url_path_short = url_path[4:]
+    else:
+        url_path_short = url_path
+    url_path_short = _escape(url_path_short)
+    output_format = endpoint.get("output_format", "json") if is_edit else "json"
+    row_limit = str(endpoint.get("row_limit", 0) or 0) if is_edit else "0"
+    api_key_raw = endpoint.get("api_key") or "" if is_edit else ""
+    allowed_origins = _escape(endpoint.get("allowed_origins") or "") if is_edit else ""
+    enabled_checked = (' checked' if (is_edit and int(endpoint.get("enabled", 1)))
+                       else (' checked' if not is_edit else ''))
+
+    # 从三个 DB 字段拼合规则 JSON
+    if is_edit:
+        rules = {}
+        cols_val = endpoint.get("columns") or ""
+        filters_raw_db = endpoint.get("filters") or ""
+        sorts_raw_db = endpoint.get("sorts") or ""
+        if cols_val:
+            rules["columns"] = cols_val
+        if filters_raw_db:
+            try:
+                rules["filters"] = json.loads(filters_raw_db)
+            except (json.JSONDecodeError, TypeError):
+                rules["filters"] = filters_raw_db
+        if sorts_raw_db:
+            try:
+                rules["sorts"] = json.loads(sorts_raw_db)
+            except (json.JSONDecodeError, TypeError):
+                rules["sorts"] = sorts_raw_db
+        rule_json = json.dumps(rules, indent=2, ensure_ascii=False) if rules else ""
+    else:
+        rule_json = ""
+
+    format_opts = "".join(
+        f'<option value="{v}"{" selected" if output_format == v else ""}>{v.upper()}</option>'
+        for v in ("json", "csv")
+    )
+
+    return f"""<div class="card">
+<h2>{title}</h2>
+{flash_html}
+<div style="margin-bottom:16px;padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:14px;color:#475569">
+  关联报表: <strong>{_escape(report_name)}</strong> (ID: {report_id})
+</div>
+<form method="post" action="{action_url}" class="config-form">
+  <label>接口名称: <input type="text" name="name" value="{name}" required
+    placeholder="例如: 客户数据 API"></label>
+
+  <label>URL 路径:
+    <div style="display:flex;align-items:center;gap:0;margin-top:4px">
+      <span style="padding:6px 12px;background:#e2e8f0;border:1px solid #cbd5e1;border-right:none;border-radius:6px 0 0 6px;font-family:monospace;font-size:14px;color:#475569;white-space:nowrap;line-height:1.5">/api/</span>
+      <input type="text" name="url_path" value="{url_path_short}" required
+        id="url-path-input"
+        placeholder="customers"
+        style="border-radius:0 6px 6px 0;flex:1;min-width:200px"
+        oninput="updateFullUrl()">
+    </div>
+  </label>
+  <div style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-weight:500;color:#64748b">完整 URL:</span>
+    <code id="full-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+    <button type="button" onclick="copyFullUrl()" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
+  </div>
+  <script>
+  function updateFullUrl() {{
+    var input = document.getElementById('url-path-input');
+    var display = document.getElementById('full-url-text');
+    var path = input.value || '';
+    display.textContent = window.location.origin + '/api/' + path;
+  }}
+  function copyFullUrl() {{
+    var el = document.getElementById('full-url-text');
+    if (!el) return;
+    var text = el.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(text).catch(function(){{}});
+    }} else {{
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }}
+  }}
+  document.addEventListener('DOMContentLoaded', updateFullUrl);
+  </script>
+
+  <label>输出格式:
+    <select name="output_format">{format_opts}</select>
+  </label>
+
+  <div style="margin-bottom:16px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a;font-size:13px;color:#92400e">
+    <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
+    展开「<strong>当前规则</strong>」折叠区，点击<strong>复制</strong>按钮即可获取 JSON 格式的配置，
+    直接粘贴到下方的 JSON 文本框中。
+    <div style="margin-top:4px;font-size:12px;color:#a16207">
+      查看报表 → <a href="/report?id={report_id}" target="_blank" style="color:#4f46e5;font-weight:600">/report?id={report_id}</a>
+    </div>
+  </div>
+
+  <label>规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
+    <textarea name="rule_json" class="sql-textarea"
+      placeholder='{{"filters":[{{"col":"status","op":"eq","val":"active"}}],"sorts":[{{"col":"created_at","dir":"desc"}}],"columns":"id,name,email"}}'
+      rows="5" style="min-height:100px;font-family:monospace">{_escape(rule_json)}</textarea></label>
+
+  <label>最大行数（0=不限制）:
+    <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
+
+  <label>API Key（留空=无需鉴权）:
+    <input type="text" name="api_key" value="{_escape(api_key_raw)}"
+      placeholder="留空则不鉴权"
+      pattern="[a-zA-Z0-9_\\-]+" title="仅允许字母、数字、下划线和短横线">
+    <span style="color:#94a3b8;font-weight:400;font-size:13px;display:block;margin-top:4px">
+      调用时通过 Authorization: Bearer &lt;key&gt; 或 ?api_key=xxx 传递
+    </span>
+  </label>
+
+  <label>CORS 允许来源（逗号分隔，留空=不设 CORS）:
+    <input type="text" name="allowed_origins" value="{allowed_origins}"
+      placeholder="例如: https://example.com,http://localhost:3000"></label>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+    <input type="hidden" name="enabled" value="0">
+    <input type="checkbox" name="enabled" value="1"{enabled_checked}>
+    <span style="font-weight:600">启用</span>
+  </label>
+
+  <div class="form-actions">
+    <button type="submit" name="action" value="save_close" class="btn btn-primary">保存并关闭</button>
+    <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
+    <a href="/config/reports/{report_id}/edit" class="cancel">关闭</a>
+  </div>
+</form>
+</div>"""

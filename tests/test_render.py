@@ -49,6 +49,10 @@ from render import (
     build_pool_section_html, build_user_section_html, build_category_section_html,
     # 分类选项
     build_category_opts_html,
+    # 当前规则区
+    build_current_rules_section_html,
+    # API 端点表单
+    build_api_endpoint_form_html,
 )
 
 
@@ -1546,3 +1550,133 @@ class TestBuildCategoryOptsHtml(unittest.TestCase):
         """空节点列表返回空字符串"""
         result = build_category_opts_html([], 0, "")
         self.assertEqual(result, "")
+
+
+# ===================================================================
+# 当前规则区测试
+# ===================================================================
+
+
+class TestBuildCurrentRulesSectionHtml(unittest.TestCase):
+    """build_current_rules_section_html 函数测试"""
+
+    def test_has_textarea(self):
+        """替换为 textarea 元素"""
+        result = build_current_rules_section_html([], [], ["a"], ["a"])
+        self.assertIn('<textarea id="current-rules-json"', result)
+        self.assertNotIn("<pre id=", result)
+
+    def test_has_apply_button(self):
+        """包含应用按钮"""
+        result = build_current_rules_section_html([], [], ["a"], ["a"])
+        self.assertIn("applyRulesJson()", result)
+        self.assertIn("应用", result)
+
+    def test_has_copy_button(self):
+        """仍包含复制按钮"""
+        result = build_current_rules_section_html([], [], ["a"], ["a"])
+        self.assertIn("copyRulesJson()", result)
+        self.assertIn("复制", result)
+
+    def test_rules_json_in_textarea(self):
+        """JSON 规则内容在 textarea 中（HTML 转义）"""
+        filters = [("status", "eq", "active")]
+        sorts = [("created_at", "desc")]
+        result = build_current_rules_section_html(filters, sorts,
+                                                   ["id", "name"],
+                                                   ["id", "name", "age"])
+        # JSON 被 HTML 转义，双引号变为 &quot;
+        self.assertIn('&quot;status&quot;', result)
+        self.assertIn('&quot;created_at&quot;', result)
+        self.assertIn('&quot;id,name&quot;', result)
+
+    def test_empty_rules_default(self):
+        """无规则时显示默认提示"""
+        result = build_current_rules_section_html([], [], ["a"], ["a"])
+        self.assertIn("无自定义规则", result)
+
+
+# ===================================================================
+# API 端点表单测试
+# ===================================================================
+
+
+class TestBuildApiEndpointFormHtml(unittest.TestCase):
+    """build_api_endpoint_form_html 函数测试"""
+
+    def test_has_rule_json_field(self):
+        """包含 rule_json textarea"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertIn('name="rule_json"', result)
+        self.assertIn("规则 JSON", result)
+
+    def test_no_columns_field(self):
+        """不再有独立的 columns 字段"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertNotIn('name="columns"', result)
+
+    def test_no_filters_field(self):
+        """不再有独立的 filters 字段"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertNotIn('name="filters"', result)
+
+    def test_no_sorts_field(self):
+        """不再有独立的 sorts 字段"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertNotIn('name="sorts"', result)
+
+    def test_edit_populates_rule_json(self):
+        """编辑时三字段合并为 JSON（HTML 转义）"""
+        endpoint = {
+            "id": 1, "name": "测试端点", "url_path": "/api/test",
+            "output_format": "json", "columns": "id,name",
+            "filters": '[{"col":"status","op":"eq","val":"active"}]',
+            "sorts": '[{"col":"created_at","dir":"desc"}]',
+            "row_limit": 0, "api_key": "", "allowed_origins": "",
+            "enabled": 1,
+        }
+        result = build_api_endpoint_form_html(1, "测试报表", endpoint)
+        # JSON 被 HTML 转义
+        self.assertIn('&quot;id,name&quot;', result)
+        self.assertIn('&quot;status&quot;', result)
+        self.assertIn('&quot;created_at&quot;', result)
+
+    def test_edit_empty_fields(self):
+        """编辑时三字段均为空"""
+        endpoint = {
+            "id": 1, "name": "测试端点", "url_path": "/api/test",
+            "output_format": "json", "columns": "",
+            "filters": "", "sorts": "",
+            "row_limit": 0, "api_key": "", "allowed_origins": "",
+            "enabled": 1,
+        }
+        result = build_api_endpoint_form_html(1, "测试报表", endpoint)
+        self.assertIn('name="rule_json"', result)
+
+    def test_has_save_close_button(self):
+        """包含保存并关闭按钮"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertIn('name="action" value="save_close"', result)
+        self.assertIn("保存并关闭", result)
+
+    def test_has_save_button(self):
+        """包含保存按钮（不返回）"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertIn('name="action" value="save"', result)
+        self.assertIn("保存", result)
+
+    def test_close_link_goes_to_report_edit(self):
+        """关闭按钮跳转到报表编辑页"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertIn('href="/config/reports/1/edit"', result)
+        self.assertIn("关闭", result)
+
+    def test_flash_success_uses_green_css(self):
+        """成功闪回消息使用绿色样式"""
+        result = build_api_endpoint_form_html(1, "测试报表", flash="保存成功")
+        self.assertIn('class="flash flash-success"', result)
+
+    def test_flash_error_uses_red_css(self):
+        """错误闪回消息使用红色样式"""
+        result = build_api_endpoint_form_html(1, "测试报表", flash="错误: 出错了")
+        self.assertIn('class="flash flash-error"', result)

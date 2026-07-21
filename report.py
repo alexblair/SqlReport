@@ -31,12 +31,14 @@ import redis_cache
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
+    _COMMON_JS,
     _OP_MAP, DEFAULT_OP, _escape, format_cell,
     build_filter_params as _build_filter_params,
     build_cols_param as _build_cols_param,
     build_pagination_html as _build_pagination,
     build_redis_banners_html as _build_redis_banners,
     build_debug_section_html, build_memo_section_html,
+    build_current_rules_section_html,
     build_result_selector_html, build_cache_badge_html,
     build_sort_bar_html, build_table_header_html, build_table_body_html,
     build_controls_bar_html, build_field_settings_panel_html,
@@ -548,23 +550,6 @@ _PAGE_HEADER = """<!DOCTYPE html>
 
 _FOOTER = r"""</div>
 <script>
-function toggleSection(btn, label) {
-  var content = btn.nextElementSibling;
-  var hidden = content.classList.toggle("hidden");
-  btn.textContent = hidden ? "▶ " + label : "▼ " + label;
-}
-function toggleFilterInput(inputName, select) {
-  var input = document.getElementsByName(inputName)[0];
-  if (!input) return;
-  var val = select.value;
-  if (val === 'nofilter' || val === 'isempty' || val === 'notempty') {
-    input.style.display = 'none';
-    input.disabled = true;
-  } else {
-    input.style.display = '';
-    input.disabled = false;
-  }
-}
 function toggleFieldItem(checkbox) {
   var label = checkbox.closest('.field-item');
   if (label) {
@@ -885,6 +870,7 @@ function formatDebugSQL() {
   });
 }
 document.addEventListener('DOMContentLoaded', formatDebugSQL);
+""" + _COMMON_JS + r"""
 </script>
 </body></html>"""
 
@@ -1378,9 +1364,11 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     result_selector_html = build_result_selector_html(
         report_id, qs_page_size, result_names, active_index, sql_override, swi)
 
-    # ---- Debug 信息、备注均委托给 render.py 渲染 ----
+    # ---- Debug 信息、当前规则、备注均委托给 render.py 渲染 ----
     debug_html = build_debug_section_html(
         pool_config, actual_sql, active_index, num_results, result_names, filters, sorts)
+    current_rules_html = build_current_rules_section_html(
+        filters, sorts, display_columns, all_columns)
     memo_html = build_memo_section_html(report.get("memo") or "")
 
     # ---- 结果参数（多结果集时附加到 URL） ----
@@ -1441,6 +1429,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             f'</div>' +
             memo_html +
             debug_html +
+            current_rules_html +
             result_selector_html +
             _build_redis_banners(result.cache_info) +
             controls +

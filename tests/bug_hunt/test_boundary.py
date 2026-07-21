@@ -134,9 +134,10 @@ class TestServerBoundary(unittest.TestCase):
         self.assertIsNone(route)
 
     def test_unknown_post_path_returns_none(self):
-        """_match_route(POST, '/api/unknown') → 应返回 None"""
+        """_match_route(POST, '/api/unknown') → 应匹配 API 路由"""
         route = self.server._match_route("POST", "/api/unknown")
-        self.assertIsNone(route)
+        self.assertIsNotNone(route)
+        self.assertEqual(route.handler, "_handle_api")
 
     def test_empty_path_matches_root(self):
         """_match_route(GET, '') → 应匹配根路由"""

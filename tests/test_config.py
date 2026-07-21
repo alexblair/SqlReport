@@ -53,6 +53,23 @@ def _make_conn():
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
+        CREATE TABLE api_endpoints (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id        INTEGER NOT NULL,
+            name             TEXT    NOT NULL,
+            url_path         TEXT    UNIQUE NOT NULL,
+            output_format    TEXT    NOT NULL DEFAULT 'json',
+            columns          TEXT,
+            filters          TEXT,
+            sorts            TEXT,
+            row_limit        INTEGER DEFAULT 0,
+            api_key          TEXT,
+            allowed_origins  TEXT,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+        );
     """)
     return conn
 
@@ -60,29 +77,36 @@ def _make_conn():
 class TestPathParsing(unittest.TestCase):
     """URL 路径解析测试"""
 
+    def _e(self, section, action, id_val, report_id=None, endpoint_id=None):
+        """辅助构建期望的路径解析结果。"""
+        return {"section": section, "action": action, "id": id_val,
+                "report_id": report_id, "endpoint_id": endpoint_id}
+
     def test_overview_path(self):
-        self.assertEqual(config.parse_config_path("/config"), {"section": None, "action": "overview", "id": None})
-        self.assertEqual(config.parse_config_path("/config/"), {"section": None, "action": "overview", "id": None})
+        self.assertEqual(config.parse_config_path("/config"),
+                         self._e(None, "overview", None))
+        self.assertEqual(config.parse_config_path("/config/"),
+                         self._e(None, "overview", None))
 
     def test_pool_add_path(self):
         self.assertEqual(config.parse_config_path("/config/pools/add"),
-                         {"section": "pools", "action": "add", "id": None})
+                         self._e("pools", "add", None))
 
     def test_pool_edit_path(self):
         self.assertEqual(config.parse_config_path("/config/pools/5/edit"),
-                         {"section": "pools", "action": "edit", "id": 5})
+                         self._e("pools", "edit", 5))
 
     def test_pool_delete_path(self):
         self.assertEqual(config.parse_config_path("/config/pools/3/delete"),
-                         {"section": "pools", "action": "delete", "id": 3})
+                         self._e("pools", "delete", 3))
 
     def test_user_add_path(self):
         self.assertEqual(config.parse_config_path("/config/users/add"),
-                         {"section": "users", "action": "add", "id": None})
+                         self._e("users", "add", None))
 
     def test_report_edit_path(self):
         self.assertEqual(config.parse_config_path("/config/reports/7/edit"),
-                         {"section": "reports", "action": "edit", "id": 7})
+                         self._e("reports", "edit", 7))
 
     def test_unmatched_path(self):
         result = config.parse_config_path("/config/unknown/123")
@@ -438,6 +462,95 @@ class TestReportFormButtons(unittest.TestCase):
         self.assertIn(f'value="{rid}"', body)
         self.assertIn('type="hidden"', body)
         self.assertIn('name="id"', body)
+
+
+# ===================================================================
+# API 端点规则 JSON 测试
+# ===================================================================
+
+
+class TestApiEndpointRuleJsonFlow(unittest.TestCase):
+    """API 端点 rule_json 输入/输出测试"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "API池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "API报表", "SELECT 1", 20, 1)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_create_with_full_rule_json(self):
+        """创建 API 端点时传入完整 rule_json，验证三字段正确拆分存储"""
+        form = ("name=测试端点&url_path=/test&output_format=json"
+                "&rule_json={\"filters\":[{\"col\":\"status\",\"op\":\"eq\",\"val\":\"active\"}],"
+                "\"sorts\":[{\"col\":\"created_at\",\"dir\":\"desc\"}],"
+                "\"columns\":\"id,name\"}"
+                "&row_limit=0&enabled=1")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
+        self.assertEqual(code, "302")
+        endpoints = db.get_api_endpoints_by_report(self.conn, 1)
+        self.assertEqual(len(endpoints), 1)
+        ep = endpoints[0]
+        self.assertEqual(ep["columns"], "id,name")
+        self.assertIn("status", ep["filters"])
+        self.assertIn("desc", ep["sorts"])
+
+    def test_create_with_partial_rule_json(self):
+        """传入只含 filters 的部分 JSON，验证其他字段为空"""
+        form = ("name=部分规则&url_path=/partial&output_format=json"
+                "&rule_json={\"filters\":[{\"col\":\"age\",\"op\":\"gt\",\"val\":\"18\"}]}"
+                "&row_limit=0&enabled=1")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
+        self.assertEqual(code, "302")
+        ep = db.get_api_endpoints_by_report(self.conn, 1)[0]
+        self.assertIn("age", ep["filters"])
+        self.assertIsNone(ep["columns"])
+        self.assertIsNone(ep["sorts"])
+
+    def test_create_with_empty_json(self):
+        """传入空 JSON，验证三个字段均为空"""
+        form = ("name=空规则&url_path=/empty&output_format=json"
+                "&rule_json={}"
+                "&row_limit=0&enabled=1")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
+        self.assertEqual(code, "302")
+        ep = db.get_api_endpoints_by_report(self.conn, 1)[0]
+        self.assertIsNone(ep["columns"])
+        self.assertIsNone(ep["filters"])
+        self.assertIsNone(ep["sorts"])
+
+    def test_edit_roundtrip(self):
+        """创建后编辑加载，验证三字段正确拼回 rule_json"""
+        # 先创建
+        eid = db.add_api_endpoint(
+            self.conn, 1, "往返端点", "/api/roundtrip",
+            columns="id,name,email",
+            filters='[{"col":"status","op":"eq","val":"active"}]',
+            sorts='[{"col":"created_at","dir":"desc"}]',
+        )
+        # 编辑页面加载应含完整的 rule_json
+        code, body, _ = config.handle_request(
+            self.conn, "GET",
+            f"/config/reports/1/api_endpoints/{eid}/edit", "")
+        self.assertEqual(code, "200")
+        self.assertIn('"id,name,email"', body)
+        self.assertIn('"status"', body)
+        self.assertIn('"created_at"', body)
+        # 提交编辑也应正常工作
+        form = ("name=往返端点改&url_path=/roundtrip&output_format=json"
+                "&rule_json={\"columns\":\"id\",\"filters\":[],\"sorts\":[]}"
+                "&row_limit=0&enabled=1")
+        code2, body2, headers2 = config.handle_request(
+            self.conn, "POST",
+            f"/config/reports/1/api_endpoints/{eid}/edit", "", form)
+        self.assertEqual(code2, "302")
+        ep = db.get_api_endpoint(self.conn, eid)
+        self.assertEqual(ep["name"], "往返端点改")
+        self.assertEqual(ep["columns"], "id")
 
 
 if __name__ == "__main__":

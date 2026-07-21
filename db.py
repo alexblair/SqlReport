@@ -21,6 +21,9 @@ from config_db import (  # noqa: F401, F403
     get_reports_by_category, get_reports, move_report_to_category,
     get_category_tree, get_parent_categories, batch_set_report_category,
     add_session, get_session, remove_session, get_all_sessions, clear_sessions,
+    add_api_endpoint, get_api_endpoint, get_api_endpoint_by_path,
+    get_api_endpoints_by_report, get_all_api_endpoints,
+    update_api_endpoint, delete_api_endpoint, delete_api_endpoints_by_report,
 )
 
 # 从 query_executor 导入 MySQL 查询执行函数

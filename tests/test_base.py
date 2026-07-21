@@ -72,6 +72,24 @@ _SQL_CREATE_SESSIONS = """CREATE TABLE IF NOT EXISTS sessions (
     created_at REAL NOT NULL
 )"""
 
+_SQL_CREATE_API_ENDPOINTS = """CREATE TABLE IF NOT EXISTS api_endpoints (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id        INTEGER NOT NULL,
+    name             TEXT    NOT NULL,
+    url_path         TEXT    UNIQUE NOT NULL,
+    output_format    TEXT    NOT NULL DEFAULT 'json',
+    columns          TEXT,
+    filters          TEXT,
+    sorts            TEXT,
+    row_limit        INTEGER DEFAULT 0,
+    api_key          TEXT,
+    allowed_origins  TEXT,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+)"""
+
 
 # ---------------------------------------------------------------------------
 # 工厂函数
@@ -101,8 +119,8 @@ def init_test_db(conn: sqlite3.Connection) -> None:
     """
     在 SQLite 连接上初始化所有测试表结构。
 
-    创建 connection_pools、users、report_categories、report_configs、sessions
-    五张配置表。DDL 与 db.py::_SQLITE_SCHEMA 保持一致，但不依赖 db 模块，
+    创建 connection_pools、users、report_categories、report_configs、sessions、
+    api_endpoints 六张配置表。DDL 与 db.py::_SQLITE_SCHEMA 保持一致，但不依赖 db 模块，
     避免循环依赖。
 
     幂等设计：使用 IF NOT EXISTS，可安全重复调用。
@@ -116,6 +134,7 @@ def init_test_db(conn: sqlite3.Connection) -> None:
     conn.execute(_SQL_CREATE_REPORT_CATEGORIES)
     conn.execute(_SQL_CREATE_REPORT_CONFIGS)
     conn.execute(_SQL_CREATE_SESSIONS)
+    conn.execute(_SQL_CREATE_API_ENDPOINTS)
     conn.commit()
 
 

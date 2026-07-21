@@ -30,6 +30,7 @@ import auth
 import config
 import report
 import export as export_mod
+import api_handler
 from app_config import get_server_config, get_log_config
 
 # ---------------------------------------------------------------------------
@@ -165,6 +166,7 @@ ROUTES = [
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
     RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
+    RouteEntry(r"^/api/", "*", False, False, "_handle_api"),
 ]
 
 
@@ -206,6 +208,9 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._handle("POST")
+
+    def do_OPTIONS(self):
+        self._handle("OPTIONS")
 
     def _handle(self, method: str):
         """基于路由表分发请求"""
@@ -321,6 +326,42 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         else:
             self.wfile.write(body.encode("utf-8"))
 
+    def _handle_api(self, method: str, path: str, query: str, conn=None):
+        """
+        处理 API 请求（不需要 session 认证，使用 API Key 鉴权）。
+
+        从 _handle() 传入 path 和 query，但不用传入的 conn（api_handler
+        自行管理连接）。
+        """
+        query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
+        body = self._read_body() if method == "POST" else ""
+
+        client_ip = _get_client_ip(self.headers, self.client_address)
+        status, resp_body, resp_headers = api_handler.handle_api_request(
+            path=path,
+            method=method,
+            headers=dict(self.headers),
+            body=body,
+            query_params=query_params,
+            client_ip=client_ip,
+        )
+
+        self.send_response(status)
+        found_content_type = False
+        for key, val in resp_headers.items():
+            self.send_header(key, val)
+            if key.lower() == "content-type":
+                found_content_type = True
+        if not found_content_type:
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        if isinstance(resp_body, str):
+            self.wfile.write(resp_body.encode("utf-8"))
+        elif isinstance(resp_body, bytes):
+            self.wfile.write(resp_body)
+        else:
+            self.wfile.write(str(resp_body).encode("utf-8"))
+
     # ---- 辅助方法 ----
 
     def _read_body(self) -> str:
@@ -348,6 +389,38 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", location)
         self.end_headers()
+
+
+# ---------------------------------------------------------------------------
+# 代理辅助函数
+# ---------------------------------------------------------------------------
+
+
+def _get_client_ip(headers, client_address) -> str:
+    """
+    获取客户端真实 IP（优先 X-Forwarded-For，其次直接连接的 remote_addr）。
+
+    参数:
+        headers: HTTP 请求头对象
+        client_address: (host, port) 元组
+    """
+    xff = headers.get("X-Forwarded-For", "")
+    if xff:
+        ips = [ip.strip() for ip in xff.split(",")]
+        if ips:
+            return ips[0]
+    return client_address[0]
+
+
+def _get_forwarded_url(headers, path: str) -> str:
+    """
+    构建代理透传后的原始 URL。
+
+    优先 X-Forwarded-Host/Proto，其次 Host 头。
+    """
+    proto = headers.get("X-Forwarded-Proto", "http")
+    host = headers.get("X-Forwarded-Host", "") or headers.get("Host", "localhost")
+    return f"{proto}://{host}{path}"
 
 
 # ---------------------------------------------------------------------------

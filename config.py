@@ -17,6 +17,7 @@ URL 路由约定：
 """
 
 import re
+import json
 import urllib.parse
 import db
 import auth
@@ -34,6 +35,8 @@ from render import (
     render_page_footer,
     _SQL_HIGHLIGHT_JS,
     _SQL_FORMATTER_JS,
+    build_api_endpoints_list_html,
+    build_api_endpoint_form_html,
 )
 
 
@@ -45,7 +48,9 @@ from render import (
 # /config/pools/{id}/move-up, /config/pools/{id}/move-down, /config/reports/batch-pool
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
-    r"(?:/(add|batch-pool|batch-set-category|batch-cache)|/(\d+)/(edit|delete|copy|move-up|move-down))?$"
+    r"(?:/(add|batch-pool|batch-set-category|batch-cache)"
+    r"|/(\d+)/(edit|delete|copy|move-up|move-down)"
+    r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete)))?$"
 )
 
 
@@ -54,15 +59,20 @@ def parse_config_path(path: str) -> dict:
     解析配置页 URL 路径，返回动作参数字典。
 
     返回格式:
-      {"section": "pools|users|reports", "action": "list|add|batch-pool|batch-set-category|batch-cache|edit|delete|copy|move-up|move-down",
-       "id": int|None}
+      {"section": "pools|users|reports|categories",
+       "action": "list|add|batch-pool|batch-set-category|batch-cache|edit|delete|copy|move-up|move-down|api_new|api_edit|api_delete",
+       "id": int|None,
+       "report_id": int|None,
+       "endpoint_id": int|None}
     """
     match = _PATH_PATTERN.match(path)
     if not match:
         # /config 或 /config/ 视为总览
         if path in ("/config", "/config/"):
-            return {"section": None, "action": "overview", "id": None}
-        return {"section": None, "action": None, "id": None}
+            return {"section": None, "action": "overview", "id": None,
+                    "report_id": None, "endpoint_id": None}
+        return {"section": None, "action": None, "id": None,
+                "report_id": None, "endpoint_id": None}
 
     section = match.group(1)
     # group(2) 匹配 add / batch-pool（无 id）
@@ -70,12 +80,39 @@ def parse_config_path(path: str) -> dict:
     # group(3) 匹配 id, group(4) 匹配 edit/delete/copy/move-up/move-down
     obj_id = int(match.group(3)) if match.group(3) else None
     obj_action = match.group(4)
+    # group(5) 匹配 api_endpoints 场景下的 report_id
+    api_report_id = int(match.group(5)) if match.group(5) else None
+    # group(6) 匹配 "new"
+    api_new = match.group(6)
+    # group(7) 匹配 api endpoint 的 id
+    api_endpoint_id = int(match.group(7)) if match.group(7) else None
+    # group(8) 匹配 edit/delete
+    api_sub_action = match.group(8)
+
+    if api_report_id:
+        if api_new == "new":
+            return {"section": section, "action": "api_new",
+                    "id": api_report_id, "report_id": api_report_id,
+                    "endpoint_id": None}
+        if api_sub_action == "edit" and api_endpoint_id:
+            return {"section": section, "action": "api_edit",
+                    "id": api_report_id, "report_id": api_report_id,
+                    "endpoint_id": api_endpoint_id}
+        if api_sub_action == "delete" and api_endpoint_id:
+            return {"section": section, "action": "api_delete",
+                    "id": api_report_id, "report_id": api_report_id,
+                    "endpoint_id": api_endpoint_id}
+        return {"section": section, "action": None, "id": None,
+                "report_id": None, "endpoint_id": None}
 
     if obj_action:
-        return {"section": section, "action": obj_action, "id": obj_id}
+        return {"section": section, "action": obj_action, "id": obj_id,
+                "report_id": None, "endpoint_id": None}
     if simple_action:
-        return {"section": section, "action": simple_action, "id": None}
-    return {"section": section, "action": "add", "id": None}
+        return {"section": section, "action": simple_action, "id": None,
+                "report_id": None, "endpoint_id": None}
+    return {"section": section, "action": "add", "id": None,
+            "report_id": None, "endpoint_id": None}
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +348,8 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
   </label>
   <div class="form-actions">
-    <button type="submit" class="btn btn-primary">保存</button>
+    <button type="submit" name="action" value="save_close" class="btn btn-primary">保存返回上级</button>
+    <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
     {view_btn}
     {preview_btn}
     <a href="/config" class="cancel">取消</a>
@@ -505,9 +543,19 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
     report = db.get_report(conn, report_id) if report_id else None
     if report_id and not report:
         return render_overview(conn, flash="错误: 报表不存在")
-    flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
-    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + _render_report_form(conn, report, copy_mode) + render_page_footer())
+    if flash:
+        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
+        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
+    else:
+        flash_html = ""
+    body = render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    body += flash_html + _render_report_form(conn, report, copy_mode)
+    # 编辑模式下显示 API 接口列表
+    if report_id and not copy_mode:
+        api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
+        body += build_api_endpoints_list_html(api_endpoints, report_id)
+    body += render_page_footer()
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +567,52 @@ def _parse_form_data(form_body: str) -> dict:
     """解析 URL 编码的表单数据"""
     parsed = urllib.parse.parse_qs(form_body, keep_blank_values=True)
     return {k: v[-1] if v else "" for k, v in parsed.items()}
+
+
+def _normalize_api_url_path(path: str) -> str:
+    """
+    规范化 API URL 路径。
+
+    表单提交的 url_path 不包含 /api/ 前缀（前缀在 UI 上固定显示），
+    此函数确保存储到 DB 时补全为 /api/<suffix> 格式。
+    同时兼容旧格式（已有 /api/ 前缀）以确保向后兼容。
+    """
+    path = path.strip()
+    if not path:
+        raise ValueError("URL 路径不能为空")
+    if path.startswith("/api/"):
+        return path
+    if path.startswith("/api"):
+        return "/api/" + path[4:].lstrip("/")
+    return "/api/" + path.lstrip("/")
+
+
+def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
+    """
+    解析规则 JSON 字符串，拆出 columns/filters/sorts 三个字段。
+
+    返回:
+        (columns, filters_json_str, sorts_json_str)
+    """
+    columns = ""
+    filters_str = ""
+    sorts_str = ""
+    if not rule_json_str or not rule_json_str.strip():
+        return columns, filters_str, sorts_str
+    try:
+        rules = json.loads(rule_json_str)
+    except json.JSONDecodeError:
+        raise ValueError("规则 JSON 格式无效")
+    if not isinstance(rules, dict):
+        raise ValueError("规则 JSON 必须是一个对象")
+    columns = rules.get("columns", "") or ""
+    f_raw = rules.get("filters")
+    if f_raw:
+        filters_str = json.dumps(f_raw, ensure_ascii=False) if isinstance(f_raw, list) else str(f_raw)
+    s_raw = rules.get("sorts")
+    if s_raw:
+        sorts_str = json.dumps(s_raw, ensure_ascii=False) if isinstance(s_raw, list) else str(s_raw)
+    return columns, filters_str, sorts_str
 
 
 def handle_pool_add(conn, form_body: str) -> tuple[str, str]:
@@ -645,6 +739,11 @@ def handle_report_edit(conn, report_id: int, form_body: str) -> tuple[str, str]:
                               result_names=result_names,
                               prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
         if ok:
+            action = data.get("action", "save_close")
+            if action == "save":
+                return "200", render_report_form_page(
+                    conn, report_id,
+                    flash=f"报表 {data['name']} 已更新")
             return "302", f"/config?flash=报表 {data['name']} 已更新"
         return "302", "/config?flash=错误: 更新失败"
     except Exception as e:
@@ -868,8 +967,30 @@ def handle_request(conn, method: str, path: str, query: str,
                 return "200", render_pool_form_page(conn, route["id"], copy_mode=True), {}
             elif route["section"] == "reports":
                 return "200", render_report_form_page(conn, route["id"], copy_mode=True), {}
+        # API 端点表单
+        if route["action"] == "api_new" and route["report_id"]:
+            return "200", render_api_endpoint_form_page(
+                conn, route["report_id"]), {}
+        if route["action"] == "api_edit" and route["endpoint_id"]:
+            return "200", render_api_endpoint_form_page(
+                conn, route["report_id"], route["endpoint_id"]), {}
 
     # ---- POST 处理 ----
+    # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
+    if method == "POST" and route["section"] == "reports" and route["report_id"]:
+        if route["action"] == "api_new" and route["report_id"]:
+            code, result = handle_api_endpoint_add(
+                conn, route["report_id"], form_body or "")
+            return _redirect_or_render(code, result)
+        elif route["action"] == "api_edit" and route["endpoint_id"]:
+            code, result = handle_api_endpoint_edit(
+                conn, route["report_id"], route["endpoint_id"], form_body or "")
+            return _redirect_or_render(code, result)
+        elif route["action"] == "api_delete" and route["endpoint_id"]:
+            code, result = handle_api_endpoint_delete(
+                conn, route["report_id"], route["endpoint_id"])
+            return _redirect_or_render(code, result)
+
     if method == "POST":
         if route["section"] == "pools":
             if route["action"] == "add":
@@ -941,6 +1062,117 @@ def handle_request(conn, method: str, path: str, query: str,
             return _redirect_or_render(code, result)
 
     return "302", "/config", {}
+
+
+def render_api_endpoint_form_page(conn, report_id: int,
+                                   endpoint_id: int = None,
+                                   flash: str = None) -> str:
+    """渲染新增/编辑 API 端点表单页"""
+    report = db.get_report(conn, report_id)
+    if not report:
+        return render_overview(conn, flash="错误: 报表不存在")
+    endpoint = db.get_api_endpoint(conn, endpoint_id) if endpoint_id else None
+    if endpoint_id and not endpoint:
+        return render_overview(conn, flash="错误: API 接口不存在")
+    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config",
+                                extra_css=_CONFIG_EXTRA_CSS)
+            + build_api_endpoint_form_html(report_id, report["name"],
+                                            endpoint, flash)
+            + render_page_footer())
+
+
+def handle_api_endpoint_add(conn, report_id: int,
+                             form_body: str) -> tuple[str, str]:
+    """处理新增 API 端点表单提交"""
+    data = _parse_form_data(form_body)
+    try:
+        row_limit = int(data.get("row_limit", 0) or 0)
+        enabled = int(data.get("enabled", 0) or 0)
+        # 从 rule_json 拆出三个字段
+        columns, filters_str, sorts_str = _parse_rule_json(
+            data.get("rule_json", ""))
+        url_path = _normalize_api_url_path(data["url_path"])
+        eid = db.add_api_endpoint(
+            conn, report_id, data["name"], url_path,
+            output_format=data.get("output_format", "json"),
+            columns=columns or None,
+            filters=filters_str or None,
+            sorts=sorts_str or None,
+            row_limit=row_limit,
+            api_key=data.get("api_key") or None,
+            allowed_origins=data.get("allowed_origins") or None,
+        )
+        # 单独更新 enabled 字段
+        if not enabled:
+            db.update_api_endpoint(conn, eid, enabled=0)
+        action = data.get("action", "save_close")
+        if action == "save":
+            return "200", render_api_endpoint_form_page(
+                conn, report_id, eid,
+                flash=f"API 接口 {data['name']} 已创建 (id={eid})")
+        return "302", (f"/config/reports/{report_id}/edit"
+                       f"?flash=API 接口 {data['name']} 已创建 (id={eid})")
+    except Exception as e:
+        err_msg = str(e)
+        if "UNIQUE" in err_msg or "unique" in err_msg:
+            err_msg = f"URL 路径 '{data.get('url_path', '')}' 已存在"
+        return "200", render_api_endpoint_form_page(
+            conn, report_id, flash=f"错误: {err_msg}")
+
+
+def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
+                              form_body: str) -> tuple[str, str]:
+    """处理编辑 API 端点表单提交"""
+    data = _parse_form_data(form_body)
+    endpoint = db.get_api_endpoint(conn, endpoint_id)
+    if not endpoint:
+        return "302", "/config?flash=错误: API 接口不存在"
+    try:
+        row_limit = int(data.get("row_limit", 0) or 0)
+        enabled = int(data.get("enabled", 0) or 0)
+        # 从 rule_json 拆出三个字段
+        columns, filters_str, sorts_str = _parse_rule_json(
+            data.get("rule_json", ""))
+        url_path = _normalize_api_url_path(data["url_path"])
+        ok = db.update_api_endpoint(
+            conn, endpoint_id,
+            name=data["name"],
+            url_path=url_path,
+            output_format=data.get("output_format", "json"),
+            columns=columns or None,
+            filters=filters_str or None,
+            sorts=sorts_str or None,
+            row_limit=row_limit,
+            api_key=data.get("api_key") or None,
+            allowed_origins=data.get("allowed_origins") or None,
+            enabled=enabled,
+        )
+        if ok:
+            action = data.get("action", "save_close")
+            if action == "save":
+                return "200", render_api_endpoint_form_page(
+                    conn, report_id, endpoint_id,
+                    flash=f"API 接口 {data['name']} 已更新")
+            return "302", (f"/config/reports/{report_id}/edit"
+                           f"?flash=API 接口 {data['name']} 已更新")
+        return "302", "/config?flash=错误: 更新失败"
+    except Exception as e:
+        err_msg = str(e)
+        if "UNIQUE" in err_msg or "unique" in err_msg:
+            err_msg = f"URL 路径 '{data.get('url_path', '')}' 已存在"
+        return "200", render_api_endpoint_form_page(
+            conn, report_id, endpoint_id, flash=f"错误: {err_msg}")
+
+
+def handle_api_endpoint_delete(conn, report_id: int,
+                                endpoint_id: int) -> tuple[str, str]:
+    """处理删除 API 端点"""
+    endpoint = db.get_api_endpoint(conn, endpoint_id)
+    if not endpoint:
+        return "302", "/config?flash=错误: API 接口不存在"
+    db.delete_api_endpoint(conn, endpoint_id)
+    return "302", (f"/config/reports/{report_id}/edit"
+                   f"?flash=API 接口 {endpoint['name']} 已删除")
 
 
 def _redirect_or_render(code: str, result: str) -> tuple[str, str, dict]:
