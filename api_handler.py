@@ -16,6 +16,7 @@ api_handler.py — API 数据接口请求处理模块
 import json
 import csv
 import io
+import math
 import time
 import logging
 import secrets
@@ -102,13 +103,26 @@ def _lookup_endpoint(conn, norm_path: str) -> dict | None:
     return db.get_api_endpoint_by_path(conn, norm_path)
 
 
+def _get_result_name(report, result_index: int, result_obj) -> str:
+    """获取结果集的显示名称，优先使用 result_names，否则自动命名。"""
+    result_names_raw = (report.get("result_names") or "").strip()
+    if result_names_raw:
+        names = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
+        if result_index < len(names):
+            return names[result_index]
+    cols = result_obj.results[result_index]["columns"]
+    preview = ", ".join(cols[:3])
+    suffix = "..." if len(cols) > 3 else ""
+    return f"结果{result_index + 1} ({preview}{suffix})"
+
+
 def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                        query_params: dict, headers: dict) -> tuple:
     """
     执行 API 查询：加载报表/连接池 + 解析参数 + 执行 SQL。
 
     返回 (data_rows, display_cols, total, page, ps, total_pages, output_format, pretty)
-    或在出错时返回 (HTTP状态码, 错误响应体, 响应头字典)。
+    或在出错/全部输出模式下返回 (HTTP状态码, 响应体, 响应头字典)。
     """
     report_id = endpoint["report_id"]
     report = db.get_report(conn, report_id)
@@ -129,6 +143,10 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     if row_limit > 0 and ps * (page - 1) >= row_limit:
         return [], [], 0, page, ps, 1, output_format, add_bom
 
+    result_mode = endpoint.get("result_mode", "single")
+    result_index = int(endpoint.get("result_index", 0))
+    active_index = -1 if result_mode == "all" else result_index
+
     result = execute_report(
         report_id=report_id,
         sql_query=report["sql_query"],
@@ -138,9 +156,50 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         sorts=sorts,
         filters=filters,
         refresh=False,
-        active_index=0,
+        active_index=active_index,
         report=report,
     )
+
+    # 全部输出模式
+    if result_mode == "all":
+        if output_format == "csv":
+            return 400, json.dumps({
+                "error": "CSV 格式不支持全部结果集输出，请使用 JSON 格式或改为单结果集模式",
+                "code": "CSV_NOT_SUPPORTED",
+            }, ensure_ascii=False), {"Content-Type": "application/json; charset=utf-8"}
+
+        results_list = []
+        for i, res in enumerate(result.results):
+            disp_cols = _resolve_display_cols(res["columns"], columns)
+            col_indices_local = [res["columns"].index(c) for c in disp_cols]
+            data_rows = [{disp_cols[ii]: row[idx] for ii, idx in enumerate(col_indices_local)}
+                         for row in res["rows"]]
+            total = res["total"]
+            total_pages = max(1, math.ceil(total / ps)) if ps > 0 else 1
+            results_list.append({
+                "name": _get_result_name(report, i, result),
+                "data": data_rows,
+                "total": total,
+                "page": page,
+                "page_size": ps,
+                "total_pages": total_pages,
+            })
+
+        resp_body = json.dumps({
+            "results": results_list,
+            "mode": "all",
+            "page": page,
+            "page_size": ps,
+        }, ensure_ascii=False, default=str)
+        return 200, resp_body, {"Content-Type": "application/json; charset=utf-8"}
+
+    # 单结果集模式 — 校验索引
+    if result_index >= len(result.results):
+        return 400, _error_response(
+            f"结果集索引 {result_index} 超出范围，该查询仅返回 {len(result.results)} 个结果集",
+            "INVALID_RESULT_INDEX", headers
+        ), {}
+
     all_cols = result.columns
     all_rows = result.rows
     display_cols = _resolve_display_cols(all_cols, columns)

@@ -1716,10 +1716,17 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                          '<span style="color:#dc2626;font-weight:600">禁用</span>')
         api_key_raw = ep.get("api_key") or ""
         api_key_display = _mask_api_key(api_key_raw) if api_key_raw else "—"
+        ep_result_mode = ep.get("result_mode", "single")
+        ep_result_index = int(ep.get("result_index", 0))
+        if ep_result_mode == "all":
+            mode_display = '<span style="color:#4f46e5;font-weight:600">全部</span>'
+        else:
+            mode_display = f'<span style="color:#475569">结果 {ep_result_index}</span>'
         rows += f"""<tr>
   <td><strong>{ep_name}</strong></td>
   <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
   <td>{ep_format}</td>
+  <td>{mode_display}</td>
   <td>{enabled_badge}</td>
   <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
   <td class="ops-cell">
@@ -1737,9 +1744,9 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th><th>URL 路径</th><th>格式</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th><th>URL 路径</th><th>格式</th><th>输出模式</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
-{rows or '<tr><td colspan="6" class="empty-state">暂无 API 接口配置</td></tr>'}
+{rows or '<tr><td colspan="7" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
 </div>
 </div>"""
@@ -1759,9 +1766,84 @@ def _mask_api_key(key: str) -> str:
     return key[:4] + "***" + key[-4:]
 
 
+def _build_result_mode_ui(result_count: int, result_names_list: list,
+                          current_mode: str, current_index: int) -> str:
+    """生成结果集输出模式的 UI 区块 HTML。"""
+    if result_count <= 1:
+        return ""
+    has_names = bool(result_names_list)
+    names = result_names_list if has_names else [f"结果{i+1}" for i in range(result_count)]
+    assert len(names) == result_count, "result_names_list 长度与 result_count 不一致"
+
+    # 名称列表展示
+    name_items = "".join(
+        f'<li style="margin:2px 0;font-size:13px;color:#475569">{"①" if i == 0 else "②" if i == 1 else "③" if i == 2 else f"<span style=\"font-family:monospace\">{i+1}.</span>"} {_escape(n)}</li>'
+        for i, n in enumerate(names)
+    )
+
+    # 下拉框选项
+    select_opts = "".join(
+        f'<option value="{i}"{" selected" if current_mode == "single" and current_index == i else ""}>{_escape(names[i])}</option>'
+        for i in range(result_count)
+    )
+
+    single_checked = ' checked' if current_mode == 'single' else ''
+    all_checked = ' checked' if current_mode == 'all' else ''
+    select_disabled = ' disabled' if current_mode == 'all' else ''
+
+    warning_html = ""
+    if not has_names:
+        warning_html = f'''<div style="margin:8px 0;padding:8px 12px;background:#fefce8;border-radius:6px;border:1px solid #fde68a;font-size:13px;color:#92400e">
+  <span>⚠️ 该报表的 SQL 包含 {result_count} 段 SELECT，但未配置结果集名称</span>
+  <span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>
+</div>'''
+
+    return f'''<div class="result-mode-section" style="margin-bottom:16px;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+  <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">结果集输出模式</div>
+  <div style="margin-bottom:8px;font-size:13px;color:#475569">
+    该报表的 SQL 包含 <strong>{result_count}</strong> 段 SELECT，返回 <strong>{result_count}</strong> 个结果集
+  </div>
+  <ul style="list-style:none;padding:0;margin:0 0 10px 0">{name_items}</ul>
+  {warning_html}
+  <div style="margin:6px 0">
+    <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
+      <input type="radio" name="result_mode" value="all"{all_checked} onchange="toggleResultIndex()">
+      <span style="font-weight:600">输出全部结果集</span>
+      <span style="color:#94a3b8;font-size:12px;font-weight:400">— 每个结果集独立分页，API 返回 JSON 数组</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
+      <input type="radio" name="result_mode" value="single"{single_checked} onchange="toggleResultIndex()">
+      <span style="font-weight:600">输出单个结果集：</span>
+      <select name="result_index"{select_disabled} style="margin-left:4px">
+        {select_opts}
+      </select>
+    </label>
+  </div>
+  <div style="font-size:12px;color:#94a3b8;margin-top:4px">
+    结果集名称在报表编辑页的「结果名称」中配置
+  </div>
+  <script>
+  function toggleResultIndex() {{
+    var radios = document.getElementsByName('result_mode');
+    var select = document.getElementsByName('result_index')[0];
+    for (var i = 0; i < radios.length; i++) {{
+      if (radios[i].checked && radios[i].value === 'all') {{
+        select.disabled = true;
+      }} else {{
+        select.disabled = false;
+      }}
+    }}
+  }}
+  document.addEventListener('DOMContentLoaded', toggleResultIndex);
+  </script>
+</div>'''
+
+
 def build_api_endpoint_form_html(report_id: int, report_name: str,
                                  endpoint: dict = None,
-                                 flash: str = None) -> str:
+                                 flash: str = None,
+                                 result_names_list: list = None,
+                                 result_count: int = 1) -> str:
     """
     渲染 API 端点编辑/新增表单。
 
@@ -1770,6 +1852,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         report_name: 关联报表名称（显示用）
         endpoint: 现有端点配置（None 表示新增）
         flash: 错误消息
+        result_names_list: 结果集名称列表（按行分割）
+        result_count: 结果集估算数量
     """
     is_edit = endpoint is not None
     if is_edit:
@@ -1802,6 +1886,10 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     allowed_origins = _escape(endpoint.get("allowed_origins") or "") if is_edit else ""
     enabled_checked = (' checked' if (is_edit and int(endpoint.get("enabled", 1)))
                        else (' checked' if not is_edit else ''))
+
+    # 结果集输出模式
+    result_mode = endpoint.get("result_mode", "single") if is_edit else "single"
+    result_index = int(endpoint.get("result_index", 0)) if is_edit else 0
 
     # 从三个 DB 字段拼合规则 JSON
     if is_edit:
@@ -1885,6 +1973,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <label>输出格式:
     <select name="output_format">{format_opts}</select>
   </label>
+
+  {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
   <div style="margin-bottom:16px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a;font-size:13px;color:#92400e">
     <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，

@@ -23,6 +23,7 @@ app_config.json
 
 # 数据库
 config.db
+audit.db
 
 # 系统
 .DS_Store

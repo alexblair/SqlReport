@@ -1075,6 +1075,19 @@ def handle_request(conn, method: str, path: str, query: str,
     return "302", "/config", {}
 
 
+def _estimate_result_count(sql_query: str) -> int:
+    """估算 SQL 中 SELECT/WITH 语句的数量。"""
+    sql = sql_query.strip()
+    if not sql:
+        return 1
+    count = 0
+    for stmt in db._split_sql_statements(sql):
+        stmt = stmt.strip().upper()
+        if stmt.startswith("SELECT") or stmt.startswith("WITH"):
+            count += 1
+    return max(count, 1)
+
+
 def render_api_endpoint_form_page(conn, report_id: int,
                                    endpoint_id: int = None,
                                    flash: str = None) -> str:
@@ -1085,10 +1098,17 @@ def render_api_endpoint_form_page(conn, report_id: int,
     endpoint = db.get_api_endpoint(conn, endpoint_id) if endpoint_id else None
     if endpoint_id and not endpoint:
         return render_overview(conn, flash="错误: API 接口不存在")
+
+    result_names_raw = (report.get("result_names") or "").strip()
+    result_names_list = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
+    result_count = len(result_names_list) if result_names_list else _estimate_result_count(report["sql_query"])
+
     return (render_page_header(title="Web 报表工具 - 配置", active_nav="config",
                                 extra_css=_CONFIG_EXTRA_CSS)
             + build_api_endpoint_form_html(report_id, report["name"],
-                                            endpoint, flash)
+                                            endpoint, flash,
+                                            result_names_list=result_names_list,
+                                            result_count=result_count)
             + render_page_footer())
 
 
@@ -1102,6 +1122,8 @@ def handle_api_endpoint_add(conn, report_id: int,
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
+        result_mode = data.get("result_mode", "single")
+        result_index = int(data.get("result_index", 0) or 0)
         eid = db.add_api_endpoint(
             conn, report_id, data["name"], url_path,
             output_format=data.get("output_format", "json"),
@@ -1111,6 +1133,8 @@ def handle_api_endpoint_add(conn, report_id: int,
             row_limit=row_limit,
             api_key=data.get("api_key") or None,
             allowed_origins=data.get("allowed_origins") or None,
+            result_mode=result_mode,
+            result_index=result_index,
             session_user=session_user,
         )
         if not enabled:
@@ -1143,6 +1167,8 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
+        result_mode = data.get("result_mode", "single")
+        result_index = int(data.get("result_index", 0) or 0)
         ok = db.update_api_endpoint(
             conn, endpoint_id,
             name=data["name"],
@@ -1155,6 +1181,8 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             api_key=data.get("api_key") or None,
             allowed_origins=data.get("allowed_origins") or None,
             enabled=enabled,
+            result_mode=result_mode,
+            result_index=result_index,
             session_user=session_user,
         )
         if ok:

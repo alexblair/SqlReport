@@ -1126,7 +1126,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         sorted_rows = _sort_rows(filtered, columns, sorts or [])
 
         total = len(sorted_rows)
-        if i == active_index:
+        if active_index == -1 or i == active_index:
             offset = (page - 1) * page_size
             page_rows = sorted_rows[offset:offset + page_size]
         else:
@@ -1134,7 +1134,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
         report_results.append({
             "columns": columns,
-            "rows": page_rows if i == active_index else sorted_rows,
+            "rows": page_rows if (active_index == -1 or i == active_index) else sorted_rows,
             "total": total,
         })
 

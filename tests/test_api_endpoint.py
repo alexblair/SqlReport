@@ -88,6 +88,8 @@ def _set_up_db():
             output_format TEXT NOT NULL DEFAULT 'json', columns TEXT, filters TEXT,
             sorts TEXT, row_limit INTEGER DEFAULT 0, api_key TEXT,
             allowed_origins TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+            result_mode TEXT NOT NULL DEFAULT 'single',
+            result_index INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);

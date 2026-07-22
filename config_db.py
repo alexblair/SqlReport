@@ -423,6 +423,22 @@ def _init_sqlite_migrations(conn) -> None:
     )""")
     conn.commit()
 
+    # 迁移 9: 添加 result_mode 和 result_index 列到 api_endpoints
+    cursor = conn.execute("PRAGMA table_info(api_endpoints)")
+    api_cols = {row[1] for row in cursor.fetchall()}
+    if "result_mode" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN result_mode TEXT NOT NULL DEFAULT 'single'")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "result_index" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN result_index INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -538,6 +554,25 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
     except Exception:
         conn.rollback()
+
+    # 迁移 9: 添加 result_mode 和 result_index 列到 api_endpoints
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
+        api_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        api_cols = set()
+    if "result_mode" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN result_mode VARCHAR(10) NOT NULL DEFAULT 'single'")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "result_index" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN result_index INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -1087,6 +1122,8 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      api_key: str = None,
                      allowed_origins: str = None,
                      enabled: int = 1,
+                     result_mode: str = 'single',
+                     result_index: int = 0,
                      session_user=None) -> int:
     """
     新增 API 端点配置，返回自增 id。
@@ -1102,20 +1139,25 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
         row_limit: 最大返回行数，0=不限制
         api_key: 鉴权密钥，None=无需鉴权
         allowed_origins: CORS 允许来源逗号分隔
+        result_mode: 'single' 或 'all'
+        result_index: 结果集索引（0-based），仅 result_mode='single' 时有效
     """
     cur = conn.execute(
         """INSERT INTO api_endpoints
            (report_id, name, url_path, output_format, columns, filters,
-            sorts, row_limit, api_key, allowed_origins, enabled)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            sorts, row_limit, api_key, allowed_origins, enabled,
+            result_mode, result_index)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (report_id, name, url_path, output_format, columns, filters,
-         sorts, row_limit, api_key, allowed_origins, enabled),
+         sorts, row_limit, api_key, allowed_origins, enabled,
+         result_mode, result_index),
     )
     conn.commit()
     _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
                      cur.lastrowid, name,
                      after_value={"name": name, "url_path": url_path,
-                                  "report_id": report_id, "output_format": output_format})
+                                  "report_id": report_id, "output_format": output_format,
+                                  "result_mode": result_mode, "result_index": result_index})
     return cur.lastrowid
 
 
@@ -1159,6 +1201,8 @@ def update_api_endpoint(conn, endpoint_id: int,
                         api_key: str = _UNSET,
                         allowed_origins: str = _UNSET,
                         enabled: int = _UNSET,
+                        result_mode: str = _UNSET,
+                        result_index: int = _UNSET,
                         session_user=None) -> bool:
     """
     更新 API 端点配置。仅更新非 _UNSET 的字段，影响行数 >0 返回 True。
@@ -1198,6 +1242,12 @@ def update_api_endpoint(conn, endpoint_id: int,
     if enabled is not _UNSET:
         sets.append("enabled=?")
         params.append(enabled)
+    if result_mode is not _UNSET:
+        sets.append("result_mode=?")
+        params.append(result_mode)
+    if result_index is not _UNSET:
+        sets.append("result_index=?")
+        params.append(result_index)
     if not sets:
         return False
     engine = _get_engine()
