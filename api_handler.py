@@ -20,30 +20,30 @@ import time
 import logging
 import secrets
 import urllib.parse
-import traceback
 
 import db
-from report import execute_report, _parse_sorts, _parse_cols, parse_filters
+from report import execute_report
+
+_CORS_BASE = {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+}
 
 
 def generate_api_key() -> str:
-    """
-    生成随机的 API Key。
-
-    使用 secrets.token_urlsafe(32) 生成 43 字符随机字符串，
-    添加 sk- 前缀，便于标识。
-    """
+    """生成随机的 API Key（sk- 前缀 + 43 字符随机字符串）。"""
     return "sk-" + secrets.token_urlsafe(32)
-from query_executor import create_mysql_connection
 
 
-def handle_api_request(path: str, method: str, headers: dict,
+def handle_api_request(conn, path: str, method: str, headers: dict,
                        body: str, query_params: dict,
                        client_ip: str = "") -> tuple:
     """
     API 请求入口函数。
 
     参数:
+        conn: 配置数据库连接
         path: URL 路径（不含查询参数）
         method: HTTP 方法（GET/POST/OPTIONS）
         headers: 请求头字典
@@ -56,116 +56,115 @@ def handle_api_request(path: str, method: str, headers: dict,
     """
     start = time.time()
 
-    # 路径匹配：从 /api/<path> 中提取 <path>
-    norm_path = "/" + path.lstrip("/")
-    prefix = "/api"
-    if not norm_path.startswith(prefix):
+    norm_path = _normalise_path(path)
+    if not norm_path.startswith("/api"):
         return 404, _error_response("接口不存在", "NOT_FOUND", headers), {}
-    api_path = norm_path[len(prefix):] or "/"
 
-    # 从 DB 查找匹配的端点
-    conn = db.get_config_db()
-    try:
-        endpoint = db.get_api_endpoint_by_path(conn, norm_path)
-        if endpoint is None:
-            _log_api_call(norm_path, client_ip, 404, time.time() - start)
-            return 404, _error_response("接口不存在或已禁用", "NOT_FOUND", headers), {}
+    endpoint = _lookup_endpoint(conn, norm_path)
+    if endpoint is None:
+        _log_api_call(norm_path, client_ip, 404, time.time() - start)
+        return 404, _error_response("接口不存在或已禁用", "NOT_FOUND", headers), {}
 
-        # CORS 预检
-        if method == "OPTIONS":
-            cors_headers = _build_cors_headers(endpoint, headers)
-            _log_api_call(norm_path, client_ip, 204, time.time() - start)
-            return 204, "", cors_headers
-
-        # API Key 鉴权
-        if endpoint.get("api_key"):
-            auth_result = _validate_api_key(endpoint, headers, query_params)
-            if auth_result:
-                _log_api_call(norm_path, client_ip, 401, time.time() - start)
-                return 401, _error_response(auth_result, "UNAUTHORIZED", headers), {}
-
-        # 获取关联报表配置
-        report_id = endpoint["report_id"]
-        report = db.get_report(conn, report_id)
-        if report is None:
-            _log_api_call(norm_path, client_ip, 500, time.time() - start)
-            return 500, _error_response("关联报表不存在", "INTERNAL_ERROR", headers), {}
-
-        # 获取连接池配置
-        pool_id = report.get("pool_id")
-        if pool_id is None:
-            _log_api_call(norm_path, client_ip, 500, time.time() - start)
-            return 500, _error_response("报表未配置连接池", "INTERNAL_ERROR", headers), {}
-        pool_config = db.get_pool(conn, pool_id)
-        if pool_config is None:
-            _log_api_call(norm_path, client_ip, 500, time.time() - start)
-            return 500, _error_response("连接池配置不存在", "INTERNAL_ERROR", headers), {}
-
-        # 解析规则：预设 + POST 覆盖
-        filters, sorts, page, page_size, row_limit, output_format, columns, pretty = \
-            _resolve_params(endpoint, method, body, query_params, headers)
-
-        # 限制 row_limit 上限（默认页面大小作分页基准）
-        actual_limit = row_limit if row_limit > 0 else 0
-        ps = page_size if row_limit == 0 else min(page_size, (row_limit if actual_limit == 0 else actual_limit))
-        if actual_limit > 0 and (ps * (page - 1) >= actual_limit):
-            # 超出限制范围，返回空
-            data_rows = []
-            total = 0
-            total_pages = 1
-        else:
-            # 执行查询（使用 report.py 的 execute_report）
-            result = execute_report(
-                report_id=report_id,
-                sql_query=report["sql_query"],
-                pool_config=pool_config,
-                page=page,
-                page_size=ps,
-                sorts=sorts,
-                filters=filters,
-                refresh=False,
-                active_index=0,
-                report=report,
-            )
-            all_cols = result.columns
-            all_rows = result.rows
-
-            # 字段选择
-            if columns:
-                col_list = [c.strip() for c in columns.split(",") if c.strip()]
-                display_cols = [c for c in col_list if c in all_cols]
-                if not display_cols:
-                    display_cols = list(all_cols)
-            else:
-                display_cols = list(all_cols)
-
-            # 提取显示列的数据
-            col_indices = [all_cols.index(c) for c in display_cols]
-            data_rows = []
-            for row in all_rows:
-                data_rows.append({display_cols[i]: row[idx] for i, idx in enumerate(col_indices)})
-
-            total = result.total
-            total_pages = result.total_pages
-
-        # 构建响应
-        if output_format == "csv":
-            status, resp_body, resp_headers = _format_csv_response(
-                data_rows, display_cols, pretty
-            )
-        else:
-            status, resp_body, resp_headers = _format_json_response(
-                data_rows, total, page, ps, total_pages
-            )
-
-        # 添加 CORS 头
+    if method == "OPTIONS":
         cors_headers = _build_cors_headers(endpoint, headers)
-        resp_headers.update(cors_headers)
+        _log_api_call(norm_path, client_ip, 204, time.time() - start)
+        return 204, "", cors_headers
 
-        _log_api_call(norm_path, client_ip, status, time.time() - start)
-        return status, resp_body, resp_headers
-    finally:
-        conn.close()
+    auth_error = _validate_api_key(endpoint, headers, query_params)
+    if auth_error:
+        _log_api_call(norm_path, client_ip, 401, time.time() - start)
+        return 401, _error_response(auth_error, "UNAUTHORIZED", headers), {}
+
+    result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
+    if isinstance(result[0], int):
+        _log_api_call(norm_path, client_ip, result[0], time.time() - start)
+        return result
+
+    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom = result
+
+    cors_headers = _build_cors_headers(endpoint, headers)
+    status, resp_body, resp_headers = _format_output(
+        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom
+    )
+    resp_headers.update(cors_headers)
+
+    _log_api_call(norm_path, client_ip, status, time.time() - start)
+    return status, resp_body, resp_headers
+
+
+def _normalise_path(path: str) -> str:
+    """规范化请求路径，确保以 / 开头。"""
+    return "/" + path.lstrip("/")
+
+
+def _lookup_endpoint(conn, norm_path: str) -> dict | None:
+    """从数据库查找匹配的 API 端点。"""
+    return db.get_api_endpoint_by_path(conn, norm_path)
+
+
+def _execute_api_query(conn, endpoint: dict, method: str, body: str,
+                       query_params: dict, headers: dict) -> tuple:
+    """
+    执行 API 查询：加载报表/连接池 + 解析参数 + 执行 SQL。
+
+    返回 (data_rows, display_cols, total, page, ps, total_pages, output_format, pretty)
+    或在出错时返回 (HTTP状态码, 错误响应体, 响应头字典)。
+    """
+    report_id = endpoint["report_id"]
+    report = db.get_report(conn, report_id)
+    if report is None:
+        return 500, _error_response("关联报表不存在", "INTERNAL_ERROR", headers), {}
+
+    pool_id = report.get("pool_id")
+    if pool_id is None:
+        return 500, _error_response("报表未配置连接池", "INTERNAL_ERROR", headers), {}
+    pool_config = db.get_pool(conn, pool_id)
+    if pool_config is None:
+        return 500, _error_response("连接池配置不存在", "INTERNAL_ERROR", headers), {}
+
+    filters, sorts, page, page_size, row_limit, output_format, columns, add_bom = \
+        _resolve_params(endpoint, method, body, query_params, headers)
+
+    ps = page_size if row_limit == 0 else min(page_size, row_limit)
+    if row_limit > 0 and ps * (page - 1) >= row_limit:
+        return [], [], 0, page, ps, 1, output_format, add_bom
+
+    result = execute_report(
+        report_id=report_id,
+        sql_query=report["sql_query"],
+        pool_config=pool_config,
+        page=page,
+        page_size=ps,
+        sorts=sorts,
+        filters=filters,
+        refresh=False,
+        active_index=0,
+        report=report,
+    )
+    all_cols = result.columns
+    all_rows = result.rows
+    display_cols = _resolve_display_cols(all_cols, columns)
+    col_indices = [all_cols.index(c) for c in display_cols]
+    data_rows = [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)} for row in all_rows]
+
+    return data_rows, display_cols, result.total, page, ps, result.total_pages, output_format, add_bom
+
+
+def _resolve_display_cols(all_cols: list, columns: str | None) -> list:
+    """根据 columns 参数解析显示列列表。"""
+    if not columns:
+        return list(all_cols)
+    col_list = [c.strip() for c in columns.split(",") if c.strip()]
+    display = [c for c in col_list if c in all_cols]
+    return display if display else list(all_cols)
+
+
+def _format_output(data_rows, display_cols, total, page, ps,
+                   total_pages, output_format, add_bom) -> tuple:
+    """根据 output_format 构建最终响应。"""
+    if output_format == "csv":
+        return _format_csv_response(data_rows, display_cols, add_bom)
+    return _format_json_response(data_rows, total, page, ps, total_pages)
 
 
 def _parse_post_body(body: str, headers: dict) -> dict | None:
@@ -233,58 +232,96 @@ def _build_cors_headers(endpoint: dict, headers: dict) -> dict:
 
     origins = [o.strip() for o in allowed_raw.split(",") if o.strip()]
     if "*" in origins:
-        return {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            "Access-Control-Max-Age": "86400",
-        }
+        return {**_CORS_BASE, "Access-Control-Allow-Origin": "*"}
 
     origin = headers.get("Origin", "")
     if origin in origins:
-        return {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            "Access-Control-Max-Age": "86400",
-        }
+        return {**_CORS_BASE, "Access-Control-Allow-Origin": origin}
 
     return {}
+
+
+def _parse_json_field(raw: str) -> list:
+    """尝试解析 JSON 字符串为列表，失败返回空列表。"""
+    if not raw:
+        return []
+    try:
+        result = json.loads(raw)
+        return result if isinstance(result, list) else []
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
+def _parse_preset_rules(endpoint: dict) -> tuple:
+    """
+    从端点配置解析预设规则。
+
+    返回:
+        (preset_filters, preset_sorts, row_limit, columns, output_format)
+    """
+    filters_raw = endpoint.get("filters", "") or ""
+    sorts_raw = endpoint.get("sorts", "") or ""
+    return (
+        _parse_json_field(filters_raw),
+        _parse_json_field(sorts_raw),
+        int(endpoint.get("row_limit", 0) or 0),
+        endpoint.get("columns") or None,
+        endpoint.get("output_format", "json"),
+    )
+
+
+def _apply_post_overrides(post_data: dict,
+                          preset_filters: list, preset_sorts: list,
+                          page: int, page_size: int,
+                          row_limit: int, columns: str | None,
+                          output_format: str) -> tuple:
+    """应用 POST 请求体中的覆盖参数。"""
+    if isinstance(post_data.get("filters"), list):
+        preset_filters = post_data["filters"]
+    if isinstance(post_data.get("sorts"), list):
+        preset_sorts = post_data["sorts"]
+    page = _safe_int(post_data.get("page"), page)
+    page_size = _safe_int(post_data.get("page_size"), page_size)
+    row_limit = _safe_int(post_data.get("limit"), row_limit)
+    columns = post_data.get("columns", columns)
+    output_format = post_data.get("format", output_format)
+    return preset_filters, preset_sorts, page, page_size, row_limit, columns, output_format
+
+
+def _apply_get_overrides(query_params: dict,
+                         page: int, page_size: int,
+                         row_limit: int, columns: str | None,
+                         output_format: str) -> tuple:
+    """应用 GET URL 参数中的覆盖参数。"""
+    page = max(1, _safe_int(query_params.get("page", [page])[0], page))
+    qs_page_size = query_params.get("page_size", [page_size])[0]
+    page_size = max(1, _safe_int(qs_page_size, page_size))
+    row_limit = _safe_int(query_params.get("limit", [row_limit])[0], row_limit)
+    fmt = query_params.get("format", [""])[0]
+    if fmt in ("json", "csv"):
+        output_format = fmt
+    columns = query_params.get("columns", [columns])[0] or columns
+    return page, page_size, row_limit, columns, output_format
+
+
+def _safe_int(val, default: int) -> int:
+    """安全转换为 int，失败返回默认值。"""
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
 
 
 def _resolve_params(endpoint: dict, method: str, body: str,
                     query_params: dict, headers: dict = None) -> tuple:
     """
-    解析请求参数：预设规则 + POST 覆盖。
-
-    参数:
-        headers: 请求头，用于 POST body 的内容类型判断
+    解析请求参数：预设规则 + POST/GET 覆盖。
 
     返回:
-        (filters, sorts, page, page_size, row_limit, output_format, columns, pretty)
+        (filters, sorts, page, page_size, row_limit, output_format, columns, add_bom)
     """
-    output_format = endpoint.get("output_format", "json")
-
-    # 解析预设 filters
-    preset_filters = []
-    filters_raw = endpoint.get("filters", "") or ""
-    if filters_raw:
-        try:
-            preset_filters = json.loads(filters_raw)
-        except (json.JSONDecodeError, ValueError):
-            preset_filters = []
-
-    # 解析预设 sorts
-    preset_sorts = []
-    sorts_raw = endpoint.get("sorts", "") or ""
-    if sorts_raw:
-        try:
-            preset_sorts = json.loads(sorts_raw)
-        except (json.JSONDecodeError, ValueError):
-            preset_sorts = []
-
-    row_limit = int(endpoint.get("row_limit", 0) or 0)
-    columns = endpoint.get("columns") or None
+    preset_filters, preset_sorts, row_limit, columns, output_format = \
+        _parse_preset_rules(endpoint)
 
     page = 1
     page_size = row_limit if row_limit > 0 else 20
@@ -292,63 +329,21 @@ def _resolve_params(endpoint: dict, method: str, body: str,
     if method == "POST" and body:
         post_data = _parse_post_body(body, headers or {})
         if post_data:
-            if "filters" in post_data and isinstance(post_data["filters"], list):
-                preset_filters = post_data["filters"]
-            if "sorts" in post_data and isinstance(post_data["sorts"], list):
-                preset_sorts = post_data["sorts"]
-            if "page" in post_data:
-                try:
-                    page = int(post_data["page"])
-                except (ValueError, TypeError):
-                    pass
-            if "page_size" in post_data:
-                try:
-                    page_size = int(post_data["page_size"])
-                except (ValueError, TypeError):
-                    pass
-            if "limit" in post_data:
-                try:
-                    row_limit = int(post_data["limit"])
-                except (ValueError, TypeError):
-                    pass
-            if "columns" in post_data:
-                columns = post_data["columns"]
-            if "format" in post_data:
-                output_format = post_data["format"]
-    else:
-        # GET 从 URL 参数读取覆盖
-        try:
-            page = max(1, int(query_params.get("page", [1])[0]))
-        except (ValueError, TypeError, IndexError):
-            page = 1
-        try:
-            page_size = max(1, int(query_params.get("page_size", [page_size])[0]))
-        except (ValueError, TypeError, IndexError):
-            pass
-        if "limit" in query_params:
-            try:
-                row_limit = int(query_params.get("limit", [0])[0])
-            except (ValueError, TypeError):
-                pass
-        if "format" in query_params:
-            f = query_params.get("format", [""])[0]
-            if f in ("json", "csv"):
-                output_format = f
+            preset_filters, preset_sorts, page, page_size, row_limit, columns, output_format = \
+                _apply_post_overrides(post_data, preset_filters, preset_sorts,
+                                       page, page_size, row_limit, columns, output_format)
+    elif query_params:
+        page, page_size, row_limit, columns, output_format = \
+            _apply_get_overrides(query_params, page, page_size, row_limit, columns, output_format)
 
-    if query_params and "columns" in query_params:
-        columns = query_params.get("columns", [""])[0] or columns
-
-    pretty = False
-    if query_params and "pretty" in query_params:
-        pretty = True
+    add_bom = bool(query_params and "pretty" in query_params)
 
     filters = [(f["col"], f.get("op", "contains"), f.get("val", ""))
                for f in preset_filters if "col" in f]
-
     sorts = [(s["col"], s.get("dir", "asc"))
              for s in preset_sorts if "col" in s]
 
-    return filters, sorts, page, page_size, row_limit, output_format, columns, pretty
+    return filters, sorts, page, page_size, row_limit, output_format, columns, add_bom
 
 
 def _format_json_response(data_rows: list[dict], total: int, page: int,
@@ -372,29 +367,25 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
 
 
 def _format_csv_response(data_rows: list[dict], columns: list[str],
-                         pretty: bool = False) -> tuple:
+                         add_bom: bool = False) -> tuple:
     """
     构建 CSV 响应。
 
     参数:
-        pretty: 为 True 时添加 UTF-8 BOM
+        add_bom: 为 True 时添加 UTF-8 BOM
 
     返回:
         (HTTP 状态码, CSV 字符串, 响应头字典)
     """
     output = io.StringIO()
-    if pretty:
+    if add_bom:
         output.write('\ufeff')
     writer = csv.DictWriter(output, fieldnames=columns, extrasaction='ignore')
     writer.writeheader()
     for row in data_rows:
         writer.writerow(row)
     csv_body = output.getvalue()
-
-    headers = {"Content-Type": "text/csv; charset=utf-8"}
-    if pretty:
-        headers["Content-Type"] = "text/csv; charset=utf-8"
-    return 200, csv_body, headers
+    return 200, csv_body, {"Content-Type": "text/csv; charset=utf-8"}
 
 
 def _error_response(message: str, code: str, headers: dict) -> str:

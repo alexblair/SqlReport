@@ -258,6 +258,7 @@ _PAGE_FOOTER = """</div>
 _NAV_ITEMS = [
     ("report", "/report", "报表页"),
     ("config", "/config", "配置管理"),
+    ("audit", "/audit", "审计日志"),
     ("logout", "/logout", "退出"),
 ]
 
@@ -1363,8 +1364,13 @@ def build_user_section_html(users: list) -> str:
 
 
 def build_category_section_html(cat_reports, unclassified_reports, all_cats,
-                                 all_reports, pools, cat_tree) -> str:
-    """渲染报表分类配置段（分类管理 + 各分类下的报表列表，纯数据 → HTML，无 DB 调用）"""
+                                 all_reports, pools, cat_tree,
+                                 api_endpoints_map: dict[int, list[dict]] = None) -> str:
+    """渲染报表分类配置段（分类管理 + 各分类下的报表列表，纯数据 → HTML，无 DB 调用）
+
+    参数:
+        api_endpoints_map: { report_id: [api_endpoint_dict, ...] }，可选。
+    """
     pools_map: dict = {p["id"]: p for p in pools}
 
     # 批量操作：连接池选择 + 分类选择
@@ -1536,6 +1542,32 @@ function updateBatchCount() {{
             cache_ttl_hours = int(r.get("cache_ttl_hours", 0))
             cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span style="color:#cbd5e1">—</span>'
 
+            # API 接口列
+            eps = (api_endpoints_map or {}).get(rpt_id, [])
+            if eps:
+                total_cnt = len(eps)
+                enabled_cnt = sum(1 for ep in eps if int(ep.get("enabled", 1)))
+                disabled_cnt = total_cnt - enabled_cnt
+                parts = []
+                if enabled_cnt:
+                    parts.append(f'{enabled_cnt}启用')
+                if disabled_cnt:
+                    parts.append(f'{disabled_cnt}禁用')
+                summary = f'{total_cnt} 个接口 ({" / ".join(parts)})' if parts else f'{total_cnt} 个接口'
+                tooltip_lines = []
+                for ep in eps:
+                    ep_name = ep.get("name", "")
+                    ep_path = ep.get("url_path", "")
+                    ep_format = ep.get("output_format", "json")
+                    ep_enabled = int(ep.get("enabled", 1))
+                    ep_status = "启用" if ep_enabled else "禁用"
+                    ep_key = "有 Key" if ep.get("api_key") else "无 Key"
+                    tooltip_lines.append(f"  [{ep_status}] {ep_name} ({ep_path}) - {ep_format}, {ep_key}")
+                tooltip = "\\n".join(tooltip_lines)
+                api_cell = f'<a href="/config/reports/{rpt_id}/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="{_escape(tooltip)}">🔌 {summary}</a>'
+            else:
+                api_cell = '<span style="color:#cbd5e1;font-size:13px">—</span>'
+
             rows += f"""<tr>
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
    <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a></strong></td>
@@ -1547,6 +1579,7 @@ function updateBatchCount() {{
   <td style="text-align:center">{prefer_cache_display}</td>
   <td style="text-align:center">{cache_ttl_display}</td>
   <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px">{memo_display}</td>
+  <td style="text-align:center;white-space:nowrap">{api_cell}</td>
   <td class="ops-cell">
     {move_btns}
     {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
@@ -1623,7 +1656,7 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th>
 </tr></thead><tbody>
 {rows}
 </tbody></table>
@@ -1647,9 +1680,9 @@ function updateBatchCount() {{
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="var section=this.closest('.section');var c=section.querySelectorAll('.report-checkbox');for(var i=0;i<c.length;i++){{c[i].checked=this.checked;}}updateBatchCount()"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>REDIS 缓存</th><th>缓存 TTL</th><th>备注</th><th>操作</th>
+  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th>
 </tr></thead><tbody>
-{uncat_rows or '<tr><td colspan="9" class="empty-state">暂无未分类报表</td></tr>'}
+{uncat_rows or '<tr><td colspan="10" class="empty-state">暂无未分类报表</td></tr>'}
 </tbody></table>
 </div>
 </div>"""
@@ -1697,7 +1730,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
     </form>
   </td>
 </tr>"""
-    return f"""<div class="section" style="margin-top:24px">
+    return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
 <div class="section-title" style="font-size:16px">
   <span>🔌 API 接口</span>
   <span class="actions">{_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")}</span>
@@ -1896,3 +1929,206 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   </div>
 </form>
 </div>"""
+
+
+# ===================================================================
+# 审计日志页
+# ===================================================================
+
+
+def render_audit_page(
+    rows: list[dict],
+    total: int,
+    page: int,
+    page_size: int,
+    filters: dict,
+    message: str = "",
+) -> str:
+    """渲染审计日志页面（筛选栏 + 表格 + 分页 + CSV 导出 + 清理）。"""
+    now = time.time()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    selected_type = filters.get("type", "")
+    type_options = {"": "全部类型", "operation": "操作日志", "web_access": "页面访问", "api": "API 调用"}
+    type_html = ""
+    for val, label in type_options.items():
+        sel = ' selected' if val == selected_type else ''
+        type_html += f'<option value="{val}"{sel}>{label}</option>'
+    range_presets = {"today": "今天", "yesterday": "昨天", "last7": "近7天", "last30": "近30天"}
+    range_btns = ""
+    for rkey, rlabel in range_presets.items():
+        range_btns += f'<button type="button" class="btn btn-sm btn-outline" onclick="setAuditDateRange(\'{rkey}\')">{rlabel}</button>'
+    date_from = filters.get("date_from", "")
+    date_to = filters.get("date_to", "")
+    session_user_val = filters.get("session_user", "")
+    keyword_val = filters.get("keyword", "")
+
+    table_header = """<thead><tr>
+      <th style="width:160px">时间</th>
+      <th style="width:90px">类型</th>
+      <th style="width:100px">操作者</th>
+      <th style="width:130px">操作</th>
+      <th style="width:100px">实体类型</th>
+      <th>详情</th>
+    </tr></thead>"""
+
+    type_labels = {"operation": "操作", "web_access": "页面", "api": "API"}
+    rows_html = ""
+    for r in rows:
+        rtype = r.get("type", "")
+        type_label = type_labels.get(rtype, rtype)
+        ts = r.get("timestamp", "")
+        user = html_mod.escape(r.get("session_user") or "")
+        action = html_mod.escape(r.get("action") or "")
+        entity_type = html_mod.escape(r.get("entity_type") or "")
+        entity_name = html_mod.escape(r.get("entity_name") or "")
+        http_method = html_mod.escape(r.get("http_method") or "")
+        http_path = html_mod.escape(r.get("http_path") or "")
+        http_status = r.get("http_status") or ""
+        duration = r.get("duration_ms") or ""
+        ip = html_mod.escape(r.get("ip_address") or "")
+        before_val = r.get("before_value") or ""
+        after_val = r.get("after_value") or ""
+        request_body = r.get("request_body") or ""
+
+        detail_parts = []
+        if rtype == "operation":
+            if entity_name:
+                detail_parts.append(f"名称: {entity_name}")
+            if before_val:
+                detail_parts.append(f"改前: {html_mod.escape(str(before_val)[:80])}")
+            if after_val:
+                detail_parts.append(f"改后: {html_mod.escape(str(after_val)[:80])}")
+        elif rtype in ("web_access", "api"):
+            detail_parts.append(f"{http_method} {http_path}")
+            if http_status:
+                detail_parts.append(f"状态: {http_status}")
+            if duration:
+                detail_parts.append(f"耗时: {duration}ms")
+            if ip:
+                detail_parts.append(f"IP: {ip}")
+            if request_body:
+                detail_parts.append(f"请求: {html_mod.escape(str(request_body)[:200])}")
+        detail_html = " | ".join(detail_parts) if detail_parts else "-"
+
+        rows_html += f"""<tr>
+      <td style="white-space:nowrap;font-size:13px">{html_mod.escape(ts)}</td>
+      <td><span class="audit-type audit-type-{rtype}">{type_label}</span></td>
+      <td>{user}</td>
+      <td style="font-family:monospace;font-size:13px">{action}</td>
+      <td>{entity_type}</td>
+      <td style="font-size:13px;max-width:400px;overflow:hidden;text-overflow:ellipsis">{detail_html}</td>
+    </tr>"""
+    if not rows_html:
+        rows_html = '<tr><td colspan="6" class="empty-state">暂无匹配的审计日志</td></tr>'
+
+    qs = urllib.parse.urlencode({k: v for k, v in filters.items() if v})
+    pagination = ""
+    if total_pages > 1:
+        page_links = ""
+        for p in range(1, total_pages + 1):
+            if p == page:
+                page_links += f'<strong style="padding:4px 10px;background:#4f46e5;color:#fff;border-radius:4px">{p}</strong>'
+            else:
+                pq = urllib.parse.urlencode({**{k: v for k, v in filters.items() if v}, "page": p})
+                page_links += f'<a href="/audit?{pq}" style="padding:4px 10px;color:#4f46e5;text-decoration:none">{p}</a>'
+        pagination = f'<div style="display:flex;align-items:center;gap:6px;margin-top:16px;justify-content:center;font-size:14px">{page_links}</div>'
+
+    export_qs = urllib.parse.urlencode({**{k: v for k, v in filters.items() if v}, "export": "csv"})
+
+    extra_css = """
+    .audit-filters { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .audit-filters label { font-size:13px; color:#475569; display:flex; flex-direction:column; gap:2px; }
+    .audit-filters input, .audit-filters select { padding:6px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:14px; }
+    .audit-filters input:focus, .audit-filters select:focus { outline:none; border-color:#4f46e5; box-shadow:0 0 0 3px rgba(79,70,229,0.1); }
+    .audit-filters .filter-btns { display:flex; gap:8px; align-items:flex-end; }
+    .audit-type { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; }
+    .audit-type-operation { background:#ede9fe; color:#5b21b6; }
+    .audit-type-web_access { background:#dbeafe; color:#1e40af; }
+    .audit-type-api { background:#d1fae5; color:#065f46; }
+    .date-shortcuts { display:flex; gap:4px; align-items:flex-end; }
+    .audit-actions { display:flex; gap:10px; margin-bottom:16px; }
+    .audit-info { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:14px; color:#64748b; }
+    """
+
+    extra_js = r"""
+    function setAuditDateRange(range) {
+      var now = new Date();
+      function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+      var dateFrom, dateTo, y;
+      switch(range) {
+        case 'today':
+          dateFrom=fmt(new Date(now.getFullYear(),now.getMonth(),now.getDate(),0,0));
+          dateTo=fmt(new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59)); break;
+        case 'yesterday':
+          y=new Date(now);y.setDate(y.getDate()-1);
+          dateFrom=fmt(new Date(y.getFullYear(),y.getMonth(),y.getDate(),0,0));
+          dateTo=fmt(new Date(y.getFullYear(),y.getMonth(),y.getDate(),23,59)); break;
+        case 'last7':
+          y=new Date(now);y.setDate(y.getDate()-6);
+          dateFrom=fmt(new Date(y.getFullYear(),y.getMonth(),y.getDate(),0,0));
+          dateTo=fmt(new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59)); break;
+        case 'last30':
+          y=new Date(now);y.setDate(y.getDate()-29);
+          dateFrom=fmt(new Date(y.getFullYear(),y.getMonth(),y.getDate(),0,0));
+          dateTo=fmt(new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59)); break;
+      }
+      document.querySelector('input[name="date_from"]').value=dateFrom;
+      document.querySelector('input[name="date_to"]').value=dateTo;
+    }
+    function confirmClean() {
+      if(!confirm('确定要删除当前筛选条件下的所有审计日志吗？此操作不可恢复。')) return;
+      var form=document.querySelector('.audit-filters form');
+      var input=document.createElement('input');
+      input.type='hidden';input.name='action';input.value='clean';
+      form.appendChild(input);
+      form.method='post';
+      form.submit();
+    }
+    """
+
+    navbar_html = _build_navbar_html("audit")
+    html = _PAGE_HEADER_TEMPLATE.substitute(
+        title="审计日志",
+        common_css=_COMMON_CSS + extra_css,
+        extra_css="",
+        navbar=navbar_html,
+    )
+
+    if message:
+        msg_class = "flash-success" if "成功" in message else "flash-error"
+        html += f'<div class="flash {msg_class}">{html_mod.escape(message)}</div>'
+
+    html += f"""
+<div class="card">
+  <h2>审计日志</h2>
+  <div class="audit-info">
+    <span>共 {total} 条记录，第 {page}/{total_pages} 页</span>
+    <div class="audit-actions">
+      <a href="/audit?{export_qs}" class="btn btn-sm btn-success">导出 CSV</a>
+    </div>
+  </div>
+  <div class="audit-filters">
+    <form method="get" action="/audit" style="display:contents">
+      <label>类型: <select name="type">{type_html}</select></label>
+      <label>操作者: <input type="text" name="session_user" value="{html_mod.escape(session_user_val)}" placeholder="操作者"></label>
+      <label>关键字: <input type="text" name="keyword" value="{html_mod.escape(keyword_val)}" placeholder="操作/实体/路径"></label>
+      <div class="date-shortcuts">{range_btns}</div>
+      <label>从: <input type="datetime-local" name="date_from" value="{html_mod.escape(date_from)}"></label>
+      <label>到: <input type="datetime-local" name="date_to" value="{html_mod.escape(date_to)}"></label>
+      <div class="filter-btns">
+        <button type="submit" class="btn btn-sm btn-primary">筛选</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="confirmClean()">清理</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+    <table>{table_header}<tbody>{rows_html}</tbody></table>
+  </div>
+  {pagination}
+</div>
+<script>{extra_js}</script>"""
+
+    html += _PAGE_FOOTER
+    return html

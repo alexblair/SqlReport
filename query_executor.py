@@ -96,7 +96,7 @@ class _MySQLConnection:
 
         # 将 SQLite 的 ? 占位符转为 MySQL 的 %s
         mysql_sql = sql.replace("?", "%s") if params is not None else sql
-        cursor = self._conn.cursor(dictionary=True)
+        cursor = self._conn.cursor(dictionary=True, buffered=True)
         try:
             cursor.execute(mysql_sql, params or ())
         except mysql.connector.Error:

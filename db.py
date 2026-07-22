@@ -33,3 +33,10 @@ from query_executor import (  # noqa: F401, F403
     create_mysql_connection, _split_sql_statements,
     execute_mysql_query, count_mysql_query,
 )
+
+# 从 audit_db 导入审计日志函数
+from audit_db import (  # noqa: F401, F403
+    get_audit_db, init_audit_db,
+    insert_audit_log, query_audit_logs, count_audit_logs,
+    export_audit_logs, delete_audit_logs,
+)

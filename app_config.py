@@ -162,3 +162,19 @@ def get_redis_config() -> dict:
     缺失或未启用时返回 {"enable": False}。
     """
     return get_config().get("redis", {"enable": False})
+
+
+def get_audit_db_config() -> dict:
+    """解析 audit_db 配置段。
+
+    配置文件示例:
+        "audit_db": {
+            "path": "audit.db"
+        }
+
+    缺失时返回默认值 {"path": "audit.db"}。
+    """
+    cfg = get_config().get("audit_db", {})
+    return {
+        "path": cfg.get("path", "audit.db"),
+    }

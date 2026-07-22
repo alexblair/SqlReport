@@ -543,6 +543,7 @@ _PAGE_HEADER = """<!DOCTYPE html>
   <div class="spacer"></div>
   <a href="/report" class="nav-active">报表页</a>
   <a href="/config">配置管理</a>
+  <a href="/audit">审计日志</a>
   <a href="/logout">退出</a>
 </div>
 <div class="container">

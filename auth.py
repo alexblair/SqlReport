@@ -29,6 +29,31 @@ _HASH_ITERATIONS = 100000
 _SALT_LENGTH = 16
 
 
+def _record_auth_event(session_user: str, action: str):
+    """记录登录/登出/登录失败事件到审计日志。
+
+    异常被静默吞掉，避免审计失败影响登录流程。
+    """
+    if not session_user:
+        return
+    try:
+        from audit_db import get_audit_db, insert_audit_log
+        audit_conn = get_audit_db()
+        try:
+            insert_audit_log(
+                audit_conn,
+                type="operation",
+                session_user=session_user,
+                action=action,
+                entity_type="user",
+                entity_name=session_user,
+            )
+        finally:
+            audit_conn.close()
+    except Exception:
+        pass
+
+
 def hash_password(password: str) -> str:
     """
     对密码进行加盐哈希。

@@ -470,5 +470,74 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("已存在", html)
 
 
+    def test_config_api_endpoint_edit_clear_fields(self):
+        """编辑 API 端点: 清空字段后应正确保存为空"""
+        eid = self._create_endpoint_in_db(
+            url_path="/api/clear-test",
+            api_key="old-key",
+            allowed_origins="https://old.example.com",
+        )
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode({
+            "name": "清空测试",
+            "url_path": "clear-test",
+            "output_format": "json",
+            "row_limit": "0",
+            "api_key": "",
+            "allowed_origins": "",
+            "rule_json": "",
+            "enabled": "1",
+            "action": "save_close",
+        }).encode()
+        resp = opener.open(
+            urllib.request.Request(
+                f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+                data=form_data, method="POST",
+            )
+        )
+        # 跟随重定向
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertIsNone(ep["api_key"], "清空 api_key 后应存储为 None")
+        self.assertIsNone(ep["allowed_origins"], "清空 allowed_origins 后应存储为 None")
+
+
+    # =====================================================================
+    # 中文/特殊符号 URL 路径测试
+    # =====================================================================
+
+    def test_api_chinese_path_encoded(self):
+        """API 路径含中文（百分号编码）时应正确匹配"""
+        import http.client
+        self._create_endpoint_in_db(url_path="/api/中文", name="中文接口测试")
+        hc = http.client.HTTPConnection("127.0.0.1", TEST_PORT, timeout=5)
+        try:
+            hc.request("GET", "/api/%E4%B8%AD%E6%96%87")
+            resp = hc.getresponse()
+            self.assertEqual(resp.status, 200,
+                             "中文路径应匹配到 DB 中的 /api/ 中文")
+            body = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(body["page"], 1)
+        finally:
+            hc.close()
+
+    def test_api_special_char_path_encoded(self):
+        """API 路径含特殊字符（百分号编码）时应正确匹配"""
+        import http.client
+        self._create_endpoint_in_db(url_path="/api/特殊-path", name="特殊路径")
+        hc = http.client.HTTPConnection("127.0.0.1", TEST_PORT, timeout=5)
+        try:
+            hc.request("GET", "/api/%E7%89%B9%E6%AE%8A-path")
+            resp = hc.getresponse()
+            self.assertEqual(resp.status, 200,
+                             "特殊字符路径应匹配到 DB 中的 /api/ 特殊-path")
+            body = json.loads(resp.read().decode("utf-8"))
+            self.assertIn("data", body)
+        finally:
+            hc.close()
+
+
 if __name__ == "__main__":
     unittest.main()

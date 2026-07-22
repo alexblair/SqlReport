@@ -21,6 +21,7 @@ server.py — HTTP 服务器入口
 import sys
 import os
 import re
+import time
 import logging
 import urllib.parse
 import http.server
@@ -29,8 +30,10 @@ import db
 import auth
 import config
 import report
+import render
 import export as export_mod
 import api_handler
+import audit_db
 from app_config import get_server_config, get_log_config
 
 # ---------------------------------------------------------------------------
@@ -166,7 +169,8 @@ ROUTES = [
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
     RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
-    RouteEntry(r"^/api/", "*", False, False, "_handle_api"),
+    RouteEntry(r"^/api/", "*", False, True, "_handle_api"),
+    RouteEntry(r"^/audit($|/)", "*", True, False, "_handle_audit"),
 ]
 
 
@@ -215,7 +219,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _handle(self, method: str):
         """基于路由表分发请求"""
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
+        raw_path = parsed.path.rstrip("/") or "/"
+        path = urllib.parse.unquote(raw_path)
         query = parsed.query
 
         route = _match_route(method, path)
@@ -247,6 +252,13 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             return False
         return True
 
+    def _get_current_user(self) -> str | None:
+        """从 cookie 中获取当前登录用户名。"""
+        cookie_header = self.headers.get("Cookie", "")
+        cookies = auth.parse_cookie(cookie_header)
+        token = cookies.get("session_id")
+        return auth.get_session_user(token) if token else None
+
     def _handle_login_get(self, method, path, query, conn=None):
         """显示登录页"""
         self._send_html(200, _render_login_page())
@@ -267,6 +279,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             user = db.get_user(conn, username)
             if user and auth.verify_password(password, user["password_hash"]):
                 token = auth.create_session(username)
+                auth._record_auth_event(username, "login")
                 self.send_response(302)
                 self.send_header("Location", "/report")
                 self.send_header("Set-Cookie", auth.make_set_cookie_header(token))
@@ -276,6 +289,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             conn.close()
 
         # 登录失败
+        auth._record_auth_event(username, "login_failed")
         self._send_html(200, _render_login_page("用户名或密码错误"))
 
     def _handle_logout(self, method=None, path=None, query=None, conn=None):
@@ -283,6 +297,9 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         cookie_header = self.headers.get("Cookie", "")
         cookies = auth.parse_cookie(cookie_header)
         token = cookies.get("session_id")
+        current_user = self._get_current_user()
+        if current_user:
+            auth._record_auth_event(current_user, "logout")
         if token:
             auth.remove_session(token)
         self.send_response(302)
@@ -295,7 +312,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _handle_config(self, method: str, path: str, query: str, conn):
         """委托给 config.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
-        code, body, headers = config.handle_request(conn, method, path, query, form_body)
+        session_user = self._get_current_user()
+        code, body, headers = config.handle_request(conn, method, path, query, form_body, session_user=session_user)
+        self._log_web_access(path, method, int(code) if code != "302" else 302,
+                             request_body=form_body)
 
         if code == "302":
             self._send_redirect(body)
@@ -306,6 +326,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         """委托给 report.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
         code, body, headers = report.handle_request(conn, method, path, query, form_body)
+        self._log_web_access(path, method, int(code) if code != "302" else 302,
+                             request_body=form_body)
 
         if code == "302":
             self._send_redirect(body)
@@ -330,14 +352,16 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         """
         处理 API 请求（不需要 session 认证，使用 API Key 鉴权）。
 
-        从 _handle() 传入 path 和 query，但不用传入的 conn（api_handler
-        自行管理连接）。
+        调用 api_handler.handle_api_request 时传入 conn，
+        由调用方管理连接生命周期。
         """
         query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
         body = self._read_body() if method == "POST" else ""
 
         client_ip = _get_client_ip(self.headers, self.client_address)
+        start = time.time()
         status, resp_body, resp_headers = api_handler.handle_api_request(
+            conn=conn,
             path=path,
             method=method,
             headers=dict(self.headers),
@@ -345,6 +369,35 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             query_params=query_params,
             client_ip=client_ip,
         )
+        duration_ms = int((time.time() - start) * 1000)
+
+        # 记录 API 审计日志
+        api_key = query_params.get("api_key", [""])[0] or ""
+        if not api_key:
+            auth_header = dict(self.headers).get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                api_key = auth_header[7:]
+        try:
+            audit_conn = audit_db.get_audit_db()
+            try:
+                audit_db.insert_audit_log(
+                    audit_conn,
+                    type="api",
+                    session_user=f"api_key:{api_key}" if api_key else "anonymous",
+                    action="api_call",
+                    entity_type="api_endpoint",
+                    entity_name=path,
+                    http_method=method,
+                    http_path=path,
+                    http_status=status,
+                    duration_ms=duration_ms,
+                    ip_address=client_ip,
+                    request_body=body if method == "POST" else "",
+                )
+            finally:
+                audit_conn.close()
+        except Exception:
+            pass
 
         self.send_response(status)
         found_content_type = False
@@ -363,6 +416,169 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(str(resp_body).encode("utf-8"))
 
     # ---- 辅助方法 ----
+
+    def _log_web_access(self, path: str, method: str, status: int,
+                        duration_ms: int = 0, request_body: str = None):
+        """记录页面访问（web_access 类型）到审计日志。
+
+        参数:
+            request_body: 外部传入已读取的请求体。
+                          为 None 时尝试通过 _read_body() 读取（注意：
+                          只能在流未被消耗时使用）。
+        """
+        user = self._get_current_user()
+        if not user:
+            return
+        try:
+            audit_conn = audit_db.get_audit_db()
+            try:
+                if request_body is None:
+                    request_body = self._read_body() if method == "POST" else ""
+                audit_db.insert_audit_log(
+                    audit_conn,
+                    type="web_access",
+                    session_user=user,
+                    action="page_view",
+                    entity_type="page",
+                    entity_name=path,
+                    http_method=method,
+                    http_path=path,
+                    http_status=status,
+                    duration_ms=duration_ms,
+                    ip_address=_get_client_ip(self.headers, self.client_address),
+                    request_body=request_body,
+                )
+            finally:
+                audit_conn.close()
+        except Exception:
+            pass
+
+    def _log_api_call(self, path: str, method: str, status: int,
+                      api_key: str = "", duration_ms: int = 0,
+                      request_body: str = None):
+        """记录 API 调用（api 类型）到审计日志。"""
+        try:
+            audit_conn = audit_db.get_audit_db()
+            try:
+                if request_body is None:
+                    request_body = self._read_body() if method == "POST" else ""
+                audit_db.insert_audit_log(
+                    audit_conn,
+                    type="api",
+                    session_user=f"api_key:{api_key}" if api_key else "anonymous",
+                    action="api_call",
+                    entity_type="api_endpoint",
+                    entity_name=path,
+                    http_method=method,
+                    http_path=path,
+                    http_status=status,
+                    duration_ms=duration_ms,
+                    ip_address=_get_client_ip(self.headers, self.client_address),
+                    request_body=request_body,
+                )
+            finally:
+                audit_conn.close()
+        except Exception:
+            pass
+
+    def _handle_audit(self, method: str, path: str, query: str, conn=None):
+        """处理审计日志页面的请求。"""
+        qs = urllib.parse.parse_qs(query, keep_blank_values=True)
+
+        if method == "POST":
+            # 清理操作
+            form_body = self._read_body()
+            data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+            action = data.get("action", [""])[0]
+            if action == "clean":
+                filters = {}
+                for key in ("type", "date_from", "date_to", "session_user", "keyword"):
+                    val = data.get(key, [None])[0]
+                    if val:
+                        filters[key] = val
+                try:
+                    audit_conn = audit_db.get_audit_db()
+                    try:
+                        deleted = audit_db.delete_audit_logs(audit_conn, filters)
+                    finally:
+                        audit_conn.close()
+                    msg = f"清理成功：共删除 {deleted} 条审计日志"
+                except Exception as e:
+                    msg = f"清理失败：{e}"
+                # 重定向回审计页并带消息
+                clean_qs = urllib.parse.urlencode({k: v for k, v in filters.items() if v})
+                self._send_redirect(f"/audit?{clean_qs}&flash={urllib.parse.quote(msg)}")
+                return
+
+        # GET — 正常浏览或 CSV 导出
+        filters = {}
+        for key in ("type", "date_from", "date_to", "session_user", "keyword"):
+            val = qs.get(key, [None])[0]
+            if val:
+                filters[key] = val
+
+        try:
+            page = int(qs.get("page", ["1"])[0])
+        except (ValueError, IndexError):
+            page = 1
+        try:
+            page_size = int(qs.get("page_size", ["20"])[0])
+        except (ValueError, IndexError):
+            page_size = 20
+
+        flash = qs.get("flash", [None])[0]
+
+        if "export" in qs and qs["export"][0] == "csv":
+            # CSV 导出
+            self._export_audit_csv(filters)
+            return
+
+        audit_conn = audit_db.get_audit_db()
+        try:
+            total = audit_db.count_audit_logs(audit_conn, filters)
+            rows = audit_db.query_audit_logs(audit_conn, filters, page, page_size)
+        finally:
+            audit_conn.close()
+
+        body = render.render_audit_page(rows, total, page, page_size, filters, message=flash or "")
+        self._log_web_access(path, "GET", 200)
+        self._send_html(200, body)
+
+    def _export_audit_csv(self, filters: dict):
+        """导出审计日志为 CSV。"""
+        audit_conn = audit_db.get_audit_db()
+        try:
+            rows = audit_db.export_audit_logs(audit_conn, filters)
+        finally:
+            audit_conn.close()
+
+        import csv, io
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        writer.writerow(["时间", "类型", "操作者", "操作", "实体类型", "实体名称",
+                         "HTTP方法", "HTTP路径", "状态码", "IP", "耗时(ms)"])
+        for r in rows:
+            writer.writerow([
+                r.get("timestamp", ""),
+                r.get("type", ""),
+                r.get("session_user", ""),
+                r.get("action", ""),
+                r.get("entity_type", ""),
+                r.get("entity_name", ""),
+                r.get("http_method", ""),
+                r.get("http_path", ""),
+                r.get("http_status", ""),
+                r.get("ip_address", ""),
+                r.get("duration_ms", ""),
+            ])
+        csv_data = output.getvalue().encode("utf-8-sig")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8-sig")
+        self.send_header("Content-Disposition",
+                         f'attachment; filename="audit_log_{int(time.time())}.csv"')
+        self.end_headers()
+        self.wfile.write(csv_data)
 
     def _read_body(self) -> str:
         """读取 POST 请求体"""
@@ -458,7 +674,7 @@ def setup_logging():
 def main():
     setup_logging()
     try:
-        # 初始化数据库
+        # 初始化配置数据库
         conn = db.get_config_db()
         try:
             db.init_db(conn)
@@ -473,6 +689,17 @@ def main():
                 logging.warning("  ⚠️  请尽快登录 /config 修改密码")
         finally:
             conn.close()
+
+        # 初始化审计数据库
+        try:
+            audit_conn = audit_db.get_audit_db()
+            try:
+                audit_db.init_audit_db(audit_conn)
+                logging.info("审计数据库已初始化")
+            finally:
+                audit_conn.close()
+        except Exception as e:
+            logging.warning("审计数据库初始化失败: %s", e)
 
         # 从 SQLite 恢复 session（使重启后用户无需重新登录）
         auth.load_sessions()

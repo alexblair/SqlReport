@@ -20,6 +20,10 @@
         "socket_timeout": 5
     },
 
+    "audit_db": {
+        "path": "audit.db"
+    },
+
     "config_db": [
         {
             "enable": true,

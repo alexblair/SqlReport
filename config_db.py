@@ -19,6 +19,45 @@ from typing import Optional
 from app_config import get_active_db_config as _get_active_db_config
 
 
+# 哨兵对象，用于区分"未传此参数"和"传了 None（设为 NULL）"
+_UNSET = object()
+
+
+# ---------------------------------------------------------------------------
+# 审计日志辅助
+# ---------------------------------------------------------------------------
+
+
+def _write_audit_log(session_user, action, entity_type,
+                     entity_id=None, entity_name=None,
+                     before_value=None, after_value=None):
+    """如果 session_user 不为 None，写入一条 operation 类型审计日志到 audit.db。
+
+    异常被静默吞掉，避免审计失败影响业务操作。
+    """
+    if session_user is None:
+        return
+    from audit_db import get_audit_db, insert_audit_log
+    try:
+        audit_conn = get_audit_db()
+        try:
+            insert_audit_log(
+                audit_conn,
+                type="operation",
+                session_user=session_user,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                entity_name=entity_name,
+                before_value=before_value,
+                after_value=after_value,
+            )
+        finally:
+            audit_conn.close()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # 引擎判断
 # ---------------------------------------------------------------------------
@@ -506,7 +545,8 @@ def _init_mysql_migrations(conn) -> None:
 # ---------------------------------------------------------------------------
 
 def add_pool(conn, name: str, host: str, port: int,
-             user: str, password: str, database: str) -> int:
+             user: str, password: str, database: str,
+             session_user=None) -> int:
     """新增一个 MySQL 连接池配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM connection_pools").fetchone()[0]
     cur = conn.execute(
@@ -514,6 +554,8 @@ def add_pool(conn, name: str, host: str, port: int,
         (name, host, port, user, password, database, max_order + 1),
     )
     conn.commit()
+    _write_audit_log(session_user, "create_pool", "pool", cur.lastrowid, name,
+                     after_value={"name": name, "host": host, "port": port, "user": user, "database": database})
     return cur.lastrowid
 
 
@@ -532,23 +574,29 @@ def get_all_pools(conn) -> list[dict]:
 
 
 def update_pool(conn, pool_id: int, name: str, host: str,
-                port: int, user: str, password: str, database: str) -> bool:
+                port: int, user: str, password: str, database: str,
+                session_user=None) -> bool:
     """更新连接池配置，影响行数 >0 返回 True。"""
+    before = get_pool(conn, pool_id) if session_user else None
     cur = conn.execute(
         "UPDATE connection_pools SET name=?,host=?,port=?,user=?,password=?,`database`=? WHERE id=?",
         (name, host, port, user, password, database, pool_id),
     )
     conn.commit()
+    _write_audit_log(session_user, "update_pool", "pool", pool_id, name,
+                     before_value=before,
+                     after_value={"name": name, "host": host, "port": port, "user": user, "database": database})
     return cur.rowcount > 0
 
 
-def delete_pool(conn, pool_id: int) -> bool:
+def delete_pool(conn, pool_id: int, session_user=None) -> bool:
     """
     删除连接池配置。
 
     先将关联报表的 pool_id 置空（断开外键关联，保留报表），再删除连接池。
     返回 True 表示删除成功。
     """
+    before = get_pool(conn, pool_id) if session_user else None
     # 先断开报表关联（report_configs 表可能不存在于测试环境）
     try:
         conn.execute("UPDATE report_configs SET pool_id = NULL WHERE pool_id = ?", (pool_id,))
@@ -556,10 +604,13 @@ def delete_pool(conn, pool_id: int) -> bool:
         pass
     cur = conn.execute("DELETE FROM connection_pools WHERE id=?", (pool_id,))
     conn.commit()
+    _write_audit_log(session_user, "delete_pool", "pool", pool_id,
+                     before.get("name") if before else None,
+                     before_value=before)
     return cur.rowcount > 0
 
 
-def move_pool(conn, pool_id: int, direction: str) -> bool:
+def move_pool(conn, pool_id: int, direction: str, session_user=None) -> bool:
     """
     调整连接池排序。direction 为 'up' 或 'down'。
     与相邻项交换 sort_order，返回 True 表示移动成功。
@@ -584,6 +635,8 @@ def move_pool(conn, pool_id: int, direction: str) -> bool:
     conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_b, pool_id))
     conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()
+    _write_audit_log(session_user, "move_pool", "pool", pool_id,
+                     pools[idx].get("name"))
     return True
 
 
@@ -591,13 +644,14 @@ def move_pool(conn, pool_id: int, direction: str) -> bool:
 # 用户 CRUD
 # ---------------------------------------------------------------------------
 
-def add_user(conn, username: str, password_hash: str) -> int:
+def add_user(conn, username: str, password_hash: str, session_user=None) -> int:
     """新增用户，返回自增 id。"""
     cur = conn.execute(
         "INSERT INTO users (username,password_hash) VALUES (?,?)",
         (username, password_hash),
     )
     conn.commit()
+    _write_audit_log(session_user, "create_user", "user", cur.lastrowid, username)
     return cur.lastrowid
 
 
@@ -622,20 +676,27 @@ def get_all_users(conn) -> list[dict]:
 
 
 def update_user(conn, user_id: int, username: str,
-                password_hash: str) -> bool:
+                password_hash: str, session_user=None) -> bool:
     """更新用户信息，影响行数 >0 返回 True。"""
+    before = get_user_by_id(conn, user_id) if session_user else None
     cur = conn.execute(
         "UPDATE users SET username=?,password_hash=? WHERE id=?",
         (username, password_hash, user_id),
     )
     conn.commit()
+    _write_audit_log(session_user, "update_user", "user", user_id, username,
+                     before_value=before, after_value={"username": username})
     return cur.rowcount > 0
 
 
-def delete_user(conn, user_id: int) -> bool:
+def delete_user(conn, user_id: int, session_user=None) -> bool:
     """删除用户，影响行数 >0 返回 True。"""
+    before = get_user_by_id(conn, user_id) if session_user else None
     cur = conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
+    _write_audit_log(session_user, "delete_user", "user", user_id,
+                     before.get("username") if before else None,
+                     before_value=before)
     return cur.rowcount > 0
 
 
@@ -649,7 +710,8 @@ def add_report(conn, name: str, sql_query: str,
                memo=None,
                result_names=None,
                prefer_cache: int = 1,
-               cache_ttl_hours: int = 0) -> int:
+               cache_ttl_hours: int = 0,
+               session_user=None) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
@@ -657,6 +719,12 @@ def add_report(conn, name: str, sql_query: str,
         (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, max_order + 1),
     )
     conn.commit()
+    _write_audit_log(session_user, "create_report", "report", cur.lastrowid, name,
+                     after_value={"name": name, "sql_query": sql_query,
+                                  "default_page_size": default_page_size,
+                                  "pool_id": pool_id, "category_id": category_id,
+                                  "memo": memo, "prefer_cache": prefer_cache,
+                                  "cache_ttl_hours": cache_ttl_hours})
     return cur.lastrowid
 
 
@@ -681,25 +749,38 @@ def update_report(conn, report_id: int, name: str,
                   memo=None,
                   result_names=None,
                   prefer_cache: int = 1,
-                  cache_ttl_hours: int = 0) -> bool:
+                  cache_ttl_hours: int = 0,
+                  session_user=None) -> bool:
     """更新报表配置，影响行数 >0 返回 True。"""
+    before = get_report(conn, report_id) if session_user else None
     cur = conn.execute(
         "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=? WHERE id=?",
         (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, report_id),
     )
     conn.commit()
+    _write_audit_log(session_user, "update_report", "report", report_id, name,
+                     before_value=before,
+                     after_value={"name": name, "sql_query": sql_query,
+                                  "default_page_size": default_page_size,
+                                  "pool_id": pool_id, "category_id": category_id,
+                                  "memo": memo, "prefer_cache": prefer_cache,
+                                  "cache_ttl_hours": cache_ttl_hours})
     return cur.rowcount > 0
 
 
-def delete_report(conn, report_id: int) -> bool:
+def delete_report(conn, report_id: int, session_user=None) -> bool:
     """删除报表配置，影响行数 >0 返回 True。"""
+    before = get_report(conn, report_id) if session_user else None
     cur = conn.execute("DELETE FROM report_configs WHERE id=?", (report_id,))
     conn.commit()
+    _write_audit_log(session_user, "delete_report", "report", report_id,
+                     before.get("name") if before else None,
+                     before_value=before)
     return cur.rowcount > 0
 
 
 def move_report(conn, report_id: int, direction: str,
-                category_id: int = None) -> bool:
+                category_id: int = None, session_user=None) -> bool:
     """
     调整报表排序（同一分类内交换）。direction 为 'up' 或 'down'。
     category_id: 可选，指定分类上下文；为 None 时从报表自身推断。
@@ -727,6 +808,8 @@ def move_report(conn, report_id: int, direction: str,
     conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_b, report_id))
     conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()
+    _write_audit_log(session_user, "move_report", "report", report_id,
+                     reports[idx].get("name"))
     return True
 
 
@@ -776,7 +859,7 @@ def batch_update_report_cache(
 # ---------------------------------------------------------------------------
 
 
-def add_category(conn, name: str, parent_id=None) -> int:
+def add_category(conn, name: str, parent_id=None, session_user=None) -> int:
     """新增报表分类，返回自增 id。"""
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_categories").fetchone()[0]
     cur = conn.execute(
@@ -784,6 +867,7 @@ def add_category(conn, name: str, parent_id=None) -> int:
         (name, parent_id, max_order + 1),
     )
     conn.commit()
+    _write_audit_log(session_user, "create_category", "category", cur.lastrowid, name)
     return cur.lastrowid
 
 
@@ -799,26 +883,33 @@ def get_all_categories(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def update_category(conn, category_id: int, name: str, parent_id=None) -> bool:
+def update_category(conn, category_id: int, name: str, parent_id=None, session_user=None) -> bool:
     """更新分类名称和父分类，影响行数 >0 返回 True。"""
+    before = get_category(conn, category_id) if session_user else None
     cur = conn.execute(
         "UPDATE report_categories SET name=?, parent_id=? WHERE id=?",
         (name, parent_id, category_id),
     )
     conn.commit()
+    _write_audit_log(session_user, "update_category", "category", category_id, name,
+                     before_value=before, after_value={"name": name, "parent_id": parent_id})
     return cur.rowcount > 0
 
 
-def delete_category(conn, category_id: int) -> bool:
+def delete_category(conn, category_id: int, session_user=None) -> bool:
     """删除分类，关联报表的 category_id 置 NULL，子分类的 parent_id 置 NULL。"""
+    before = get_category(conn, category_id) if session_user else None
     conn.execute("UPDATE report_configs SET category_id=NULL WHERE category_id=?", (category_id,))
     conn.execute("UPDATE report_categories SET parent_id=NULL WHERE parent_id=?", (category_id,))
     cur = conn.execute("DELETE FROM report_categories WHERE id=?", (category_id,))
     conn.commit()
+    _write_audit_log(session_user, "delete_category", "category", category_id,
+                     before.get("name") if before else None,
+                     before_value=before)
     return cur.rowcount > 0
 
 
-def move_category(conn, category_id: int, direction: str) -> bool:
+def move_category(conn, category_id: int, direction: str, session_user=None) -> bool:
     """
     调整分类排序。direction 为 'up' 或 'down'。
     与相邻项交换 sort_order，返回 True 表示移动成功。
@@ -839,6 +930,8 @@ def move_category(conn, category_id: int, direction: str) -> bool:
     conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_b, category_id))
     conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_a, swap_id))
     conn.commit()
+    _write_audit_log(session_user, "move_category", "category", category_id,
+                     cats[idx].get("name"))
     return True
 
 
@@ -870,12 +963,17 @@ def get_reports(conn, category_id: int = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def move_report_to_category(conn, report_id: int, category_id) -> bool:
+def move_report_to_category(conn, report_id: int, category_id, session_user=None) -> bool:
     """将报表移动到指定分类（None 表示移出分类）。"""
+    before = get_report(conn, report_id) if session_user else None
     cur = conn.execute(
         "UPDATE report_configs SET category_id=? WHERE id=?", (category_id, report_id)
     )
     conn.commit()
+    _write_audit_log(session_user, "move_report_to_category", "report", report_id,
+                     before.get("name") if before else None,
+                     before_value={"category_id": before.get("category_id")} if before else None,
+                     after_value={"category_id": category_id})
     return cur.rowcount > 0
 
 
@@ -988,7 +1086,8 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      sorts: str = None, row_limit: int = 0,
                      api_key: str = None,
                      allowed_origins: str = None,
-                     enabled: int = 1) -> int:
+                     enabled: int = 1,
+                     session_user=None) -> int:
     """
     新增 API 端点配置，返回自增 id。
 
@@ -1013,6 +1112,10 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
          sorts, row_limit, api_key, allowed_origins, enabled),
     )
     conn.commit()
+    _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
+                     cur.lastrowid, name,
+                     after_value={"name": name, "url_path": url_path,
+                                  "report_id": report_id, "output_format": output_format})
     return cur.lastrowid
 
 
@@ -1049,46 +1152,50 @@ def get_all_api_endpoints(conn) -> list[dict]:
 
 
 def update_api_endpoint(conn, endpoint_id: int,
-                        name: str = None, url_path: str = None,
-                        output_format: str = None,
-                        columns: str = None, filters: str = None,
-                        sorts: str = None, row_limit: int = None,
-                        api_key: str = None,
-                        allowed_origins: str = None,
-                        enabled: int = None) -> bool:
+                        name: str = _UNSET, url_path: str = _UNSET,
+                        output_format: str = _UNSET,
+                        columns: str = _UNSET, filters: str = _UNSET,
+                        sorts: str = _UNSET, row_limit: int = _UNSET,
+                        api_key: str = _UNSET,
+                        allowed_origins: str = _UNSET,
+                        enabled: int = _UNSET,
+                        session_user=None) -> bool:
     """
-    更新 API 端点配置。仅更新非 None 的字段，影响行数 >0 返回 True。
+    更新 API 端点配置。仅更新非 _UNSET 的字段，影响行数 >0 返回 True。
+
+    使用 _UNSET 哨兵而非 None 作为默认值，使得调用方可以显式传入 None
+    来表示"将此字段设为 NULL"。不传此参数则跳过更新。
     """
     sets = []
     params = []
-    if name is not None:
+    if name is not _UNSET:
         sets.append("name=?")
         params.append(name)
-    if url_path is not None:
+    if url_path is not _UNSET:
         sets.append("url_path=?")
         params.append(url_path)
-    if output_format is not None:
+    if output_format is not _UNSET:
         sets.append("output_format=?")
         params.append(output_format)
-    if columns is not None:
+    if columns is not _UNSET:
         sets.append("columns=?")
         params.append(columns)
-    if filters is not None:
+    if filters is not _UNSET:
         sets.append("filters=?")
         params.append(filters)
-    if sorts is not None:
+    if sorts is not _UNSET:
         sets.append("sorts=?")
         params.append(sorts)
-    if row_limit is not None:
+    if row_limit is not _UNSET:
         sets.append("row_limit=?")
         params.append(row_limit)
-    if api_key is not None:
+    if api_key is not _UNSET:
         sets.append("api_key=?")
         params.append(api_key)
-    if allowed_origins is not None:
+    if allowed_origins is not _UNSET:
         sets.append("allowed_origins=?")
         params.append(allowed_origins)
-    if enabled is not None:
+    if enabled is not _UNSET:
         sets.append("enabled=?")
         params.append(enabled)
     if not sets:
@@ -1102,20 +1209,34 @@ def update_api_endpoint(conn, endpoint_id: int,
         params,
     )
     conn.commit()
+    entity_name = name if name is not _UNSET else (get_api_endpoint(conn, endpoint_id) or {}).get("name")
+    _write_audit_log(session_user, "update_api_endpoint", "api_endpoint",
+                     endpoint_id, entity_name)
     return cur.rowcount > 0
 
 
-def delete_api_endpoint(conn, endpoint_id: int) -> bool:
+def delete_api_endpoint(conn, endpoint_id: int, session_user=None) -> bool:
     """删除 API 端点，影响行数 >0 返回 True。"""
+    before = get_api_endpoint(conn, endpoint_id) if session_user else None
     cur = conn.execute("DELETE FROM api_endpoints WHERE id=?", (endpoint_id,))
     conn.commit()
+    _write_audit_log(session_user, "delete_api_endpoint", "api_endpoint",
+                     endpoint_id, before.get("name") if before else None,
+                     before_value=before)
     return cur.rowcount > 0
 
 
-def delete_api_endpoints_by_report(conn, report_id: int) -> int:
+def delete_api_endpoints_by_report(conn, report_id: int, session_user=None) -> int:
     """删除某报表下的所有 API 端点，返回删除行数。"""
+    before_list = []
+    if session_user:
+        for ep in get_api_endpoints_by_report(conn, report_id):
+            before_list.append(dict(ep))
     cur = conn.execute(
         "DELETE FROM api_endpoints WHERE report_id=?", (report_id,)
     )
     conn.commit()
+    _write_audit_log(session_user, "delete_api_endpoints_by_report", "api_endpoint",
+                     entity_name=f"report_id={report_id}",
+                     before_value=before_list if before_list else None)
     return cur.rowcount
