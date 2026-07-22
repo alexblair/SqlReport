@@ -176,7 +176,7 @@ function highlight(txt) {
     "(--[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|" +
     "\\b(\\d+(?:\\.\\d+)?)\\b|" +
     "\\b(" + kw + ")\\b|" +
-    "\\b(\\w+)\\s*\\(",
+    "\\b(\\w+)(?=\\s*\\()",
     "gi"
   );
   return s.replace(re, function(m, str, cmt, num, kw, fn) {
@@ -465,24 +465,32 @@ def build_cols_param(display_columns: list[str], all_columns: list[str]) -> str:
 def build_pagination_html(report_id: int, current: int, total_pages: int,
                           page_size: int, total_rows: int,
                           sorts=None, filters=None, cols_param: str = '',
-                          result_param: str = '') -> str:
-    """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数"""
+                          result_param: str = '',
+                          page_url_base: str = None) -> str:
+    """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数。
+
+    当提供 page_url_base 时，直接以此为基 URL（须已含 &amp; 转义），
+    忽略 report_id/page_size/sorts/filters/cols/result 参数。
+    """
     sorts = sorts or []
     filters = filters or []
     if total_pages <= 1:
         return ""
 
-    # 基础 URL（使用 &amp; 确保 HTML 中 & 被正确转义）
-    base_url = f"/report?id={report_id}&amp;page_size={page_size}"
-    if sorts:
-        base_url += "&amp;" + build_sort_params(sorts)
-    if filters:
-        base_url += "&amp;" + build_filter_params(filters)
-    if cols_param:
-        base_url += "&amp;" + cols_param
-    if result_param:
-        base_url += "&amp;" + result_param
-        base_url += "&amp;" + cols_param
+    if page_url_base is not None:
+        base_url = page_url_base
+    else:
+        # 基础 URL（使用 &amp; 确保 HTML 中 & 被正确转义）
+        base_url = f"/report?id={report_id}&amp;page_size={page_size}"
+        if sorts:
+            base_url += "&amp;" + build_sort_params(sorts)
+        if filters:
+            base_url += "&amp;" + build_filter_params(filters)
+        if cols_param:
+            base_url += "&amp;" + cols_param
+        if result_param:
+            base_url += "&amp;" + result_param
+            base_url += "&amp;" + cols_param
 
     parts = []
 
@@ -1696,13 +1704,15 @@ function updateBatchCount() {{
 
 
 def build_api_endpoints_list_html(api_endpoints: list[dict],
-                                   report_id: int) -> str:
+                                   report_id: int = None,
+                                   show_report_name: bool = False) -> str:
     """
-    渲染报表编辑表单中的 API 接口列表区块。
+    渲染 API 接口列表区块。
 
     参数:
         api_endpoints: API 端点列表
-        report_id: 关联报表 ID
+        report_id: 关联报表 ID（为 None 时表示独立管理页，不带编辑/新增按钮）
+        show_report_name: 是否显示关联报表名称列（独立管理页使用）
     """
     rows = ""
     for ep in api_endpoints:
@@ -1722,31 +1732,51 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             mode_display = '<span style="color:#4f46e5;font-weight:600">全部</span>'
         else:
             mode_display = f'<span style="color:#475569">结果 {ep_result_index}</span>'
-        rows += f"""<tr>
-  <td><strong>{ep_name}</strong></td>
-  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
-  <td>{ep_format}</td>
-  <td>{mode_display}</td>
-  <td>{enabled_badge}</td>
-  <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
-  <td class="ops-cell">
+        report_name_cell = ""
+        if show_report_name:
+            rname = _escape(ep.get("report_name", ""))
+            report_name_cell = f'<td>{rname}</td>'
+        if report_id is not None:
+            ops_cell = f"""<td class="ops-cell">
     {_link_btn(f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit", "编辑")}
     <form method="post" action="/config/reports/{report_id}/api_endpoints/{ep_id}/delete" style="display:inline"
           onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
       <button type="submit" class="btn btn-danger btn-sm">删除</button>
     </form>
-  </td>
+  </td>"""
+        else:
+            ops_cell = f"""<td class="ops-cell">
+    <form method="post" action="/config/api-endpoints" style="display:inline"
+          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
+      <input type="hidden" name="action" value="delete">
+      <input type="hidden" name="endpoint_id" value="{ep_id}">
+      <button type="submit" class="btn btn-danger btn-sm">删除</button>
+    </form>
+  </td>"""
+        rows += f"""<tr>
+  <td><strong>{ep_name}</strong></td>{report_name_cell}
+  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
+  <td>{ep_format}</td>
+  <td>{mode_display}</td>
+  <td>{enabled_badge}</td>
+  <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
+  {ops_cell}
 </tr>"""
+    extra_col = '<th>关联报表</th>' if show_report_name else ''
+    extra_colspan = 1 if show_report_name else 0
+    total_cols = 7 + extra_colspan
+    title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
+                     if report_id is not None else "")
     return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
 <div class="section-title" style="font-size:16px">
   <span>🔌 API 接口</span>
-  <span class="actions">{_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")}</span>
+  <span class="actions">{title_actions}</span>
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th><th>URL 路径</th><th>格式</th><th>输出模式</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
-{rows or '<tr><td colspan="7" class="empty-state">暂无 API 接口配置</td></tr>'}
+{rows or f'<tr><td colspan="{total_cols}" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
 </div>
 </div>"""
@@ -2033,6 +2063,7 @@ def render_audit_page(
     page_size: int,
     filters: dict,
     message: str = "",
+    db_size: int = 0,
 ) -> str:
     """渲染审计日志页面（筛选栏 + 表格 + 分页 + CSV 导出 + 清理）。"""
     now = time.time()
@@ -2112,16 +2143,16 @@ def render_audit_page(
         rows_html = '<tr><td colspan="6" class="empty-state">暂无匹配的审计日志</td></tr>'
 
     qs = urllib.parse.urlencode({k: v for k, v in filters.items() if v})
-    pagination = ""
-    if total_pages > 1:
-        page_links = ""
-        for p in range(1, total_pages + 1):
-            if p == page:
-                page_links += f'<strong style="padding:4px 10px;background:#4f46e5;color:#fff;border-radius:4px">{p}</strong>'
-            else:
-                pq = urllib.parse.urlencode({**{k: v for k, v in filters.items() if v}, "page": p})
-                page_links += f'<a href="/audit?{pq}" style="padding:4px 10px;color:#4f46e5;text-decoration:none">{p}</a>'
-        pagination = f'<div style="display:flex;align-items:center;gap:6px;margin-top:16px;justify-content:center;font-size:14px">{page_links}</div>'
+    qs_amp = qs.replace("&", "&amp;") if qs else ""
+    page_url_base = f"/audit?{qs_amp}"
+    pagination = build_pagination_html(
+        report_id=0,
+        current=page,
+        total_pages=total_pages,
+        page_size=page_size,
+        total_rows=total,
+        page_url_base=page_url_base,
+    )
 
     export_qs = urllib.parse.urlencode({**{k: v for k, v in filters.items() if v}, "export": "csv"})
 
@@ -2138,6 +2169,22 @@ def render_audit_page(
     .date-shortcuts { display:flex; gap:4px; align-items:flex-end; }
     .audit-actions { display:flex; gap:10px; margin-bottom:16px; }
     .audit-info { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:14px; color:#64748b; }
+    .pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
+    .pagination a, .pagination .page-btn, .pagination .page-span {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 36px; height: 36px; padding: 0 10px; border-radius: 8px;
+      font-size: 14px; text-decoration: none; color: #475569; transition: all 0.15s;
+    }
+    .pagination a { background: #fff; border: 1px solid #e2e8f0; }
+    .pagination a:hover { background: #f1f5f9; border-color: #cbd5e1; }
+    .pagination .active { background: #4f46e5 !important; color: #fff !important; border-color: #4f46e5 !important; font-weight: 600; }
+    .pagination .disabled { color: #cbd5e1; background: transparent; border: none; cursor: default; }
+    .jump-box { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; }
+    .jump-box input {
+      width: 64px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
+      font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
+    }
+    .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
     """
 
     extra_js = r"""
@@ -2188,11 +2235,20 @@ def render_audit_page(
         msg_class = "flash-success" if "成功" in message else "flash-error"
         html += f'<div class="flash {msg_class}">{html_mod.escape(message)}</div>'
 
+    size_info = ""
+    if db_size > 0:
+        for unit in ("B", "KB", "MB", "GB"):
+            if db_size < 1024:
+                size_info = f"{db_size:.1f} {unit}"
+                break
+            db_size /= 1024
+        size_info = f'<span style="margin-left:16px;color:#64748b">数据库大小: {size_info}</span>'
+
     html += f"""
 <div class="card">
   <h2>审计日志</h2>
   <div class="audit-info">
-    <span>共 {total} 条记录，第 {page}/{total_pages} 页</span>
+    <span>共 {total} 条记录，第 {page}/{total_pages} 页{size_info}</span>
     <div class="audit-actions">
       <a href="/audit?{export_qs}" class="btn btn-sm btn-success">导出 CSV</a>
     </div>

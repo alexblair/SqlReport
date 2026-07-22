@@ -1098,10 +1098,10 @@ def remove_session(conn, token: str) -> bool:
 def get_all_sessions(conn) -> list[dict]:
     """返回所有未过期的 session 记录。"""
     rows = conn.execute(
-        "SELECT token, username FROM sessions WHERE created_at > ?",
+        "SELECT token, username, created_at FROM sessions WHERE created_at > ?",
         (time.time() - 86400,),
     ).fetchall()
-    return [{"token": r[0], "username": r[1]} for r in rows]
+    return [{"token": r[0], "username": r[1], "created_at": r[2]} for r in rows]
 
 
 def clear_sessions(conn) -> None:
@@ -1188,8 +1188,13 @@ def get_api_endpoints_by_report(conn, report_id: int) -> list[dict]:
 
 
 def get_all_api_endpoints(conn) -> list[dict]:
-    """返回所有 API 端点列表。"""
-    rows = conn.execute("SELECT * FROM api_endpoints ORDER BY id").fetchall()
+    """返回所有 API 端点列表（含关联报表名）。"""
+    rows = conn.execute("""
+        SELECT ae.*, rc.name AS report_name
+        FROM api_endpoints ae
+        LEFT JOIN report_configs rc ON ae.report_id = rc.id
+        ORDER BY ae.id
+    """).fetchall()
     return [dict(r) for r in rows]
 
 

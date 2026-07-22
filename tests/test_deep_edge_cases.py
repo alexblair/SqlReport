@@ -702,7 +702,7 @@ class TestImportCompatibility(unittest.TestCase):
             "_MySQLRow", "_MySQLCursor", "_MySQLConnection",
             "_connect_mysql_config",
             "create_mysql_connection", "_split_sql_statements",
-            "execute_mysql_query", "count_mysql_query",
+            "execute_mysql_query",
         ]
         for sym in qe_symbols:
             with self.subTest(symbol=sym):
@@ -717,7 +717,7 @@ class TestImportCompatibility(unittest.TestCase):
             "_MySQLRow", "_MySQLCursor", "_MySQLConnection",
             "_connect_mysql_config",
             "create_mysql_connection", "_split_sql_statements",
-            "execute_mysql_query", "count_mysql_query",
+            "execute_mysql_query",
         ]
         for sym in qe_symbols:
             with self.subTest(symbol=sym):

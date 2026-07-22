@@ -319,7 +319,7 @@ class BaseStateMachineTest(unittest.TestCase):
             self.conn, "GET", "/report", query_string,
             pool_override=self.MOCK_POOL,
         )
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         return body
 
     # ---- URL 参数解析辅助 ----

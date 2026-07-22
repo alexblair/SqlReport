@@ -294,39 +294,6 @@ class TestMySQLManager(unittest.TestCase):
         self.assertEqual(results[0]["rows"], [(1, "Alice"), (2, "Bob")])
         mock_cursor.execute.assert_called_once_with("SELECT * FROM t", ())
 
-    @patch("db.create_mysql_connection")
-    def test_count_mysql_query(self, mock_create_conn):
-        """count_mysql_query 应返回总行数"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.fetchone.return_value = (42,)
-        mock_create_conn.return_value = mock_conn
-
-        conn = db.create_mysql_connection({"host": "h", "port": 3306, "user": "u",
-                                           "password": "p", "database": "d"})
-        count = db.count_mysql_query(conn, "SELECT * FROM t")
-        self.assertEqual(count, 42)
-
-    @patch("db.create_mysql_connection")
-    def test_count_mysql_query_trailing_semicolon(self, mock_create_conn):
-        """SQL 末尾带分号时 count 应正确去除"""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.fetchone.return_value = (7,)
-        mock_create_conn.return_value = mock_conn
-
-        conn = db.create_mysql_connection({"host": "h", "port": 3306, "user": "u",
-                                           "password": "p", "database": "d"})
-        count = db.count_mysql_query(conn, "SELECT * FROM D1;")
-        self.assertEqual(count, 7)
-        # 验证 SQL 中不含分号
-        call_sql = mock_cursor.execute.call_args[0][0]
-        self.assertNotIn(";)", call_sql)
-        self.assertIn("D1) AS _sub", call_sql)
-
-
 class TestSessionCRUD(unittest.TestCase):
     """Session CRUD 测试"""
 

@@ -8,6 +8,7 @@ test_export.py — export.py 单元测试
 - 覆盖错误路径（缺少参数、报表不存在、查询失败）
 """
 
+import csv
 import io
 import json
 import unittest
@@ -91,7 +92,7 @@ class TestExportToCSV(unittest.TestCase):
         code, csv_content, headers = export.handle_export(
             self.conn, "id=1&charset=utf8", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(csv_content, bytes)
         text = csv_content.decode("utf-8")
         # 应包含 BOM
@@ -156,7 +157,7 @@ class TestExportToCSV(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&charset=utf8", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "text/csv; charset=utf-8")
         self.assertIsInstance(content, bytes)
         text = content.decode("utf-8")
@@ -178,7 +179,7 @@ class TestExportToCSV(unittest.TestCase):
             self.conn, "id=1&f_name=alice", pool_override=self.mock_pool)
 
         text = self._decode(csv_content)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("Alice", text)
         self.assertNotIn("Bob", text)
         self.assertNotIn("Charlie", text)
@@ -189,18 +190,18 @@ class TestExportToCSV(unittest.TestCase):
     def test_export_missing_id(self):
         """缺少 id 参数应返回 400"""
         code, body, _ = export.handle_export(self.conn, "")
-        self.assertEqual(code, "400")
+        self.assertEqual(code, 400)
         self.assertIn("缺少", body)
 
     def test_export_invalid_id(self):
         """无效 id 应返回 400"""
         code, body, _ = export.handle_export(self.conn, "id=abc")
-        self.assertEqual(code, "400")
+        self.assertEqual(code, 400)
 
     def test_export_report_not_found(self):
         """不存在的报表应返回 404"""
         code, body, _ = export.handle_export(self.conn, "id=999")
-        self.assertEqual(code, "404")
+        self.assertEqual(code, 404)
 
     @patch("db.create_mysql_connection")
     def test_export_query_error(self, mock_create_conn):
@@ -213,7 +214,7 @@ class TestExportToCSV(unittest.TestCase):
 
         code, body, _ = export.handle_export(
             self.conn, "id=1", pool_override=self.mock_pool)
-        self.assertEqual(code, "500")
+        self.assertEqual(code, 500)
         self.assertIn("表不存在", body)
 
 
@@ -235,6 +236,31 @@ class TestExportReportToCSV(unittest.TestCase):
                                                "user": "u", "password": "p",
                                                "database": "d"})
         self.assertEqual(result, '\ufeff"col1","col2"\n')
+
+    @patch("db.create_mysql_connection")
+    def test_export_csv_with_sort(self, mock_create_conn):
+        """导出 CSV 时应用排序"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("name",)]
+        mock_cursor.fetchall.return_value = [
+            (1, "Charlie"), (2, "Alice"), (3, "Bob"),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        sorts = [("name", "desc")]
+        result = export.export_report_to_csv(
+            "SELECT * FROM t",
+            {"host": "h", "port": 3306, "user": "u", "password": "p",
+             "database": "d"},
+            filters=[], columns=["id", "name"], result_index=0, sorts=sorts)
+
+        rows = list(csv.reader(io.StringIO(result)))
+        header = rows[0]
+        data_rows = rows[1:]
+        names = [row[1] for row in data_rows]
+        self.assertEqual(names, sorted(names, reverse=True))
 
 
 # ===================================================================
@@ -279,7 +305,7 @@ class TestJSONExport(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = self._decode_json(content)
         self.assertIn("订单报表", data)
         rows = data["订单报表"]
@@ -303,7 +329,7 @@ class TestJSONExport(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = self._decode_json(content)
         detail = data["订单报表"][0]["detail"]
         self.assertEqual(detail, '包含"引号"的文本')
@@ -323,7 +349,7 @@ class TestJSONExport(unittest.TestCase):
         code, content, _ = export.handle_export(
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = self._decode_json(content)
         detail = data["订单报表"][0]["物资详情"]
         self.assertIn("钢筋", detail)
@@ -348,7 +374,7 @@ class TestJSONExport(unittest.TestCase):
         code, content, _ = export.handle_export(
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = self._decode_json(content)
         self.assertEqual(data["订单报表"], [])
 
@@ -368,7 +394,7 @@ class TestJSONExport(unittest.TestCase):
             self.conn, "id=1&format=json&f_name=alice",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = self._decode_json(content)
         rows = data["订单报表"]
         self.assertEqual(len(rows), 1)
@@ -387,7 +413,7 @@ class TestJSONExport(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"),
                          "application/json; charset=gbk")
         self.assertIn("attachment", headers.get("Content-Disposition", ""))
@@ -396,7 +422,7 @@ class TestJSONExport(unittest.TestCase):
     def test_json_export_missing_id(self):
         """缺少 id 参数应返回 400"""
         code, body, _ = export.handle_export(self.conn, "format=json")
-        self.assertEqual(code, "400")
+        self.assertEqual(code, 400)
         self.assertIn("缺少", body)
 
 
@@ -431,7 +457,7 @@ class TestExportCharset(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         # 应该能正常解码为 GBK
         text = content.decode("gbk")
@@ -450,7 +476,7 @@ class TestExportCharset(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&charset=utf8", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "text/csv; charset=utf-8")
 
     @patch("db.create_mysql_connection")
@@ -467,7 +493,7 @@ class TestExportCharset(unittest.TestCase):
             self.conn, "id=1&format=json&charset=gbk",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"),
                          "application/json; charset=gbk")
         self.assertIsInstance(content, bytes)
@@ -489,7 +515,7 @@ class TestExportCharset(unittest.TestCase):
             self.conn, "id=1&format=json&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"),
                          "application/json; charset=utf-8")
 
@@ -524,7 +550,7 @@ class TestExportJSONNoQuotes(unittest.TestCase):
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         text = content.decode("utf-8") if isinstance(content, bytes) else content
         # id 应为数字 1 而不是字符串 "1"
         self.assertIn('"id": 1', text)
@@ -555,7 +581,7 @@ class TestExportJSONNoQuotes(unittest.TestCase):
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         data = json.loads(content.decode("utf-8"))
         self.assertIsInstance(data["订单报表"][0]["id"], int)
@@ -577,7 +603,7 @@ class TestExportJSONNoQuotes(unittest.TestCase):
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         text = content.decode("utf-8")
         self.assertIn('"remark": null', text)
         data = json.loads(text)
@@ -599,7 +625,7 @@ class TestExportJSONNoQuotes(unittest.TestCase):
             self.conn, "id=1&format=json&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = json.loads(content.decode("utf-8"))
         self.assertIsInstance(data["订单报表"][0]["id"], str)
         self.assertEqual(data["订单报表"][0]["id"], "1")
@@ -631,7 +657,7 @@ class TestExportZip(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&zip=1", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         self.assertEqual(headers.get("Content-Type"), "application/zip")
         self.assertIn(".zip", headers.get("Content-Disposition", ""))
@@ -660,7 +686,7 @@ class TestExportZip(unittest.TestCase):
             self.conn, "id=1&format=json&zip=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "application/zip")
 
         import zipfile
@@ -686,7 +712,7 @@ class TestExportZip(unittest.TestCase):
             self.conn, "id=1&format=json&zip=1&json_no_quotes=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "application/zip")
 
         import zipfile
@@ -776,6 +802,32 @@ class TestExportReportToJSON(unittest.TestCase):
         self.assertIsInstance(row["id"], int)
         self.assertEqual(row["id"], 1)
         self.assertIsInstance(row["price"], float)
+
+    @patch("db.create_mysql_connection")
+    def test_export_json_with_sort(self, mock_create_conn):
+        """导出 JSON 时应用排序"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("name",)]
+        mock_cursor.fetchall.return_value = [
+            (1, "Charlie"), (2, "Alice"), (3, "Bob"),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        sorts = [("name", "asc")]
+        result = export.export_report_to_json(
+            "SELECT * FROM t",
+            {"host": "h", "port": 3306, "user": "u", "password": "p",
+             "database": "d"},
+            "测试报表",
+            filters=[], json_no_quotes=False,
+            columns=["id", "name"], result_index=0, sorts=sorts)
+
+        data = json.loads(result)
+        rows = data["测试报表"]
+        names = [r["name"] for r in rows]
+        self.assertEqual(names, sorted(names))
 
 
 class TestEncodeContent(unittest.TestCase):
@@ -912,7 +964,7 @@ class TestExportParameterCombinations(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1&charset=utf8", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         text = content.decode("utf-8")
         # BOM 存在
@@ -940,7 +992,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&format=json&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = json.loads(content.decode("utf-8"))
         # 顶层键为报表名
         self.assertIn("订单报表", data)
@@ -966,7 +1018,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&charset=utf8&f_name=Alice&op_name=eq",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头 + 1 行
         self.assertEqual(len(rows), 2)
@@ -985,7 +1037,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&format=json&charset=utf8&f_name=Bob&op_name=eq",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = json.loads(content.decode("utf-8"))
         rows = data["订单报表"]
         self.assertEqual(len(rows), 1)
@@ -1003,7 +1055,7 @@ class TestExportParameterCombinations(unittest.TestCase):
         code, content, headers = export.handle_export(
             self.conn, "id=1", pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         # 应能正常解码为 GBK
         text = content.decode("gbk")
@@ -1026,7 +1078,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&format=json&charset=gbk",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         # 应能正常解码为 GBK
         text = content.decode("gbk")
@@ -1047,7 +1099,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&charset=utf8&use_custom_cols=1&cols=name",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头 + 4 行
         self.assertEqual(len(rows), 5)
@@ -1071,7 +1123,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=id,city",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = json.loads(content.decode("utf-8"))
         rows = data["订单报表"]
         self.assertEqual(len(rows), 4)
@@ -1097,7 +1149,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=name,age",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头 + 3 行 (Alice 30, Charlie 35, Diana 28)
         self.assertEqual(len(rows), 4)
@@ -1126,7 +1178,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=name,age",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         data = json.loads(content.decode("utf-8"))
         rows = data["订单报表"]
         self.assertEqual(len(rows), 3)
@@ -1151,7 +1203,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&charset=gbk&f_city=NYC&op_city=eq",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         text = content.decode("gbk")
         # 只有 NYC 的行 (Alice, Charlie)
@@ -1175,7 +1227,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         text = content.decode("utf-8")
         # id 应为数字不加引号
         self.assertIn('"id": 1', text)
@@ -1208,7 +1260,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&zip=1&charset=utf8",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "application/zip")
         self.assertIsInstance(content, bytes)
 
@@ -1241,7 +1293,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&f_name=Alice&op_name=eq",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"), "application/zip")
 
         import zipfile
@@ -1266,7 +1318,7 @@ class TestExportParameterCombinations(unittest.TestCase):
             self.conn, "id=1&charset=utf8&f_name=NotFound&op_name=eq",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         text = content.decode("utf-8")
         # 有 BOM
         self.assertTrue(text.startswith("\ufeff"))
@@ -1293,7 +1345,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&f_age=40&op_age=lt",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头 + 2 行 (Bob=LA/25, Diana=LA/28)
         self.assertEqual(len(rows), 3)
@@ -1315,7 +1367,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=nonexistent",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         text = content.decode("utf-8")
         # 回退到全部列
         self.assertIn('"id","name","age","city"', text)
@@ -1336,7 +1388,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=name,name",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头 1 列
         self.assertEqual(len(rows[0]), 1)
@@ -1357,7 +1409,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=age,name,id",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         rows = self._decode_csv_rows(content)
         # 表头应为 age, name, id 顺序
         self.assertEqual(rows[0], ["age", "name", "id"])
@@ -1380,7 +1432,7 @@ class TestExportParameterCombinations(unittest.TestCase):
                        "&use_custom_cols=1&cols=id,name",
             pool_override=self.mock_pool)
 
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
         # 解码 GBK → 解析 JSON
         text = content.decode("gbk")
@@ -1398,6 +1450,64 @@ class TestExportParameterCombinations(unittest.TestCase):
         self.assertEqual(names, {"Alice", "Charlie"})
         # 响应头含 gbk
         self.assertIn("charset=gbk", headers.get("Content-Type", ""))
+
+    # ------------------------------------------------------------------
+    # 用例 21: CSV + name 降序排序
+    # ------------------------------------------------------------------
+
+    @patch("db.create_mysql_connection")
+    def test_21_csv_sort_desc(self, mock_create_conn):
+        """CSV + name 降序 — 导出时应用排序"""
+        self._setup_mock(mock_create_conn)
+        code, content, headers = export.handle_export(
+            self.conn, "id=1&charset=utf8"
+                       "&sort=name&dir=desc",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code, 200)
+        rows = self._decode_csv_rows(content)
+        names = [r[1] for r in rows[1:]]
+        self.assertEqual(names, sorted(names, reverse=True))
+
+    # ------------------------------------------------------------------
+    # 用例 22: JSON + name 升序排列
+    # ------------------------------------------------------------------
+
+    @patch("db.create_mysql_connection")
+    def test_22_json_sort_asc(self, mock_create_conn):
+        """JSON + name 升序 — 导出时应用排序"""
+        self._setup_mock(mock_create_conn)
+        code, content, headers = export.handle_export(
+            self.conn, "id=1&format=json&charset=utf8"
+                       "&sort=name&dir=asc",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code, 200)
+        data = json.loads(content.decode("utf-8"))
+        rows = data["订单报表"]
+        names = [r["name"] for r in rows]
+        self.assertEqual(names, sorted(names))
+
+    # ------------------------------------------------------------------
+    # 用例 23: CSV + age 降序 + city 筛选 (排序在筛选之后)
+    # ------------------------------------------------------------------
+
+    @patch("db.create_mysql_connection")
+    def test_23_csv_sort_after_filter(self, mock_create_conn):
+        """CSV + age 降序 + 筛选 city=NYC — 先筛选再排序"""
+        self._setup_mock(mock_create_conn)
+        code, content, headers = export.handle_export(
+            self.conn, "id=1&charset=utf8"
+                       "&f_city=NYC&op_city=eq"
+                       "&sort=age&dir=desc",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code, 200)
+        rows = self._decode_csv_rows(content)
+        # 仅 NYC 的行 (Alice/30, Charlie/35)
+        self.assertEqual(len(rows), 3)  # header + 2 data
+        ages = [int(r[2]) for r in rows[1:]]
+        self.assertEqual(ages, sorted(ages, reverse=True))
 
 
 if __name__ == "__main__":

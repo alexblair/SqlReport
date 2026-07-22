@@ -21,10 +21,12 @@ server.py — HTTP 服务器入口
 import sys
 import os
 import re
+import json
 import time
 import logging
 import urllib.parse
 import http.server
+import html as _html_mod
 import threading
 import db
 import auth
@@ -34,13 +36,14 @@ import render
 import export as export_mod
 import api_handler
 import audit_db
-from app_config import get_server_config, get_log_config
+from app_config import get_server_config, get_log_config, get_error_log_config, get_audit_db_config
 
 # ---------------------------------------------------------------------------
 # 配置（从 app_config.json 加载，支持环境变量 HOST / PORT 覆盖）
 # ---------------------------------------------------------------------------
 
 HOST, PORT = get_server_config()
+_start_time = time.time()
 
 # ---------------------------------------------------------------------------
 # 登录页 HTML
@@ -164,8 +167,11 @@ class RouteEntry:
 ROUTES = [
     RouteEntry(r"^/login$", "GET", False, False, "_handle_login_get"),
     RouteEntry(r"^/login$", "POST", False, False, "_handle_login"),
+    RouteEntry(r"^/health$", "GET", False, False, "_handle_health"),
     RouteEntry(r"^/?$", "GET", True, False, "_handle_home_redirect"),
     RouteEntry(r"^/logout$", "GET", True, False, "_handle_logout"),
+    RouteEntry(r"^/config/api-endpoints$", "GET", True, True, "_handle_config_api_endpoints"),
+    RouteEntry(r"^/config/api-endpoints$", "POST", True, True, "_handle_config_api_endpoints"),
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
     RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
@@ -218,6 +224,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle(self, method: str):
         """基于路由表分发请求"""
+        self._session_token = None
         parsed = urllib.parse.urlparse(self.path)
         raw_path = parsed.path.rstrip("/") or "/"
         path = urllib.parse.unquote(raw_path)
@@ -234,10 +241,17 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             conn = db.get_config_db()
             try:
                 getattr(self, route.handler)(method, path, query, conn)
+            except Exception as e:
+                logging.error("未捕获异常: %s", e, exc_info=True)
+                self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
             finally:
                 conn.close()
         else:
-            getattr(self, route.handler)(method, path, query, None)
+            try:
+                getattr(self, route.handler)(method, path, query, None)
+            except Exception as e:
+                logging.error("未捕获异常: %s", e, exc_info=True)
+                self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
 
     # ---- 认证 ----
 
@@ -250,6 +264,9 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         if user is None:
             self._send_redirect("/login")
             return False
+        # 滑动过期：刷新 session 时间戳 + 下行 cookie Max-Age
+        auth.refresh_session(token)
+        self._session_token = token
         return True
 
     def _get_current_user(self) -> str | None:
@@ -266,6 +283,17 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _handle_home_redirect(self, method, path, query, conn=None):
         """首页重定向到 /report"""
         self._send_redirect("/report")
+
+    def _handle_health(self, method, path, query, conn=None):
+        """健康检查端点，返回 JSON 状态"""
+        uptime = int(time.time() - _start_time)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "status": "ok",
+            "uptime": uptime,
+        }).encode("utf-8"))
 
     def _handle_login(self, method=None, path=None, query=None, conn=None):
         """处理登录表单提交"""
@@ -309,37 +337,48 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     # ---- 各功能路由 ----
 
+    def _handle_config_api_endpoints(self, method: str, path: str, query: str, conn):
+        """API 端点独立管理页"""
+        form_body = self._read_body() if method == "POST" else None
+        session_user = self._get_current_user()
+        code, body, headers = config.handle_api_endpoints_request(
+            conn, method, path, query, form_body, session_user=session_user)
+        self._log_web_access(path, method, code, request_body=form_body)
+        if code == 302:
+            self._send_redirect(body)
+        else:
+            self._send_html(code, body, headers)
+
     def _handle_config(self, method: str, path: str, query: str, conn):
         """委托给 config.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
         session_user = self._get_current_user()
         code, body, headers = config.handle_request(conn, method, path, query, form_body, session_user=session_user)
-        self._log_web_access(path, method, int(code) if code != "302" else 302,
+        self._log_web_access(path, method, code,
                              request_body=form_body)
 
-        if code == "302":
+        if code == 302:
             self._send_redirect(body)
         else:
-            self._send_html(int(code), body, headers)
+            self._send_html(code, body, headers)
 
     def _handle_report(self, method: str, path: str, query: str, conn):
         """委托给 report.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
         code, body, headers = report.handle_request(conn, method, path, query, form_body)
-        self._log_web_access(path, method, int(code) if code != "302" else 302,
+        self._log_web_access(path, method, code,
                              request_body=form_body)
 
-        if code == "302":
+        if code == 302:
             self._send_redirect(body)
         else:
-            self._send_html(int(code), body, headers)
+            self._send_html(code, body, headers)
 
     def _handle_export(self, method: str, path: str, query: str, conn):
         """委托给 export.py，使用 _handle() 传入的共享连接"""
         code, body, headers = export_mod.handle_export(conn, query)
 
-        code_int = int(code)
-        self.send_response(code_int)
+        self.send_response(code)
         for key, val in headers.items():
             self.send_header(key, val)
         self.end_headers()
@@ -483,6 +522,20 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_audit(self, method: str, path: str, query: str, conn=None):
         """处理审计日志页面的请求。"""
+        # 自动轮转过期日志
+        audit_config = get_audit_db_config()
+        if audit_config.get("retention_days", 0) > 0:
+            try:
+                audit_conn = audit_db.get_audit_db()
+                try:
+                    deleted = audit_db.rotate_audit_logs(audit_conn, audit_config["retention_days"])
+                    if deleted > 0:
+                        logging.info("审计日志自动清理: 删除了 %d 条过期记录", deleted)
+                finally:
+                    audit_conn.close()
+            except Exception as e:
+                logging.warning("审计日志自动轮转失败: %s", e)
+
         qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
         if method == "POST":
@@ -540,7 +593,14 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         finally:
             audit_conn.close()
 
-        body = render.render_audit_page(rows, total, page, page_size, filters, message=flash or "")
+        db_size = 0
+        try:
+            db_size = os.path.getsize(audit_db.get_audit_db_path())
+        except OSError:
+            pass
+
+        body = render.render_audit_page(rows, total, page, page_size, filters,
+                                         message=flash or "", db_size=db_size)
         self._log_web_access(path, "GET", 200)
         self._send_html(200, body)
 
@@ -591,6 +651,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         """发送 HTML 响应"""
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if self._session_token:
+            self.send_header("Set-Cookie", auth.make_set_cookie_header(self._session_token))
         if extra_headers:
             for k, v in extra_headers.items():
                 self.send_header(k, v)
@@ -604,6 +666,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         """发送 302 重定向"""
         self.send_response(302)
         self.send_header("Location", location)
+        if self._session_token:
+            self.send_header("Set-Cookie", auth.make_set_cookie_header(self._session_token))
         self.end_headers()
 
 
@@ -649,21 +713,27 @@ def setup_logging():
     enabled, log_path = get_log_config()
     if not enabled:
         logging.basicConfig(level=logging.WARNING, force=True)
-        return
+    else:
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            filename=log_path,
+            filemode="a",
+            force=True,
+        )
+        logging.info("日志系统已初始化，文件: %s", os.path.abspath(log_path))
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        filename=log_path,
-        filemode="a",
-        force=True,
-    )
-    logging.info("日志系统已初始化，文件: %s", os.path.abspath(log_path))
+    error_log_cfg = get_error_log_config()
+    if error_log_cfg["enable"]:
+        error_handler = logging.FileHandler(error_log_cfg["path"], encoding="utf-8")
+        error_handler.setLevel(logging.WARNING)
+        error_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logging.getLogger().addHandler(error_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -703,14 +773,28 @@ def main():
 
         # 从 SQLite 恢复 session（使重启后用户无需重新登录）
         auth.load_sessions()
+
+        # 启动时清理过期审计日志
+        audit_config = get_audit_db_config()
+        if audit_config.get("retention_days", 0) > 0:
+            try:
+                audit_conn = audit_db.get_audit_db()
+                try:
+                    deleted = audit_db.rotate_audit_logs(audit_conn, audit_config["retention_days"])
+                    if deleted > 0:
+                        logging.info("启动时自动清理了 %d 条过期审计日志", deleted)
+                finally:
+                    audit_conn.close()
+            except Exception as e:
+                logging.warning("启动时审计日志轮转失败: %s", e)
     except KeyboardInterrupt:
         logging.info("启动被用户中断")
         sys.exit(0)
 
     # 创建 HTTP 服务器（允许地址重用，避免 Ctrl+Z 暂停后端口仍被占用）
-    http.server.HTTPServer.allow_reuse_address = True
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
     try:
-        server = http.server.HTTPServer((HOST, PORT), ReportHandler)
+        server = http.server.ThreadingHTTPServer((HOST, PORT), ReportHandler)
     except OSError as e:
         if e.errno == 98:  # Address already in use
             # 尝试自动清理占用端口的旧进程
@@ -721,7 +805,7 @@ def main():
                     capture_output=True, timeout=5
                 )
                 logging.info("已清理端口 %s，重新绑定...", PORT)
-                server = http.server.HTTPServer((HOST, PORT), ReportHandler)
+                server = http.server.ThreadingHTTPServer((HOST, PORT), ReportHandler)
             except Exception:
                 logging.error("端口 %s 已被占用", PORT)
                 logging.error("请手动执行: fuser -k %s/tcp", PORT)

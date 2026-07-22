@@ -115,6 +115,9 @@ class _MySQLConnection:
     def commit(self):
         self._conn.commit()
 
+    def begin(self):
+        self._conn.start_transaction()
+
     def rollback(self):
         self._conn.rollback()
 
@@ -300,49 +303,52 @@ def _split_sql_statements(sql: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def execute_mysql_query(conn, sql: str, params: tuple = ()) -> list[dict]:
+def execute_mysql_query(conn, sql: str, params: tuple = (),
+                        transactional: bool = False) -> list[dict]:
     """
     在 MySQL 连接上执行 SQL 查询。支持多段 SQL（用 ; 分隔）。
 
     逐条执行每段 SQL，跳过 DDL/DML（cur.description is None）等不返回结果集的语句，
     收集所有 SELECT / 查询类语句的结果。
 
+    当 transactional=True 时，所有语句包装在 BEGIN/COMMIT 中。
+    任一语句失败 → ROLLBACK，重新抛出异常。
+    注意：DDL（ALTER/CREATE/DROP）在 InnoDB 中会隐式提交当前事务，
+    在事务内执行 DDL 可能导致部分语句在 ROLLBACK 后仍无法撤销。
+
     返回 list[dict]，每项包含 {"columns": list[str], "rows": list[tuple]}。
     若整个 SQL 中没有任何结果集返回，抛出 RuntimeError。
     """
+    if transactional:
+        if hasattr(conn, 'begin'):
+            conn.begin()
+        else:
+            conn.start_transaction()
     cur = conn.cursor()
     results: list[dict] = []
-    for statement in _split_sql_statements(sql):
-        stmt = statement.strip()
-        if not stmt:
-            continue
-        cur.execute(stmt, params)
-        if cur.description is not None:
-            columns = [desc[0] for desc in cur.description]
-            rows = cur.fetchall()
-            results.append({"columns": columns, "rows": rows})
-    cur.close()
+    try:
+        for statement in _split_sql_statements(sql):
+            stmt = statement.strip()
+            if not stmt:
+                continue
+            cur.execute(stmt, params)
+            if cur.description is not None:
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                results.append({"columns": columns, "rows": rows})
+        if transactional:
+            conn.commit()
+    except Exception:
+        if transactional:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        cur.close()
     if not results:
         raise RuntimeError("查询未返回任何结果集（SQL 中缺少 SELECT 语句）")
     return results
 
 
-# ---------------------------------------------------------------------------
-# MySQL 行计数
-# ---------------------------------------------------------------------------
-
-
-def count_mysql_query(conn, sql: str, params: tuple = ()) -> int:
-    """
-    将原 SQL 包装为 COUNT(*) 查询并返回总行数。
-
-    自动去除 SQL 末尾的分号，避免子查询包裹时报语法错误。
-    注意：简单包装，不支持包含 ORDER BY / LIMIT 的复杂子查询。
-    """
-    clean_sql = sql.rstrip("; \t\n\r")
-    count_sql = f"SELECT COUNT(*) AS cnt FROM ({clean_sql}) AS _sub"
-    cur = conn.cursor()
-    cur.execute(count_sql, params)
-    row = cur.fetchone()
-    cur.close()
-    return row[0]

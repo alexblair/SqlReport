@@ -21,6 +21,12 @@ from typing import Any, Optional
 # ---------------------------------------------------------------------------
 
 
+def get_audit_db_path() -> str:
+    """获取审计数据库文件路径（公开接口）。"""
+    from app_config import get_audit_db_config
+    return get_audit_db_config().get("path", "audit.db")
+
+
 def _get_audit_db_path() -> str:
     """从 app_config 获取 audit.db 路径，默认为 audit.db。"""
     from app_config import get_config
@@ -206,6 +212,28 @@ def export_audit_logs(conn, filters: dict) -> list[dict]:
         f"SELECT * FROM audit_logs WHERE {where_sql} ORDER BY id DESC", params
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def rotate_audit_logs(conn, retention_days: int) -> int:
+    """
+    自动清理超过保留天数的审计日志。
+
+    Args:
+        conn: 审计数据库连接
+        retention_days: 保留天数（0 = 不清理）
+
+    Returns:
+        删除的记录数
+    """
+    if retention_days <= 0:
+        return 0
+    import time
+    cutoff = time.time() - retention_days * 86400
+    from datetime import datetime
+    cutoff_iso = datetime.fromtimestamp(cutoff).isoformat()
+    cur = conn.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff_iso,))
+    conn.commit()
+    return cur.rowcount
 
 
 def delete_audit_logs(conn, filters: dict) -> int:

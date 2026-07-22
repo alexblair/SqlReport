@@ -108,7 +108,7 @@ class TestReportSelector(unittest.TestCase):
     def test_selector_lists_reports(self):
         """报表选择页应列出所有报表"""
         code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("报表A", body)
         self.assertIn("报表B", body)
         self.assertIn("选择报表", body)
@@ -126,7 +126,7 @@ class TestReportSelector(unittest.TestCase):
             sort_order INTEGER NOT NULL DEFAULT 0,FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL, FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL);
         """)
         code, body, _ = report.handle_request(conn2, "GET", "/report", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("选择报表", body)
         conn2.close()
 
@@ -155,7 +155,7 @@ class TestReportExecution(unittest.TestCase):
         )
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("用户报表", body)
         self.assertIn("Alice", body)
         self.assertIn("Bob", body)
@@ -220,7 +220,7 @@ class TestReportExecution(unittest.TestCase):
         """无效的 id 参数应回到选择页"""
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=abc", pool_override=self.mock_pool)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("选择报表", body)
 
     @patch("report.execute_report")
@@ -1494,7 +1494,7 @@ class TestEditButtonOnReportPage(unittest.TestCase):
         )
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override={"host": "h"})
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn('/config/reports/1/edit', body)
         self.assertIn('编辑', body)
         self.assertIn('target="_blank"', body)
@@ -1533,7 +1533,7 @@ class TestPreviewEndpoint(unittest.TestCase):
         form_body = "id=1&sql_query=SELECT+override_sql&name=预览报表&default_page_size=20"
         code, body, _ = report.handle_request(self.conn, "POST", "/report/preview",
                                                "", form_body)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         # 应使用 override SQL 进行查询
         actual_sql = mock_exec.call_args[0][1]
         self.assertEqual(actual_sql, "SELECT override_sql")

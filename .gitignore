@@ -42,3 +42,6 @@ CONTEXT.md
 
 # 代理指引（本地使用，不提交）
 AGENTS.md
+
+# 会话记忆系统（本地使用，不提交）
+.sessions/

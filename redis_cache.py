@@ -16,6 +16,7 @@ redis_cache.py — Redis 缓存层
 
 import hashlib
 import json
+import logging
 import threading
 import time
 from typing import Any, Optional
@@ -145,7 +146,8 @@ class RedisConnectionManager:
             self._client = self._create_client()
             self._client.ping()
             self._available = True
-        except Exception:
+        except Exception as e:
+            logging.error("Redis 连接失败: %s", e)
             self._client = None
             self._available = False
         return self._available
@@ -172,7 +174,8 @@ class RedisConnectionManager:
                     self._available = True
                 else:
                     self._available = False
-            except Exception:
+            except Exception as e:
+                logging.warning("Redis 健康检查失败: %s", e)
                 self._available = False
 
     def start_health_check(self):
@@ -202,7 +205,8 @@ class RedisConnectionManager:
             if ok:
                 self._client.expire(lock_key, timeout)
             return bool(ok)
-        except Exception:
+        except Exception as e:
+            logging.error("Redis acquire_lock 失败: %s", e)
             return False
 
     def release_lock(self, lock_key: str):
@@ -211,8 +215,8 @@ class RedisConnectionManager:
             return
         try:
             self._client.delete(lock_key)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error("Redis release_lock 失败: %s", e)
 
     def wait_for_lock(self, lock_key: str, max_wait: int = _LOCK_MAX_WAIT) -> bool:
         """等待锁释放，轮询直到获取锁或超时。"""
@@ -234,7 +238,8 @@ class RedisConnectionManager:
             if data is None:
                 return None
             return ReportSnapshot.from_json(data)
-        except Exception:
+        except Exception as e:
+            logging.warning("Redis get_snapshot 失败: %s", e)
             return None
 
     def set_snapshot(self, key: str, snapshot: ReportSnapshot,
@@ -251,8 +256,8 @@ class RedisConnectionManager:
                 self._client.setex(key, ttl_hours * 3600, data)
             else:
                 self._client.set(key, data)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error("Redis set_snapshot 失败: %s", e)
 
     def delete_snapshot(self, key: str):
         """从 Redis 删除报表快照。"""
@@ -260,8 +265,8 @@ class RedisConnectionManager:
             return
         try:
             self._client.delete(key)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("Redis delete_snapshot 失败: %s", e)
 
     def scan_snapshots(self, prefix: str, report_id: int) -> list[str]:
         """SCAN 匹配某报表全部快照 key（跨配置版本）。"""
@@ -279,7 +284,8 @@ class RedisConnectionManager:
                 if cursor == 0:
                     break
             return keys
-        except Exception:
+        except Exception as e:
+            logging.warning("Redis scan_snapshots 失败: %s", e)
             return []
 
     def set_expiration(self, key: str, ttl_hours: int):
@@ -291,8 +297,8 @@ class RedisConnectionManager:
                 self._client.expire(key, ttl_hours * 3600)
             else:
                 self._client.persist(key)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("Redis set_expiration 失败: %s", e)
 
     def close(self):
         """关闭 Redis 连接。"""
@@ -300,8 +306,8 @@ class RedisConnectionManager:
         if self._client:
             try:
                 self._client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning("Redis close 失败: %s", e)
             self._client = None
         self._available = False
 

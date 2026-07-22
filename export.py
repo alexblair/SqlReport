@@ -41,13 +41,14 @@ from decimal import Decimal
 from typing import Optional, Union
 import db
 import report
-from report import format_cell, parse_filters
+from report import format_cell, parse_filters, _parse_sorts, _sort_rows
 
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
                          filters=None,
                          columns: list[str] = None,
-                         result_index: int = 0) -> str:
+                         result_index: int = 0,
+                         sorts=None) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
@@ -55,6 +56,7 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
     result_index: 多结果集时选择第几个结果（默认 0）。
+    sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
@@ -71,6 +73,9 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
     filtered = report._filter_rows(rows, all_columns, filters or [])
+    # 应用排序（与报表页面一致）
+    if sorts:
+        filtered = report._sort_rows(filtered, all_columns, sorts)
 
     # 确定输出列（按用户自定义顺序）
     if columns is None:
@@ -152,7 +157,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                           filters=None,
                           json_no_quotes: bool = False,
                           columns: list[str] = None,
-                          result_index: int = 0) -> str:
+                          result_index: int = 0,
+                          sorts=None) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
@@ -160,6 +166,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     在导出前按条件过滤数据行（与报表页面筛选行为一致）。
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
     result_index: 多结果集时选择第几个结果（默认 0）。
+    sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
     （不加引号），而非全部转为字符串。
@@ -184,6 +191,9 @@ def export_report_to_json(sql_query: str, pool_config: dict,
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
     filtered = report._filter_rows(rows, all_columns, filters or [])
+    # 应用排序（与报表页面一致）
+    if sorts:
+        filtered = report._sort_rows(filtered, all_columns, sorts)
 
     # 确定输出列（按用户自定义顺序）
     if columns is None:
@@ -300,14 +310,14 @@ def _create_temp_zip(content_bytes: bytes, filename: str,
 
 def handle_export(conn, query: str,
                   pool_override: Optional[dict] = None
-                  ) -> tuple[str, Union[str, bytes], dict]:
+                  ) -> tuple[int, Union[str, bytes], dict]:
     """
     处理导出请求。
 
     解析以下查询参数：
       id             — 报表 ID（必需）
       format         — csv 或 json（默认 csv）
-      charset        — gbk 或 utf8（默认 gbk）
+      charset        — gbk 或 utf8（默认 utf8）
       json_no_quotes — 为 1 时 JSON 数值不加引号
       zip            — 为 1 时输出 ZIP 压缩包
       f_COL          — 筛选值（多字段）
@@ -320,26 +330,29 @@ def handle_export(conn, query: str,
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
     if "id" not in qs or not qs["id"][0]:
-        return "400", "缺少报表 ID 参数", {}
+        return 400, "缺少报表 ID 参数", {}
 
     try:
         report_id = int(qs["id"][0])
     except (ValueError, IndexError):
-        return "400", "无效的报表 ID", {}
+        return 400, "无效的报表 ID", {}
 
     report_config = db.get_report(conn, report_id)
     if not report_config:
-        return "404", "报表不存在", {}
+        return 404, "报表不存在", {}
 
     if pool_override:
         pool_config = pool_override
     else:
         pool_config = db.get_pool(conn, report_config["pool_id"])
         if not pool_config:
-            return "404", f"报表 '{report_config['name']}' 关联的连接池不存在", {}
+            return 404, f"报表 '{report_config['name']}' 关联的连接池不存在", {}
 
     # 解析筛选参数（从查询字符串，与报表页面一致）
     filters = parse_filters(qs)
+
+    # 解析排序参数（与报表页面共享 _parse_sorts）
+    sorts = _parse_sorts(qs)
 
     # 解析自定义列参数
     custom_columns = None
@@ -381,13 +394,13 @@ def handle_export(conn, query: str,
             content = export_report_to_json(
                 report_config["sql_query"], pool_config,
                 report_config["name"], filters, json_no_quotes,
-                custom_columns, result_index)
+                custom_columns, result_index, sorts=sorts)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,
-                custom_columns, result_index)
+                custom_columns, result_index, sorts=sorts)
     except Exception as e:
-        return "500", f"导出失败: {e}", {}
+        return 500, f"导出失败: {e}", {}
 
     # 构建 Content-Disposition 文件名
     raw_name, ascii_name, encoded_name = _build_export_filename(
@@ -407,7 +420,7 @@ def handle_export(conn, query: str,
                 f"filename*=UTF-8''{encoded_name}"
             ),
         }
-        return "200", zip_data, headers
+        return 200, zip_data, headers
 
     # 非 ZIP 模式：根据字符集编码内容
     content_bytes = _encode_content(content, charset)
@@ -426,4 +439,4 @@ def handle_export(conn, query: str,
         ),
     }
 
-    return "200", content_bytes, headers
+    return 200, content_bytes, headers

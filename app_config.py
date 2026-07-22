@@ -54,7 +54,19 @@ def _load_config() -> dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        print(f"[app_config] 警告: 配置文件 {path} 不存在，使用默认配置")
+        return {
+            "config_db": [
+                {
+                    "enable": True,
+                    "engine": "sqlite3",
+                    "path": "config.db",
+                }
+            ]
+        }
+    except json.JSONDecodeError as e:
+        print(f"[app_config] 警告: 配置文件 {path} 格式错误 ({e})，使用默认配置")
         return {
             "config_db": [
                 {
@@ -164,17 +176,39 @@ def get_redis_config() -> dict:
     return get_config().get("redis", {"enable": False})
 
 
+def get_error_log_config() -> dict:
+    """解析 error_log 配置段。
+
+    配置文件示例:
+        "error_log": {
+            "enable": true,
+            "path": "error.log"
+        }
+
+    缺失时返回 {"enable": False, "path": "error.log"}。
+    """
+    cfg = get_config().get("error_log", {})
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        "path": str(cfg.get("path", "error.log")),
+    }
+
+
 def get_audit_db_config() -> dict:
     """解析 audit_db 配置段。
 
     配置文件示例:
         "audit_db": {
-            "path": "audit.db"
+            "path": "audit.db",
+            "retention_days": 90
         }
 
-    缺失时返回默认值 {"path": "audit.db"}。
+    retention_days: 保留天数（0 = 永久保存）。
+    缺失时返回默认值 {"path": "audit.db", "retention_days": 0}。
     """
     cfg = get_config().get("audit_db", {})
+    retention = int(cfg.get("retention_days", 0))
     return {
-        "path": cfg.get("path", "audit.db"),
+        "path": str(cfg.get("path", "audit.db")),
+        "retention_days": max(0, retention),
     }

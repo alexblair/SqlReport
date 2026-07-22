@@ -46,7 +46,7 @@ def _set_up_db():
 def _start_server():
     """在后台线程启动 HTTP 服务器"""
     srv.PORT = TEST_PORT
-    server = http.server.HTTPServer((srv.HOST, srv.PORT), srv.ReportHandler)
+    server = http.server.ThreadingHTTPServer((srv.HOST, srv.PORT), srv.ReportHandler)
     srv._server_ref = server
     server.serve_forever()
 

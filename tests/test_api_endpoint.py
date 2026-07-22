@@ -122,7 +122,7 @@ def _start_server():
     _stop_server()
     srv.PORT = TEST_PORT
     try:
-        server = http.server.HTTPServer((srv.HOST, srv.PORT), srv.ReportHandler)
+        server = http.server.ThreadingHTTPServer((srv.HOST, srv.PORT), srv.ReportHandler)
         srv._server_ref = server
         server.serve_forever()
     except Exception:

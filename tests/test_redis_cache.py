@@ -8,6 +8,7 @@ test_redis_cache.py — redis_cache.py 单元测试
 - 全局管理器的 reset 机制
 """
 
+import logging
 import time
 import unittest
 from unittest.mock import patch, MagicMock, PropertyMock
@@ -348,6 +349,67 @@ class TestReportSnapshotEdgeCases(unittest.TestCase):
         snap = ReportSnapshot([], "", 0.0, "")
         restored = ReportSnapshot.from_json(snap.to_json())
         self.assertEqual(restored.config_version, "")
+
+
+class TestRedisCacheLogging(unittest.TestCase):
+    """Redis 缓存操作日志测试"""
+
+    def setUp(self):
+        self.config = {
+            "enable": True,
+            "host": "127.0.0.1",
+            "port": 6379,
+            "db": 0,
+            "password": "",
+            "key_prefix": "sr",
+            "default_ttl_hours": 24,
+            "socket_timeout": 5,
+        }
+
+    @patch("redis_cache.RedisConnectionManager._create_client")
+    def test_redis_get_snapshot_logs_warning_on_failure(self, mock_create):
+        """get_snapshot 失败时记录 warning 日志"""
+        mock_client = MagicMock()
+        mock_client.get.side_effect = Exception("连接被拒绝")
+        mock_create.return_value = mock_client
+        mgr = RedisConnectionManager(self.config)
+        mgr.connect()
+
+        with self.assertLogs(level=logging.WARNING) as cm:
+            result = mgr.get_snapshot("test_key")
+            self.assertIsNone(result)
+            self.assertTrue(any("Redis" in msg and "失败" in msg
+                            for msg in cm.output))
+
+    @patch("redis_cache.RedisConnectionManager._create_client")
+    def test_redis_set_snapshot_logs_error_on_failure(self, mock_create):
+        """set_snapshot 失败时记录 error 日志"""
+        mock_client = MagicMock()
+        mock_client.set.side_effect = Exception("写入超时")
+        mock_create.return_value = mock_client
+        mgr = RedisConnectionManager(self.config)
+        mgr.connect()
+        snap = ReportSnapshot([], "SELECT 1", 100.0, "v1")
+
+        with self.assertLogs(level=logging.ERROR) as cm:
+            mgr.set_snapshot("sr:snapshot:1:v1", snap)
+            self.assertTrue(any("Redis" in msg and "失败" in msg
+                            for msg in cm.output))
+
+    @patch("redis_cache.RedisConnectionManager._create_client")
+    def test_redis_acquire_lock_logs_error_on_failure(self, mock_create):
+        """acquire_lock 失败时记录 error 日志"""
+        mock_client = MagicMock()
+        mock_client.setnx.side_effect = Exception("连接超时")
+        mock_create.return_value = mock_client
+        mgr = RedisConnectionManager(self.config)
+        mgr.connect()
+
+        with self.assertLogs(level=logging.ERROR) as cm:
+            result = mgr.acquire_lock("my:lock")
+            self.assertFalse(result)
+            self.assertTrue(any("Redis" in msg and "失败" in msg
+                            for msg in cm.output))
 
 
 if __name__ == "__main__":

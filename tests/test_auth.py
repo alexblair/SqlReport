@@ -8,6 +8,8 @@ test_auth.py — auth.py 单元测试
 """
 
 import unittest
+from unittest.mock import patch
+import time
 import auth
 
 
@@ -92,6 +94,77 @@ class TestSession(unittest.TestCase):
         auth.clear_all_sessions()
         self.assertIsNone(auth.get_session_user(t1))
         self.assertIsNone(auth.get_session_user(t2))
+
+    def test_load_sessions_from_db(self):
+        """从 SQLite 加载 session 到内存时应正确恢复 token→(username, created_at)"""
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE sessions (token TEXT PRIMARY KEY, username TEXT NOT NULL, created_at REAL NOT NULL)"
+        )
+        now = time.time()
+        conn.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+            ("tok_load1", "alice", now),
+        )
+        conn.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+            ("tok_load2", "bob", now),
+        )
+        conn.commit()
+
+        with patch("db.get_config_db", return_value=conn):
+            auth._sessions.clear()
+            auth.load_sessions()
+
+        self.assertIn("tok_load1", auth._sessions)
+        self.assertIn("tok_load2", auth._sessions)
+        self.assertEqual(auth._sessions["tok_load1"][0], "alice")
+        self.assertEqual(auth._sessions["tok_load2"][0], "bob")
+        self.assertAlmostEqual(auth._sessions["tok_load1"][1], now, delta=1)
+
+    def test_session_expiry(self):
+        """过期的 session 应返回 None 并被清理"""
+        token = auth.create_session("alice")
+        # 修改内存中的 created_at 到过期时间
+        old = time.time() - auth._SESSION_TTL - 100
+        auth._sessions[token] = ("alice", old)
+        self.assertIsNone(auth.get_session_user(token))
+        self.assertNotIn(token, auth._sessions)
+
+    def test_create_session_db_failure_logs(self):
+        """DB 写入失败时应记录日志并降级"""
+        with patch("db.add_session", side_effect=RuntimeError("DB down")), \
+             patch("db.get_config_db", return_value=None), \
+             self.assertLogs(level="WARNING") as log:
+            token = auth.create_session("alice")
+            self.assertTrue(any("Session 持久化失败" in m for m in log.output))
+        self.assertEqual(auth.get_session_user(token), "alice")
+
+    def test_refresh_session_updates_timestamp(self):
+        """refresh_session 应更新 created_at"""
+        token = auth.create_session("alice")
+        old_ts = auth._sessions[token][1]
+        time.sleep(0.01)
+        auth.refresh_session(token)
+        new_ts = auth._sessions[token][1]
+        self.assertGreater(new_ts, old_ts)
+
+    def test_sliding_expiry_keeps_session_alive(self):
+        """滑动过期机制：刷新后 session 应继续有效"""
+        token = auth.create_session("alice")
+        # 将 created_at 拨到接近过期
+        near_expiry = time.time() - auth._SESSION_TTL + 30
+        auth._sessions[token] = ("alice", near_expiry)
+        # 刷新
+        auth.refresh_session(token)
+        # 应仍然有效（created_at 已被刷新）
+        self.assertEqual(auth.get_session_user(token), "alice")
+        # 再次拨到过期并验证
+        expired = time.time() - auth._SESSION_TTL - 100
+        auth._sessions[token] = ("alice", expired)
+        self.assertIsNone(auth.get_session_user(token))
 
 
 class TestCookieUtils(unittest.TestCase):

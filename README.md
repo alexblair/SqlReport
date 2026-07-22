@@ -33,6 +33,16 @@
 | **ZIP 压缩包** | 导出结果可选打包为 ZIP 压缩文件 |
 | **配置存储双引擎** | 支持 SQLite / MySQL 两种配置存储方案，通过 `app_config.json` 切换 |
 | **编辑-查看双向关联** | 报表页一键跳转编辑页，编辑页可直接查看报表或实时预览未保存的 SQL |
+| **健康检查端点** | `GET /health` 返回 JSON 状态（status + uptime），无需认证 |
+| **API 接口独立管理** | 独立管理页 `/config/api-endpoints`，展示全局 API 接口列表及关联报表 |
+| **Session 滑动过期** | 24 小时 TTL，每次请求自动刷新，重启后通过 SQLite 持久化恢复 |
+| **导出支持排序** | CSV/JSON 导出时应用当前排序状态（与报表页面行为一致） |
+| **事务性 SQL 执行** | 支持 BEGIN/COMMIT/ROLLBACK 包装的多语句事务执行 |
+| **错误日志独立输出** | WARNING 及以上级别可配置独立日志文件，与普通日志分离 |
+| **审计日志自动轮转** | 可配置保留天数，启动时和每次访问时自动清理过期记录 |
+| **ThreadingHTTPServer** | 多线程 HTTP 服务器，提升并发处理能力 |
+| **全局异常兜底** | 未捕获异常返回 500 错误页，避免直接崩溃 |
+| **Redis 可观测性** | 所有静默异常（`except: pass`）改为结构化日志输出 |
 | **纯标准库** | 仅依赖 `mysql-connector-python`，其余全部使用 Python 内置模块 |
 
 ## ✨ Features
@@ -55,6 +65,16 @@
 | **ZIP Compression** | Package export results as ZIP archive |
 | **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
 | **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
+| **Health Check** | `GET /health` returns JSON status (status + uptime), no auth required |
+| **API Endpoint Indep. Mgmt** | Standalone page `/config/api-endpoints` with global list & linked report |
+| **Session Sliding Expiry** | 24h TTL, refreshed on each request, persisted via SQLite across restarts |
+| **Export with Sorting** | CSV/JSON exports apply current sort state (consistent with report view) |
+| **Transactional SQL** | Multi-statement execution wrapped in BEGIN/COMMIT/ROLLBACK |
+| **Error Log Output** | Configurable separate log file for WARNING+ level messages |
+| **Audit Log Rotation** | Configurable retention days, auto-cleanup on startup and page visits |
+| **ThreadingHTTPServer** | Multi-threaded HTTP server for better concurrency |
+| **Global Error Handler** | Uncaught exceptions render a 500 error page instead of crashing |
+| **Redis Observability** | All silent exceptions (`except: pass`) upgraded to structured logging |
 | **Pure Stdlib** | Only depends on `mysql-connector-python`; everything else is Python built-in |
 
 ---
@@ -173,13 +193,33 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
     "log": {
         "enable": false,
         "path": "run.log"
+    },
+    "error_log": {
+        "enable": false,
+        "path": "error.log"
     }
 }
 ```
 
-- `enable` — `true` 开启文件日志，`false` 关闭（默认）
-- `path` — 日志文件路径，默认为 `run.log`（项目根目录）
+- `log.enable` — `true` 开启常规文件日志，`false` 关闭（默认）
+- `log.path` — 日志文件路径，默认为 `run.log`（项目根目录）
+- `error_log.enable` — `true` 开启独立错误日志文件（WARNING 及以上级别），`false` 关闭（默认）
+- `error_log.path` — 错误日志文件路径，默认为 `error.log`
 - 日志包含启动信息、请求记录和错误信息
+
+### 审计日志配置 / Audit Log Configuration
+
+```json
+{
+    "audit_db": {
+        "path": "audit.db",
+        "retention_days": 90
+    }
+}
+```
+
+- `path` — 审计数据库文件路径，默认为 `audit.db`
+- `retention_days` — 保留天数（0 = 永久保存），启动时和每次访问审计页时自动清理过期记录
 
 > ⚠️ `app_config.json` 包含数据库密码，已加入 `.gitignore`，请勿提交到版本控制。
 >
@@ -197,6 +237,7 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 - **用户** — 添加/编辑/删除系统用户
 - **报表** — 配置 SQL 查询、绑定的连接池、默认每页行数、所属分类、备注
 - **分类** — 无限层级树形管理，支持调序、新增、删除、重命名
+- **API 接口** — 独立管理页 `/config/api-endpoints`，全局 API 接口列表及关联报表名称
 
 报表编辑表单特色：
 - SQL 编辑器带格式化按钮和语法高亮预览切换
@@ -240,15 +281,21 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 
 ```
 SqlReport/
-├── server.py              # HTTP 服务器入口、路由分发
-├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类）
+├── server.py              # HTTP 服务器入口、路由分发（ThreadingHTTPServer）
+├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点）
 ├── report.py              # 报表页、分页、排序、筛选
-├── export.py              # CSV 导出
-├── auth.py                # 用户认证、Session 管理
+├── export.py              # CSV/JSON/ZIP 导出（支持排序）
+├── auth.py                # 用户认证、Session 管理（滑动过期 + SQLite 持久化）
 ├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
 ├── app_config.py          # 应用配置文件加载器
 ├── app_config.json        # 应用配置文件（含密码，不提交）
 ├── app_config.example.json# 配置文件模板
+├── config_db.py           # 配置数据库引擎选择
+├── query_executor.py      # MySQL 查询执行器（事务支持、?→%s 占位符转换）
+├── render.py              # HTML 模板（string.Template 常量）
+├── audit_db.py            # 审计日志数据库（含自动轮转）
+├── redis_cache.py         # Redis 快照缓存层
+├── api_handler.py         # API 接口处理器
 ├── tests/                 # 单元测试
 │   ├── __init__.py
 │   ├── test_auth.py
@@ -256,7 +303,10 @@ SqlReport/
 │   ├── test_config.py
 │   ├── test_db.py
 │   ├── test_export.py
+│   ├── test_health.py
 │   ├── test_mysql_mock.py
+│   ├── test_mysql_transactional.py
+│   ├── test_redis_cache.py
 │   ├── test_report.py
 │   ├── test_server.py
 │   └── test_state_machine.py
@@ -294,10 +344,10 @@ python -m unittest discover -s tests/ -v
 
 | 层级 / Layer | 技术 / Technology |
 |-------------|------------------|
-| Web 服务器 | `http.server` (Python stdlib) |
+| Web 服务器 | `http.server.ThreadingHTTPServer` (Python stdlib) |
 | 配置存储 | SQLite (Python stdlib `sqlite3`) 或 MySQL (`mysql-connector-python`)，通过 `app_config.json` 切换 |
 | 数据查询 | MySQL via `mysql-connector-python` |
-| 认证 | Cookie + SHA-256 salt hash (Python stdlib `hashlib`, `secrets`, `hmac`) |
+| 认证 | Cookie + SHA-256 salt hash + 滑动过期 (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
 | 前端 | 纯 HTML + 内联 CSS（无 JS 框架） |
 | 测试 | `unittest` (Python stdlib) |
 

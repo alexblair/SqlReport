@@ -11,6 +11,7 @@ import sqlite3
 import config
 import db
 import auth
+from tests.test_base import BaseConfigTest
 
 
 def _make_conn():
@@ -127,14 +128,14 @@ class TestPoolFlow(unittest.TestCase):
     def test_overview_contains_pool_section(self):
         """总览页面应包含连接池配置区块"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("连接池配置", body)
         self.assertIn("新增连接池", body)
 
     def test_add_pool_form(self):
         """新增连接池表单页面应包含表单元素"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config/pools/add", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("新增连接池", body)
         self.assertIn('name="name"', body)
         self.assertIn('name="host"', body)
@@ -146,7 +147,7 @@ class TestPoolFlow(unittest.TestCase):
         """提交新增连接池应成功并重定向"""
         form = "name=生产库&host=10.0.0.1&port=3306&user=root&password=secret&database=mydb"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/pools/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         self.assertIn("Location", headers)
         # 验证数据库
         pools = db.get_all_pools(self.conn)
@@ -158,14 +159,14 @@ class TestPoolFlow(unittest.TestCase):
         db.add_pool(self.conn, "dup", "h", 3306, "u", "p", "d")
         form = "name=dup&host=h2&port=3306&user=u2&password=p2&database=d2"
         code, body, _ = config.handle_request(self.conn, "POST", "/config/pools/add", "", form)
-        self.assertEqual(code, "200")  # 返回表单页
+        self.assertEqual(code, 200)  # 返回表单页
         self.assertIn("错误", body)
 
     def test_edit_pool_form(self):
         """编辑连接池表单应回填数据"""
         pid = db.add_pool(self.conn, "要改的池", "host1", 3306, "user1", "pass1", "db1")
         code, body, _ = config.handle_request(self.conn, "GET", f"/config/pools/{pid}/edit", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("编辑连接池", body)
         self.assertIn("host1", body)
         self.assertIn("user1", body)
@@ -175,7 +176,7 @@ class TestPoolFlow(unittest.TestCase):
         pid = db.add_pool(self.conn, "old", "host1", 3306, "u", "p", "d")
         form = "name=改后&host=host2&port=3307&user=u2&password=&database=d2"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/pools/{pid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         pool = db.get_pool(self.conn, pid)
         self.assertEqual(pool["name"], "改后")
         # 密码未提供，应保留原密码
@@ -185,13 +186,13 @@ class TestPoolFlow(unittest.TestCase):
         """编辑不存在的连接池应重定向"""
         form = "name=x&host=x&port=3306&user=x&password=x&database=x"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/pools/999/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
 
     def test_delete_pool(self):
         """删除连接池"""
         pid = db.add_pool(self.conn, "待删", "h", 3306, "u", "p", "d")
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/pools/{pid}/delete", "", "")
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         self.assertIsNone(db.get_pool(self.conn, pid))
 
 
@@ -211,7 +212,7 @@ class TestUserFlow(unittest.TestCase):
     def test_submit_add_user(self):
         form = "username=alice&password=pass123"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/users/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         users = db.get_all_users(self.conn)
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0]["username"], "alice")
@@ -223,7 +224,7 @@ class TestUserFlow(unittest.TestCase):
         uid = db.add_user(self.conn, "bob", h)
         form = "username=bob_new&password=newpw"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/users/{uid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         user = db.get_user_by_id(self.conn, uid)
         self.assertEqual(user["username"], "bob_new")
         self.assertTrue(auth.verify_password("newpw", user["password_hash"]))
@@ -231,14 +232,14 @@ class TestUserFlow(unittest.TestCase):
     def test_delete_user(self):
         uid = db.add_user(self.conn, "del", auth.hash_password("pw"))
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/users/{uid}/delete", "", "")
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         self.assertIsNone(db.get_user_by_id(self.conn, uid))
 
     def test_add_duplicate_user(self):
         db.add_user(self.conn, "dup", auth.hash_password("pw"))
         form = "username=dup&password=other"
         code, body, _ = config.handle_request(self.conn, "POST", "/config/users/add", "", form)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("错误", body)
 
 
@@ -266,7 +267,7 @@ class TestReportFlow(unittest.TestCase):
     def test_submit_add_report(self):
         form = "name=销售报表&sql_query=SELECT * FROM sales&default_page_size=30&pool_id=1"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         reports = db.get_all_reports(self.conn)
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]["name"], "销售报表")
@@ -276,7 +277,7 @@ class TestReportFlow(unittest.TestCase):
         rid = db.add_report(self.conn, "旧报表", "SELECT 1", 20, 1)
         form = "name=新报表&sql_query=SELECT 2&default_page_size=50&pool_id=1"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["name"], "新报表")
         self.assertEqual(rpt["default_page_size"], 50)
@@ -284,14 +285,14 @@ class TestReportFlow(unittest.TestCase):
     def test_delete_report(self):
         rid = db.add_report(self.conn, "待删报表", "SELECT 1", 20, 1)
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/delete", "", "")
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         self.assertIsNone(db.get_report(self.conn, rid))
 
     def test_submit_add_report_without_pool(self):
         """提交时指定不存在的连接池应报错（外键约束）"""
         form = "name=坏报表&sql_query=SELECT 1&default_page_size=20&pool_id=999"
         code, body, _ = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn("错误", body)
 
     def test_add_report_form_contains_memo(self):
@@ -305,7 +306,7 @@ class TestReportFlow(unittest.TestCase):
         form = ("name=备注报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
                 "&memo=这是报表的备注说明")
         code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         reports = db.get_all_reports(self.conn)
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]["memo"], "这是报表的备注说明")
@@ -321,7 +322,7 @@ class TestReportFlow(unittest.TestCase):
         rid = db.add_report(self.conn, "改备注", "SELECT 1", 20, 1, memo="旧备注")
         form = "name=改备注&sql_query=SELECT 1&default_page_size=20&pool_id=1&memo=新备注"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["memo"], "新备注")
 
@@ -329,7 +330,7 @@ class TestReportFlow(unittest.TestCase):
         """提交不带备注的报表，memo 应存为 None"""
         form = "name=无备注&sql_query=SELECT 1&default_page_size=20&pool_id=1"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         reports = db.get_all_reports(self.conn)
         self.assertIsNone(reports[0]["memo"])
 
@@ -340,7 +341,7 @@ class TestReportFlow(unittest.TestCase):
         # 模拟浏览器提交：hidden(0) + checkbox(1) + ttl
         form = "name=缓存报表&sql_query=SELECT 1&default_page_size=20&pool_id=1&prefer_cache=0&prefer_cache=1&cache_ttl_hours=24"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["prefer_cache"], 1)
         self.assertEqual(rpt["cache_ttl_hours"], 24)
@@ -351,7 +352,7 @@ class TestReportFlow(unittest.TestCase):
         # 模拟浏览器提交：仅 hidden(0) 提交（checkbox 未勾选时不提交）
         form = "name=无缓存报表&sql_query=SELECT 1&default_page_size=20&pool_id=1&prefer_cache=0&cache_ttl_hours=0"
         code, body, headers = config.handle_request(self.conn, "POST", f"/config/reports/{rid}/edit", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["prefer_cache"], 0)
         self.assertEqual(rpt["cache_ttl_hours"], 0)
@@ -383,7 +384,7 @@ class TestUnknownAction(unittest.TestCase):
 
     def test_unknown_path(self):
         code, body, headers = config.handle_request(self.conn, "GET", "/config/unknown/action", "")
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
 
 
 class TestChineseRedirect(unittest.TestCase):
@@ -401,7 +402,7 @@ class TestChineseRedirect(unittest.TestCase):
         form = "name=销售报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/add", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         location = headers.get("Location", "")
         # 中文 "销售报表" 应被编码为 %xx%xx%xx%xx
         self.assertNotIn("销售报表", location)
@@ -412,7 +413,7 @@ class TestChineseRedirect(unittest.TestCase):
         """纯英文 flash 消息不额外编码"""
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/pools/999/delete", "", "")
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         location = headers.get("Location", "")
         self.assertIn("/config?flash=", location)
 
@@ -432,7 +433,7 @@ class TestReportFormButtons(unittest.TestCase):
         rid = db.add_report(self.conn, "可查看报表", "SELECT 1", 20, 1)
         code, body, _ = config.handle_request(self.conn, "GET",
                                                f"/config/reports/{rid}/edit", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn(f'/report?id={rid}', body)
         self.assertIn('查看', body)
         self.assertIn('target="_blank"', body)
@@ -491,7 +492,7 @@ class TestApiEndpointRuleJsonFlow(unittest.TestCase):
                 "&row_limit=0&enabled=1")
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         endpoints = db.get_api_endpoints_by_report(self.conn, 1)
         self.assertEqual(len(endpoints), 1)
         ep = endpoints[0]
@@ -506,7 +507,7 @@ class TestApiEndpointRuleJsonFlow(unittest.TestCase):
                 "&row_limit=0&enabled=1")
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         ep = db.get_api_endpoints_by_report(self.conn, 1)[0]
         self.assertIn("age", ep["filters"])
         self.assertIsNone(ep["columns"])
@@ -519,7 +520,7 @@ class TestApiEndpointRuleJsonFlow(unittest.TestCase):
                 "&row_limit=0&enabled=1")
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/1/api_endpoints/new", "", form)
-        self.assertEqual(code, "302")
+        self.assertEqual(code, 302)
         ep = db.get_api_endpoints_by_report(self.conn, 1)[0]
         self.assertIsNone(ep["columns"])
         self.assertIsNone(ep["filters"])
@@ -538,7 +539,7 @@ class TestApiEndpointRuleJsonFlow(unittest.TestCase):
         code, body, _ = config.handle_request(
             self.conn, "GET",
             f"/config/reports/1/api_endpoints/{eid}/edit", "")
-        self.assertEqual(code, "200")
+        self.assertEqual(code, 200)
         self.assertIn('"id,name,email"', body)
         self.assertIn('"status"', body)
         self.assertIn('"created_at"', body)
@@ -549,10 +550,92 @@ class TestApiEndpointRuleJsonFlow(unittest.TestCase):
         code2, body2, headers2 = config.handle_request(
             self.conn, "POST",
             f"/config/reports/1/api_endpoints/{eid}/edit", "", form)
-        self.assertEqual(code2, "302")
+        self.assertEqual(code2, 302)
         ep = db.get_api_endpoint(self.conn, eid)
         self.assertEqual(ep["name"], "往返端点改")
         self.assertEqual(ep["columns"], "id")
+
+
+class TestApiEndpointsListPage(BaseConfigTest):
+    """独立 API 端点管理页面测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn.execute(
+            "INSERT INTO connection_pools (name,host,port,user,password,database,sort_order) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("testpool", "127.0.0.1", 3306, "root", "secret", "testdb", 1),
+        )
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,memo,sort_order) "
+            "VALUES (?,?,?,?,?,?)",
+            ("测试报表", "SELECT * FROM test_table", 20, 1, "测试备注", 1),
+        )
+        self.conn.execute(
+            "INSERT INTO api_endpoints (report_id,name,url_path,output_format) "
+            "VALUES (?,?,?,?)",
+            (1, "测试端点", "/test-api", "json"),
+        )
+        self.conn.commit()
+
+    def test_api_endpoints_page_renders(self):
+        """验证 API 端点独立页面可以渲染"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "GET", "/config/api-endpoints", "")
+        self.assertEqual(code, 200)
+        self.assertIn("API 接口管理", body)
+        self.assertIn("测试端点", body)
+        self.assertIn("测试报表", body)
+
+    def test_api_endpoints_page_post_delete(self):
+        """验证 API 端点独立页面删除操作"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=1")
+        self.assertEqual(code, 302)
+        self.assertIn("/config/api-endpoints", body)
+        self.assertIsNone(db.get_api_endpoint(self.conn, 1))
+
+    def test_api_endpoints_delete_not_found(self):
+        """验证删除不存在的端点返回错误"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=999")
+        self.assertEqual(code, 302)
+        self.assertIn("错误", body)
+
+    def test_api_endpoints_delete_invalid_id(self):
+        """验证无效 ID 处理"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=abc")
+        self.assertEqual(code, 302)
+        self.assertIn("无效", body)
+
+
+class TestApiEndpointsRoute(unittest.TestCase):
+    """路由注册测试"""
+
+    def test_api_endpoints_route_registered(self):
+        """验证 API 端点路由已注册"""
+        from server import _match_route
+        route = _match_route("GET", "/config/api-endpoints")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.handler, "_handle_config_api_endpoints")
+
+    def test_api_endpoints_post_route_registered(self):
+        """验证 API 端点 POST 路由已注册"""
+        from server import _match_route
+        route = _match_route("POST", "/config/api-endpoints")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.handler, "_handle_config_api_endpoints")
+
+    def test_config_route_still_matches_subpath(self):
+        """验证 /config 模式仍然匹配子路径"""
+        from server import _match_route
+        route = _match_route("GET", "/config/pools/add")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.handler, "_handle_config")
 
 
 if __name__ == "__main__":

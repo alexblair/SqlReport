@@ -16,6 +16,9 @@ auth.py — 简易 Cookie 认证
 import hashlib
 import secrets
 import hmac
+import logging
+import threading
+import time
 from typing import Optional
 
 import db
@@ -50,8 +53,8 @@ def _record_auth_event(session_user: str, action: str):
             )
         finally:
             audit_conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("审计日志写入失败: %s", e)
 
 
 def hash_password(password: str) -> str:
@@ -86,12 +89,14 @@ def verify_password(password: str, stored: str) -> bool:
 # Session 管理
 # ---------------------------------------------------------------------------
 
-# 内存 session 存储: {session_token: username}
+# 内存 session 存储: {session_token: (username, created_at)}
 # 应用重启后通过 load_sessions() 从 SQLite 恢复
-_sessions: dict[str, str] = {}
+_sessions: dict[str, tuple[str, float]] = {}
+_sessions_lock = threading.Lock()
 
 # Session token 字节长度
 _SESSION_TOKEN_BYTES = 32
+_SESSION_TTL = 86400  # 24 小时
 
 
 def load_sessions() -> None:
@@ -104,10 +109,12 @@ def load_sessions() -> None:
     try:
         conn = db.get_config_db()
         try:
-            for s in db.get_all_sessions(conn):
-                _sessions[s["token"]] = s["username"]
+            rows = list(db.get_all_sessions(conn))
         finally:
             conn.close()
+        with _sessions_lock:
+            for s in rows:
+                _sessions[s["token"]] = (s["username"], s["created_at"])
     except KeyboardInterrupt:
         raise  # Ctrl+C 正常传播
     except Exception as exc:
@@ -122,26 +129,57 @@ def create_session(username: str) -> str:
     DB 写入失败不影响登录（降级为纯内存）。
     """
     token = secrets.token_hex(_SESSION_TOKEN_BYTES)
-    _sessions[token] = username
+    now = time.time()
+    with _sessions_lock:
+        _sessions[token] = (username, now)
     try:
         conn = db.get_config_db()
         try:
             db.add_session(conn, token, username)
         finally:
             conn.close()
-    except Exception:
-        pass  # 降级：纯内存 session
+    except Exception as e:
+        logging.warning("Session 持久化失败: %s", e)
     return token
 
 
 def get_session_user(token: str) -> Optional[str]:
     """根据 session token 返回用户名，token 无效或过期返回 None。"""
-    return _sessions.get(token)
+    with _sessions_lock:
+        entry = _sessions.get(token)
+    if entry is None:
+        return None
+    username, created_at = entry
+    if time.time() - created_at > _SESSION_TTL:
+        with _sessions_lock:
+            _sessions.pop(token, None)
+        return None
+    return username
+
+
+def refresh_session(token: str) -> None:
+    """刷新 session 时间戳（滑动过期）。"""
+    with _sessions_lock:
+        entry = _sessions.get(token)
+        if entry is None:
+            return
+        username, _ = entry
+        now = time.time()
+        _sessions[token] = (username, now)
+    try:
+        conn = db.get_config_db()
+        try:
+            db.add_session(conn, token, username)  # REPLACE INTO 更新时间和用户名
+        finally:
+            conn.close()
+    except Exception as e:
+        logging.warning("Session 刷新失败: %s", e)
 
 
 def remove_session(token: str) -> bool:
     """删除 session，成功返回 True。同时从 SQLite 移除。"""
-    existed = _sessions.pop(token, None) is not None
+    with _sessions_lock:
+        existed = _sessions.pop(token, None) is not None
     try:
         conn = db.get_config_db()
         try:
@@ -155,7 +193,8 @@ def remove_session(token: str) -> bool:
 
 def clear_all_sessions() -> None:
     """清空所有 session（内存 + SQLite）。"""
-    _sessions.clear()
+    with _sessions_lock:
+        _sessions.clear()
     try:
         conn = db.get_config_db()
         try:

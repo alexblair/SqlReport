@@ -408,7 +408,7 @@ class TestMySQLConnectionExecute(_MySQLConnectionTestBase):
     def test_execute_requests_dictionary_cursor(self):
         """execute 应以 dictionary=True 创建游标。"""
         self.conn.execute("SELECT 1")
-        self.mock_raw.cursor.assert_called_once_with(dictionary=True)
+        self.mock_raw.cursor.assert_called_once_with(dictionary=True, buffered=True)
 
     def test_execute_with_params_converts_placeholder(self):
         """带参数时，execute 应将 ? 占位符转为 %s。"""
@@ -1317,8 +1317,8 @@ class TestMySQLSessionCRUD(_MySQLCRUDTestBase):
     def test_get_all_sessions(self):
         """get_all_sessions 应返回所有未过期 session。"""
         self.mock_cursor.fetchall.return_value = [
-            {"token": "tok_a", "username": "alice"},
-            {"token": "tok_b", "username": "bob"},
+            {"token": "tok_a", "username": "alice", "created_at": 1000000},
+            {"token": "tok_b", "username": "bob", "created_at": 1000000},
         ]
         sessions = db.get_all_sessions(self.conn)
         self.assertEqual(len(sessions), 2)

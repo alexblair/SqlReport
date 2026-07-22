@@ -45,7 +45,7 @@ _server_ref = None
 
 def _start_server():
     global _server_ref
-    _server_ref = http.server.HTTPServer((srv.HOST, TEST_PORT), srv.ReportHandler)
+    _server_ref = http.server.ThreadingHTTPServer((srv.HOST, TEST_PORT), srv.ReportHandler)
     _server_ref.serve_forever()
 
 

@@ -22,6 +22,7 @@ URL 路由：
   GET /report?id=N&f_col=name&f_q=alice →（自动转为 f_name=alice）
 """
 
+import logging
 import urllib.parse
 import math
 import time
@@ -32,6 +33,8 @@ import redis_cache
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
     _COMMON_JS,
+    _SQL_HIGHLIGHT_JS,
+    _SQL_FORMATTER_JS,
     _OP_MAP, DEFAULT_OP, _escape, format_cell,
     build_filter_params as _build_filter_params,
     build_cols_param as _build_cols_param,
@@ -801,66 +804,6 @@ function switchResult(sel) {
     window.location.href = base;
   }
 }
-// ---- SQL 格式化与高亮 ----
-function h(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function highlight(txt) {
-  var s = txt.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-  var kw = 'SELECT|FROM|WHERE|AND|OR|NOT|IN|IS|NULL|LIKE|BETWEEN|EXISTS|AS|ON|JOIN|INNER|OUTER|LEFT|RIGHT|CROSS|FULL|NATURAL|USING|GROUP|BY|HAVING|ORDER|ASC|DESC|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|DROP|ALTER|ADD|COLUMN|INDEX|UNIQUE|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|UNION|ALL|EXCEPT|INTERSECT|WITH|RECURSIVE|REPLACE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE|DATABASE|IF|EXISTS|GRANT|REVOKE';
-  var re = new RegExp(
-    "('(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\")|" +
-    "(--[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|" +
-    "\\b(\\d+(?:\\.\\d+)?)\\b|" +
-    "\\b(" + kw + ")\\b|" +
-    "\\b(\\w+)\\s*\\(",
-    "gi"
-  );
-  return s.replace(re, function(m, str, cmt, num, kw, fn) {
-    if (str) return '<span class="sql-hl-string">' + str + '</span>';
-    if (cmt) return '<span class="sql-hl-comment">' + cmt + '</span>';
-    if (num) return '<span class="sql-hl-number">' + num + '</span>';
-    if (kw) return '<span class="sql-hl-keyword">' + kw + '</span>';
-    if (fn)  return '<span class="sql-hl-function">' + fn + '</span>';
-    return m;
-  });
-}
-function fmt(t) {
-  if (!t || !t.trim()) return t;
-  var s = t.replace(/\s*;\s*$/,""), lines = [], indent = 0, clauseCount = 0;
-  var parts = s.split(/\b(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|FULL\s+JOIN|NATURAL\s+JOIN|INSERT\s+INTO|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|GROUP\s+BY|ORDER\s+BY|UNION\s+ALL|SELECT|FROM|WHERE|JOIN|ON|AND|OR|GROUP|BY|HAVING|ORDER|LIMIT|OFFSET|UNION|VALUES|SET|CASE|WHEN|THEN|ELSE|END|INTO)\b/i);
-  for (var i = 0; i < (parts ? parts.length : 0); i++) {
-    var p = parts[i];
-    if (!p || !p.trim()) continue;
-    var w = p.trim(), u = w.toUpperCase();
-    function pad() {
-      if (indent === 0) return "";
-      if (indent === 1) return "  ";
-      return Array(indent + 1).join("  ");
-    }
-    if (u === "SELECT") { indent = indent === 0 ? 1 : (clauseCount > 0 && indent++); lines.push(pad() + "SELECT"); indent = 2; clauseCount++; }
-    else if (u === "FROM" || u === "INNER JOIN" || u === "LEFT JOIN" || u === "RIGHT JOIN" || u === "CROSS JOIN" || u === "FULL JOIN" || u === "NATURAL JOIN" || u === "JOIN") { indent = Math.max(1, indent - 1); lines.push(pad() + w); indent = 2; }
-    else if (u === "ON") { lines.push(pad() + w); indent = 2; }
-    else if (u === "WHERE") { indent = Math.max(1, indent - 1); lines.push(pad() + "WHERE"); indent = 2; }
-    else if (u === "AND" || u === "OR") { lines.push(pad() + w); indent = 2; }
-    else if (u === "GROUP BY" || u === "GROUP") { indent = Math.max(1, indent - 1); lines.push(pad() + "GROUP BY"); indent = 2; }
-    else if (u === "HAVING") { indent = Math.max(1, indent - 1); lines.push(pad() + "HAVING"); indent = 2; }
-    else if (u === "ORDER BY" || u === "ORDER") { indent = Math.max(1, indent - 1); lines.push(pad() + "ORDER BY"); indent = 2; }
-    else if (u === "LIMIT") { indent = Math.max(1, indent - 1); lines.push(pad() + "LIMIT"); indent = 1; }
-    else if (u === "OFFSET") { lines.push(pad() + "OFFSET"); indent = 1; }
-    else if (u === "UNION" || u === "UNION ALL") { indent = 0; lines.push(""); lines.push(w); }
-    else if (u === "VALUES") { lines.push(pad() + "VALUES"); indent = 2; }
-    else if (u === "SET") { lines.push(pad() + "SET"); indent = 2; }
-    else if (u === "DELETE FROM" || u === "INSERT INTO" || u === "CREATE TABLE" || u === "DROP TABLE" || u === "ALTER TABLE") { indent = 0; lines.push(w); indent = 2; }
-    else if (u === "CASE") { lines.push(pad() + "CASE"); indent++; }
-    else if (u === "WHEN") { lines.push(pad() + "WHEN"); indent = 2; }
-    else if (u === "THEN" || u === "ELSE") { lines.push(pad() + w); }
-    else if (u === "END") { indent = Math.max(1, indent - 1); lines.push(pad() + "END"); }
-    else if (u === "INTO") { lines.push(pad() + "INTO"); indent = 1; }
-    else { lines.push(pad() + w); }
-  }
-  return lines.join("\n") + ";";
-}
 function formatDebugSQL() {
   var pres = document.querySelectorAll('.sql-debug');
   pres.forEach(function(pre) {
@@ -871,7 +814,7 @@ function formatDebugSQL() {
   });
 }
 document.addEventListener('DOMContentLoaded', formatDebugSQL);
-""" + _COMMON_JS + r"""
+""" + _SQL_HIGHLIGHT_JS + _SQL_FORMATTER_JS + _COMMON_JS + r"""
 </script>
 </body></html>"""
 
@@ -1067,7 +1010,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 clean_sql = sql_query.rstrip("; \t\n\r")
                 conn = db.create_mysql_connection(pool_config)
                 try:
-                    all_results = db.execute_mysql_query(conn, clean_sql)
+                    all_results = db.execute_mysql_query(conn, clean_sql, transactional=True)
                 except Exception as e:
                     # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
                     if _mgr and snapshot_key:
@@ -1296,6 +1239,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
                                 page, page_size, sorts or [], filters or [], refresh,
                                 active_index, report)
     except Exception as e:
+        logging.error("报表 %d 查询执行失败: %s", report_id, e, exc_info=True)
         pool_name = pool_config.get("name", "?")
         pool_host = pool_config.get("host", "?")
         pool_port = pool_config.get("port", "?")
@@ -1462,7 +1406,7 @@ def _build_report_switcher(conn, current_id: int = None) -> str:
 
 def handle_request(conn, method: str, path: str, query: str,
                    form_body: str = None,
-                   pool_override: Optional[dict] = None) -> tuple[str, str, dict]:
+                   pool_override: Optional[dict] = None) -> tuple[int, str, dict]:
     """
     报表页面请求入口。
     解析多字段排序/刷新缓存等参数。
@@ -1475,7 +1419,7 @@ def handle_request(conn, method: str, path: str, query: str,
             preview_id_str = form_data.get("id", [None])[0] or ""
             preview_id = int(preview_id_str)
         except (ValueError, TypeError, IndexError):
-            return "200", render_report_selector(conn), {}
+            return 200, render_report_selector(conn), {}
         sql_override = form_data.get("sql_query", [None])[0] or ""
         preview_result = 0
         if "result" in form_data and form_data["result"][0]:
@@ -1484,19 +1428,19 @@ def handle_request(conn, method: str, path: str, query: str,
             except ValueError:
                 pass
         preview_names = form_data.get("result_names", [None])[0]
-        return "200", render_report_page(conn, preview_id, sql_override=sql_override,
+        return 200, render_report_page(conn, preview_id, sql_override=sql_override,
                                          active_index=preview_result,
                                          result_names_override=preview_names or None), {}
 
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
     if "id" not in qs or not qs["id"][0]:
-        return "200", render_report_selector(conn), {}
+        return 200, render_report_selector(conn), {}
 
     try:
         report_id = int(qs["id"][0])
     except (ValueError, IndexError):
-        return "200", render_report_selector(conn), {}
+        return 200, render_report_selector(conn), {}
 
     page = 1
     if "page" in qs and qs["page"][0]:
@@ -1555,8 +1499,8 @@ def handle_request(conn, method: str, path: str, query: str,
         qs.pop("refresh", None)
         new_qs = urllib.parse.urlencode(qs, doseq=True)
         new_url = f"/report?{new_qs}" if new_qs else f"/report?id={report_id}"
-        return "302", new_url, {}
+        return 302, new_url, {}
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
                               sorts, filters, refresh_flag, cols_raw, active_index=active_index)
-    return "200", html, {}
+    return 200, html, {}

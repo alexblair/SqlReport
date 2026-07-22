@@ -31,7 +31,7 @@ from query_executor import (  # noqa: F401, F403
     _MySQLRow, _MySQLCursor, _MySQLConnection,
     _connect_mysql_config,
     create_mysql_connection, _split_sql_statements,
-    execute_mysql_query, count_mysql_query,
+    execute_mysql_query,
 )
 
 # 从 audit_db 导入审计日志函数

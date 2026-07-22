@@ -18,18 +18,41 @@ _KNOWN_FALSE_POSITIVES: set[str] = {
     "tests/__init__.py:6:0 - 无法导入模块 'test_base'",
 }
 """已知误报集合。因模块路径、相对导入等静态分析无法消除的合法模式。
+格式为 finding 字符串中 `[ERROR]` 之后的部分。
+以 `::` 结尾的条目作为通配前缀匹配（忽略行号列号），用于非生产代码目录。"""
+
+_WILDCARD_FALSE_POSITIVES: set[str] = {
+    # docs/tools/ 不是生产代码，yaml 是延迟导入，非必需依赖
+    "docs/tools/capture.py:: - 无法导入模块 'yaml'",
+}
+"""已知误报集合。因模块路径、相对导入等静态分析无法消除的合法模式。
 格式为 finding 字符串中 `[ERROR]` 之后的部分。"""
 
 
 def _filter_false_positives(findings: list[str]) -> list[str]:
     """过滤掉已知误报。"""
+
+    def _is_known(fp: str, s: str) -> bool:
+        """s 是否匹配已知误报（精确或通配）。"""
+        if s == fp:
+            return True
+        # 通配匹配：fp 格式 "filepath::message_text"，忽略行号列号
+        if "::" in fp:
+            fpath, msg = fp.split("::", 1)
+            if s.startswith(fpath + ":") and msg in s:
+                return True
+        return False
+
     filtered: list[str] = []
     for f in findings:
-        # 去掉 [ERROR] 前缀后与误报集合对比
         after_prefix = f.split("]", 1)[-1].strip() if f.startswith("[") else f
-        if after_prefix in _KNOWN_FALSE_POSITIVES:
-            continue
-        filtered.append(f)
+        matched_any = False
+        for fp in _KNOWN_FALSE_POSITIVES | _WILDCARD_FALSE_POSITIVES:
+            if _is_known(fp, after_prefix):
+                matched_any = True
+                break
+        if not matched_any:
+            filtered.append(f)
     return filtered
 
 
