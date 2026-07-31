@@ -1732,6 +1732,10 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             mode_display = '<span style="color:#4f46e5;font-weight:600">全部</span>'
         else:
             mode_display = f'<span style="color:#475569">结果 {ep_result_index}</span>'
+        allow_fetch_all = int(ep.get("allow_fetch_all", 1))
+        fetch_all_display = ('<span style="color:#059669;font-weight:600">允许</span>'
+                             if allow_fetch_all else
+                             '<span style="color:#dc2626;font-weight:600">禁止</span>')
         report_name_cell = ""
         if show_report_name:
             rname = _escape(ep.get("report_name", ""))
@@ -1758,13 +1762,14 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
   <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
   <td>{ep_format}</td>
   <td>{mode_display}</td>
+  <td>{fetch_all_display}</td>
   <td>{enabled_badge}</td>
   <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
   {ops_cell}
 </tr>"""
     extra_col = '<th>关联报表</th>' if show_report_name else ''
     extra_colspan = 1 if show_report_name else 0
-    total_cols = 7 + extra_colspan
+    total_cols = 8 + extra_colspan
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
     return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
@@ -1774,7 +1779,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
 {rows or f'<tr><td colspan="{total_cols}" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
@@ -1916,6 +1921,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     allowed_origins = _escape(endpoint.get("allowed_origins") or "") if is_edit else ""
     enabled_checked = (' checked' if (is_edit and int(endpoint.get("enabled", 1)))
                        else (' checked' if not is_edit else ''))
+    allow_fetch_all_checked = (' checked' if (is_edit and int(endpoint.get("allow_fetch_all", 1)))
+                               else (' checked' if not is_edit else ''))
 
     # 结果集输出模式
     result_mode = endpoint.get("result_mode", "single") if is_edit else "single"
@@ -2022,6 +2029,20 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   <label>最大行数（0=不限制）:
     <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="allow_fetch_all" value="0">
+    <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked}>
+    <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
+  </label>
+  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    <strong>使用示例：</strong>开启后，调用方在请求中携带 <code>fetch_all</code> 参数即可一次获取全部数据（不做翻页）：
+    <div style="font-family:monospace;font-size:12px;margin-top:4px">
+      GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
+      POST&nbsp; body: {{"fetch_all": true}}
+    </div>
+    <div style="color:#94a3b8;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
+  </div>
 
   <label>API Key（留空=无需鉴权）:
     <input type="text" name="api_key" value="{_escape(api_key_raw)}"

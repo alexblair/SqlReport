@@ -191,6 +191,9 @@ _SQLITE_SCHEMA = """
         enabled          INTEGER NOT NULL DEFAULT 1,
         created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
         updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        result_mode      TEXT    NOT NULL DEFAULT 'single',
+        result_index     INTEGER NOT NULL DEFAULT 0,
+        allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     );
 """
@@ -258,6 +261,9 @@ _MYSQL_SCHEMA = """
         enabled          TINYINT NOT NULL DEFAULT 1,
         created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        result_mode      VARCHAR(10) NOT NULL DEFAULT 'single',
+        result_index     INTEGER NOT NULL DEFAULT 0,
+        allow_fetch_all  TINYINT NOT NULL DEFAULT 1,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
@@ -439,6 +445,16 @@ def _init_sqlite_migrations(conn) -> None:
         except Exception:
             conn.rollback()
 
+    # 迁移 10: 添加 allow_fetch_all 列到 api_endpoints（fetch_all 全量获取开关，默认开启）
+    cursor = conn.execute("PRAGMA table_info(api_endpoints)")
+    api_cols = {row[1] for row in cursor.fetchall()}
+    if "allow_fetch_all" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN allow_fetch_all INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -570,6 +586,19 @@ def _init_mysql_migrations(conn) -> None:
     if "result_index" not in api_cols:
         try:
             conn.execute("ALTER TABLE api_endpoints ADD COLUMN result_index INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 10: 添加 allow_fetch_all 列到 api_endpoints（fetch_all 全量获取开关，默认开启）
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
+        api_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        api_cols = set()
+    if "allow_fetch_all" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN allow_fetch_all TINYINT NOT NULL DEFAULT 1")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1124,6 +1153,7 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      enabled: int = 1,
                      result_mode: str = 'single',
                      result_index: int = 0,
+                     allow_fetch_all: int = 1,
                      session_user=None) -> int:
     """
     新增 API 端点配置，返回自增 id。
@@ -1141,23 +1171,25 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
         allowed_origins: CORS 允许来源逗号分隔
         result_mode: 'single' 或 'all'
         result_index: 结果集索引（0-based），仅 result_mode='single' 时有效
+        allow_fetch_all: 是否接受 fetch_all 全量获取参数，1=接受（默认），0=忽略
     """
     cur = conn.execute(
         """INSERT INTO api_endpoints
            (report_id, name, url_path, output_format, columns, filters,
             sorts, row_limit, api_key, allowed_origins, enabled,
-            result_mode, result_index)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            result_mode, result_index, allow_fetch_all)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (report_id, name, url_path, output_format, columns, filters,
          sorts, row_limit, api_key, allowed_origins, enabled,
-         result_mode, result_index),
+         result_mode, result_index, allow_fetch_all),
     )
     conn.commit()
     _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
                      cur.lastrowid, name,
                      after_value={"name": name, "url_path": url_path,
                                   "report_id": report_id, "output_format": output_format,
-                                  "result_mode": result_mode, "result_index": result_index})
+                                  "result_mode": result_mode, "result_index": result_index,
+                                  "allow_fetch_all": allow_fetch_all})
     return cur.lastrowid
 
 
@@ -1208,6 +1240,7 @@ def update_api_endpoint(conn, endpoint_id: int,
                         enabled: int = _UNSET,
                         result_mode: str = _UNSET,
                         result_index: int = _UNSET,
+                        allow_fetch_all: int = _UNSET,
                         session_user=None) -> bool:
     """
     更新 API 端点配置。仅更新非 _UNSET 的字段，影响行数 >0 返回 True。
@@ -1253,6 +1286,9 @@ def update_api_endpoint(conn, endpoint_id: int,
     if result_index is not _UNSET:
         sets.append("result_index=?")
         params.append(result_index)
+    if allow_fetch_all is not _UNSET:
+        sets.append("allow_fetch_all=?")
+        params.append(allow_fetch_all)
     if not sets:
         return False
     engine = _get_engine()

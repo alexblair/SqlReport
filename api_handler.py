@@ -31,6 +31,12 @@ _CORS_BASE = {
     "Access-Control-Max-Age": "86400",
 }
 
+# fetch_all 全量获取时的内部页大小：足够大以避免内存分页切片，实际行数以 total 为准
+_FETCH_ALL_PAGE_SIZE = 10 ** 9
+
+# fetch_all 参数合法值（大小写不敏感）
+_FETCH_ALL_VALUES = {"true", "1", "yes"}
+
 
 def generate_api_key() -> str:
     """生成随机的 API Key（sk- 前缀 + 43 字符随机字符串）。"""
@@ -81,11 +87,11 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
         _log_api_call(norm_path, client_ip, result[0], time.time() - start)
         return result
 
-    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom = result
+    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
 
     cors_headers = _build_cors_headers(endpoint, headers)
     status, resp_body, resp_headers = _format_output(
-        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom
+        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full
     )
     resp_headers.update(cors_headers)
 
@@ -136,12 +142,16 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     if pool_config is None:
         return 500, _error_response("连接池配置不存在", "INTERNAL_ERROR", headers), {}
 
-    filters, sorts, page, page_size, row_limit, output_format, columns, add_bom = \
+    filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all = \
         _resolve_params(endpoint, method, body, query_params, headers)
 
     ps = page_size if row_limit == 0 else min(page_size, row_limit)
-    if row_limit > 0 and ps * (page - 1) >= row_limit:
-        return [], [], 0, page, ps, 1, output_format, add_bom
+    if fetch_all:
+        # 全量获取：无视分页与行数限制，内部以超大页大小避免切片
+        page = 1
+        ps = _FETCH_ALL_PAGE_SIZE
+    elif row_limit > 0 and ps * (page - 1) >= row_limit:
+        return [], [], 0, page, ps, 1, output_format, add_bom, False
 
     result_mode = endpoint.get("result_mode", "single")
     result_index = int(endpoint.get("result_index", 0))
@@ -169,28 +179,33 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
             }, ensure_ascii=False), {"Content-Type": "application/json; charset=utf-8"}
 
         results_list = []
+        total_all_rows = 0
         for i, res in enumerate(result.results):
             disp_cols = _resolve_display_cols(res["columns"], columns)
             col_indices_local = [res["columns"].index(c) for c in disp_cols]
             data_rows = [{disp_cols[ii]: row[idx] for ii, idx in enumerate(col_indices_local)}
                          for row in res["rows"]]
             total = res["total"]
+            total_all_rows += total
             total_pages = max(1, math.ceil(total / ps)) if ps > 0 else 1
-            results_list.append({
+            item = {
                 "name": _get_result_name(report, i, result),
                 "data": data_rows,
                 "total": total,
                 "page": page,
-                "page_size": ps,
+                "page_size": total if fetch_all else ps,
                 "total_pages": total_pages,
-            })
+            }
+            if fetch_all:
+                item["full"] = True
+            results_list.append(item)
 
         resp_body = json.dumps({
             "results": results_list,
             "mode": "all",
             "page": page,
-            "page_size": ps,
-        }, ensure_ascii=False, default=str)
+            "page_size": total_all_rows if fetch_all else ps,
+        } | ({"full": True} if fetch_all else {}), ensure_ascii=False, default=str)
         return 200, resp_body, {"Content-Type": "application/json; charset=utf-8"}
 
     # 单结果集模式 — 校验索引
@@ -206,7 +221,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     col_indices = [all_cols.index(c) for c in display_cols]
     data_rows = [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)} for row in all_rows]
 
-    return data_rows, display_cols, result.total, page, ps, result.total_pages, output_format, add_bom
+    display_ps = result.total if fetch_all else ps
+    return data_rows, display_cols, result.total, page, display_ps, result.total_pages, output_format, add_bom, fetch_all
 
 
 def _resolve_display_cols(all_cols: list, columns: str | None) -> list:
@@ -219,11 +235,11 @@ def _resolve_display_cols(all_cols: list, columns: str | None) -> list:
 
 
 def _format_output(data_rows, display_cols, total, page, ps,
-                   total_pages, output_format, add_bom) -> tuple:
+                   total_pages, output_format, add_bom, full: bool) -> tuple:
     """根据 output_format 构建最终响应。"""
     if output_format == "csv":
         return _format_csv_response(data_rows, display_cols, add_bom)
-    return _format_json_response(data_rows, total, page, ps, total_pages)
+    return _format_json_response(data_rows, total, page, ps, total_pages, full)
 
 
 def _parse_post_body(body: str, headers: dict) -> dict | None:
@@ -371,13 +387,37 @@ def _safe_int(val, default: int) -> int:
         return default
 
 
+def _resolve_fetch_all(endpoint: dict, method: str, body: str,
+                       query_params: dict, headers: dict = None) -> bool:
+    """
+    解析 fetch_all 全量获取参数。
+
+    GET 从 query string 提取，POST 从请求体（JSON/form-urlencoded）提取。
+    严格值校验：true/1/yes（大小写不敏感），其他值视为未传递。
+    端点配置 allow_fetch_all 关闭时参数被忽略，返回 False。
+    """
+    if not int(endpoint.get("allow_fetch_all", 1) or 0):
+        return False
+    raw = None
+    if method == "POST" and body:
+        post_data = _parse_post_body(body, headers or {})
+        if post_data:
+            raw = post_data.get("fetch_all")
+    elif query_params:
+        qp = query_params.get("fetch_all", [""])
+        raw = qp[0] if qp else ""
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in _FETCH_ALL_VALUES
+
+
 def _resolve_params(endpoint: dict, method: str, body: str,
                     query_params: dict, headers: dict = None) -> tuple:
     """
     解析请求参数：预设规则 + POST/GET 覆盖。
 
     返回:
-        (filters, sorts, page, page_size, row_limit, output_format, columns, add_bom)
+        (filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all)
     """
     preset_filters, preset_sorts, row_limit, columns, output_format = \
         _parse_preset_rules(endpoint)
@@ -396,17 +436,19 @@ def _resolve_params(endpoint: dict, method: str, body: str,
             _apply_get_overrides(query_params, page, page_size, row_limit, columns, output_format)
 
     add_bom = bool(query_params and "pretty" in query_params)
+    fetch_all = _resolve_fetch_all(endpoint, method, body, query_params, headers)
 
     filters = [(f["col"], f.get("op", "contains"), f.get("val", ""))
                for f in preset_filters if "col" in f]
     sorts = [(s["col"], s.get("dir", "asc"))
              for s in preset_sorts if "col" in s]
 
-    return filters, sorts, page, page_size, row_limit, output_format, columns, add_bom
+    return filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all
 
 
 def _format_json_response(data_rows: list[dict], total: int, page: int,
-                          page_size: int, total_pages: int) -> tuple:
+                          page_size: int, total_pages: int,
+                          full: bool = False) -> tuple:
     """
     构建 JSON 响应。
 
@@ -420,6 +462,8 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
         "page_size": page_size,
         "total_pages": total_pages,
     }
+    if full:
+        resp["full"] = True
     return 200, json.dumps(resp, ensure_ascii=False, default=str), {
         "Content-Type": "application/json; charset=utf-8",
     }

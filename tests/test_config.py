@@ -69,6 +69,7 @@ def _make_conn():
             enabled          INTEGER NOT NULL DEFAULT 1,
             result_mode      TEXT    NOT NULL DEFAULT 'single',
             result_index     INTEGER NOT NULL DEFAULT 0,
+            allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE

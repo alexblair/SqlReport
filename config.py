@@ -1127,6 +1127,7 @@ def handle_api_endpoint_add(conn, report_id: int,
     try:
         row_limit = int(data.get("row_limit", 0) or 0)
         enabled = int(data.get("enabled", 0) or 0)
+        allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
@@ -1143,6 +1144,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             allowed_origins=data.get("allowed_origins") or None,
             result_mode=result_mode,
             result_index=result_index,
+            allow_fetch_all=allow_fetch_all,
             session_user=session_user,
         )
         if not enabled:
@@ -1172,6 +1174,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             return 302, "/config?flash=错误: API 接口不存在"
         row_limit = int(data.get("row_limit", 0) or 0)
         enabled = int(data.get("enabled", 0) or 0)
+        allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
@@ -1191,6 +1194,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             enabled=enabled,
             result_mode=result_mode,
             result_index=result_index,
+            allow_fetch_all=allow_fetch_all,
             session_user=session_user,
         )
         if ok:

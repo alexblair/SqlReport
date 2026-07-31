@@ -90,6 +90,7 @@ def _set_up_db():
             allowed_origins TEXT, enabled INTEGER NOT NULL DEFAULT 1,
             result_mode TEXT NOT NULL DEFAULT 'single',
             result_index INTEGER NOT NULL DEFAULT 0,
+            allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -539,6 +540,257 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
             self.assertIn("data", body)
         finally:
             hc.close()
+
+    # =====================================================================
+    # fetch_all 全量获取测试
+    # =====================================================================
+
+    def test_api_endpoint_default_allow_fetch_all(self):
+        """新建端点 allow_fetch_all 默认开启"""
+        conn = _get_conn()
+        eid = db.add_api_endpoint(conn, _TEST_REPORT_ID, "默认全量", "/api/default-full")
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["allow_fetch_all"], 1)
+
+    def test_api_endpoint_migration_allow_fetch_all_default_on(self):
+        """存量库迁移后 allow_fetch_all 列存在且存量端点默认开启"""
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        old_schema = tb._SQL_CREATE_API_ENDPOINTS.replace(
+            "    allow_fetch_all  INTEGER NOT NULL DEFAULT 1,\n", "")
+        conn.execute(old_schema)
+        conn.execute("INSERT INTO api_endpoints (report_id, name, url_path) "
+                     "VALUES (1, '存量端点', '/api/legacy')")
+        conn.commit()
+        from config_db import _init_sqlite_migrations
+        _init_sqlite_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        self.assertIn("allow_fetch_all", cols)
+        val = conn.execute("SELECT allow_fetch_all FROM api_endpoints").fetchone()[0]
+        self.assertEqual(val, 1, "存量端点迁移后默认开启")
+        conn.close()
+
+    def test_api_fetch_all_get_true(self):
+        """GET ?fetch_all=true 返回全部行 + full 标记"""
+        self._create_endpoint_in_db(url_path="/api/full-get")
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-get?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["page_size"], 3)
+        self.assertEqual(body["total_pages"], 1)
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_get_case_insensitive(self):
+        """值大小写不敏感：TRUE/Yes/1 均合法"""
+        self._create_endpoint_in_db(url_path="/api/full-case")
+        for val in ("TRUE", "Yes", "1"):
+            resp = urllib.request.urlopen(f"{BASE_URL}/api/full-case?fetch_all={val}")
+            body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(body["full"], f"fetch_all={val} 应生效")
+
+    def test_api_fetch_all_post_json(self):
+        """POST JSON body fetch_all=true 返回全量"""
+        self._create_endpoint_in_db(url_path="/api/full-post-json")
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/full-post-json",
+            data=json.dumps({"fetch_all": True}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(req)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_post_form(self):
+        """POST form-urlencoded fetch_all=1 返回全量"""
+        self._create_endpoint_in_db(url_path="/api/full-post-form")
+        data = urllib.parse.urlencode({"fetch_all": "1"}).encode()
+        resp = urllib.request.urlopen(urllib.request.Request(
+            f"{BASE_URL}/api/full-post-form", data=data, method="POST"))
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_invalid_values_ignored(self):
+        """非法值按翻页处理：无 full 标记，page_size 保持默认"""
+        self._create_endpoint_in_db(url_path="/api/full-invalid")
+        for qs in ("fetch_all=0", "fetch_all=abc", "fetch_all=false", "fetch_all="):
+            resp = urllib.request.urlopen(f"{BASE_URL}/api/full-invalid?{qs}")
+            body = json.loads(resp.read().decode("utf-8"))
+            self.assertNotIn("full", body, f"fetch_all={qs} 不应生效")
+            self.assertEqual(body["page_size"], 20)
+
+    def test_api_fetch_all_ignores_row_limit(self):
+        """端点配置 row_limit 时 fetch_all 仍返回全量"""
+        self._create_endpoint_in_db(url_path="/api/full-limit", row_limit=1)
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-limit?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_ignores_request_limit_and_page(self):
+        """请求 limit/page/page_size 被 fetch_all 无视"""
+        self._create_endpoint_in_db(url_path="/api/full-req-limit")
+        resp = urllib.request.urlopen(
+            f"{BASE_URL}/api/full-req-limit?fetch_all=true&limit=1&page=2&page_size=1")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_disabled_switch(self):
+        """allow_fetch_all=0 时参数被忽略，按翻页处理"""
+        self._create_endpoint_in_db(url_path="/api/full-disabled", allow_fetch_all=0)
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-disabled?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertNotIn("full", body)
+        self.assertEqual(body["page_size"], 20)
+        self.assertEqual(len(body["data"]), 3)
+
+    def test_api_fetch_all_csv(self):
+        """CSV 格式 fetch_all 输出全量行"""
+        self._create_endpoint_in_db(url_path="/api/full-csv")
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-csv?format=csv&fetch_all=true")
+        text = resp.read().decode("utf-8")
+        self.assertEqual(len(text.strip().splitlines()), 4, "表头 + 3 行数据")
+
+    def test_api_fetch_all_result_mode_all(self):
+        """result_mode=all 时每个结果集全量 + 子对象 full 标记"""
+        self._create_endpoint_in_db(url_path="/api/full-multi", result_mode="all")
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-multi?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["mode"], "all")
+        self.assertTrue(body["full"])
+        self.assertEqual(body["page_size"], 3, "顶层 page_size 应显示行数而非内部值")
+        self.assertEqual(len(body["results"]), 1)
+        self.assertTrue(body["results"][0]["full"])
+        self.assertEqual(body["results"][0]["total"], 3)
+        self.assertEqual(len(body["results"][0]["data"]), 3)
+
+    def test_api_fetch_all_filters_still_applied(self):
+        """fetch_all 全量时筛选仍生效"""
+        self._create_endpoint_in_db(
+            url_path="/api/full-filter",
+            filters='[{"col":"status","op":"eq","val":"active"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-filter?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(body["total"], 2)
+        self.assertEqual(len(body["data"]), 2)
+
+    def test_api_fetch_all_sorts_still_applied(self):
+        """fetch_all 全量时排序仍生效"""
+        self._create_endpoint_in_db(
+            url_path="/api/full-sort",
+            sorts='[{"col":"name","dir":"desc"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-sort?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["data"]), 3)
+        names = [row["name"] for row in body["data"]]
+        self.assertEqual(names, ["王五", "李四", "张三"])
+
+    # =====================================================================
+    # fetch_all 配置 UI 测试
+    # =====================================================================
+
+    def test_config_api_endpoint_form_has_fetch_all_ui(self):
+        """API 端点表单含全量开关与 DEMO 文案"""
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new"
+        )
+        html = resp.read().decode("utf-8")
+        self.assertIn("允许全量获取", html)
+        self.assertIn("fetch_all", html)
+        self.assertIn("使用示例", html)
+        self.assertIn("true / 1 / yes", html)
+
+    def test_config_api_endpoint_form_fetch_all_default_checked(self):
+        """新增表单全量开关默认勾选"""
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new"
+        )
+        html = resp.read().decode("utf-8")
+        self.assertRegex(html, r'name="allow_fetch_all" value="1"[^>]*checked')
+
+    def test_config_api_endpoint_save_fetch_all_enabled(self):
+        """表单提交勾选全量开关 → DB 保存为 1"""
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode([
+            ("name", "全量开启"),
+            ("url_path", "ui-full-on"),
+            ("output_format", "json"),
+            ("row_limit", "0"),
+            ("api_key", ""),
+            ("allowed_origins", ""),
+            ("rule_json", ""),
+            ("enabled", "1"),
+            ("allow_fetch_all", "0"),
+            ("allow_fetch_all", "1"),
+            ("action", "save_close"),
+        ]).encode()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-full-on")
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertEqual(ep["allow_fetch_all"], 1)
+
+    def test_config_api_endpoint_save_fetch_all_disabled(self):
+        """表单提交不勾选全量开关 → DB 保存为 0"""
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode({
+            "name": "全量关闭",
+            "url_path": "ui-full-off",
+            "output_format": "json",
+            "row_limit": "0",
+            "api_key": "",
+            "allowed_origins": "",
+            "rule_json": "",
+            "enabled": "1",
+            "allow_fetch_all": "0",
+            "action": "save_close",
+        }).encode()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-full-off")
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertEqual(ep["allow_fetch_all"], 0)
+
+    def test_config_api_endpoint_edit_fetch_all_echo(self):
+        """编辑页面回显 allow_fetch_all=0 的开关为不勾选"""
+        eid = self._create_endpoint_in_db(url_path="/api/ui-echo", allow_fetch_all=0)
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit"
+        )
+        html = resp.read().decode("utf-8")
+        self.assertIn("允许全量获取", html)
+        self.assertNotRegex(html, r'name="allow_fetch_all" value="1"[^>]*checked')
+
+    def test_config_api_endpoint_list_shows_fetch_all(self):
+        """API 列表展示全量状态列"""
+        self._create_endpoint_in_db(url_path="/api/ui-list", allow_fetch_all=1)
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/edit")
+        html = resp.read().decode("utf-8")
+        self.assertIn("全量", html)
+        self.assertIn("允许", html)
 
 
 if __name__ == "__main__":
