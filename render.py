@@ -1978,7 +1978,12 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <div style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-weight:500;color:#64748b">完整 URL:</span>
     <code id="full-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
-    <button type="button" onclick="copyFullUrl()" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
+    <button type="button" onclick="copyText('full-url-text')" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
+  </div>
+  <div id="fetch-all-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-weight:500;color:#64748b">全量 URL:</span>
+    <code id="fetch-all-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+    <button type="button" onclick="copyText('fetch-all-url-text')" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
   </div>
   <script>
   function updateFullUrl() {{
@@ -1987,8 +1992,21 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     var path = input.value || '';
     display.textContent = window.location.origin + '/api/' + path;
   }}
-  function copyFullUrl() {{
-    var el = document.getElementById('full-url-text');
+  function updateFetchAllUrl() {{
+    var input = document.getElementById('url-path-input');
+    var row = document.getElementById('fetch-all-url-row');
+    var checkbox = document.querySelector('input[name="allow_fetch_all"]');
+    if (!input || !row) return;
+    var show = !checkbox || checkbox.checked;
+    row.style.display = show ? 'flex' : 'none';
+    if (show) {{
+      var text = document.getElementById('fetch-all-url-text');
+      var path = input.value || '';
+      text.textContent = window.location.origin + '/api/' + path + '?fetch_all=true';
+    }}
+  }}
+  function copyText(elId) {{
+    var el = document.getElementById(elId);
     if (!el) return;
     var text = el.textContent;
     if (navigator.clipboard && navigator.clipboard.writeText) {{
@@ -2004,7 +2022,10 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       document.body.removeChild(ta);
     }}
   }}
-  document.addEventListener('DOMContentLoaded', updateFullUrl);
+  document.addEventListener('DOMContentLoaded', function() {{
+    updateFullUrl();
+    updateFetchAllUrl();
+  }});
   </script>
 
   <label>输出格式:
@@ -2032,7 +2053,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
     <input type="hidden" name="allow_fetch_all" value="0">
-    <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked}>
+    <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked} onchange="updateFetchAllUrl()">
     <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
   </label>
   <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">

@@ -447,12 +447,16 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         if not found_content_type:
             self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        if isinstance(resp_body, str):
-            self.wfile.write(resp_body.encode("utf-8"))
-        elif isinstance(resp_body, bytes):
-            self.wfile.write(resp_body)
-        else:
-            self.wfile.write(str(resp_body).encode("utf-8"))
+        try:
+            if isinstance(resp_body, str):
+                self.wfile.write(resp_body.encode("utf-8"))
+            elif isinstance(resp_body, bytes):
+                self.wfile.write(resp_body)
+            else:
+                self.wfile.write(str(resp_body).encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError):
+            # 客户端已断开连接，放弃发送响应（常见于全量输出等大响应场景）
+            logging.info("API 响应发送失败（客户端已断开）: %s %s", path, method)
 
     # ---- 辅助方法 ----
 

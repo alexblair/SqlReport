@@ -714,6 +714,18 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("使用示例", html)
         self.assertIn("true / 1 / yes", html)
 
+    def test_config_api_endpoint_form_has_fetch_all_url_row(self):
+        """表单含全量 URL 展示行，输出带 fetch_all=true 的可复制地址"""
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new"
+        )
+        html = resp.read().decode("utf-8")
+        self.assertIn("全量 URL:", html)
+        self.assertIn("fetch-all-url-text", html)
+        self.assertIn("fetch_all=true", html)
+        self.assertIn("copyText('fetch-all-url-text')", html)
+
     def test_config_api_endpoint_form_fetch_all_default_checked(self):
         """新增表单全量开关默认勾选"""
         _, opener = self._login_and_get_cookie()
@@ -791,6 +803,38 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         html = resp.read().decode("utf-8")
         self.assertIn("全量", html)
         self.assertIn("允许", html)
+
+    # =====================================================================
+    # 客户端断开连接（ConnectionResetError）回归测试
+    # =====================================================================
+
+    def test_api_write_connection_reset_swallowed(self):
+        """客户端在响应写出中断开连接：写异常被吞掉，不冒泡、不发 500"""
+        self._create_endpoint_in_db(url_path="/api/reset-test")
+        conn = _get_conn()
+        handler = unittest.mock.Mock()
+        handler.headers = {}
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.wfile = unittest.mock.Mock()
+        handler.wfile.write.side_effect = ConnectionResetError("Connection reset by peer")
+        # 不抛异常即通过（修复前 ConnectionResetError 会冒泡到 _handle 并二次写失败）
+        srv.ReportHandler._handle_api(
+            handler, "GET", "/api/reset-test", "", conn)
+        self.assertTrue(handler.wfile.write.called)
+        conn.close()
+
+    def test_api_write_broken_pipe_swallowed(self):
+        """客户端断开后继续写响应：BrokenPipeError 同样被吞掉"""
+        self._create_endpoint_in_db(url_path="/api/broken-pipe-test")
+        conn = _get_conn()
+        handler = unittest.mock.Mock()
+        handler.headers = {}
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.wfile = unittest.mock.Mock()
+        handler.wfile.write.side_effect = BrokenPipeError("Broken pipe")
+        srv.ReportHandler._handle_api(
+            handler, "GET", "/api/broken-pipe-test", "", conn)
+        conn.close()
 
 
 if __name__ == "__main__":
