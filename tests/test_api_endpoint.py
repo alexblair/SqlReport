@@ -726,6 +726,26 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("fetch_all=true", html)
         self.assertIn("copyText('fetch-all-url-text')", html)
 
+    def test_config_api_endpoint_fetch_all_url_row_visibility(self):
+        """全量 URL 行初始可见性由服务端决定：默认勾选时显示，关闭时隐藏；
+        JS 联动选择器须精确匹配 checkbox（排除 hidden 同名字段）"""
+        _, opener = self._login_and_get_cookie()
+        html = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new"
+        ).read().decode("utf-8")
+        self.assertRegex(
+            html,
+            r'id="fetch-all-url-row"[^>]*display:flex')
+        self.assertIn(
+            'input[type="checkbox"][name="allow_fetch_all"]', html)
+        eid = self._create_endpoint_in_db(url_path="/api/ui-row-hidden", allow_fetch_all=0)
+        html_off = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit"
+        ).read().decode("utf-8")
+        self.assertRegex(
+            html_off,
+            r'id="fetch-all-url-row"[^>]*display:none')
+
     def test_config_api_endpoint_form_fetch_all_default_checked(self):
         """新增表单全量开关默认勾选"""
         _, opener = self._login_and_get_cookie()

@@ -1980,7 +1980,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <code id="full-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyText('full-url-text')" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
   </div>
-  <div id="fetch-all-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <div id="fetch-all-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if allow_fetch_all_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-weight:500;color:#64748b">全量 URL:</span>
     <code id="fetch-all-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyText('fetch-all-url-text')" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
@@ -1995,7 +1995,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   function updateFetchAllUrl() {{
     var input = document.getElementById('url-path-input');
     var row = document.getElementById('fetch-all-url-row');
-    var checkbox = document.querySelector('input[name="allow_fetch_all"]');
+    var checkbox = document.querySelector('input[type="checkbox"][name="allow_fetch_all"]');
     if (!input || !row) return;
     var show = !checkbox || checkbox.checked;
     row.style.display = show ? 'flex' : 'none';
