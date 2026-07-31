@@ -631,19 +631,29 @@ def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
 
 
 def handle_pool_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
-    """处理新增连接池表单提交。"""
+    """处理新增连接池表单提交
+
+    遵循「保存」/「保存返回上级」双按钮业务逻辑。
+    """
     data = _parse_form_data(form_body)
     try:
         pid = db.add_pool(conn, data["name"], data["host"], int(data["port"]),
                           data["user"], data["password"], data["database"],
                           session_user=session_user)
+        action = data.get("action", "save_close")
+        if action == "save":
+            return 200, render_pool_form_page(
+                conn, pid, flash=f"连接池 {data['name']} 已创建 (id={pid})")
         return 302, f"/config?flash=连接池 {data['name']} 已创建 (id={pid})"
     except Exception as e:
         return 200, render_pool_form_page(conn, flash=f"错误: {e}")
 
 
 def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> tuple[int, str]:
-    """处理编辑连接池表单提交"""
+    """处理编辑连接池表单提交
+
+    遵循「保存」/「保存返回上级」双按钮业务逻辑。
+    """
     data = _parse_form_data(form_body)
     pool = db.get_pool(conn, pool_id)
     if not pool:
@@ -654,6 +664,11 @@ def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> t
                             int(data["port"]), data["user"], password, data["database"],
                             session_user=session_user)
         if ok:
+            action = data.get("action", "save_close")
+            if action == "save":
+                return 200, render_pool_form_page(
+                    conn, pool_id,
+                    flash=f"连接池 {data['name']} 已更新")
             return 302, f"/config?flash=连接池 {data['name']} 已更新"
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
@@ -715,7 +730,12 @@ def handle_user_delete(conn, user_id: int, session_user=None) -> tuple[int, str]
 
 
 def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
-    """处理新增报表表单提交"""
+    """处理新增报表表单提交
+
+    遵循「保存」/「保存并关闭」双按钮业务逻辑：
+    - action=save         → 保存后返回 200，停留在编辑页（可继续编辑）
+    - action=save_close   → 保存后 302 返回列表页（默认）
+    """
     data = _parse_form_data(form_body)
     try:
         pool_id = int(data["pool_id"]) if data.get("pool_id") else None
@@ -729,6 +749,11 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
                             result_names=result_names,
                             prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
                             session_user=session_user)
+        action = data.get("action", "save_close")
+        if action == "save":
+            return 200, render_report_form_page(
+                conn, rid,
+                flash=f"报表 {data['name']} 已创建 (id={rid})")
         return 302, f"/config?flash=报表 {data['name']} 已创建 (id={rid})"
     except Exception as e:
         return 200, render_report_form_page(conn, flash=f"错误: {e}")
@@ -765,7 +790,10 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
 
 
 def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) -> tuple[int, str]:
-    """处理复制报表（新增一个同名+副本的报表）"""
+    """处理复制报表（新增一个同名+副本的报表）
+
+    遵循「保存」/「保存并关闭」双按钮业务逻辑，与新建报表一致。
+    """
     data = _parse_form_data(form_body)
     try:
         pool_id = int(data["pool_id"]) if data.get("pool_id") else None
@@ -779,6 +807,11 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
                             result_names=result_names,
                             prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
                             session_user=session_user)
+        action = data.get("action", "save_close")
+        if action == "save":
+            return 200, render_report_form_page(
+                conn, rid,
+                flash=f"报表 {data['name']} 已创建（复制自 id={report_id}）")
         return 302, f"/config?flash=报表 {data['name']} 已创建（复制自 id={report_id}）"
     except Exception as e:
         return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True)

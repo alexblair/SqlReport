@@ -155,6 +155,29 @@ class TestPoolFlow(unittest.TestCase):
         self.assertEqual(len(pools), 1)
         self.assertEqual(pools[0]["name"], "生产库")
 
+    def test_submit_add_pool_action_save_stays_on_form(self):
+        """新增连接池点【保存】应留在表单页（200），不关闭页面"""
+        form = ("name=保存型连接池&host=h&port=3306&user=u&password=p&database=d"
+                "&action=save")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/pools/add", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("已创建", body)
+        pools = db.get_all_pools(self.conn)
+        self.assertEqual(len(pools), 1)
+        self.assertIn(f'/config/pools/{pools[0]["id"]}/edit', body)
+
+    def test_submit_edit_pool_action_save_stays_on_form(self):
+        """编辑连接池点【保存】应留在表单页（200），不关闭页面"""
+        pid = db.add_pool(self.conn, "待改连接池", "h", 3306, "u", "p", "d")
+        form = ("name=保存型连接池&host=h&port=3306&user=u&password=p&database=d"
+                "&action=save")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", f"/config/pools/{pid}/edit", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("已更新", body)
+        self.assertIn(f'/config/pools/{pid}/edit', body)
+
     def test_submit_add_pool_duplicate(self):
         """重复名称应回到表单页并显示错误"""
         db.add_pool(self.conn, "dup", "h", 3306, "u", "p", "d")
@@ -273,6 +296,39 @@ class TestReportFlow(unittest.TestCase):
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]["name"], "销售报表")
         self.assertEqual(reports[0]["default_page_size"], 30)
+
+    def test_submit_add_report_action_save_stays_on_form(self):
+        """新建报表点【保存】应留在表单页（200），不关闭页面"""
+        form = ("name=保存型报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
+                "&action=save")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/reports/add", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("已创建", body)
+        reports = db.get_all_reports(self.conn)
+        self.assertEqual(len(reports), 1)
+
+    def test_submit_add_report_action_save_close_redirects(self):
+        """新建报表点【保存并关闭】应返回列表页（302）"""
+        form = ("name=关闭型报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
+                "&action=save_close")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/reports/add", "", form)
+        self.assertEqual(code, 302)
+        self.assertIn("/config", body)
+
+    def test_submit_copy_report_action_save_stays_on_form(self):
+        """复制报表点【保存】应留在新报表编辑页（200），不关闭页面"""
+        rid = db.add_report(self.conn, "被复制报表", "SELECT 1", 20, 1)
+        form = ("name=复制保存型&sql_query=SELECT 1&default_page_size=20&pool_id=1"
+                "&action=save")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", f"/config/reports/{rid}/copy", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("已创建", body)
+        new_report = [r for r in db.get_all_reports(self.conn)
+                      if r["name"] == "复制保存型"][0]
+        self.assertIn(f'/config/reports/{new_report["id"]}/edit', body)
 
     def test_submit_edit_report(self):
         rid = db.add_report(self.conn, "旧报表", "SELECT 1", 20, 1)
