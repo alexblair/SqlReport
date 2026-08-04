@@ -3,7 +3,7 @@ static_cache.py — API 静态文件缓存（.json 变体）
 
 职责：
 1. 配置读取：app_config.json 的 static_cache 段（enable 默认 true、dir 默认 static_cache）
-2. 路径映射：{dir}/{url_path}.json，子目录自动创建，realpath 校验防 `..` 穿越
+2. 路径映射：{dir}/{url_path}.json，子目录自动创建，realpath 校验防 `..` 穿越（dir 支持相对路径或外部绝对路径）
 3. 命中判定：文件存在 + config_version（MD5(sql + pool_id)）一致 + mtime 未超 TTL
 4. 原子写：临时文件 + os.replace，并发请求最后写入者生效
 5. 失效记录：模块级 dict（url_path → 上次判定失效时刻，进程重启后无记录）
@@ -39,6 +39,7 @@ def get_static_cache_config() -> dict:
         }
 
     缺失或字段缺失时按默认值（enable=True、dir="static_cache"）。
+    dir 支持相对路径或外部绝对路径，路径解析通过 os.path.realpath() 完成。
     """
     cfg = app_config.get_config().get("static_cache", {}) or {}
     return {

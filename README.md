@@ -120,7 +120,7 @@ pip install -r requirements.txt
 
 The server listens at `http://0.0.0.0:8000` by default.
 
-API 静态文件缓存的存储目录 `static_cache/` 在首次写入缓存时自动创建（无需手工建目录）；生产环境建议将该目录纳入备份/清理策略，位置可通过 `app_config.json` 的 `static_cache.dir` 调整（见下文「API 静态文件缓存」章节）。
+API 静态文件缓存的存储目录 `static_cache/` 在首次写入缓存时自动创建（无需手工建目录）；生产环境建议将该目录纳入备份/清理策略，位置可通过 `app_config.json` 的 `static_cache.dir` 调整（支持相对路径或**外部绝对路径**，详见下文「API 静态文件缓存」章节）。
 
 ### 首次登录 / First Login
 
@@ -151,6 +151,8 @@ The application uses `app_config.json` (or the `CONFIG_FILE` env var) to select 
 The `config_db` field supports a **list of configurations**, toggled via the `enable` flag. The legacy single-dict format is still supported.
 
 ### 完整示例 / Full Example
+
+`static_cache.dir` 支持相对路径或外部绝对路径（如 `/var/cache/sqlreport_static`）；目录在首次写入时自动创建。
 
 ```json
 {
@@ -297,7 +299,7 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 ```
 
 - `enable`：全局开关，默认 `true`
-- `dir`：静态文件存储目录（相对/绝对路径均可），默认 `static_cache`；目录在首次写入时自动创建
+- `dir`：静态文件存储目录，支持**相对路径或外部绝对路径**（默认 `static_cache`）。路径解析通过 `os.path.realpath()` 完成，绝对路径如 `/var/cache/sqlreport_static` 直接使用，相对路径如 `../external_cache` 相对进程工作目录解析；无论何种形式，目录在首次写入缓存时**自动创建**（`os.makedirs(exist_ok=True)`）。写入失败（如权限不足、磁盘满）时，系统仅记录 `logging.warning` 并自动回退到普通 API 链路，不影响正常请求。
 - **TTL 无独立配置**：失效时间与端点关联报表的 `cache_ttl_hours` 完全一致（0=永不过期，仅靠手动清理/配置变更失效）
 - 端点级开关：API 端点表单的「静态文件缓存（.json 变体）」勾选框（默认开启），可单独关闭某端点
 - **失效联动**：报表页「重建缓存」与批量缓存配置「关闭缓存」会同步删除对应静态文件（删除即失效，下次 `.json` 请求惰性重建）
