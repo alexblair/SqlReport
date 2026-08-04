@@ -16,6 +16,8 @@ import sqlite3
 import time
 from typing import Optional
 
+import static_cache
+
 from app_config import get_active_db_config as _get_active_db_config
 
 
@@ -1258,6 +1260,33 @@ def get_all_api_endpoints(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _invalidate_api_static_cache(paths) -> None:
+    """使指定 url_path 的静态缓存文件失效（删除文件，幂等）。"""
+    for p in paths:
+        if p:
+            static_cache.invalidate(p)
+
+
+def _invalidate_after_endpoint_update(before: dict | None, url_path) -> None:
+    """API 端点配置变更后使静态缓存失效。
+
+    任何字段变更（url_path/name/enabled/columns/filters/sorts/row_limit/
+    output_format/api_key 等）都可能影响静态缓存内容，统一删除缓存文件：
+    - url_path 变化 → 删除旧路径与新路径（旧文件成为孤儿，新路径可能残留）
+    - 其他字段变更 → 删除当前路径缓存文件
+    """
+    if before is None:
+        return
+    old_path = before.get("url_path") or ""
+    new_path = url_path if url_path is not _UNSET else old_path
+    paths = set()
+    if old_path:
+        paths.add(old_path)
+    if new_path:
+        paths.add(new_path)
+    _invalidate_api_static_cache(paths)
+
+
 def update_api_endpoint(conn, endpoint_id: int,
                         name: str = _UNSET, url_path: str = _UNSET,
                         output_format: str = _UNSET,
@@ -1277,6 +1306,7 @@ def update_api_endpoint(conn, endpoint_id: int,
     使用 _UNSET 哨兵而非 None 作为默认值，使得调用方可以显式传入 None
     来表示"将此字段设为 NULL"。不传此参数则跳过更新。
     """
+    before = get_api_endpoint(conn, endpoint_id)
     sets = []
     params = []
     if name is not _UNSET:
@@ -1329,7 +1359,9 @@ def update_api_endpoint(conn, endpoint_id: int,
         params,
     )
     conn.commit()
-    entity_name = name if name is not _UNSET else (get_api_endpoint(conn, endpoint_id) or {}).get("name")
+    if cur.rowcount > 0:
+        _invalidate_after_endpoint_update(before, url_path)
+    entity_name = name if name is not _UNSET else (before or {}).get("name")
     _write_audit_log(session_user, "update_api_endpoint", "api_endpoint",
                      endpoint_id, entity_name)
     return cur.rowcount > 0
@@ -1337,9 +1369,11 @@ def update_api_endpoint(conn, endpoint_id: int,
 
 def delete_api_endpoint(conn, endpoint_id: int, session_user=None) -> bool:
     """删除 API 端点，影响行数 >0 返回 True。"""
-    before = get_api_endpoint(conn, endpoint_id) if session_user else None
+    before = get_api_endpoint(conn, endpoint_id)
     cur = conn.execute("DELETE FROM api_endpoints WHERE id=?", (endpoint_id,))
     conn.commit()
+    if cur.rowcount > 0:
+        _invalidate_api_static_cache({before.get("url_path")} if before else set())
     _write_audit_log(session_user, "delete_api_endpoint", "api_endpoint",
                      endpoint_id, before.get("name") if before else None,
                      before_value=before)
@@ -1348,14 +1382,13 @@ def delete_api_endpoint(conn, endpoint_id: int, session_user=None) -> bool:
 
 def delete_api_endpoints_by_report(conn, report_id: int, session_user=None) -> int:
     """删除某报表下的所有 API 端点，返回删除行数。"""
-    before_list = []
-    if session_user:
-        for ep in get_api_endpoints_by_report(conn, report_id):
-            before_list.append(dict(ep))
+    before_list = [dict(ep) for ep in get_api_endpoints_by_report(conn, report_id)]
     cur = conn.execute(
         "DELETE FROM api_endpoints WHERE report_id=?", (report_id,)
     )
     conn.commit()
+    if cur.rowcount > 0:
+        _invalidate_api_static_cache(ep.get("url_path") for ep in before_list)
     _write_audit_log(session_user, "delete_api_endpoints_by_report", "api_endpoint",
                      entity_name=f"report_id={report_id}",
                      before_value=before_list if before_list else None)

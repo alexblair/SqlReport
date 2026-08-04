@@ -631,6 +631,89 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
         code, redirect = config.handle_batch_cache(_get_conn(), f"report_ids={rid}&cache_switch=0")
         self.assertEqual(code, 302)
 
+    # ------------------------------------------------------------------
+    # 端点变更 → 缓存文件删除
+    # ------------------------------------------------------------------
+
+    def _write_cache_file(self, path):
+        """在缓存目录写入一个缓存文件，返回文件路径。"""
+        fp = static_cache.resolve_file_path(path.lstrip("/"))
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write("{}")
+        return fp
+
+    def test_delete_endpoint_removes_cache_file(self):
+        """删除 API 端点后对应静态缓存文件被删除。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/del-cache")
+        fp = self._write_cache_file("/api/del-cache")
+        self.assertTrue(os.path.exists(fp))
+        db.delete_api_endpoint(_get_conn(), eid)
+        self.assertFalse(os.path.exists(fp), "删除端点后缓存文件应被删除")
+
+    def test_disable_endpoint_removes_cache_file(self):
+        """禁用 API 端点（enabled=0）后对应静态缓存文件被删除。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/disable-cache")
+        fp = self._write_cache_file("/api/disable-cache")
+        db.update_api_endpoint(_get_conn(), eid, enabled=0)
+        self.assertFalse(os.path.exists(fp), "禁用端点后缓存文件应被删除")
+
+    def test_rename_endpoint_removes_cache_file(self):
+        """改名 API 端点后对应静态缓存文件被删除。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/rename-cache")
+        fp = self._write_cache_file("/api/rename-cache")
+        db.update_api_endpoint(_get_conn(), eid, name="新名字")
+        self.assertFalse(os.path.exists(fp), "改名后缓存文件应被删除")
+
+    def test_change_url_path_removes_old_cache_file(self):
+        """修改 API 端点 URL 后旧路径缓存文件被删除。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/old-path")
+        fp = self._write_cache_file("/api/old-path")
+        db.update_api_endpoint(_get_conn(), eid, url_path="/api/new-path")
+        self.assertFalse(os.path.exists(fp), "修改 URL 后旧路径缓存文件应被删除")
+
+    def test_any_config_change_removes_cache_file(self):
+        """任意配置字段变更（columns/filters/row_limit 等）后缓存文件被删除。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/cfg-change")
+        fp = self._write_cache_file("/api/cfg-change")
+        self.assertTrue(os.path.exists(fp))
+        db.update_api_endpoint(_get_conn(), eid, filters='[{"col":"status","op":"eq","val":"active"}]')
+        self.assertFalse(os.path.exists(fp), "修改 filters 后缓存文件应被删除")
+
+        fp2 = self._write_cache_file("/api/cfg-change")
+        db.update_api_endpoint(_get_conn(), eid, row_limit=10)
+        self.assertFalse(os.path.exists(fp2), "修改 row_limit 后缓存文件应被删除")
+
+        fp3 = self._write_cache_file("/api/cfg-change")
+        db.update_api_endpoint(_get_conn(), eid, output_format="csv")
+        self.assertFalse(os.path.exists(fp3), "修改 output_format 后缓存文件应被删除")
+
+    def test_no_change_does_not_invalidate(self):
+        """无实际字段变更（空更新）时不应删除缓存文件。"""
+        rid = self._create_report()
+        eid = self._create_endpoint(report_id=rid, url_path="/api/no-change")
+        fp = self._write_cache_file("/api/no-change")
+        self.assertTrue(os.path.exists(fp))
+        ok = db.update_api_endpoint(_get_conn(), eid)
+        self.assertFalse(ok, "无字段变更应返回 False")
+        self.assertTrue(os.path.exists(fp), "空更新不应删除缓存文件")
+
+    def test_delete_endpoints_by_report_removes_cache_files(self):
+        """删除报表下所有端点时，对应缓存文件全部被删除。"""
+        rid = self._create_report()
+        self._create_endpoint(report_id=rid, url_path="/api/batch-a")
+        self._create_endpoint(report_id=rid, url_path="/api/batch-b")
+        fp_a = self._write_cache_file("/api/batch-a")
+        fp_b = self._write_cache_file("/api/batch-b")
+        db.delete_api_endpoints_by_report(_get_conn(), rid)
+        self.assertFalse(os.path.exists(fp_a), "批量删除后 a 缓存应删除")
+        self.assertFalse(os.path.exists(fp_b), "批量删除后 b 缓存应删除")
+
 
 class TestStaticCacheModule(unittest.TestCase):
     """static_cache 模块单元测试（路径映射/穿越/原子写/失效记录）。"""

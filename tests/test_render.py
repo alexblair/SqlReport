@@ -53,6 +53,8 @@ from render import (
     build_current_rules_section_html,
     # API 端点表单
     build_api_endpoint_form_html,
+    # API URL 折叠区
+    build_api_urls_section_html,
 )
 
 
@@ -1680,3 +1682,57 @@ class TestBuildApiEndpointFormHtml(unittest.TestCase):
         """错误闪回消息使用红色样式"""
         result = build_api_endpoint_form_html(1, "测试报表", flash="错误: 出错了")
         self.assertIn('class="flash flash-error"', result)
+
+
+class TestApiUrlsSectionHtml(unittest.TestCase):
+    """build_api_urls_section_html 测试 — 样式与 Debug 信息模块一致。"""
+
+    def _ep(self, eid, path="/api/test", static_cache=1):
+        return {"id": eid, "name": f"接口{eid}", "url_path": path,
+                "static_cache": static_cache}
+
+    def test_uses_debug_info_structure(self):
+        """外层结构与 Debug 信息模块一致（debug-info/debug-toggle/toggleSection/debug-content hidden）。"""
+        html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
+        self.assertIn('class="debug-info"', html)
+        self.assertIn('class="debug-toggle"', html)
+        self.assertIn("toggleSection(this, 'API 调用地址')", html)
+        self.assertIn('class="debug-content hidden"', html)
+        self.assertIn("▶ API 调用地址", html)
+
+    def test_default_collapsed(self):
+        """默认折叠（debug-content hidden）。"""
+        html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
+        self.assertIn('class="debug-content hidden"', html)
+
+    def test_multiple_grouped_label(self):
+        """多个接口时标题显示数量。"""
+        html = build_api_urls_section_html(
+            [self._ep(1), self._ep(2)], "http://127.0.0.1:8080")
+        self.assertIn("API 调用地址 (2 个接口)", html)
+        self.assertIn('toggleSection(this, \'API 调用地址 (2 个接口)\')', html)
+
+    def test_url_code_has_js_attributes(self):
+        """URL code 保留 data-path/data-kind/api-url-code 供 JS 填充。"""
+        html = build_api_urls_section_html([self._ep(1, "/api/测试")], "http://127.0.0.1:8080")
+        self.assertIn('class="api-url-code"', html)
+        self.assertIn('data-path="/api/测试"', html)
+        self.assertIn('data-kind="base"', html)
+        self.assertIn('data-kind="full"', html)
+        self.assertIn('data-kind="static"', html)
+
+    def test_no_duplicate_api_prefix(self):
+        """URL 拼接不应重复 /api。"""
+        html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
+        self.assertNotIn("/api//api/", html)
+
+    def test_static_url_hidden_when_static_cache_off(self):
+        """static_cache=0 时不显示静态 URL 行。"""
+        html = build_api_urls_section_html(
+            [self._ep(1), self._ep(2, static_cache=0)], "http://127.0.0.1:8080")
+        self.assertIn("api-static-1", html)
+        self.assertNotIn("api-static-2", html)
+
+    def test_empty_returns_empty(self):
+        """无 API 端点返回空字符串。"""
+        self.assertEqual(build_api_urls_section_html([], "http://x"), "")

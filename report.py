@@ -30,6 +30,7 @@ import db
 from typing import Optional
 import redis_cache
 import static_cache
+import app_config
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
@@ -48,6 +49,7 @@ from render import (
     build_controls_bar_html, build_field_settings_panel_html,
     build_sort_settings_panel_html, build_filter_form_html,
     build_filter_action_html, build_report_switcher_html,
+    build_api_urls_section_html,
 )
 
 # ===================================================================
@@ -1325,6 +1327,17 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         filters, sorts, display_columns, all_columns)
     memo_html = build_memo_section_html(report.get("memo") or "")
 
+    # ---- API URL 区域 ----
+    try:
+        api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
+        _, port = app_config.get_server_config()
+        # base_url 仅作服务端兜底值（无 JS 时可用）；页面加载后 JS 用
+        # window.location.origin 覆盖（与 API 配置后台一致，显示用户实际访问的地址）
+        base_url = f"http://127.0.0.1:{port}"
+        api_urls_html = build_api_urls_section_html(api_endpoints, base_url)
+    except Exception:
+        api_urls_html = ""
+
     # ---- 结果参数（多结果集时附加到 URL） ----
     result_param = f"result={active_index}" if num_results > 1 else ""
 
@@ -1382,6 +1395,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
             f'</div>' +
             memo_html +
+            api_urls_html +
             debug_html +
             current_rules_html +
             result_selector_html +

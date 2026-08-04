@@ -129,6 +129,72 @@ function copyRulesJson() {
     document.body.removeChild(ta);
   }
 }
+function copyToClipboard(elementId) {
+  var el = document.getElementById(elementId);
+  if (!el) return;
+  var text = el.textContent || el.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() {
+      var btn = el.nextElementSibling;
+      if (btn && btn.tagName === 'BUTTON') {
+        var originalText = btn.textContent;
+        btn.textContent = '已复制';
+        btn.style.color = '#059669';
+        setTimeout(function() {
+          btn.textContent = originalText;
+          btn.style.color = '';
+        }, 2000);
+      }
+    }).catch(function() {
+      fallbackCopyText(text, el);
+    });
+  } else {
+    fallbackCopyText(text, el);
+  }
+}
+function fallbackCopyText(text, el) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    var btn = el.nextElementSibling;
+    if (btn && btn.tagName === 'BUTTON') {
+      var originalText = btn.textContent;
+      btn.textContent = '已复制';
+      btn.style.color = '#059669';
+      setTimeout(function() {
+        btn.textContent = originalText;
+        btn.style.color = '';
+      }, 2000);
+    }
+  } catch (err) {
+    console.error('复制失败:', err);
+  }
+  document.body.removeChild(ta);
+}
+function initApiUrls() {
+  var els = document.querySelectorAll('.api-url-code');
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    var path = el.getAttribute('data-path') || '';
+    var kind = el.getAttribute('data-kind') || 'base';
+    var origin = window.location.origin;
+    if (kind === 'full') {
+      el.textContent = origin + path + '?fetch_all=true';
+    } else if (kind === 'static') {
+      el.textContent = origin + path + '.json';
+    } else {
+      el.textContent = origin + path;
+    }
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  initApiUrls();
+});
 function applyRulesJson() {
   var ta = document.getElementById('current-rules-json');
   if (!ta) return;
@@ -2381,3 +2447,108 @@ def render_audit_page(
 
     html += _PAGE_FOOTER
     return html
+
+
+# ===================================================================
+
+
+def build_api_urls_section_html(api_endpoints: list[dict], base_url: str) -> str:
+    """
+    渲染 API URL 折叠区域，显示每个 API 端点的调用地址。
+
+    参数:
+        api_endpoints: API 端点列表
+        base_url: 服务器基础 URL（如 http://localhost:8080）
+    """
+    if not api_endpoints:
+        return ""
+
+    # 按接口名称分组（如果只有一个，不分组）
+    if len(api_endpoints) == 1:
+        ep = api_endpoints[0]
+        return _build_single_api_url_html(ep, base_url)
+
+    # 多个 API 时分组显示
+    return _build_grouped_api_urls_html(api_endpoints, base_url)
+
+
+def _build_api_url_row(code_id: str, label: str, url_path: str,
+                       kind: str, url_value: str) -> str:
+    """构建一行 API URL 展示（标签 + code + 复制按钮，样式与 Debug 信息模块一致）。"""
+    return (f'<div style="margin:2px 0">'
+            f'<span style="font-weight:500">{label}</span> '
+            f'<code id="{code_id}" class="api-url-code" data-path="{_escape(url_path)}" '
+            f'data-kind="{kind}">{_escape(url_value)}</code> '
+            f'<button onclick="copyToClipboard(\'{code_id}\')" '
+            f'style="padding:4px 10px;font-size:12px;background:#4f46e5;color:#fff;'
+            f'border:none;border-radius:4px;cursor:pointer">复制</button>'
+            f'</div>')
+
+
+def _build_single_api_url_html(ep: dict, base_url: str) -> str:
+    """构建单个 API 端点的 URL 显示区域（样式与 Debug 信息模块一致）。"""
+    ep_id = ep['id']
+    ep_name = _escape(ep.get("name", "未命名"))
+    url_path = ep.get("url_path", "")
+    static_on = int(ep.get("static_cache", 1)) == 1
+
+    # url_path 已包含 /api/ 前缀，直接拼接。
+    # 服务端先用 base_url 渲染占位值；页面加载后 JS 用 window.location.origin
+    # 覆盖（与 API 配置后台一致，显示用户实际访问的地址）。
+    base_api_url = f"{base_url}{url_path}"
+    full_url = f"{base_url}{url_path}?fetch_all=true"
+    static_url = f"{base_url}{url_path}.json"
+
+    static_row = ""
+    if static_on:
+        static_row = _build_api_url_row(
+            f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url)
+
+    rows = _build_api_url_row(f"api-url-{ep_id}", "完整 URL:", url_path, "base", base_api_url)
+    rows += _build_api_url_row(f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url)
+    rows += static_row
+
+    return f"""<div class="debug-info" style="margin-top:8px">
+<button class="debug-toggle" onclick="toggleSection(this, 'API 调用地址')" type="button">▶ API 调用地址</button>
+<div class="debug-content hidden">
+  <div style="margin-bottom:4px"><strong>接口名称:</strong> {ep_name}</div>
+  {rows}
+</div>
+</div>"""
+
+
+def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> str:
+    """构建多个 API 端点的分组 URL 显示区域（样式与 Debug 信息模块一致）。"""
+
+    # 构建每个 API 的 HTML
+    api_items = ""
+    for idx, ep in enumerate(api_endpoints):
+        ep_id = ep['id']
+        ep_name = _escape(ep.get("name", f"接口 {idx + 1}"))
+        url_path = ep.get("url_path", "")
+        static_on = int(ep.get("static_cache", 1)) == 1
+
+        # url_path 已包含 /api/ 前缀，直接拼接。
+        # 服务端先用 base_url 渲染占位值；页面加载后 JS 用 window.location.origin
+        # 覆盖（与 API 配置后台一致，显示用户实际访问的地址）。
+        base_api_url = f"{base_url}{url_path}"
+        full_url = f"{base_url}{url_path}?fetch_all=true"
+        static_url = f"{base_url}{url_path}.json"
+
+        rows = _build_api_url_row(f"api-url-{ep_id}", "完整 URL:", url_path, "base", base_api_url)
+        rows += _build_api_url_row(f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url)
+        if static_on:
+            rows += _build_api_url_row(
+                f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url)
+
+        sep = '<div style="border-top:1px dashed #cbd5e1;margin:8px 0"></div>' if idx > 0 else ""
+        api_items += f"""{sep}
+<div style="margin-bottom:2px"><strong>{ep_name}</strong></div>
+{rows}"""
+
+    return f"""<div class="debug-info" style="margin-top:8px">
+<button class="debug-toggle" onclick="toggleSection(this, 'API 调用地址 ({len(api_endpoints)} 个接口)')" type="button">▶ API 调用地址 ({len(api_endpoints)} 个接口)</button>
+<div class="debug-content hidden">
+  {api_items}
+</div>
+</div>"""

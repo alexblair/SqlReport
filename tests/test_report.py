@@ -49,6 +49,27 @@ def _make_conn():
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
+        CREATE TABLE api_endpoints (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id        INTEGER NOT NULL,
+            name             TEXT    NOT NULL,
+            url_path         TEXT    UNIQUE NOT NULL,
+            output_format    TEXT    NOT NULL DEFAULT 'json',
+            columns          TEXT,
+            filters          TEXT,
+            sorts            TEXT,
+            row_limit        INTEGER DEFAULT 0,
+            api_key          TEXT,
+            allowed_origins  TEXT,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            result_mode      TEXT    NOT NULL DEFAULT 'single',
+            result_index     INTEGER NOT NULL DEFAULT 0,
+            allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
+            static_cache    INTEGER NOT NULL DEFAULT 1,
+            created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+        );
     """)
     return conn
 
@@ -89,8 +110,29 @@ def _make_conn2():
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
+        CREATE TABLE api_endpoints (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id        INTEGER NOT NULL,
+            name             TEXT    NOT NULL,
+            url_path         TEXT    UNIQUE NOT NULL,
+            output_format    TEXT    NOT NULL DEFAULT 'json',
+            columns          TEXT,
+            filters          TEXT,
+            sorts            TEXT,
+            row_limit        INTEGER DEFAULT 0,
+            api_key          TEXT,
+            allowed_origins  TEXT,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            result_mode      TEXT    NOT NULL DEFAULT 'single',
+            result_index     INTEGER NOT NULL DEFAULT 0,
+            allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
+            static_cache    INTEGER NOT NULL DEFAULT 1,
+            created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+        );
     """)
-    return conn
+    return conn2
 
 
 class TestReportSelector(unittest.TestCase):
