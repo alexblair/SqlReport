@@ -29,6 +29,7 @@ import time
 import db
 from typing import Optional
 import redis_cache
+import static_cache
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
@@ -903,7 +904,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    sorts=None, filters=None,
                    refresh: bool = False,
                    active_index: int = 0,
-                   report: Optional[dict] = None) -> ReportResult:
+                   report: Optional[dict] = None,
+                   conn=None) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
@@ -918,8 +920,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     active_index: 当前渲染的结果索引
     report: 报表配置 dict（必须包含 prefer_cache/cache_ttl_hours，由调用方传入）
     """
-    page = max(page, 1)
-    page_size = max(page_size, 1)
+    page = max(page if page is not None else 1, 1)
+    page_size = max(page_size if page_size is not None else 20, 1)
 
     prefer_cache = bool(report.get("prefer_cache", 0)) if report else False
     # 预览模式（SQL 来自表单而非数据库）时不写入 Redis
@@ -948,6 +950,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             mgr = redis_cache.get_redis_manager()
             if mgr:
                 mgr.delete_snapshot(snapshot_key)
+        # 静态文件缓存联动：删除该报表全部 API 端点的静态文件（惰性重建）
+        if conn is not None:
+            try:
+                for ep in db.get_api_endpoints_by_report(conn, report_id):
+                    static_cache.invalidate(ep["url_path"])
+            except Exception as e:
+                logging.warning("static_cache refresh 联动失败: %s", e)
 
     # ---- 尝试从进程内缓存获取 ----
     cached = _query_cache.get(report_id, sql_query)
@@ -1237,7 +1246,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
     try:
         result = execute_report(report_id, actual_sql, pool_config,
                                 page, page_size, sorts or [], filters or [], refresh,
-                                active_index, report)
+                                active_index, report, conn)
     except Exception as e:
         logging.error("报表 %d 查询执行失败: %s", report_id, e, exc_info=True)
         pool_name = pool_config.get("name", "?")
@@ -1493,9 +1502,9 @@ def handle_request(conn, method: str, path: str, query: str,
                     actual_sql = report["sql_query"]
                     execute_report(report_id, actual_sql, pool_config,
                                    page, page_size, sorts or [], filters or [], True,
-                                   active_index, report)
-            except Exception:
-                pass  # 缓存清除失败不影响重定向，错误将在下一页显示
+                                   active_index, report, conn)
+            except Exception as e:
+                logging.warning("refresh 预填失败: %s", e)  # 预填失败不影响重定向，错误将在下一页显示
         qs.pop("refresh", None)
         new_qs = urllib.parse.urlencode(qs, doseq=True)
         new_url = f"/report?{new_qs}" if new_qs else f"/report?id={report_id}"

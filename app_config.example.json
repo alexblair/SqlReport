@@ -20,6 +20,11 @@
         "socket_timeout": 5
     },
 
+    "static_cache": {
+        "enable": true,
+        "dir": "static_cache"
+    },
+
     "audit_db": {
         "path": "audit.db"
     },

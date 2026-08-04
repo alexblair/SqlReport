@@ -25,6 +25,9 @@ app_config.json
 config.db
 audit.db
 
+# 运行时缓存
+static_cache/
+
 # 系统
 .DS_Store
 Thumbs.db

@@ -35,6 +35,7 @@
 | **编辑-查看双向关联** | 报表页一键跳转编辑页，编辑页可直接查看报表或实时预览未保存的 SQL |
 | **健康检查端点** | `GET /health` 返回 JSON 状态（status + uptime），无需认证 |
 | **API 接口独立管理** | 独立管理页 `/config/api-endpoints`，展示全局 API 接口列表及关联报表 |
+| **API 静态文件缓存** | 端点 URL 后追加 `.json` 获取全量静态输出（零查询零计算），miss 自动回退重建，支持 NGINX 直出集成 |
 | **Session 滑动过期** | 24 小时 TTL，每次请求自动刷新，重启后通过 SQLite 持久化恢复 |
 | **导出支持排序** | CSV/JSON 导出时应用当前排序状态（与报表页面行为一致） |
 | **事务性 SQL 执行** | 支持 BEGIN/COMMIT/ROLLBACK 包装的多语句事务执行 |
@@ -67,6 +68,7 @@
 | **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
 | **Health Check** | `GET /health` returns JSON status (status + uptime), no auth required |
 | **API Endpoint Indep. Mgmt** | Standalone page `/config/api-endpoints` with global list & linked report |
+| **API Static File Cache** | Append `.json` to endpoint URL for static full output (zero query/compute), auto rebuild on miss, NGINX serve-ready |
 | **Session Sliding Expiry** | 24h TTL, refreshed on each request, persisted via SQLite across restarts |
 | **Export with Sorting** | CSV/JSON exports apply current sort state (consistent with report view) |
 | **Transactional SQL** | Multi-statement execution wrapped in BEGIN/COMMIT/ROLLBACK |
@@ -118,6 +120,8 @@ pip install -r requirements.txt
 
 The server listens at `http://0.0.0.0:8000` by default.
 
+API 静态文件缓存的存储目录 `static_cache/` 在首次写入缓存时自动创建（无需手工建目录）；生产环境建议将该目录纳入备份/清理策略，位置可通过 `app_config.json` 的 `static_cache.dir` 调整（见下文「API 静态文件缓存」章节）。
+
 ### 首次登录 / First Login
 
 打开浏览器访问 `http://localhost:8000`，使用默认管理员账户登录：
@@ -153,6 +157,10 @@ The `config_db` field supports a **list of configurations**, toggled via the `en
     "server": {
         "host": "0.0.0.0",
         "port": 8080
+    },
+    "static_cache": {
+        "enable": true,
+        "dir": "static_cache"
     },
     "config_db": [
         {
@@ -226,6 +234,164 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 > `app_config.json` contains credentials and is in `.gitignore` — do not commit.
 
 ---
+
+## 📄 API 静态文件缓存 / API Static File Cache
+
+为高并发、高流量场景提供**静态化输出**：在 API 端点 URL 后追加 `.json` 即可访问该端点的静态缓存文件——命中时直接返回文件内容，零查询、零计算、零 Redis 存取。
+
+The `.json` variant serves a pre-computed static file of the endpoint's full output. On hit, the server just returns the file bytes.
+
+### 功能说明 / How it works
+
+- **内容**：全量数据（fetch_all 语义，`page:1`、`page_size:total`、`total_pages:1`、`full:true`）+ 顶层平铺 `meta` 节点，与原始 API 输出结构兼容（仅多一个 `meta` 键）
+- **命中条件**：文件存在 + 配置版本（SQL/连接池 MD5）一致 + 未过期
+- **miss 自愈**：文件缺失、过期、被第三方删除时，自动回退完整 API 计算链路（Redis → MySQL），成功后重建文件，调用方无感知
+- **鉴权**：与普通 API 完全一致——端点 `api_key` 为空则公开；非空必须带 key（`Authorization: Bearer` 头或 `?api_key=` 参数），缺失/错误返回 401
+- **响应头**：`X-Static-Cache: hit|miss` 标识本次请求是否命中；`Content-Type: application/json; charset=utf-8`
+- **仅 GET 触发**：POST 请求、CSV 格式端点、非 200 响应均不参与
+
+### 调用示例 / Usage
+
+```bash
+# 静态缓存路径（首次 miss → 回退计算并重建；后续请求 hit 直出）
+curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers.json"
+# 普通 API（无静态缓存）保持不变
+curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
+```
+
+响应体示例：
+
+```json
+{
+  "data": [...],
+  "total": 1000,
+  "page": 1,
+  "page_size": 1000,
+  "total_pages": 1,
+  "full": true,
+  "meta": {
+    "generated_at": "2026-08-04 18:30:22 +0800",
+    "expires_at": "2026-08-05 18:30:22 +0800",
+    "last_invalidated_at": null,
+    "config_version": "a1b2c3d4e5f6..."
+  }
+}
+```
+
+`meta` 字段说明（时间均为服务器本地时区、秒级精度）：
+
+| 字段 | 说明 |
+|---|---|
+| `generated_at` | 文件生成时间 |
+| `expires_at` | 失效时间 = 生成时间 + 报表 `cache_ttl_hours`；`cache_ttl_hours=0`（永久）时为 `null` |
+| `last_invalidated_at` | 该缓存路径"上次被判定失效"的时刻：因版本不匹配/过期重建时记录本次时刻；因文件缺失（首次/第三方删除）重建时沿用历史记录；无记录时为 `null` |
+| `config_version` | 内部字段：配置版本 MD5（SQL + 连接池 + 端点字段/筛选/排序/条数），命中判定用；SQL、连接池或端点变换配置任一变化都会自动失效重建 |
+
+### 配置 / Configuration
+
+```json
+"static_cache": {
+    "enable": true,
+    "dir": "static_cache"
+}
+```
+
+- `enable`：全局开关，默认 `true`
+- `dir`：静态文件存储目录（相对/绝对路径均可），默认 `static_cache`；目录在首次写入时自动创建
+- **TTL 无独立配置**：失效时间与端点关联报表的 `cache_ttl_hours` 完全一致（0=永不过期，仅靠手动清理/配置变更失效）
+- 端点级开关：API 端点表单的「静态文件缓存（.json 变体）」勾选框（默认开启），可单独关闭某端点
+- **失效联动**：报表页「重建缓存」与批量缓存配置「关闭缓存」会同步删除对应静态文件（删除即失效，下次 `.json` 请求惰性重建）
+
+### NGINX 集成 / NGINX Integration
+
+NGINX 三种接入方式，按端点鉴权策略选择：
+
+**场景 1：公开端点（api_key 为空）静态直出 + miss 回退应用（推荐）**
+
+```nginx
+# static_cache.dir 配置为 /opt/sqlreport/static_cache（与 app_config.json 一致）
+location ~ ^/api/(?<api_file>.+)\.json$ {
+    root /opt/sqlreport;
+    # /api/customers.json → /opt/sqlreport/static_cache/api/customers.json
+    try_files /static_cache/api/$api_file.json @api_upstream;
+
+    default_type application/json;
+    add_header X-Static-Cache hit always;
+    add_header Cache-Control "public, max-age=300" always;
+}
+
+location @api_upstream {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+**场景 2：带 api_key 端点 → 全部落应用（鉴权、静态读取都在应用内完成）**
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+**场景 3：rewrite 直出变体（无回退，文件不存在返回 404）**
+
+```nginx
+location ~ ^/api/(?<api_file>.+)\.json$ {
+    rewrite ^/api/(.+)\.json$ /static_cache/$1.json break;
+    root /opt/sqlreport;
+    default_type application/json;
+    add_header X-Static-Cache hit always;
+}
+```
+
+**域名前缀映射完整案例**：`https://a.com/fishapi/` → `http://127.0.0.1:8101/api/`（后端系统约束的 API 地址开头为 `/api/`），保留完整 API Key 鉴权能力，缓存与系统一致（NGINX 层不设独立缓存）：
+
+```nginx
+# /etc/nginx/conf.d/a.com-fishapi.conf
+server {
+    listen 80;
+    server_name a.com;
+
+    location /fishapi/ {
+        # 剥掉 /fishapi/ 前缀，换成系统约束的 /api/ 前缀
+        # rewrite 不影响查询串，?api_key=xxx 原样透传
+        rewrite ^/fishapi/(.*)$ /api/$1 break;
+
+        proxy_pass http://127.0.0.1:8101;
+        proxy_http_version 1.1;
+
+        # Host 保留客户端域名（后端日志审计用）
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 5s;
+        proxy_read_timeout  60s;
+        proxy_send_timeout  60s;
+        client_max_body_size 10m;
+    }
+}
+```
+
+验证：
+
+```bash
+nginx -t && systemctl reload nginx
+curl -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers"
+curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json"   # 看 X-Static-Cache
+```
+
+**NGINX 集成注意事项**：
+
+1. **鉴权边界**：场景 1/3 的静态直出会绕过应用鉴权，**仅适用于 api_key 为空的公开端点**；配置了 key 的端点必须走场景 2，否则等于公开数据
+2. **TTL 由应用保证**：NGINX 直出不检查过期，过期文件会持续直出；需要 NGINX 层也过期时，用 `expires` 指令或部署任务按 `meta.expires_at` 清理
+3. **安全**：正则 location 已限定 `.json` 后缀；`try_files` 对 `..` 返回 404；建议禁止该目录的脚本执行
+4. 后端端口按实际部署调整（默认 `python server.py` 监听端口见 `app_config.json` 的 `server` 段）
 
 ## 🖥️ 页面说明 / Pages
 

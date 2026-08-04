@@ -16,14 +16,17 @@ api_handler.py — API 数据接口请求处理模块
 import json
 import csv
 import io
+import os
 import math
 import time
 import logging
+import hashlib
 import secrets
 import urllib.parse
 
 import db
 from report import execute_report
+import static_cache
 
 _CORS_BASE = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -60,6 +63,12 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
 
     返回:
         (HTTP 状态码, 响应体, 响应头字典)
+
+    静态缓存（.json 变体）：
+    - 仅 GET 且路径以 .json 结尾（大小写不敏感）时解析静态目标
+    - 原路径未命中端点时剥离 .json 后缀再查（防端点 URL 本身以 .json 结尾被误伤）
+    - 端点存在且 output_format=json 且全局启用时才进入静态分支，否则回退普通链路
+    - 鉴权在静态分支之前统一执行，与普通请求完全一致
     """
     start = time.time()
 
@@ -67,7 +76,17 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
     if not norm_path.startswith("/api"):
         return 404, _error_response("接口不存在", "NOT_FOUND", headers), {}
 
+    # 静态缓存目标解析（仅 GET 触发）：原路径未命中且以 .json 结尾时，
+    # 剥离后缀再查一次（防端点 URL 本身以 .json 结尾被误伤）
     endpoint = _lookup_endpoint(conn, norm_path)
+    static_base = None
+    if endpoint is None and method == "GET":
+        static_base = _static_base_path(norm_path)
+        if static_base is not None:
+            endpoint = _lookup_endpoint(conn, static_base)
+            if endpoint is not None:
+                norm_path = static_base
+
     if endpoint is None:
         _log_api_call(norm_path, client_ip, 404, time.time() - start)
         return 404, _error_response("接口不存在或已禁用", "NOT_FOUND", headers), {}
@@ -82,21 +101,20 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
         _log_api_call(norm_path, client_ip, 401, time.time() - start)
         return 401, _error_response(auth_error, "UNAUTHORIZED", headers), {}
 
-    result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
-    if isinstance(result[0], int):
-        _log_api_call(norm_path, client_ip, result[0], time.time() - start)
-        return result
+    # 静态缓存分支：鉴权之后、执行查询之前
+    # 仅 JSON 格式端点 + 端点开关开启 + 全局开关启用时进入，否则回退普通 API 链路
+    if static_base is not None \
+            and endpoint.get("output_format", "json") == "json" \
+            and int(endpoint.get("static_cache", 1)) == 1 \
+            and static_cache.get_static_cache_config().get("enable", True):
+        status, resp_body, resp_headers = _handle_static_request(
+            conn, endpoint, static_base, method, body, query_params, headers)
+        _log_api_call(norm_path, client_ip, status, time.time() - start)
+        return status, resp_body, resp_headers
 
-    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
-
-    cors_headers = _build_cors_headers(endpoint, headers)
-    status, resp_body, resp_headers = _format_output(
-        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full
-    )
-    resp_headers.update(cors_headers)
-
-    _log_api_call(norm_path, client_ip, status, time.time() - start)
-    return status, resp_body, resp_headers
+    result = _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
+    _log_api_call(norm_path, client_ip, result[0], time.time() - start)
+    return result
 
 
 def _normalise_path(path: str) -> str:
@@ -107,6 +125,147 @@ def _normalise_path(path: str) -> str:
 def _lookup_endpoint(conn, norm_path: str) -> dict | None:
     """从数据库查找匹配的 API 端点。"""
     return db.get_api_endpoint_by_path(conn, norm_path)
+
+
+def _static_base_path(norm_path: str) -> str | None:
+    """路径以 .json 结尾（大小写不敏感）时返回剥离后缀的路径，否则返回 None。"""
+    if not norm_path.lower().endswith(".json"):
+        return None
+    return norm_path[:-len(".json")]
+
+
+def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
+                            query_params: dict, headers: dict) -> tuple:
+    """执行普通 API 链路（查询 + 格式化 + CORS），静态分支回退共用。"""
+    result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
+    if isinstance(result[0], int):
+        return result
+    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
+    status, resp_body, resp_headers = _format_output(
+        data_rows, display_cols, total, page, ps, total_pages,
+        output_format, add_bom, full)
+    resp_headers.update(_build_cors_headers(endpoint, headers))
+    return status, resp_body, resp_headers
+
+
+def _handle_static_request(conn, endpoint: dict, base_path: str,
+                           method: str, body: str, query_params: dict,
+                           headers: dict) -> tuple:
+    """
+    处理静态缓存请求（.json 变体，已通过鉴权，端点 output_format=json 且全局启用）。
+
+    命中：直接返回文件内容，X-Static-Cache: hit。
+    miss：以全量语义执行完整计算链路（Redis 快照 → 锁 → MySQL 兜底），
+          200 成功后把"全量 + meta"输出原子写入文件；非 200 不落盘。
+    文件 IO / 配置异常静默降级：回退普通 API 链路。
+    """
+    url_key = base_path.lstrip("/")
+    file_path = static_cache.resolve_file_path(url_key)
+    if file_path is None:
+        # 路径穿越（..）被拒：回退普通 API 链路
+        logging.warning("static_cache 路径穿越被拒绝: %s", base_path)
+        return _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
+
+    report = db.get_report(conn, endpoint["report_id"])
+    if report is None or report.get("pool_id") is None:
+        return _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
+
+    ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
+    config_version = _compute_static_config_version(endpoint, report)
+
+    content = static_cache.try_read(file_path, config_version, ttl_hours)
+    if content is not None:
+        resp_headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Static-Cache": "hit",
+        }
+        resp_headers.update(_build_cors_headers(endpoint, headers))
+        return 200, content, resp_headers
+
+    return _execute_static_miss(
+        conn, endpoint, url_key, file_path, ttl_hours, config_version, headers)
+
+
+def _compute_static_config_version(endpoint: dict, report: dict) -> str:
+    """计算静态缓存配置版本（MD5 of sql + pool_id + 端点变换配置）。
+
+    静态文件内容是"SQL 结果 + 端点变换规则（字段/筛选/排序/条数）"的产物，
+    任一变化都会改变文件内容，必须纳入版本计算；否则编辑端点配置后
+    旧文件在 TTL 内持续命中（缓存陈旧）。
+    """
+    parts = [report["sql_query"], str(report.get("pool_id") or "")]
+    for key in ("columns", "filters", "sorts", "row_limit"):
+        value = endpoint.get(key)
+        if value is not None and value != "":
+            parts.append(f"{key}={value}")
+    return hashlib.md5("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
+                         ttl_hours: int, config_version: str,
+                         headers: dict) -> tuple:
+    """miss 链路：失效记录 → 全量计算 → 200 成功原子落盘（非 200 不落盘）。
+
+    last_invalidated_at 语义（该缓存路径"上次被判定失效"的时刻）：
+    - 文件存在但版本不匹配/过期 → 本次即一次失效事件，记录本次时刻
+    - 文件缺失（首次/第三方删除）→ 本次没有文件被判定失效，沿用历史记录（无则 null）
+    """
+    if os.path.exists(file_path):
+        static_cache.record_invalidated(url_key)
+    last_invalidated = static_cache.get_last_invalidated(url_key)
+    result = _execute_api_query(conn, endpoint, "GET", "", {}, headers, force_full=True)
+    if isinstance(result[0], int):
+        if result[0] != 200:
+            # 非 200 不落盘
+            status, resp_body, resp_headers = result[0], result[1], dict(result[2])
+        else:
+            # result_mode=all 成功：直接返回 (200, JSON 串, 响应头)
+            status, resp_body, resp_headers = 200, result[1], dict(result[2])
+    else:
+        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
+        status, resp_body, resp_headers = _format_output(
+            data_rows, display_cols, total, page, ps, total_pages,
+            output_format, add_bom, full)
+
+    if status == 200:
+        meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
+        file_content = _attach_static_meta(resp_body, meta)
+        if static_cache.write_file(file_path, file_content):
+            resp_body = file_content
+
+    resp_headers = dict(resp_headers)
+    resp_headers["X-Static-Cache"] = "miss"
+    resp_headers.update(_build_cors_headers(endpoint, headers))
+    return status, resp_body, resp_headers
+
+
+def _build_static_meta(ttl_hours: int, url_key: str, config_version: str,
+                       last_invalidated: float | None) -> dict:
+    """构建静态文件 meta 节点（服务器本地时区，秒级精度）。
+
+    last_invalidated_at 为该缓存路径"上次被判定失效"的时刻：
+    - 本次重建因文件失效（版本不匹配/过期）触发 → 本次失效时刻
+    - 本次重建因文件缺失（首次/第三方删除）触发 → 历史记录；无记录时为 null
+    """
+    now = time.time()
+    return {
+        "generated_at": _format_local_time(now),
+        "expires_at": _format_local_time(now + ttl_hours * 3600) if ttl_hours > 0 else None,
+        "last_invalidated_at": _format_local_time(last_invalidated) if last_invalidated else None,
+        "config_version": config_version,
+    }
+
+
+def _format_local_time(ts: float) -> str:
+    """格式化为服务器本地时区时间（秒级精度），如 2026-08-04 18:30:22 +0800。"""
+    return time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(ts))
+
+
+def _attach_static_meta(resp_body: str, meta: dict) -> str:
+    """将 meta 节点平铺附加到 JSON 响应体顶层。"""
+    body = json.loads(resp_body)
+    body["meta"] = meta
+    return json.dumps(body, ensure_ascii=False, default=str)
 
 
 def _get_result_name(report, result_index: int, result_obj) -> str:
@@ -123,9 +282,13 @@ def _get_result_name(report, result_index: int, result_obj) -> str:
 
 
 def _execute_api_query(conn, endpoint: dict, method: str, body: str,
-                       query_params: dict, headers: dict) -> tuple:
+                       query_params: dict, headers: dict,
+                       force_full: bool = False) -> tuple:
     """
     执行 API 查询：加载报表/连接池 + 解析参数 + 执行 SQL。
+
+    force_full: 强制全量语义（静态缓存文件的固有语义，与 allow_fetch_all 开关
+                及请求参数无关），无视分页与行数限制。
 
     返回 (data_rows, display_cols, total, page, ps, total_pages, output_format, pretty)
     或在出错/全部输出模式下返回 (HTTP状态码, 响应体, 响应头字典)。
@@ -146,8 +309,9 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         _resolve_params(endpoint, method, body, query_params, headers)
 
     ps = page_size if row_limit == 0 else min(page_size, row_limit)
-    if fetch_all:
-        # 全量获取：无视分页与行数限制，内部以超大页大小避免切片
+    if fetch_all or force_full:
+        # 全量获取：无视分页与行数限制（静态缓存的全量是文件固有语义，与 allow_fetch_all 开关无关）
+        fetch_all = True
         page = 1
         ps = _FETCH_ALL_PAGE_SIZE
     elif row_limit > 0 and ps * (page - 1) >= row_limit:

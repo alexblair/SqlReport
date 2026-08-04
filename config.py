@@ -22,6 +22,7 @@ import urllib.parse
 import db
 import auth
 import redis_cache
+import static_cache
 import html as html_mod
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
 from render import (
@@ -952,6 +953,15 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     except Exception:
         pass
 
+    # 静态文件缓存联动：关闭缓存时删除对应报表所有端点的静态文件（删除即失效，惰性重建）
+    if cache_switch == "0":
+        for rid in report_ids:
+            try:
+                for ep in db.get_api_endpoints_by_report(conn, rid):
+                    static_cache.invalidate(ep["url_path"])
+            except Exception as e:
+                logging.warning("static_cache 批量关缓存联动失败: %s", e)
+
     parts = [f"已更新 {affected} 个报表的缓存配置"]
     if redis_updated > 0:
         parts.append(f"Redis 成功 {redis_updated}")
@@ -1161,6 +1171,7 @@ def handle_api_endpoint_add(conn, report_id: int,
         row_limit = int(data.get("row_limit", 0) or 0)
         enabled = int(data.get("enabled", 0) or 0)
         allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
+        static_cache_enabled = int(data.get("static_cache", 1) or 0)
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
@@ -1178,6 +1189,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             result_mode=result_mode,
             result_index=result_index,
             allow_fetch_all=allow_fetch_all,
+            static_cache=static_cache_enabled,
             session_user=session_user,
         )
         if not enabled:
@@ -1208,6 +1220,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         row_limit = int(data.get("row_limit", 0) or 0)
         enabled = int(data.get("enabled", 0) or 0)
         allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
+        static_cache_enabled = int(data.get("static_cache", 1) or 0)
         columns, filters_str, sorts_str = _parse_rule_json(
             data.get("rule_json", ""))
         url_path = _normalize_api_url_path(data["url_path"])
@@ -1228,6 +1241,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             result_mode=result_mode,
             result_index=result_index,
             allow_fetch_all=allow_fetch_all,
+            static_cache=static_cache_enabled,
             session_user=session_user,
         )
         if ok:

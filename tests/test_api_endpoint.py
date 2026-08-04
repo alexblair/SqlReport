@@ -19,6 +19,7 @@ import os
 import tempfile
 import json
 import sqlite3
+import re
 
 # 创建临时测试数据库文件
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False, prefix="test_api_")
@@ -91,6 +92,7 @@ def _set_up_db():
             result_mode TEXT NOT NULL DEFAULT 'single',
             result_index INTEGER NOT NULL DEFAULT 0,
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
+            static_cache INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -746,6 +748,20 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
             html_off,
             r'id="fetch-all-url-row"[^>]*display:none')
 
+    def test_config_api_endpoint_url_input_syncs_all_urls(self):
+        """URL 路径输入时完整/全量/静态 URL 联动刷新：
+        updateFullUrl（oninput 绑定）须联动调用 updateFetchAllUrl 与 updateStaticUrl"""
+        _, opener = self._login_and_get_cookie()
+        html = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new"
+        ).read().decode("utf-8")
+        self.assertIn('oninput="updateFullUrl()"', html)
+        func_body = re.search(
+            r"function updateFullUrl\(\) \{(.*?)\n  \}", html, re.S)
+        self.assertIsNotNone(func_body)
+        self.assertIn("updateFetchAllUrl();", func_body.group(1))
+        self.assertIn("updateStaticUrl();", func_body.group(1))
+
     def test_config_api_endpoint_form_fetch_all_default_checked(self):
         """新增表单全量开关默认勾选"""
         _, opener = self._login_and_get_cookie()
@@ -823,6 +839,82 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         html = resp.read().decode("utf-8")
         self.assertIn("全量", html)
         self.assertIn("允许", html)
+
+    # ------------------------------------------------------------------
+    # 静态文件缓存（.json 变体）UI
+    # ------------------------------------------------------------------
+
+    def test_config_api_endpoint_save_static_cache_enabled(self):
+        """表单勾选静态缓存开关 → DB 保存为 1"""
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode([
+            ("name", "静态缓存开"),
+            ("url_path", "ui-sc-on"),
+            ("output_format", "json"),
+            ("row_limit", "0"),
+            ("api_key", ""),
+            ("allowed_origins", ""),
+            ("rule_json", ""),
+            ("enabled", "1"),
+            ("static_cache", "0"),
+            ("static_cache", "1"),
+            ("action", "save_close"),
+        ]).encode()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-sc-on")
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertEqual(ep["static_cache"], 1)
+
+    def test_config_api_endpoint_save_static_cache_disabled(self):
+        """表单不勾选静态缓存开关 → DB 保存为 0"""
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode({
+            "name": "静态缓存关",
+            "url_path": "ui-sc-off",
+            "output_format": "json",
+            "row_limit": "0",
+            "api_key": "",
+            "allowed_origins": "",
+            "rule_json": "",
+            "enabled": "1",
+            "static_cache": "0",
+            "action": "save_close",
+        }).encode()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-sc-off")
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertEqual(ep["static_cache"], 0)
+
+    def test_config_api_endpoint_edit_static_cache_echo(self):
+        """编辑页回显 static_cache=0 为不勾选；表单含静态 URL 预览行与说明"""
+        eid = self._create_endpoint_in_db(url_path="/api/ui-sc-echo", static_cache=0)
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit")
+        html = resp.read().decode("utf-8")
+        self.assertIn("静态文件缓存", html)
+        self.assertIn("static-url-row", html)
+        self.assertNotRegex(html, r'name="static_cache" value="1"[^>]*checked')
+
+    def test_config_api_endpoint_list_shows_static_cache(self):
+        """API 列表展示静态缓存状态列（开/关徽标）+ 全局状态提示"""
+        self._create_endpoint_in_db(url_path="/api/ui-sc-list", static_cache=1)
+        self._create_endpoint_in_db(url_path="/api/ui-sc-off", static_cache=0)
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/edit")
+        html = resp.read().decode("utf-8")
+        self.assertIn("静态缓存", html)
+        self.assertIn("静态文件缓存: 全局", html)
+        self.assertIn(">开<", html)
+        self.assertIn(">关<", html)
 
     # =====================================================================
     # 客户端断开连接（ConnectionResetError）回归测试

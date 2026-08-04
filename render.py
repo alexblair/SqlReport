@@ -19,6 +19,7 @@ import time
 import json
 from decimal import Decimal
 import redis_cache
+import static_cache
 
 # ---------------------------------------------------------------------------
 # 公共 CSS（report.py + config.py 公共子集合并去重）
@@ -1736,6 +1737,10 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         fetch_all_display = ('<span style="color:#059669;font-weight:600">允许</span>'
                              if allow_fetch_all else
                              '<span style="color:#dc2626;font-weight:600">禁止</span>')
+        static_cache_on = int(ep.get("static_cache", 1))
+        static_cache_display = ('<span style="color:#059669;font-weight:600">开</span>'
+                                if static_cache_on else
+                                '<span style="color:#94a3b8;font-weight:600">关</span>')
         report_name_cell = ""
         if show_report_name:
             rname = _escape(ep.get("report_name", ""))
@@ -1763,23 +1768,31 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
   <td>{ep_format}</td>
   <td>{mode_display}</td>
   <td>{fetch_all_display}</td>
+  <td>{static_cache_display}</td>
   <td>{enabled_badge}</td>
   <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
   {ops_cell}
 </tr>"""
     extra_col = '<th>关联报表</th>' if show_report_name else ''
     extra_colspan = 1 if show_report_name else 0
-    total_cols = 8 + extra_colspan
+    total_cols = 9 + extra_colspan
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
+    _sc_cfg = static_cache.get_static_cache_config()
+    _sc_state = "开启" if _sc_cfg.get("enable", True) else "关闭"
+    _sc_dir = _sc_cfg.get("dir", "static_cache")
+    _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#94a3b8">'
+                f'静态文件缓存: 全局 {_sc_state} | 存储目录: <code>{_escape(str(_sc_dir))}</code>'
+                f'（通过 app_config.json 的 static_cache 段配置）</div>')
     return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
 <div class="section-title" style="font-size:16px">
   <span>🔌 API 接口</span>
   <span class="actions">{title_actions}</span>
 </div>
+{_sc_hint}
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
 {rows or f'<tr><td colspan="{total_cols}" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
@@ -1923,6 +1936,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
                        else (' checked' if not is_edit else ''))
     allow_fetch_all_checked = (' checked' if (is_edit and int(endpoint.get("allow_fetch_all", 1)))
                                else (' checked' if not is_edit else ''))
+    static_cache_checked = (' checked' if (is_edit and int(endpoint.get("static_cache", 1)))
+                            else (' checked' if not is_edit else ''))
 
     # 结果集输出模式
     result_mode = endpoint.get("result_mode", "single") if is_edit else "single"
@@ -1991,6 +2006,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     var display = document.getElementById('full-url-text');
     var path = input.value || '';
     display.textContent = window.location.origin + '/api/' + path;
+    updateFetchAllUrl();
+    updateStaticUrl();
   }}
   function updateFetchAllUrl() {{
     var input = document.getElementById('url-path-input');
@@ -2004,6 +2021,32 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       var path = input.value || '';
       text.textContent = window.location.origin + '/api/' + path + '?fetch_all=true';
     }}
+  }}
+  function updateStaticUrl() {{
+    var input = document.getElementById('url-path-input');
+    var row = document.getElementById('static-url-row');
+    var checkbox = document.getElementById('static-cache-checkbox');
+    if (!input || !row) return;
+    var show = checkbox && checkbox.checked && !checkbox.disabled;
+    row.style.display = show ? 'flex' : 'none';
+    if (show) {{
+      var text = document.getElementById('static-url-text');
+      var path = input.value || '';
+      text.textContent = window.location.origin + '/api/' + path + '.json';
+    }}
+  }}
+  function updateStaticCacheState() {{
+    var fmtSel = document.querySelector('select[name="output_format"]');
+    if (!fmtSel) return;
+    var cb = document.getElementById('static-cache-checkbox');
+    var hint = document.getElementById('static-cache-csv-hint');
+    var isCsv = fmtSel.value === 'csv';
+    if (cb) {{
+      cb.disabled = isCsv;
+      if (isCsv) cb.checked = false;
+    }}
+    if (hint) hint.style.display = isCsv ? 'inline' : 'none';
+    updateStaticUrl();
   }}
   function copyText(elId) {{
     var el = document.getElementById(elId);
@@ -2025,12 +2068,30 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   document.addEventListener('DOMContentLoaded', function() {{
     updateFullUrl();
     updateFetchAllUrl();
+    updateStaticCacheState();
   }});
   </script>
 
   <label>输出格式:
-    <select name="output_format">{format_opts}</select>
+    <select name="output_format" onchange="updateStaticCacheState()">{format_opts}</select>
   </label>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="static_cache" value="0">
+    <input type="checkbox" name="static_cache" value="1"{static_cache_checked} id="static-cache-checkbox"
+      onchange="updateStaticUrl()">
+    <span style="font-weight:600">静态文件缓存（.json 变体）</span>
+    <span id="static-cache-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
+  </label>
+  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    开启后，调用方在端点 URL 后追加 <code>.json</code> 即可访问静态化输出（全量数据 + meta 节点），
+    命中时零查询零计算；缓存失效自动回退并重建。TTL 与报表缓存配置（cache_ttl_hours）一致。
+  </div>
+  <div id="static-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if static_cache_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-weight:500;color:#64748b">静态 URL:</span>
+    <code id="static-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+    <button type="button" onclick="copyText('static-url-text')" style="padding:3px 10px;font-size:12px;cursor:pointer;border:1px solid #cbd5e1;border-radius:4px;background:#fff;white-space:nowrap">复制</button>
+  </div>
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
