@@ -237,6 +237,47 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 
 ---
 
+## 📄 API JSON 输出模板 / API JSON Output Template
+
+API 端点支持自定义 JSON 输出结构：管理员在端点配置页维护一段 JSON 模板，值位置用 `{{占位符}}` 引用数据，**留空 = 默认输出**（`{"data": ..., "total": N, ...}`）。
+
+### 用法 / Usage
+
+以默认 JSON 为起点，改键名/位置即可。例如把默认结构改为只输出数据数组与总数：
+
+```json
+{
+  "count": {{total}},
+  "items": {{data}}
+}
+```
+
+渲染结果为：
+
+```json
+{"count": 42, "items": [{"id": 1, "name": "张三"}, ...]}
+```
+
+### 占位符 / Placeholders
+
+占位符键集随「结果集输出模式」切换：
+
+- **single（单结果集）**：`{{data}}` 数据数组、`{{total}}` 总行数、`{{page}}` 页码、`{{page_size}}` 每页条数、`{{total_pages}}` 总页数、`{{full}}` 全量标记、`{{meta}}` 静态缓存 meta
+- **all（全部结果集）**：`{{results}}` 结果集数组（每项含 name/data/total/page/page_size/total_pages）、`{{mode}}` 模式（固定 "all"）、`{{page}}`、`{{page_size}}`、`{{full}}`、`{{meta}}`
+
+规则：
+
+- 模板中**不出现的字段即不输出**；默认输出在 `fetch_all` 时才带 `"full": true`，模板需要时手动加 `{{full}}`
+- 键集内键缺失输出 `null`（如普通链路无 meta 时 `{{meta}}` 得 null）；**键集外占位符保存时被拒绝**（页面提示所在行列）
+- **CSV 格式不支持模板**（表单已禁用）；模板渲染运行期失败自动回退默认输出，不影响接口可用性
+- 与静态缓存联动：模板文本变化自动纳入 config_version 计算，`.json` 静态变体随即失效重建；模板含 `{{meta}}` 时输出 meta 节点，不含则不附加
+
+### 真实数据预览 / Live Preview
+
+编辑端点页（已保存的端点）模板区旁有「用真实数据预览」按钮：以当前表单**未保存**的模板与规则（筛选/排序/字段选择）执行真实查询（最多 3 行数据，不落库、不影响线上端点），把渲染结果展示在预览区；模板非法或查询失败时显示含行列位置的结构化错误。新增端点（尚未保存）不提供该按钮。
+
+---
+
 ## 📄 API 静态文件缓存 / API Static File Cache
 
 为高并发、高流量场景提供**静态化输出**：在 API 端点 URL 后追加 `.json` 即可访问该端点的静态缓存文件——命中时直接返回文件内容，零查询、零计算、零 Redis 存取。
@@ -287,7 +328,7 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 | `generated_at` | 文件生成时间 |
 | `expires_at` | 失效时间 = 生成时间 + 报表 `cache_ttl_hours`；`cache_ttl_hours=0`（永久）时为 `null` |
 | `last_invalidated_at` | 该缓存路径"上次被判定失效"的时刻：因版本不匹配/过期重建时记录本次时刻；因文件缺失（首次/第三方删除）重建时沿用历史记录；无记录时为 `null` |
-| `config_version` | 内部字段：配置版本 MD5（SQL + 连接池 + 端点字段/筛选/排序/条数），命中判定用；SQL、连接池或端点变换配置任一变化都会自动失效重建 |
+| `config_version` | 内部字段：配置版本 MD5（SQL + 连接池 + 端点字段/筛选/排序/条数/JSON 模板），命中判定用；任一变化都会自动失效重建 |
 
 ### 配置 / Configuration
 
