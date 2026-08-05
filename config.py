@@ -945,7 +945,7 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     try:
         mgr = redis_cache.get_redis_manager()
         if mgr and mgr.available:
-            prefix = mgr._config.get("key_prefix", "sr")
+            prefix = mgr.key_prefix
             for rid in report_ids:
                 try:
                     keys = mgr.scan_snapshots(prefix, rid)
@@ -1422,7 +1422,7 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
         logging.warning("真实数据预览查询执行失败: %s", e)
         return fail(f"查询执行失败: {e}")
 
-    if isinstance(result[0], int):
+    if isinstance(result, tuple):
         status, resp_body, _ = result
         if status != 200:
             try:
@@ -1434,10 +1434,10 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
         return 200, json.dumps({"ok": True, "output": resp_body},
                                ensure_ascii=False), json_headers
 
-    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, fetch_all = result
     status, out_body, _ = api_handler._format_output(
-        data_rows, display_cols, total, page, ps, total_pages,
-        output_format, add_bom, fetch_all, template=tmp["json_template"] or "", meta=None)
+        result.data_rows, result.display_cols, result.total, result.page,
+        result.page_size, result.total_pages, result.output_format,
+        result.add_bom, result.full, template=tmp["json_template"] or "", meta=None)
     if status != 200:
         return fail("预览输出构建失败")
     return 200, json.dumps({"ok": True, "output": out_body},

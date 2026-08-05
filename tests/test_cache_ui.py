@@ -195,7 +195,7 @@ class TestRebuildCacheButton(unittest.TestCase):
         mock_create_conn.return_value = mock_conn
 
         mock_mgr = MagicMock()
-        mock_mgr._config = {"key_prefix": "sr"}
+        mock_mgr.key_prefix = "sr"
         mock_mgr.available = True
         mock_mgr.acquire_lock.return_value = True
         mock_mgr.wait_for_lock.return_value = True
@@ -225,7 +225,7 @@ class TestRebuildCacheButton(unittest.TestCase):
         mock_create_conn.return_value = mock_conn
 
         mock_mgr = MagicMock()
-        mock_mgr._config = {"key_prefix": "sr"}
+        mock_mgr.key_prefix = "sr"
         mock_mgr.available = False
         mock_get_mgr.return_value = mock_mgr
 
@@ -260,7 +260,7 @@ class TestRebuildCacheButton(unittest.TestCase):
         mock_create_conn.return_value = mock_conn
 
         mock_mgr = MagicMock()
-        mock_mgr._config = {"key_prefix": "sr"}
+        mock_mgr.key_prefix = "sr"
         mock_mgr.available = True
         mock_mgr.get_snapshot.return_value = None
         mock_mgr.acquire_lock.return_value = True

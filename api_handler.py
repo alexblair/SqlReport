@@ -28,6 +28,7 @@ import db
 from report import execute_report
 import static_cache
 from json_template import is_template_enabled, render_template
+from result_transform import select_columns, column_indices
 
 _CORS_BASE = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -140,12 +141,12 @@ def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
     """执行普通 API 链路（查询 + 格式化 + CORS），静态分支回退共用。"""
     template = endpoint.get("json_template") or ""
     result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
-    if isinstance(result[0], int):
+    if isinstance(result, tuple):
         return result
-    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
     status, resp_body, resp_headers = _format_output(
-        data_rows, display_cols, total, page, ps, total_pages,
-        output_format, add_bom, full, template=template)
+        result.data_rows, result.display_cols, result.total,
+        result.page, result.page_size, result.total_pages,
+        result.output_format, result.add_bom, result.full, template=template)
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
 
@@ -219,7 +220,7 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
     meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
     result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
                                 force_full=True, meta=meta)
-    if isinstance(result[0], int):
+    if isinstance(result, tuple):
         if result[0] != 200:
             # 非 200 不落盘
             status, resp_body, resp_headers = result[0], result[1], dict(result[2])
@@ -227,10 +228,11 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
             # result_mode=all 成功：直接返回 (200, JSON 串, 响应头)
             status, resp_body, resp_headers = 200, result[1], dict(result[2])
     else:
-        data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
         status, resp_body, resp_headers = _format_output(
-            data_rows, display_cols, total, page, ps, total_pages,
-            output_format, add_bom, full, template=template, meta=meta)
+            result.data_rows, result.display_cols, result.total,
+            result.page, result.page_size, result.total_pages,
+            result.output_format, result.add_bom, result.full,
+            template=template, meta=meta)
 
     if status == 200:
         if is_template_enabled(template):
@@ -305,8 +307,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                 及请求参数无关），无视分页与行数限制。
     meta: 静态缓存链路的 meta 节点（模板启用时进入模板上下文；普通链路为 None）。
 
-    返回 (data_rows, display_cols, total, page, ps, total_pages, output_format, pretty)
-    或在出错/全部输出模式下返回 (HTTP状态码, 响应体, 响应头字典)。
+    成功路径（单结果集模式）返回 ApiQueryResult 具名结构；
+    错误或 result_mode=all 成功时返回 (HTTP状态码, 响应体, 响应头字典)。
     """
     report_id = endpoint["report_id"]
     report = db.get_report(conn, report_id)
@@ -330,7 +332,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         page = 1
         ps = _FETCH_ALL_PAGE_SIZE
     elif row_limit > 0 and ps * (page - 1) >= row_limit:
-        return [], [], 0, page, ps, 1, output_format, add_bom, False
+        return ApiQueryResult(
+            [], [], 0, page, ps, 1, output_format, add_bom, False)
 
     result_mode = endpoint.get("result_mode", "single")
     result_index = int(endpoint.get("result_index", 0))
@@ -360,8 +363,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         results_list = []
         total_all_rows = 0
         for i, res in enumerate(result.results):
-            disp_cols = _resolve_display_cols(res["columns"], columns)
-            col_indices_local = [res["columns"].index(c) for c in disp_cols]
+            disp_cols = select_columns(res["columns"], columns)
+            col_indices_local = column_indices(disp_cols, res["columns"])
             data_rows = [{disp_cols[ii]: row[idx] for ii, idx in enumerate(col_indices_local)}
                          for row in res["rows"]]
             total = res["total"]
@@ -405,21 +408,37 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
 
     all_cols = result.columns
     all_rows = result.rows
-    display_cols = _resolve_display_cols(all_cols, columns)
-    col_indices = [all_cols.index(c) for c in display_cols]
+    display_cols = select_columns(all_cols, columns)
+    col_indices = column_indices(display_cols, all_cols)
     data_rows = [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)} for row in all_rows]
 
     display_ps = result.total if fetch_all else ps
-    return data_rows, display_cols, result.total, page, display_ps, result.total_pages, output_format, add_bom, fetch_all
+    return ApiQueryResult(
+        data_rows, display_cols, result.total, page, display_ps,
+        result.total_pages, output_format, add_bom, fetch_all)
 
 
-def _resolve_display_cols(all_cols: list, columns: str | None) -> list:
-    """根据 columns 参数解析显示列列表。"""
-    if not columns:
-        return list(all_cols)
-    col_list = [c.strip() for c in columns.split(",") if c.strip()]
-    display = [c for c in col_list if c in all_cols]
-    return display if display else list(all_cols)
+class ApiQueryResult:
+    """API 查询结果的具名结构（单结果集成功路径，替代 9 字段位置元组）。
+
+    错误路径与 result_mode=all 的成功路径仍返回 (状态码, 响应体, 响应头) 元组，
+    调用方通过 isinstance(result, tuple) 区分。
+    """
+
+    __slots__ = ("data_rows", "display_cols", "total", "page", "page_size",
+                 "total_pages", "output_format", "add_bom", "full")
+
+    def __init__(self, data_rows, display_cols, total, page, page_size,
+                 total_pages, output_format, add_bom, full):
+        self.data_rows = data_rows
+        self.display_cols = display_cols
+        self.total = total
+        self.page = page
+        self.page_size = page_size
+        self.total_pages = total_pages
+        self.output_format = output_format
+        self.add_bom = add_bom
+        self.full = full
 
 
 def _format_output(data_rows, display_cols, total, page, ps,

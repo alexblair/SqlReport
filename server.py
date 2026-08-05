@@ -36,6 +36,7 @@ import render
 import export as export_mod
 import api_handler
 import audit_db
+import audit_page
 from app_config import get_server_config, get_log_config, get_error_log_config, get_audit_db_config
 
 # ---------------------------------------------------------------------------
@@ -525,124 +526,23 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _handle_audit(self, method: str, path: str, query: str, conn=None):
-        """处理审计日志页面的请求。"""
-        # 自动轮转过期日志
-        audit_config = get_audit_db_config()
-        if audit_config.get("retention_days", 0) > 0:
-            try:
-                audit_conn = audit_db.get_audit_db()
-                try:
-                    deleted = audit_db.rotate_audit_logs(audit_conn, audit_config["retention_days"])
-                    if deleted > 0:
-                        logging.info("审计日志自动清理: 删除了 %d 条过期记录", deleted)
-                finally:
-                    audit_conn.close()
-            except Exception as e:
-                logging.warning("审计日志自动轮转失败: %s", e)
+        """委托给 audit_page.py，使用 _handle() 传入的共享连接"""
+        form_body = self._read_body() if method == "POST" else None
+        code, body, headers = audit_page.handle_audit_request(
+            method, query, form_body)
+        self._log_web_access(path, method, code, request_body=form_body)
 
-        qs = urllib.parse.parse_qs(query, keep_blank_values=True)
-
-        if method == "POST":
-            # 清理操作
-            form_body = self._read_body()
-            data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-            action = data.get("action", [""])[0]
-            if action == "clean":
-                filters = {}
-                for key in ("type", "date_from", "date_to", "session_user", "keyword"):
-                    val = data.get(key, [None])[0]
-                    if val:
-                        filters[key] = val
-                try:
-                    audit_conn = audit_db.get_audit_db()
-                    try:
-                        deleted = audit_db.delete_audit_logs(audit_conn, filters)
-                    finally:
-                        audit_conn.close()
-                    msg = f"清理成功：共删除 {deleted} 条审计日志"
-                except Exception as e:
-                    msg = f"清理失败：{e}"
-                # 重定向回审计页并带消息
-                clean_qs = urllib.parse.urlencode({k: v for k, v in filters.items() if v})
-                self._send_redirect(f"/audit?{clean_qs}&flash={urllib.parse.quote(msg)}")
-                return
-
-        # GET — 正常浏览或 CSV 导出
-        filters = {}
-        for key in ("type", "date_from", "date_to", "session_user", "keyword"):
-            val = qs.get(key, [None])[0]
-            if val:
-                filters[key] = val
-
-        try:
-            page = int(qs.get("page", ["1"])[0])
-        except (ValueError, IndexError):
-            page = 1
-        try:
-            page_size = int(qs.get("page_size", ["20"])[0])
-        except (ValueError, IndexError):
-            page_size = 20
-
-        flash = qs.get("flash", [None])[0]
-
-        if "export" in qs and qs["export"][0] == "csv":
-            # CSV 导出
-            self._export_audit_csv(filters)
+        if code == 302:
+            self._send_redirect(body)
             return
-
-        audit_conn = audit_db.get_audit_db()
-        try:
-            total = audit_db.count_audit_logs(audit_conn, filters)
-            rows = audit_db.query_audit_logs(audit_conn, filters, page, page_size)
-        finally:
-            audit_conn.close()
-
-        db_size = 0
-        try:
-            db_size = os.path.getsize(audit_db.get_audit_db_path())
-        except OSError:
-            pass
-
-        body = render.render_audit_page(rows, total, page, page_size, filters,
-                                         message=flash or "", db_size=db_size)
-        self._log_web_access(path, "GET", 200)
-        self._send_html(200, body)
-
-    def _export_audit_csv(self, filters: dict):
-        """导出审计日志为 CSV。"""
-        audit_conn = audit_db.get_audit_db()
-        try:
-            rows = audit_db.export_audit_logs(audit_conn, filters)
-        finally:
-            audit_conn.close()
-
-        import csv, io
-        output = io.StringIO()
-        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-        writer.writerow(["时间", "类型", "操作者", "操作", "实体类型", "实体名称",
-                         "HTTP方法", "HTTP路径", "状态码", "IP", "耗时(ms)"])
-        for r in rows:
-            writer.writerow([
-                r.get("timestamp", ""),
-                r.get("type", ""),
-                r.get("session_user", ""),
-                r.get("action", ""),
-                r.get("entity_type", ""),
-                r.get("entity_name", ""),
-                r.get("http_method", ""),
-                r.get("http_path", ""),
-                r.get("http_status", ""),
-                r.get("ip_address", ""),
-                r.get("duration_ms", ""),
-            ])
-        csv_data = output.getvalue().encode("utf-8-sig")
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/csv; charset=utf-8-sig")
-        self.send_header("Content-Disposition",
-                         f'attachment; filename="audit_log_{int(time.time())}.csv"')
-        self.end_headers()
-        self.wfile.write(csv_data)
+        if isinstance(body, bytes):
+            self.send_response(code)
+            for key, val in headers.items():
+                self.send_header(key, val)
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self._send_html(code, body, headers)
 
     def _read_body(self) -> str:
         """读取 POST 请求体"""

@@ -115,6 +115,11 @@ class RedisConnectionManager:
         self._health_thread: Optional[threading.Thread] = None
         self._stop_health: bool = False
 
+    @property
+    def key_prefix(self) -> str:
+        """Redis 键前缀（配置 key_prefix，默认 sr）。"""
+        return str(self._config.get("key_prefix", "sr"))
+
     # ---- 连接 ----
 
     def _create_client(self):

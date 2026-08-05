@@ -40,8 +40,8 @@ import zipfile
 from decimal import Decimal
 from typing import Optional, Union
 import db
-import report
-from report import format_cell, parse_filters, _parse_sorts, _sort_rows
+from report import format_cell, parse_filters, _parse_sorts
+from result_transform import filter_rows, sort_rows, select_columns, column_indices
 
 
 def export_report_to_csv(sql_query: str, pool_config: dict,
@@ -72,31 +72,14 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
         conn.close()
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = report._filter_rows(rows, all_columns, filters or [])
+    filtered = filter_rows(rows, all_columns, filters or [])
     # 应用排序（与报表页面一致）
     if sorts:
-        filtered = report._sort_rows(filtered, all_columns, sorts)
+        filtered = sort_rows(filtered, all_columns, sorts)
 
-    # 确定输出列（按用户自定义顺序）
-    if columns is None:
-        output_columns = all_columns
-        display_indices = list(range(len(all_columns)))
-    else:
-        # 仅保留实际存在的列名，去重并保持用户指定顺序
-        valid_set = set(all_columns)
-        seen = set()
-        output_columns = []
-        for c in columns:
-            if c in valid_set and c not in seen:
-                output_columns.append(c)
-                seen.add(c)
-        # 所有列名均无效时回退到全部列
-        if not output_columns:
-            output_columns = all_columns
-            display_indices = list(range(len(all_columns)))
-        else:
-            col_index_map = {name: idx for idx, name in enumerate(all_columns)}
-            display_indices = [col_index_map[c] for c in output_columns]
+    # 确定输出列（按用户自定义顺序，无效列名回退全部列）
+    output_columns = select_columns(all_columns, columns)
+    display_indices = column_indices(output_columns, all_columns)
 
     output = io.StringIO()
     # 写入 BOM，便于 Excel 识别编码（UTF-8 时有效，GBK 编码时由调用方处理）
@@ -190,31 +173,14 @@ def export_report_to_json(sql_query: str, pool_config: dict,
         conn.close()
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = report._filter_rows(rows, all_columns, filters or [])
+    filtered = filter_rows(rows, all_columns, filters or [])
     # 应用排序（与报表页面一致）
     if sorts:
-        filtered = report._sort_rows(filtered, all_columns, sorts)
+        filtered = sort_rows(filtered, all_columns, sorts)
 
-    # 确定输出列（按用户自定义顺序）
-    if columns is None:
-        output_columns = all_columns
-        display_indices = list(range(len(all_columns)))
-    else:
-        # 仅保留实际存在的列名，去重并保持用户指定顺序
-        valid_set = set(all_columns)
-        seen = set()
-        output_columns = []
-        for c in columns:
-            if c in valid_set and c not in seen:
-                output_columns.append(c)
-                seen.add(c)
-        # 所有列名均无效时回退到全部列
-        if not output_columns:
-            output_columns = all_columns
-            display_indices = list(range(len(all_columns)))
-        else:
-            col_index_map = {name: idx for idx, name in enumerate(all_columns)}
-            display_indices = [col_index_map[c] for c in output_columns]
+    # 确定输出列（按用户自定义顺序，无效列名回退全部列）
+    output_columns = select_columns(all_columns, columns)
+    display_indices = column_indices(output_columns, all_columns)
 
     # 构建行对象数组
     rows_data = []

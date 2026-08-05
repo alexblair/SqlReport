@@ -493,6 +493,7 @@ SqlReport/
 ├── server.py              # HTTP 服务器入口、路由分发（ThreadingHTTPServer）
 ├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点）
 ├── report.py              # 报表页、分页、排序、筛选
+├── result_transform.py    # 结果集变换（筛选/排序/列选择，页面/导出/API 共用）
 ├── export.py              # CSV/JSON/ZIP 导出（支持排序）
 ├── auth.py                # 用户认证、Session 管理（滑动过期 + SQLite 持久化）
 ├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
@@ -503,8 +504,9 @@ SqlReport/
 ├── query_executor.py      # MySQL 查询执行器（事务支持、?→%s 占位符转换）
 ├── render.py              # HTML 模板（string.Template 常量）
 ├── audit_db.py            # 审计日志数据库（含自动轮转）
+├── audit_page.py          # 审计日志页面处理（浏览/清理/CSV 导出）
 ├── redis_cache.py         # Redis 快照缓存层
-├── api_handler.py         # API 接口处理器
+├── api_handler.py         # API 接口处理器（API 端点查询 + 静态缓存 + 具名结果结构）
 ├── tests/                 # 单元测试
 │   ├── __init__.py
 │   ├── test_auth.py

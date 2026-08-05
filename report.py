@@ -26,11 +26,13 @@ import logging
 import urllib.parse
 import math
 import time
+import threading
 import db
 from typing import Optional
 import redis_cache
 import static_cache
 import app_config
+from result_transform import filter_rows, sort_rows, select_columns
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
@@ -82,37 +84,46 @@ class QueryCache:
 
     将原始 SQL 查询结果（全量行）保存在内存中，后续的排序/筛选/分页
     均在缓存数据上操作，避免对 MySQL 数据库产生重复压力。
+
+    线程安全：ThreadingHTTPServer 下多个请求可能并发读写同一缓存项，
+    所有操作均在锁内进行（get 的过期逐出与 SQL 变更逐出非原子，
+    无锁时并发逐出同一项会抛 KeyError）。
     """
 
     def __init__(self, ttl: int = 300):
         """ttl: 缓存有效期（秒），默认 5 分钟"""
         self._cache: dict[int, CachedResult] = {}
         self._ttl = ttl
+        self._lock = threading.Lock()
 
     def get(self, report_id: int,
             sql_query: str = None) -> CachedResult | None:
-        cached = self._cache.get(report_id)
-        if cached is None:
-            return None
-        if time.time() - cached.timestamp > self._ttl:
-            del self._cache[report_id]
-            return None
-        if sql_query is not None and cached.sql_query != sql_query:
-            del self._cache[report_id]
-            return None
-        return cached
+        with self._lock:
+            cached = self._cache.get(report_id)
+            if cached is None:
+                return None
+            if time.time() - cached.timestamp > self._ttl:
+                del self._cache[report_id]
+                return None
+            if sql_query is not None and cached.sql_query != sql_query:
+                del self._cache[report_id]
+                return None
+            return cached
 
     def set(self, report_id: int, results: list[dict],
             sql_query: str, source: str = None,
             source_timestamp: float = None) -> None:
-        self._cache[report_id] = CachedResult(results, sql_query, source,
-                                               source_timestamp)
+        with self._lock:
+            self._cache[report_id] = CachedResult(results, sql_query, source,
+                                                   source_timestamp)
 
     def invalidate(self, report_id: int) -> None:
-        self._cache.pop(report_id, None)
+        with self._lock:
+            self._cache.pop(report_id, None)
 
     def clear(self) -> None:
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
 
 # 全局缓存实例
@@ -129,119 +140,6 @@ def _safe_sort_key(val):
     if val is None:
         return (1, '')
     return (0, str(val))
-
-
-def _filter_rows(rows: list[tuple], columns: list[str],
-                 filters=None) -> list[tuple]:
-    """
-    在内存中按多字段筛选（AND 逻辑），支持多种操作符。
-
-    filters: list[(col, op, val), ...]
-    操作符说明：
-      contains  — 不区分大小写的 LIKE '%val%'
-      eq        — 字符串精确相等
-      neq       — 字符串不相等
-      gt / lt / gte / lte — 数值比较（尝试转 float）
-      isempty   — IS NULL OR = ''
-      notempty  — IS NOT NULL AND != ''
-    """
-    if not filters:
-        return rows
-    result = list(rows)
-    for col_name, op, q in filters:
-        if col_name not in columns:
-            continue
-        col_idx = columns.index(col_name)
-
-        if op == "contains":
-            q_lower = q.lower()
-            result = [
-                r for r in result
-                if q_lower in str(r[col_idx] if r[col_idx] is not None else "").lower()
-            ]
-        elif op == "eq":
-            result = [
-                r for r in result
-                if str(r[col_idx] if r[col_idx] is not None else "") == q
-            ]
-        elif op == "neq":
-            result = [
-                r for r in result
-                if str(r[col_idx] if r[col_idx] is not None else "") != q
-            ]
-        elif op in ("gt", "lt", "gte", "lte"):
-            try:
-                q_num = float(q)
-            except (ValueError, TypeError):
-                continue
-            if op == "gt":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) > q_num
-                ]
-            elif op == "lt":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) < q_num
-                ]
-            elif op == "gte":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) >= q_num
-                ]
-            elif op == "lte":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) <= q_num
-                ]
-        elif op == "isempty":
-            result = [
-                r for r in result
-                if r[col_idx] is None or str(r[col_idx]).strip() == ""
-            ]
-        elif op == "notempty":
-            result = [
-                r for r in result
-                if r[col_idx] is not None and str(r[col_idx]).strip() != ""
-            ]
-    return result
-
-
-def _try_float(val):
-    """尝试将值转为 float，失败返回 None"""
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _sort_rows(rows: list[tuple], columns: list[str],
-               sorts=None) -> list[tuple]:
-    """
-    在内存中按多字段排序。
-
-    sorts: list[(col, dir), ...]  按优先级从高到低
-    使用稳定排序，从最低优先级到最高优先级依次排序。
-    调用方应保证 sorts 中无重复列名（由 _parse_sorts 去重）。
-    None 值始终排在最后，不受升降序影响。
-    """
-    if not sorts:
-        return rows
-    result = list(rows)
-    # 从低优先级到高优先级应用（稳定排序保证优先级）
-    for col_name, dir_ in reversed(sorts):
-        if col_name not in columns:
-            continue
-        col_idx = columns.index(col_name)
-        reverse = dir_.lower() == "desc"
-        # 分离 None 值与非 None 值，确保 None 始终最后
-        none_part = [r for r in result if r[col_idx] is None]
-        not_none_part = [r for r in result if r[col_idx] is not None]
-        not_none_part.sort(key=lambda r, c=col_idx: str(r[c]), reverse=reverse)
-        result = not_none_part + none_part
-    return result
 
 
 # ===================================================================
@@ -344,14 +242,7 @@ def _parse_cols(qs, all_columns: list[str]) -> list[str]:
     if not cols_raw or not cols_raw[0]:
         return list(all_columns)
     requested = [urllib.parse.unquote(c) for c in cols_raw[0].split(",")]
-    valid_set = set(all_columns)
-    seen = set()
-    result = []
-    for c in requested:
-        if c in valid_set and c not in seen:
-            result.append(c)
-            seen.add(c)
-    return result if result else list(all_columns)
+    return select_columns(all_columns, requested)
 
 
 def _qs_val(qs: dict, key: str, default: str = None) -> Optional[str]:
@@ -907,7 +798,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    refresh: bool = False,
                    active_index: int = 0,
                    report: Optional[dict] = None,
-                   conn=None) -> ReportResult:
+                   conn=None,
+                   cache: "QueryCache" = None) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
@@ -921,7 +813,11 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     filters: list[(col, op, val), ...]  或 None
     active_index: 当前渲染的结果索引
     report: 报表配置 dict（必须包含 prefer_cache/cache_ttl_hours，由调用方传入）
+    cache: 进程内缓存会话（QueryCache 实例）。None 时使用模块级全局缓存；
+           测试可注入独立实例避免跨用例污染。
     """
+    if cache is None:
+        cache = _query_cache
     page = max(page if page is not None else 1, 1)
     page_size = max(page_size if page_size is not None else 20, 1)
 
@@ -939,7 +835,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     redis_prefix = ""
     if redis_avail and report:
         mgr = redis_cache.get_redis_manager()
-        redis_prefix = mgr._config.get("key_prefix", "sr") if mgr else "sr"
+        redis_prefix = mgr.key_prefix if mgr else "sr"
         pool_id = report.get("pool_id")
         config_version = redis_cache.compute_config_version(sql_query, pool_id)
         snapshot_key = redis_cache.build_snapshot_key(redis_prefix, report_id, config_version)
@@ -947,7 +843,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     # 强制刷新：清除各层缓存
     if refresh:
-        _query_cache.invalidate(report_id)
+        cache.invalidate(report_id)
         if redis_avail and snapshot_key:
             mgr = redis_cache.get_redis_manager()
             if mgr:
@@ -961,7 +857,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 logging.warning("static_cache refresh 联动失败: %s", e)
 
     # ---- 尝试从进程内缓存获取 ----
-    cached = _query_cache.get(report_id, sql_query)
+    cached = cache.get(report_id, sql_query)
     if cached is not None:
         all_results = cached.results
         # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示
@@ -982,7 +878,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 snapshot = mgr.get_snapshot(snapshot_key)
                 if snapshot is not None:
                     all_results = snapshot.results
-                    _query_cache.set(report_id, all_results, sql_query,
+                    cache.set(report_id, all_results, sql_query,
                                      source="redis",
                                      source_timestamp=snapshot.updated_at)
                     redis_hit = True
@@ -1006,7 +902,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         _snap = _mgr.get_snapshot(snapshot_key)
                         if _snap is not None:
                             all_results = _snap.results
-                            _query_cache.set(report_id, all_results, sql_query,
+                            cache.set(report_id, all_results, sql_query,
                                              source="redis",
                                              source_timestamp=_snap.updated_at)
                             redis_hit = True
@@ -1051,7 +947,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         )
                         _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
                         _redis_written = True
-                    _query_cache.set(report_id, all_results, sql_query,
+                    cache.set(report_id, all_results, sql_query,
                                      source="redis" if _redis_written else None,
                                      source_timestamp=_snap_ts if _redis_written else None)
                     if _redis_written:
@@ -1076,8 +972,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         columns = res["columns"]
         all_rows = res["rows"]
 
-        filtered = _filter_rows(all_rows, columns, filters or [])
-        sorted_rows = _sort_rows(filtered, columns, sorts or [])
+        filtered = filter_rows(all_rows, columns, filters or [])
+        sorted_rows = sort_rows(filtered, columns, sorts or [])
 
         total = len(sorted_rows)
         if active_index == -1 or i == active_index:
