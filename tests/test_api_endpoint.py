@@ -702,6 +702,72 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(names, ["王五", "李四", "张三"])
 
     # =====================================================================
+    # JSON 输出模板测试
+    # =====================================================================
+
+    def test_api_template_single_mode(self):
+        """单结果集模式：模板键名替换默认结构"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-single",
+            json_template='{"rand99_count": {{total}}, "rand99_items": {{data}}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-single")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["rand99_count"], 3)
+        self.assertEqual(len(body["rand99_items"]), 3)
+        self.assertNotIn("total", body)
+        self.assertNotIn("data", body)
+
+    def test_api_template_csv_ignored(self):
+        """CSV 输出忽略模板，仍输出表头 + 行"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-csv",
+            json_template='{"rand99_count": {{total}}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-csv?format=csv")
+        text = resp.read().decode("utf-8")
+        self.assertEqual(len(text.strip().splitlines()), 4, "表头 + 3 行数据")
+
+    def test_api_template_fetch_all(self):
+        """fetch_all + 模板：{{full}} 输出 true"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-full",
+            json_template='{"full": {{full}}, "rows": {{data}}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-full?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["rows"]), 3)
+
+    def test_api_template_result_mode_all(self):
+        """result_mode=all + 模板：{{results}}/{{mode}} 替换"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-all", result_mode="all",
+            json_template='{"mode": {{mode}}, "sets": {{results}}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-all")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["mode"], "all")
+        self.assertEqual(len(body["sets"]), 1)
+        self.assertIn("name", body["sets"][0])
+
+    def test_api_template_all_fetch_all_full(self):
+        """result_mode=all + fetch_all + 模板：{{full}} true"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-all-full", result_mode="all",
+            json_template='{"full": {{full}}, "sets": {{results}}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-all-full?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(body["full"])
+        self.assertEqual(len(body["sets"]), 1)
+
+    def test_api_template_render_failure_fallback(self):
+        """模板语法非法导致渲染失败时回退默认结构（不 500）"""
+        self._create_endpoint_in_db(
+            url_path="/api/tpl-bad",
+            json_template='{"bad": {{data}}')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/tpl-bad")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(len(body["data"]), 3)
+
+    # =====================================================================
     # fetch_all 配置 UI 测试
     # =====================================================================
 

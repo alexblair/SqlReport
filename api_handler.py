@@ -27,6 +27,7 @@ import urllib.parse
 import db
 from report import execute_report
 import static_cache
+from json_template import is_template_enabled, render_template
 
 _CORS_BASE = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -137,13 +138,14 @@ def _static_base_path(norm_path: str) -> str | None:
 def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
                             query_params: dict, headers: dict) -> tuple:
     """执行普通 API 链路（查询 + 格式化 + CORS），静态分支回退共用。"""
+    template = endpoint.get("json_template") or ""
     result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
     if isinstance(result[0], int):
         return result
     data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
     status, resp_body, resp_headers = _format_output(
         data_rows, display_cols, total, page, ps, total_pages,
-        output_format, add_bom, full)
+        output_format, add_bom, full, template=template)
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
 
@@ -194,7 +196,7 @@ def _compute_static_config_version(endpoint: dict, report: dict) -> str:
     旧文件在 TTL 内持续命中（缓存陈旧）。
     """
     parts = [report["sql_query"], str(report.get("pool_id") or "")]
-    for key in ("columns", "filters", "sorts", "row_limit"):
+    for key in ("columns", "filters", "sorts", "row_limit", "json_template"):
         value = endpoint.get(key)
         if value is not None and value != "":
             parts.append(f"{key}={value}")
@@ -213,7 +215,10 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
     if os.path.exists(file_path):
         static_cache.record_invalidated(url_key)
     last_invalidated = static_cache.get_last_invalidated(url_key)
-    result = _execute_api_query(conn, endpoint, "GET", "", {}, headers, force_full=True)
+    template = endpoint.get("json_template") or ""
+    meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
+    result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
+                                force_full=True, meta=meta)
     if isinstance(result[0], int):
         if result[0] != 200:
             # 非 200 不落盘
@@ -225,11 +230,14 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
         data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, full = result
         status, resp_body, resp_headers = _format_output(
             data_rows, display_cols, total, page, ps, total_pages,
-            output_format, add_bom, full)
+            output_format, add_bom, full, template=template, meta=meta)
 
     if status == 200:
-        meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
-        file_content = _attach_static_meta(resp_body, meta)
+        if is_template_enabled(template):
+            # 模板已内嵌渲染 meta（模板不含 {{meta}} 占位符则自然不带 meta）
+            file_content = resp_body
+        else:
+            file_content = _attach_static_meta(resp_body, meta)
         if static_cache.write_file(file_path, file_content):
             resp_body = file_content
 
@@ -283,12 +291,13 @@ def _get_result_name(report, result_index: int, result_obj) -> str:
 
 def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                        query_params: dict, headers: dict,
-                       force_full: bool = False) -> tuple:
+                       force_full: bool = False, meta: dict | None = None) -> tuple:
     """
     执行 API 查询：加载报表/连接池 + 解析参数 + 执行 SQL。
 
     force_full: 强制全量语义（静态缓存文件的固有语义，与 allow_fetch_all 开关
                 及请求参数无关），无视分页与行数限制。
+    meta: 静态缓存链路的 meta 节点（模板启用时进入模板上下文；普通链路为 None）。
 
     返回 (data_rows, display_cols, total, page, ps, total_pages, output_format, pretty)
     或在出错/全部输出模式下返回 (HTTP状态码, 响应体, 响应头字典)。
@@ -364,6 +373,15 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                 item["full"] = True
             results_list.append(item)
 
+        template = endpoint.get("json_template") or ""
+        if is_template_enabled(template):
+            context = _build_all_context(
+                results_list, "all", page,
+                total_all_rows if fetch_all else ps, fetch_all, meta)
+            rendered = _apply_json_template(template, context)
+            if rendered is not None:
+                return 200, rendered, {"Content-Type": "application/json; charset=utf-8"}
+
         resp_body = json.dumps({
             "results": results_list,
             "mode": "all",
@@ -399,11 +417,49 @@ def _resolve_display_cols(all_cols: list, columns: str | None) -> list:
 
 
 def _format_output(data_rows, display_cols, total, page, ps,
-                   total_pages, output_format, add_bom, full: bool) -> tuple:
-    """根据 output_format 构建最终响应。"""
+                   total_pages, output_format, add_bom, full: bool,
+                   template: str = "", meta: dict | None = None) -> tuple:
+    """根据 output_format 构建最终响应（JSON 支持自定义输出模板）。"""
     if output_format == "csv":
         return _format_csv_response(data_rows, display_cols, add_bom)
-    return _format_json_response(data_rows, total, page, ps, total_pages, full)
+    return _format_json_response(data_rows, total, page, ps, total_pages, full,
+                                 template=template, meta=meta)
+
+
+def _build_single_context(data_rows, total, page, ps, total_pages, full,
+                          meta: dict | None) -> dict:
+    """构建单结果集模式的模板上下文（模板键集 SINGLE_KEYS）。"""
+    return {
+        "data": data_rows,
+        "total": total,
+        "page": page,
+        "page_size": ps,
+        "total_pages": total_pages,
+        "full": full,
+        "meta": meta,
+    }
+
+
+def _build_all_context(results_list, mode, page, ps, full,
+                       meta: dict | None) -> dict:
+    """构建全部输出模式的模板上下文（模板键集 ALL_KEYS）。"""
+    return {
+        "results": results_list,
+        "mode": mode,
+        "page": page,
+        "page_size": ps,
+        "full": full,
+        "meta": meta,
+    }
+
+
+def _apply_json_template(template: str, context: dict) -> str | None:
+    """渲染 JSON 输出模板；失败时记录警告并返回 None（调用方回退默认结构）。"""
+    ok, output, error = render_template(template, context)
+    if not ok:
+        logging.warning("API JSON 输出模板渲染失败，回退默认结构: %s", error)
+        return None
+    return output
 
 
 def _parse_post_body(body: str, headers: dict) -> dict | None:
@@ -612,13 +668,23 @@ def _resolve_params(endpoint: dict, method: str, body: str,
 
 def _format_json_response(data_rows: list[dict], total: int, page: int,
                           page_size: int, total_pages: int,
-                          full: bool = False) -> tuple:
+                          full: bool = False, template: str = "",
+                          meta: dict | None = None) -> tuple:
     """
     构建 JSON 响应。
 
     返回:
         (HTTP 状态码, JSON 字符串, 响应头字典)
     """
+    if is_template_enabled(template):
+        context = _build_single_context(
+            data_rows, total, page, page_size, total_pages, full, meta)
+        rendered = _apply_json_template(template, context)
+        if rendered is not None:
+            return 200, rendered, {
+                "Content-Type": "application/json; charset=utf-8",
+            }
+
     resp = {
         "data": data_rows,
         "total": total,

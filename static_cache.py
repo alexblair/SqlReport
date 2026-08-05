@@ -4,14 +4,16 @@ static_cache.py — API 静态文件缓存（.json 变体）
 职责：
 1. 配置读取：app_config.json 的 static_cache 段（enable 默认 true、dir 默认 static_cache）
 2. 路径映射：{dir}/{url_path}.json，子目录自动创建，realpath 校验防 `..` 穿越（dir 支持相对路径或外部绝对路径）
-3. 命中判定：文件存在 + config_version（MD5(sql + pool_id)）一致 + mtime 未超 TTL
+3. 命中判定：文件存在 + 版本一致（默认输出比对内容 meta.config_version；
+   自定义输出模板未引用 {{meta}} 时以"上次失效时刻 vs 文件 mtime"判定）+ mtime 未超 TTL
 4. 原子写：临时文件 + os.replace，并发请求最后写入者生效
 5. 失效记录：模块级 dict（url_path → 上次判定失效时刻，进程重启后无记录）
 6. 失效函数：invalidate(url_path) 删除文件（幂等）
 
 设计原则：
 - 所有文件 IO / 配置异常静默降级并记 logging.warning，绝不向调用方抛异常
-- 不写旁路 meta 文件：config_version 存于文件内容 meta 节点，每次请求现算比对
+- 不写旁路 meta 文件：config_version 存于文件内容 meta 节点，每次请求现算比对；
+  模板端点文件无 meta 时退化为失效时刻判定（见 try_read）
 """
 
 import json
@@ -68,7 +70,9 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
 
     命中条件（三者全满足）：
     1. 文件存在
-    2. 文件内容 meta.config_version 与当前配置版本一致
+    2. 版本一致：
+       - 文件含 meta 节点（默认输出）→ meta.config_version 与当前配置版本一致
+       - 文件无 meta 节点（自定义输出模板未引用 {{meta}}）→ 上次失效时刻不晚于文件生成时刻
     3. mtime 未超 TTL（ttl_hours=0 表示永不过期）
 
     命中返回文件内容字符串，否则返回 None（调用方回退完整计算链路）。
@@ -80,8 +84,16 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
         meta = json.loads(content).get("meta", {}) if content else {}
-        if meta.get("config_version") != config_version:
-            return None
+        if meta.get("config_version") is not None:
+            if meta.get("config_version") != config_version:
+                return None
+        else:
+            # 模板端点文件：无 meta 节点，无法自证版本。
+            # 以上次失效时刻 vs 文件 mtime 判定（编辑配置后的首次请求
+            # 必先 record_invalidated 再重建文件，故失效时刻 > mtime 即旧文件）。
+            last_inv = get_last_invalidated(_url_key_from_path(file_path))
+            if last_inv is not None and last_inv > os.path.getmtime(file_path):
+                return None
         mtime = os.path.getmtime(file_path)
         if ttl_hours > 0 and time.time() - mtime > ttl_hours * 3600:
             return None
@@ -89,6 +101,13 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
     except Exception as e:
         logging.warning("static_cache 读取失败: %s", e)
         return None
+
+
+def _url_key_from_path(file_path: str) -> str:
+    """将缓存文件路径还原为 url_key（反 resolve_file_path）。"""
+    base = os.path.realpath(get_static_cache_config()["dir"])
+    rel = os.path.relpath(os.path.realpath(file_path), base)
+    return rel[:-len(".json")] if rel.endswith(".json") else rel
 
 
 def write_file(file_path: str, content: str) -> bool:

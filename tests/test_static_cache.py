@@ -292,6 +292,84 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(resp_headers3.get("X-Static-Cache"), "hit")
         self.assertEqual(body3, body2)
 
+    def test_template_endpoint_static_uses_template(self):
+        """模板端点 .json 变体：文件内容为模板渲染结果，命中时一致。"""
+        rid = self._create_report()
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_count": {{total}}, "rows": {{data}}}')
+        status, body, resp_headers = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers.get("X-Static-Cache"), "miss")
+        parsed = json.loads(body)
+        self.assertEqual(parsed["rand99_count"], 3)
+        self.assertEqual(len(parsed["rows"]), 3)
+        self.assertNotIn("total", parsed)
+        # 二次请求命中缓存，内容一致
+        _, body2, resp_headers2 = self._request("/api/cust.json")
+        self.assertEqual(resp_headers2.get("X-Static-Cache"), "hit")
+        self.assertEqual(body2, body)
+
+    def test_template_in_config_version(self):
+        """编辑模板 → config_version 变化 → 旧文件自动失效重建。"""
+        rid = self._create_report()
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_count": {{total}}, "meta": {{meta}}}')
+        _, body1, _ = self._request("/api/cust.json")
+        v1 = json.loads(body1)["meta"]["config_version"]
+        conn = _get_conn()
+        eid = db.get_api_endpoint_by_path(conn, "/api/cust")["id"]
+        db.update_api_endpoint(
+            conn, eid, json_template='{"rand99_count": {{total}}, "x": 1, "meta": {{meta}}}')
+        conn.close()
+        status, body2, resp_headers = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers.get("X-Static-Cache"), "miss")
+        v2 = json.loads(body2)["meta"]["config_version"]
+        self.assertNotEqual(v1, v2)
+        self.assertEqual(json.loads(body2)["x"], 1)
+        # 后续请求命中新版本文件
+        _, body3, resp_headers3 = self._request("/api/cust.json")
+        self.assertEqual(resp_headers3.get("X-Static-Cache"), "hit")
+        self.assertEqual(body3, body2)
+
+    def test_template_with_meta_placeholder(self):
+        """模板含 {{meta}}：meta 节点进入输出（用户自定位置）。"""
+        rid = self._create_report(ttl_hours=1)
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_when": {{meta}}}')
+        _, body, _ = self._request("/api/cust.json")
+        parsed = json.loads(body)
+        self.assertIn("generated_at", parsed["rand99_when"])
+        self.assertIn("config_version", parsed["rand99_when"])
+        self.assertIsInstance(parsed["rand99_when"]["expires_at"], str,
+                              "TTL=1 时 expires_at 为时间字符串")
+
+    def test_template_without_meta_placeholder(self):
+        """模板不含 {{meta}}：输出不带 meta 节点。"""
+        rid = self._create_report(ttl_hours=1)
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_rows": {{data}}}')
+        _, body, _ = self._request("/api/cust.json")
+        parsed = json.loads(body)
+        self.assertNotIn("meta", parsed)
+        self.assertEqual(len(parsed["rand99_rows"]), 3)
+
+    def test_template_all_mode_static(self):
+        """result_mode=all + 模板：静态 miss 链路输出模板渲染结果。"""
+        rid = self._create_report()
+        self._create_endpoint(
+            report_id=rid, result_mode="all",
+            json_template='{"mode": {{mode}}, "sets": {{results}}}')
+        status, body, _ = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        parsed = json.loads(body)
+        self.assertEqual(parsed["mode"], "all")
+        self.assertEqual(len(parsed["sets"]), 1)
+
     def test_endpoint_switch_off_falls_back(self):
         """端点静态缓存开关关闭：.json 请求回退普通 API，不生成文件。"""
         rid = self._create_report()
