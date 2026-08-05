@@ -5,17 +5,20 @@ static_cache.py — API 静态文件缓存（.json 变体）
 1. 配置读取：app_config.json 的 static_cache 段（enable 默认 true、dir 默认 static_cache）
 2. 路径映射：{dir}/{url_path}.json，子目录自动创建，realpath 校验防 `..` 穿越（dir 支持相对路径或外部绝对路径）
 3. 命中判定：文件存在 + 版本一致（默认输出比对内容 meta.config_version；
-   自定义输出模板未引用 {{meta}} 时以"上次失效时刻 vs 文件 mtime"判定）+ mtime 未超 TTL
+   自定义输出模板未引用 {{meta}} 时比对文件名内嵌版本 {url_path}.v{版本8}.json，
+   版本不匹配即 miss，不依赖进程内存）+ mtime 未超 TTL
 4. 原子写：临时文件 + os.replace，并发请求最后写入者生效
-5. 失效记录：模块级 dict（url_path → 上次判定失效时刻，进程重启后无记录）
-6. 失效函数：invalidate(url_path) 删除文件（幂等）
+5. 失效记录：模块级 dict（url_path → 上次判定失效时刻，仅供 meta.last_invalidated_at 展示，不参与命中判定）
+6. 失效函数：invalidate(url_path) 删除稳定文件与全部版本文件（幂等）
 
 设计原则：
 - 所有文件 IO / 配置异常静默降级并记 logging.warning，绝不向调用方抛异常
-- 不写旁路 meta 文件：config_version 存于文件内容 meta 节点，每次请求现算比对；
-  模板端点文件无 meta 时退化为失效时刻判定（见 try_read）
+- config_version 不写旁路 meta 文件：默认输出存于内容 meta 节点每次请求现算比对；
+  模板端点文件无 meta 时版本体现在文件名（write_versioned_file 双写稳定文件，
+  保持稳定路径 data.json 语义），版本变化 → 文件名变化 → 自动 miss 重建
 """
 
+import glob
 import json
 import logging
 import os
@@ -27,6 +30,7 @@ import app_config
 
 # 模块级失效时刻记录：url_path → 上次判定失效的时间戳（进程内存）
 # 有界容量：只保留最近 MAX_LAST_INVALIDATED 条，防止长期运行无界增长
+# 注意：仅用于 meta.last_invalidated_at 展示；命中判定不再依赖该记录
 _MAX_LAST_INVALIDATED = 512
 _last_invalidated: OrderedDict[str, float] = OrderedDict()
 
@@ -64,6 +68,29 @@ def resolve_file_path(url_path: str) -> str | None:
     return target
 
 
+def _versioned_path(file_path: str, version8: str) -> str:
+    """由稳定文件路径推导带版本文件名：{url_path}.json → {url_path}.v{版本8}.json。
+
+    版本取 config_version 前 8 位（2^32 分之一冲突概率，冲突时仅退化为一次
+    多余重建，由内容 meta 判定兜底，不产生错误结果）。
+    """
+    return f"{file_path[:-5]}.v{version8}.json"
+
+
+def _remove_stale_versioned(file_path: str, keep: str) -> None:
+    """删除该 url_path 下除 keep 外的全部版本文件（失败静默降级）。
+
+    旧版本文件残留不影响命中判定（读取按精确版本路径），仅占用磁盘，
+    由本清理函数与 invalidate 兜底清除。
+    """
+    try:
+        for stale in glob.glob(f"{file_path[:-5]}.v*.json"):
+            if stale != keep:
+                os.remove(stale)
+    except OSError as e:
+        logging.warning("static_cache 清理旧版本文件失败: %s", e)
+
+
 def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
     """
     命中判定并读取文件内容。
@@ -72,7 +99,8 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
     1. 文件存在
     2. 版本一致：
        - 文件含 meta 节点（默认输出）→ meta.config_version 与当前配置版本一致
-       - 文件无 meta 节点（自定义输出模板未引用 {{meta}}）→ 上次失效时刻不晚于文件生成时刻
+       - 文件无 meta 节点（自定义输出模板未引用 {{meta}}）→ 文件名为
+         {url_path}.v{版本8}.json 且版本前缀与当前配置版本一致
     3. mtime 未超 TTL（ttl_hours=0 表示永不过期）
 
     命中返回文件内容字符串，否则返回 None（调用方回退完整计算链路）。
@@ -87,27 +115,25 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
         if meta.get("config_version") is not None:
             if meta.get("config_version") != config_version:
                 return None
+            read_path = file_path
+            read_content = content
         else:
             # 模板端点文件：无 meta 节点，无法自证版本。
-            # 以上次失效时刻 vs 文件 mtime 判定（编辑配置后的首次请求
-            # 必先 record_invalidated 再重建文件，故失效时刻 > mtime 即旧文件）。
-            last_inv = get_last_invalidated(_url_key_from_path(file_path))
-            if last_inv is not None and last_inv > os.path.getmtime(file_path):
+            # 版本体现在文件名（write_versioned_file 写入），改库即版本变化
+            # → 精确版本路径不存在 → miss，不依赖进程内存状态。
+            version_path = _versioned_path(file_path, config_version[:8])
+            if not os.path.isfile(version_path):
                 return None
-        mtime = os.path.getmtime(file_path)
+            read_path = version_path
+            with open(version_path, "r", encoding="utf-8") as f:
+                read_content = f.read()
+        mtime = os.path.getmtime(read_path)
         if ttl_hours > 0 and time.time() - mtime > ttl_hours * 3600:
             return None
-        return content
+        return read_content
     except Exception as e:
         logging.warning("static_cache 读取失败: %s", e)
         return None
-
-
-def _url_key_from_path(file_path: str) -> str:
-    """将缓存文件路径还原为 url_key（反 resolve_file_path）。"""
-    base = os.path.realpath(get_static_cache_config()["dir"])
-    rel = os.path.relpath(os.path.realpath(file_path), base)
-    return rel[:-len(".json")] if rel.endswith(".json") else rel
 
 
 def write_file(file_path: str, content: str) -> bool:
@@ -135,6 +161,23 @@ def write_file(file_path: str, content: str) -> bool:
         return False
 
 
+def write_versioned_file(file_path: str, version8: str, content: str) -> bool:
+    """原子写入带版本缓存文件，并同步稳定文件（无 meta 模板端点专用）。
+
+    双写语义：
+    - 版本文件 {url_path}.v{version8}.json：try_read 的命中判定以它为准，
+      版本变化 → 精确路径不存在 → miss，改库自动失效且不依赖进程内存
+    - 稳定文件 {url_path}.json：保持既有"文件存在即缓存存在"的外部语义
+      （refresh 联动删除、第三方检查等），内容与版本文件一致
+    写入成功后清理旧版本文件（残留不影响判定，仅防磁盘堆积）。
+    """
+    version_path = _versioned_path(file_path, version8)
+    if not (write_file(version_path, content) and write_file(file_path, content)):
+        return False
+    _remove_stale_versioned(file_path, keep=version_path)
+    return True
+
+
 def record_invalidated(url_path: str) -> None:
     """记录 url_path 的静态文件被判定失效的时刻（进程内存，有界容量）。"""
     _last_invalidated[url_path] = time.time()
@@ -149,13 +192,18 @@ def get_last_invalidated(url_path: str) -> float | None:
 
 
 def invalidate(url_path: str) -> bool:
-    """删除 url_path 的静态缓存文件（幂等，删除即失效，下次请求惰性重建）。"""
+    """删除 url_path 的静态缓存文件（稳定文件 + 全部版本文件，幂等，删除即失效）。"""
     file_path = resolve_file_path(url_path.lstrip("/"))
     if file_path is None:
         return False
     try:
+        removed = False
         if os.path.exists(file_path):
             os.remove(file_path)
+            removed = True
+        for stale in glob.glob(f"{file_path[:-5]}.v*.json"):
+            os.remove(stale)
+            removed = True
         return True
     except Exception as e:
         logging.warning("static_cache invalidate 失败: %s", e)

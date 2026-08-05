@@ -1117,6 +1117,34 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("tpl-default-all", html)
         self.assertIn("resetTemplateToDefault", html, "还原按钮 JS")
         self.assertIn("JSON.parse(replaced)", html, "预览校验 JS")
+        self.assertIn("TPL_DEFAULTS = {", html, "默认模板文本 JS 常量")
+        self.assertIn("single: '{\\n", html)
+        self.assertIn("ta.value = TPL_DEFAULTS[currentTemplateMode()]", html,
+                      "还原按钮函数体应填入默认模板文本")
+        self.assertIn("renderTemplatePreview()", html,
+                      "还原后应即时刷新预览")
+
+    def test_config_api_endpoint_csv_preserves_template(self):
+        """CSV 模式保存：忽略模板字段，不覆盖（保留原模板，切回 JSON 仍可用）"""
+        eid = self._create_endpoint_in_db(
+            url_path="/api/tpl-csv-keep", json_template='{"a": {{data}}}')
+        form_data = urllib.parse.urlencode([
+            ("name", "切CSV"), ("url_path", "tpl-csv-keep"),
+            ("output_format", "csv"), ("row_limit", "0"),
+            ("api_key", ""), ("allowed_origins", ""), ("rule_json", ""),
+            ("enabled", "1"), ("result_mode", "single"), ("result_index", "0"),
+            ("action", "save_close"),
+        ]).encode()
+        _, opener = self._login_and_get_cookie()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["output_format"], "csv")
+        self.assertEqual(ep["json_template"], '{"a": {{data}}}',
+                         "CSV 模式保存不应清空已存模板")
 
     # =====================================================================
     # 客户端断开连接（ConnectionResetError）回归测试

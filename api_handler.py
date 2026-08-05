@@ -238,13 +238,30 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
             file_content = resp_body
         else:
             file_content = _attach_static_meta(resp_body, meta)
-        if static_cache.write_file(file_path, file_content):
+        if _static_content_has_meta(file_content):
+            written = static_cache.write_file(file_path, file_content)
+        else:
+            # 无 meta 模板输出：版本体现在文件名，模板变化自动失效重建
+            written = static_cache.write_versioned_file(
+                file_path, config_version[:8], file_content)
+        if written:
             resp_body = file_content
 
     resp_headers = dict(resp_headers)
     resp_headers["X-Static-Cache"] = "miss"
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
+
+
+def _static_content_has_meta(content: str) -> bool:
+    """静态文件内容是否含 meta 顶层键（决定写入方式与版本判定来源）。
+
+    内容不可解析时保守返回 True（走稳定文件 + 内容 meta 判定路径）。
+    """
+    try:
+        return "meta" in json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return True
 
 
 def _build_static_meta(ttl_hours: int, url_key: str, config_version: str,
@@ -376,7 +393,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         template = endpoint.get("json_template") or ""
         if is_template_enabled(template):
             context = _build_all_context(
-                results_list, "all", page,
+                results_list, page,
                 total_all_rows if fetch_all else ps, fetch_all, meta)
             rendered = _apply_json_template(template, context)
             if rendered is not None:
@@ -440,12 +457,12 @@ def _build_single_context(data_rows, total, page, ps, total_pages, full,
     }
 
 
-def _build_all_context(results_list, mode, page, ps, full,
+def _build_all_context(results_list, page, ps, full,
                        meta: dict | None) -> dict:
-    """构建全部输出模式的模板上下文（模板键集 ALL_KEYS）。"""
+    """构建全部输出模式的模板上下文（模板键集 ALL_KEYS，mode 恒为 "all"）。"""
     return {
         "results": results_list,
-        "mode": mode,
+        "mode": "all",
         "page": page,
         "page_size": ps,
         "full": full,

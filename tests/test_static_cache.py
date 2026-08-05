@@ -358,6 +358,39 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
         self.assertNotIn("meta", parsed)
         self.assertEqual(len(parsed["rand99_rows"]), 3)
 
+    def test_template_no_meta_change_invalidates_after_restart(self):
+        """无 meta 模板改库 → 版本文件不匹配 → 自动失效重建（不依赖进程内存）。
+
+        修复场景：模板不含 {{meta}} 时静态文件无版本信息，原实现靠进程内存
+        失效时刻判定，绕过 UI 改库后 TTL 内持续命中旧结构、进程重启后判定
+        丢失。现版本号嵌入文件名，改库即版本变化 → miss。
+        """
+        rid = self._create_report(ttl_hours=24)
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_rows": {{data}}}')
+        _, body1, _ = self._request("/api/cust.json")
+        self.assertNotIn("meta", json.loads(body1))
+        # 二次请求命中
+        _, _, resp_headers2 = self._request("/api/cust.json")
+        self.assertEqual(resp_headers2.get("X-Static-Cache"), "hit")
+        # 绕过 UI 直接改库（模拟进程外修改）→ 清空内存失效记录（模拟进程重启）
+        conn = _get_conn()
+        eid = db.get_api_endpoint_by_path(conn, "/api/cust")["id"]
+        db.update_api_endpoint(
+            conn, eid, json_template='{"rand99_rows": {{data}}, "extra": 1}')
+        conn.close()
+        static_cache._last_invalidated.clear()
+        # 版本已变 → 即使无内存失效记录也必须 miss 并重建
+        status, body3, resp_headers3 = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers3.get("X-Static-Cache"), "miss")
+        self.assertEqual(json.loads(body3)["extra"], 1)
+        # 新版本文件生成后命中
+        _, body4, resp_headers4 = self._request("/api/cust.json")
+        self.assertEqual(resp_headers4.get("X-Static-Cache"), "hit")
+        self.assertEqual(body4, body3)
+
     def test_template_all_mode_static(self):
         """result_mode=all + 模板：静态 miss 链路输出模板渲染结果。"""
         rid = self._create_report()
@@ -870,6 +903,43 @@ class TestStaticCacheModule(unittest.TestCase):
         self.assertIsNotNone(static_cache.try_read(p, "v1", 0), "TTL=0 永不过期")
         self.assertIsNone(static_cache.try_read(os.path.join(_CACHE_DIR, "missing.json"),
                                                 "v1", 0), "缺失应 miss")
+
+    @patch("static_cache.get_static_cache_config",
+           return_value={"enable": True, "dir": _CACHE_DIR})
+    def test_try_read_versioned_file(self, _m):
+        """无 meta 内容：版本体现在文件名，版本前缀匹配才命中。"""
+        p = static_cache.resolve_file_path("api/verfile")
+        content = '{"rows": []}'
+        self.assertTrue(static_cache.write_versioned_file(p, "abc12345", content))
+        # 版本前缀一致 → 命中（版本文件与稳定文件双写）
+        self.assertEqual(static_cache.try_read(p, "abc12345" * 4, 0), content)
+        self.assertTrue(os.path.isfile(p), "稳定文件应同步写入")
+        version_path = os.path.join(_CACHE_DIR, "api", "verfile.vabc12345.json")
+        self.assertTrue(os.path.isfile(version_path), "版本文件应写入")
+        # 版本前缀不一致 → miss（改库即版本变化）
+        self.assertIsNone(static_cache.try_read(p, "deadbeef" * 4, 0))
+        # 旧版本文件被清理，仅保留当前版本
+        stale = os.path.join(_CACHE_DIR, "api", "verfile.v99999999.json")
+        with open(stale, "w", encoding="utf-8") as f:
+            f.write("{}")
+        self.assertTrue(static_cache.write_versioned_file(p, "def01234", "{}"))
+        self.assertFalse(os.path.exists(stale), "旧版本文件应被清理")
+
+    @patch("static_cache.get_static_cache_config",
+           return_value={"enable": True, "dir": _CACHE_DIR})
+    def test_invalidate_removes_versioned_files(self, _m):
+        """invalidate 同时删除稳定文件与全部版本文件（refresh 联动生效）。"""
+        p = static_cache.resolve_file_path("api/verinv")
+        static_cache.write_versioned_file(p, "abc12345", "{}")
+        stale = os.path.join(_CACHE_DIR, "api", "verinv.v99999999.json")
+        with open(stale, "w", encoding="utf-8") as f:
+            f.write("{}")
+        self.assertTrue(static_cache.invalidate("api/verinv"))
+        self.assertFalse(os.path.exists(p), "稳定文件应删除")
+        self.assertFalse(os.path.exists(
+            os.path.join(_CACHE_DIR, "api", "verinv.vabc12345.json")),
+            "版本文件应删除")
+        self.assertFalse(os.path.exists(stale), "残留旧版本文件应一并删除")
 
     @patch("static_cache.get_static_cache_config",
            return_value={"enable": True, "dir": _CACHE_DIR})

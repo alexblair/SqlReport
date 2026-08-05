@@ -1187,10 +1187,14 @@ def _validate_json_template(raw: str, result_mode: str) -> str | None:
 
 def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
     """从表单数据构造临时端点 dict（保存失败时表单回显用户原输入）。"""
+    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
     return {
         "name": data.get("name", ""),
         "url_path": url_path,
         "output_format": data.get("output_format", "json"),
+        "columns": columns,
+        "filters": filters_str,
+        "sorts": sorts_str,
         "row_limit": int(data.get("row_limit", 0) or 0),
         "api_key": data.get("api_key") or "",
         "allowed_origins": data.get("allowed_origins") or "",
@@ -1217,7 +1221,9 @@ def handle_api_endpoint_add(conn, report_id: int,
         url_path = _normalize_api_url_path(data["url_path"])
         result_mode = data.get("result_mode", "single")
         result_index = int(data.get("result_index", 0) or 0)
-        template_raw = data.get("json_template", "")
+        output_format = data.get("output_format", "json")
+        # CSV 模式忽略模板字段（模板仅 JSON 有效），不校验、不落库
+        template_raw = "" if output_format == "csv" else data.get("json_template", "")
         tpl_err = _validate_json_template(template_raw, result_mode)
         if tpl_err:
             return 200, render_api_endpoint_form_page(
@@ -1227,7 +1233,7 @@ def handle_api_endpoint_add(conn, report_id: int,
                 flash=f"错误: JSON 输出模板无效: {tpl_err}")
         eid = db.add_api_endpoint(
             conn, report_id, data["name"], url_path,
-            output_format=data.get("output_format", "json"),
+            output_format=output_format,
             columns=columns or None,
             filters=filters_str or None,
             sorts=sorts_str or None,
@@ -1275,7 +1281,10 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         url_path = _normalize_api_url_path(data["url_path"])
         result_mode = data.get("result_mode", "single")
         result_index = int(data.get("result_index", 0) or 0)
-        template_raw = data.get("json_template", "")
+        output_format = data.get("output_format", "json")
+        # CSV 模式忽略模板字段（模板仅 JSON 有效）：不校验、不更新（保留原值，
+        # 切回 JSON 后模板仍可用）
+        template_raw = "" if output_format == "csv" else data.get("json_template", "")
         tpl_err = _validate_json_template(template_raw, result_mode)
         if tpl_err:
             tmp = _endpoint_from_form(data, url_path, result_mode)
@@ -1283,11 +1292,10 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             return 200, render_api_endpoint_form_page(
                 conn, report_id, endpoint_id, endpoint=tmp, is_edit=True,
                 flash=f"错误: JSON 输出模板无效: {tpl_err}")
-        ok = db.update_api_endpoint(
-            conn, endpoint_id,
+        update_kwargs = dict(
             name=data["name"],
             url_path=url_path,
-            output_format=data.get("output_format", "json"),
+            output_format=output_format,
             columns=columns or None,
             filters=filters_str or None,
             sorts=sorts_str or None,
@@ -1297,11 +1305,12 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             enabled=enabled,
             result_mode=result_mode,
             result_index=result_index,
-            allow_fetch_all=allow_fetch_all,
             static_cache=static_cache_enabled,
-            json_template=template_raw or None,
             session_user=session_user,
         )
+        if output_format != "csv":
+            update_kwargs["json_template"] = template_raw or None
+        ok = db.update_api_endpoint(conn, endpoint_id, **update_kwargs)
         if ok:
             action = data.get("action", "save_close")
             if action == "save":
