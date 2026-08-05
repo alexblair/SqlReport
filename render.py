@@ -1953,23 +1953,164 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
 </div>'''
 
 
+_API_TEMPLATE_JS = r'''
+<script>
+  var TPL_DEFAULTS = {
+    single: '{\n  "data": {{data}},\n  "total": {{total}},\n  "page": {{page}},\n  "page_size": {{page_size}},\n  "total_pages": {{total_pages}}\n}',
+    all: '{\n  "results": {{results}},\n  "mode": {{mode}},\n  "page": {{page}},\n  "page_size": {{page_size}}\n}'
+  };
+  var TPL_KEYS = {
+    single: ['data', 'total', 'page', 'page_size', 'total_pages', 'full', 'meta'],
+    all: ['results', 'mode', 'page', 'page_size', 'full', 'meta']
+  };
+  var TPL_META_SAMPLE = {
+    "generated_at": "2026-08-05 10:00:00 +0800",
+    "expires_at": null,
+    "last_invalidated_at": null,
+    "config_version": "ab12cd34"
+  };
+  var TPL_SAMPLE = {
+    single: {
+      data: [{"客户ID": 1, "客户名称": "张三"}, {"客户ID": 2, "客户名称": "李四"}],
+      total: 42, page: 1, page_size: 20, total_pages: 3, full: true,
+      meta: TPL_META_SAMPLE
+    },
+    all: {
+      results: [{
+        "name": "结果1",
+        "data": [{"客户ID": 1, "客户名称": "张三"}, {"客户ID": 2, "客户名称": "李四"}],
+        "total": 42, "page": 1, "page_size": 42, "total_pages": 1
+      }],
+      mode: "all", page: 1, page_size: 42, full: true,
+      meta: TPL_META_SAMPLE
+    }
+  };
+  function currentTemplateMode() {
+    var radios = document.getElementsByName('result_mode');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) return radios[i].value;
+    }
+    return 'single';
+  }
+  function lineColOf(text, pos) {
+    var line = 1, col = 1;
+    for (var i = 0; i < pos && i < text.length; i++) {
+      if (text.charAt(i) === '\n') { line++; col = 1; } else { col++; }
+    }
+    return { line: line, col: col };
+  }
+  function jsonErrorLoc(msg, replaced) {
+    var m = msg.match(/line (\d+) column (\d+)/);
+    if (m) return { line: +m[1], col: +m[2] };
+    m = msg.match(/position (\d+)/);
+    if (m) return lineColOf(replaced, +m[1]);
+    return null;
+  }
+  function renderTemplatePreview() {
+    var ta = document.getElementById('json-template-input');
+    var pre = document.getElementById('template-preview');
+    var err = document.getElementById('template-preview-error');
+    if (!ta || !pre || !err) return;
+    var mode = currentTemplateMode();
+    var tpl = ta.value;
+    pre.textContent = '';
+    err.textContent = '';
+    if (!tpl.trim()) {
+      pre.textContent = '（留空 = 默认输出）';
+      return;
+    }
+    var re = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+    var keys = TPL_KEYS[mode];
+    var m;
+    while ((m = re.exec(tpl)) !== null) {
+      if (keys.indexOf(m[1]) === -1) {
+        var loc = lineColOf(tpl, m.index);
+        err.textContent = '未知占位符 {{' + m[1] + '}} 位于第 ' + loc.line + ' 行第 ' + loc.col + ' 列；可用占位符: ' + keys.join(', ');
+        return;
+      }
+    }
+    var replaced = tpl.replace(re, function(mm, key) {
+      var v = TPL_SAMPLE[mode][key];
+      return v === undefined ? 'null' : JSON.stringify(v);
+    });
+    try {
+      var parsed = JSON.parse(replaced);
+      pre.textContent = JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      var loc = jsonErrorLoc(e.message, replaced);
+      if (loc) {
+        err.textContent = 'JSON 格式非法（第 ' + loc.line + ' 行第 ' + loc.col + ' 列附近）: ' + e.message;
+      } else {
+        err.textContent = 'JSON 格式非法: ' + e.message;
+      }
+    }
+  }
+  function resetTemplateToDefault() {
+    var ta = document.getElementById('json-template-input');
+    if (!ta) return;
+    ta.value = TPL_DEFAULTS[currentTemplateMode()];
+    renderTemplatePreview();
+  }
+  function updateTemplateMode() {
+    var mode = currentTemplateMode();
+    var badgesSingle = document.getElementById('tpl-badges-single');
+    var badgesAll = document.getElementById('tpl-badges-all');
+    var defSingle = document.getElementById('tpl-default-single');
+    var defAll = document.getElementById('tpl-default-all');
+    if (badgesSingle) badgesSingle.style.display = mode === 'single' ? 'block' : 'none';
+    if (badgesAll) badgesAll.style.display = mode === 'all' ? 'block' : 'none';
+    if (defSingle) defSingle.style.display = mode === 'single' ? 'block' : 'none';
+    if (defAll) defAll.style.display = mode === 'all' ? 'block' : 'none';
+    renderTemplatePreview();
+  }
+  function updateTemplateState() {
+    var fmtSel = document.querySelector('select[name="output_format"]');
+    var isCsv = fmtSel && fmtSel.value === 'csv';
+    var ta = document.getElementById('json-template-input');
+    var btn = document.getElementById('template-reset-btn');
+    var hint = document.getElementById('template-csv-hint');
+    var section = document.getElementById('template-section');
+    if (ta) ta.disabled = isCsv;
+    if (btn) btn.disabled = isCsv;
+    if (hint) hint.style.display = isCsv ? 'inline' : 'none';
+    if (section) section.style.opacity = isCsv ? '0.55' : '1';
+  }
+  document.addEventListener('DOMContentLoaded', function() {
+    var radios = document.getElementsByName('result_mode');
+    for (var i = 0; i < radios.length; i++) {
+      radios[i].addEventListener('change', updateTemplateMode);
+    }
+    var fmtSel = document.querySelector('select[name="output_format"]');
+    if (fmtSel) fmtSel.addEventListener('change', updateTemplateState);
+    updateTemplateMode();
+    updateTemplateState();
+  });
+</script>
+'''
+
+
 def build_api_endpoint_form_html(report_id: int, report_name: str,
                                  endpoint: dict = None,
                                  flash: str = None,
                                  result_names_list: list = None,
-                                 result_count: int = 1) -> str:
+                                 result_count: int = 1,
+                                 endpoint_id: int = None,
+                                 is_edit: bool = None) -> str:
     """
     渲染 API 端点编辑/新增表单。
 
     参数:
         report_id: 关联报表 ID
         report_name: 关联报表名称（显示用）
-        endpoint: 现有端点配置（None 表示新增）
+        endpoint: 现有端点配置（None 表示新增；保存失败回显时传表单临时数据）
         flash: 错误消息
         result_names_list: 结果集名称列表（按行分割）
         result_count: 结果集估算数量
+        endpoint_id: 端点 ID（决定 action_url）
+        is_edit: 表单模式（None 时按 endpoint 是否为 None 判定）
     """
-    is_edit = endpoint is not None
+    if is_edit is None:
+        is_edit = endpoint is not None
     if is_edit:
         ep_id = endpoint["id"]
         action_url = f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit"
@@ -1984,8 +2125,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     else:
         flash_html = ""
 
-    name = _escape(endpoint["name"]) if is_edit else ""
-    url_path = endpoint["url_path"] if is_edit else ""
+    name = _escape(endpoint["name"]) if endpoint else ""
+    url_path = endpoint["url_path"] if endpoint else ""
     # 从完整 URL 路径中剥离 /api/ 前缀，仅保留用户输入的后段
     if url_path.startswith("/api/"):
         url_path_short = url_path[5:]
@@ -1994,23 +2135,20 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     else:
         url_path_short = url_path
     url_path_short = _escape(url_path_short)
-    output_format = endpoint.get("output_format", "json") if is_edit else "json"
-    row_limit = str(endpoint.get("row_limit", 0) or 0) if is_edit else "0"
-    api_key_raw = endpoint.get("api_key") or "" if is_edit else ""
-    allowed_origins = _escape(endpoint.get("allowed_origins") or "") if is_edit else ""
-    enabled_checked = (' checked' if (is_edit and int(endpoint.get("enabled", 1)))
-                       else (' checked' if not is_edit else ''))
-    allow_fetch_all_checked = (' checked' if (is_edit and int(endpoint.get("allow_fetch_all", 1)))
-                               else (' checked' if not is_edit else ''))
-    static_cache_checked = (' checked' if (is_edit and int(endpoint.get("static_cache", 1)))
-                            else (' checked' if not is_edit else ''))
+    output_format = (endpoint or {}).get("output_format", "json")
+    row_limit = str((endpoint or {}).get("row_limit", 0) or 0)
+    api_key_raw = (endpoint or {}).get("api_key") or ""
+    allowed_origins = _escape((endpoint or {}).get("allowed_origins") or "")
+    enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
+    allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
+    static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
 
     # 结果集输出模式
-    result_mode = endpoint.get("result_mode", "single") if is_edit else "single"
-    result_index = int(endpoint.get("result_index", 0)) if is_edit else 0
+    result_mode = (endpoint or {}).get("result_mode", "single")
+    result_index = int((endpoint or {}).get("result_index", 0))
 
     # 从三个 DB 字段拼合规则 JSON
-    if is_edit:
+    if endpoint:
         rules = {}
         cols_val = endpoint.get("columns") or ""
         filters_raw_db = endpoint.get("filters") or ""
@@ -2035,6 +2173,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         f'<option value="{v}"{" selected" if output_format == v else ""}>{v.upper()}</option>'
         for v in ("json", "csv")
     )
+    template_val = _escape((endpoint or {}).get("json_template") or "")
 
     return f"""<div class="card">
 <h2>{title}</h2>
@@ -2139,7 +2278,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   </script>
 
   <label>输出格式:
-    <select name="output_format" onchange="updateStaticCacheState()">{format_opts}</select>
+    <select name="output_format" onchange="updateStaticCacheState();updateTemplateState()">{format_opts}</select>
   </label>
 
   <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
@@ -2160,6 +2299,76 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   </div>
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
+
+  <div id="template-section" style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+    <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">JSON 输出模板（可选）</div>
+    <label style="font-size:13px;color:#475569;display:block">
+      <textarea name="json_template" id="json-template-input" rows="8"
+        style="width:100%;min-height:150px;font-family:monospace;box-sizing:border-box"
+        placeholder='{{"data": {{{{data}}}}, "total": {{{{total}}}}, "page": {{{{page}}}}, "page_size": {{{{page_size}}}}, "total_pages": {{{{total_pages}}}}}}'
+        oninput="renderTemplatePreview()">{template_val}</textarea>
+    </label>
+    <div style="margin:6px 0;font-size:12px;color:#64748b;line-height:1.7">
+      留空 = 默认输出。自定义模板以默认 JSON 为起点，用 <code>{{{{占位符}}}}</code> 引用数据，
+      值将按实际数据替换（缺键输出 null）。<span id="template-csv-hint" style="display:none;color:#dc2626;font-weight:600">模板仅 JSON 格式支持，CSV 格式下已禁用。</span>
+    </div>
+
+    <div style="margin:10px 0;font-size:12px;color:#475569;line-height:2">
+      <span style="font-weight:600;color:#1e293b">可用占位符（随「结果集输出模式」切换）：</span>
+      <div id="tpl-badges-single">
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{data}}}}</span>数据数组
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{total}}}}</span>总行数
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page}}}}</span>页码
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page_size}}}}</span>每页条数
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{total_pages}}}}</span>总页数
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{full}}}}</span>全量标记（fetch_all 时 true）
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
+      </div>
+      <div id="tpl-badges-all" style="display:none">
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{results}}}}</span>结果集数组
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{mode}}}}</span>模式（固定 "all"）
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page}}}}</span>页码
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page_size}}}}</span>每页条数
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{full}}}}</span>全量标记（fetch_all 时 true）
+        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
+      </div>
+    </div>
+
+    <details open style="margin:10px 0;font-size:13px;color:#475569">
+      <summary style="cursor:pointer;color:#1e293b;font-weight:600">默认 JSON 起点（把默认结构改一改就是模板）</summary>
+      <div id="tpl-default-single" style="margin-top:8px">
+        <pre style="margin:0;padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;line-height:1.8;color:#334155;overflow:auto">{{
+  "data": {{{{data}}}},              // 数据数组
+  "total": {{{{total}}}},            // 总行数
+  "page": {{{{page}}}},              // 页码
+  "page_size": {{{{page_size}}}},    // 每页条数
+  "total_pages": {{{{total_pages}}}} // 总页数
+}}</pre>
+        <div style="margin-top:6px;font-size:12px;color:#94a3b8">注：原生默认输出在 fetch_all 时含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code>；如需这些字段，在模板中手动加对应键</div>
+      </div>
+      <div id="tpl-default-all" style="display:none;margin-top:8px">
+        <pre style="margin:0;padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;line-height:1.8;color:#334155;overflow:auto">{{
+  "results": {{{{results}}}},   // 结果集数组（每项含 name/data/total/page/page_size/total_pages）
+  "mode": {{{{mode}}}},         // 固定 "all"
+  "page": {{{{page}}}},         // 页码
+  "page_size": {{{{page_size}}}} // 每页条数
+}}</pre>
+        <div style="margin-top:6px;font-size:12px;color:#94a3b8">注：fetch_all 时原生输出含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code></div>
+      </div>
+    </details>
+
+    <div style="margin:10px 0">
+      <button type="button" id="template-reset-btn" onclick="resetTemplateToDefault()"
+        style="padding:6px 14px;cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:13px">还原为默认 JSON 格式</button>
+      <span style="font-size:12px;color:#94a3b8;margin-left:8px">还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
+    </div>
+
+    <div style="font-size:12px;color:#64748b;margin-top:10px">实时预览（样例数据）：</div>
+    <pre id="template-preview" style="margin:4px 0 0 0;padding:12px;background:#0f172a;color:#e2e8f0;border-radius:6px;font-size:12px;line-height:1.6;overflow:auto;max-height:280px"></pre>
+    <div id="template-preview-error" style="color:#dc2626;font-size:12px;margin-top:6px"></div>
+  </div>
+
+  {_API_TEMPLATE_JS}
 
   <div style="margin-bottom:16px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a;font-size:13px;color:#92400e">
     <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，

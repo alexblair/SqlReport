@@ -24,6 +24,7 @@ import auth
 import redis_cache
 import static_cache
 import html as html_mod
+from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
 from render import (
     build_pool_form_html,
@@ -1141,12 +1142,19 @@ def _estimate_result_count(sql_query: str) -> int:
 
 def render_api_endpoint_form_page(conn, report_id: int,
                                    endpoint_id: int = None,
-                                   flash: str = None) -> str:
-    """渲染新增/编辑 API 端点表单页"""
+                                   flash: str = None,
+                                   endpoint: dict = None,
+                                   is_edit: bool = None) -> str:
+    """渲染新增/编辑 API 端点表单页
+
+    endpoint: 表单回显数据（保存失败时覆盖 DB 读取，保留用户原输入）
+    is_edit: 表单模式（None 时按 endpoint_id 判定）
+    """
     report = db.get_report(conn, report_id)
     if not report:
         return render_overview(conn, flash="错误: 报表不存在")
-    endpoint = db.get_api_endpoint(conn, endpoint_id) if endpoint_id else None
+    if endpoint is None:
+        endpoint = db.get_api_endpoint(conn, endpoint_id) if endpoint_id else None
     if endpoint_id and not endpoint:
         return render_overview(conn, flash="错误: API 接口不存在")
 
@@ -1159,8 +1167,40 @@ def render_api_endpoint_form_page(conn, report_id: int,
             + build_api_endpoint_form_html(report_id, report["name"],
                                             endpoint, flash,
                                             result_names_list=result_names_list,
-                                            result_count=result_count)
+                                            result_count=result_count,
+                                            endpoint_id=endpoint_id,
+                                            is_edit=is_edit)
             + render_page_footer())
+
+
+def _validate_json_template(raw: str, result_mode: str) -> str | None:
+    """校验 JSON 输出模板文本；返回错误消息（None=合法或未启用）。
+
+    键集随表单 result_mode 判定（single/all），与渲染链路保持一致。
+    """
+    if not raw or not raw.strip():
+        return None
+    keys = SINGLE_KEYS if result_mode == "single" else ALL_KEYS
+    ok, err = validate_template(raw, keys)
+    return None if ok else err
+
+
+def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
+    """从表单数据构造临时端点 dict（保存失败时表单回显用户原输入）。"""
+    return {
+        "name": data.get("name", ""),
+        "url_path": url_path,
+        "output_format": data.get("output_format", "json"),
+        "row_limit": int(data.get("row_limit", 0) or 0),
+        "api_key": data.get("api_key") or "",
+        "allowed_origins": data.get("allowed_origins") or "",
+        "enabled": int(data.get("enabled", 0) or 0),
+        "allow_fetch_all": int(data.get("allow_fetch_all", 1) or 0),
+        "static_cache": int(data.get("static_cache", 1) or 0),
+        "result_mode": result_mode,
+        "result_index": int(data.get("result_index", 0) or 0),
+        "json_template": data.get("json_template", "") or "",
+    }
 
 
 def handle_api_endpoint_add(conn, report_id: int,
@@ -1177,6 +1217,14 @@ def handle_api_endpoint_add(conn, report_id: int,
         url_path = _normalize_api_url_path(data["url_path"])
         result_mode = data.get("result_mode", "single")
         result_index = int(data.get("result_index", 0) or 0)
+        template_raw = data.get("json_template", "")
+        tpl_err = _validate_json_template(template_raw, result_mode)
+        if tpl_err:
+            return 200, render_api_endpoint_form_page(
+                conn, report_id,
+                endpoint=_endpoint_from_form(data, url_path, result_mode),
+                is_edit=False,
+                flash=f"错误: JSON 输出模板无效: {tpl_err}")
         eid = db.add_api_endpoint(
             conn, report_id, data["name"], url_path,
             output_format=data.get("output_format", "json"),
@@ -1190,6 +1238,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             result_index=result_index,
             allow_fetch_all=allow_fetch_all,
             static_cache=static_cache_enabled,
+            json_template=template_raw or None,
             session_user=session_user,
         )
         if not enabled:
@@ -1226,6 +1275,14 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         url_path = _normalize_api_url_path(data["url_path"])
         result_mode = data.get("result_mode", "single")
         result_index = int(data.get("result_index", 0) or 0)
+        template_raw = data.get("json_template", "")
+        tpl_err = _validate_json_template(template_raw, result_mode)
+        if tpl_err:
+            tmp = _endpoint_from_form(data, url_path, result_mode)
+            tmp["id"] = endpoint_id
+            return 200, render_api_endpoint_form_page(
+                conn, report_id, endpoint_id, endpoint=tmp, is_edit=True,
+                flash=f"错误: JSON 输出模板无效: {tpl_err}")
         ok = db.update_api_endpoint(
             conn, endpoint_id,
             name=data["name"],
@@ -1242,6 +1299,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             result_index=result_index,
             allow_fetch_all=allow_fetch_all,
             static_cache=static_cache_enabled,
+            json_template=template_raw or None,
             session_user=session_user,
         )
         if ok:

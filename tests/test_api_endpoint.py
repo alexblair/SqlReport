@@ -983,6 +983,141 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn(">开<", html)
         self.assertIn(">关<", html)
 
+    # ------------------------------------------------------------------
+    # JSON 输出模板 UI
+    # ------------------------------------------------------------------
+
+    def test_config_api_endpoint_form_has_template_ui(self):
+        """新增表单含模板 textarea、占位符清单、默认对照、还原按钮、预览区"""
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new")
+        html = resp.read().decode("utf-8")
+        for probe in ("JSON 输出模板", 'name="json_template"', "可用占位符",
+                      "默认 JSON 起点", "还原为默认 JSON 格式", "实时预览"):
+            self.assertIn(probe, html)
+        self.assertIn("{{data}}", html)
+        self.assertIn("{{results}}", html)
+        self.assertIn("renderTemplatePreview", html)
+        self.assertIn("TPL_KEYS", html)
+
+    def test_config_api_endpoint_template_echo(self):
+        """编辑页面回显 json_template"""
+        eid = self._create_endpoint_in_db(
+            url_path="/api/tpl-echo", json_template='{"a": {{data}}}')
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit")
+        html = resp.read().decode("utf-8")
+        self.assertIn('{"a": {{data}}}', html.replace('&quot;', '"'),
+                      "模板内容应回显")
+
+    def test_config_api_endpoint_save_template_success(self):
+        """保存合法模板 → 落库"""
+        form_data = urllib.parse.urlencode([
+            ("name", "模板保存"), ("url_path", "ui-tpl-save"),
+            ("output_format", "json"), ("row_limit", "0"),
+            ("api_key", ""), ("allowed_origins", ""), ("rule_json", ""),
+            ("enabled", "1"), ("result_mode", "single"), ("result_index", "0"),
+            ("json_template", '{"rand99": {{total}}}'),
+            ("action", "save_close"),
+        ]).encode()
+        _, opener = self._login_and_get_cookie()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-tpl-save")
+        conn.close()
+        self.assertIsNotNone(ep)
+        self.assertEqual(ep["json_template"], '{"rand99": {{total}}}')
+
+    def test_config_api_endpoint_save_template_invalid_rejected(self):
+        """保存非法模板 → 拒绝 + 回显 + 行列错误 + 不落库"""
+        form_data = urllib.parse.urlencode([
+            ("name", "坏模板保存"), ("url_path", "ui-tpl-bad"),
+            ("output_format", "json"), ("row_limit", "0"),
+            ("api_key", ""), ("allowed_origins", ""), ("rule_json", ""),
+            ("enabled", "1"), ("result_mode", "single"), ("result_index", "0"),
+            ("json_template", '{"a": {{unknown_key}}}'),
+            ("action", "save_close"),
+        ]).encode()
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new",
+            data=form_data, method="POST"))
+        html = resp.read().decode("utf-8")
+        self.assertIn("JSON 输出模板无效", html)
+        self.assertIn("未知占位符 {{unknown_key}} 位于第 1 行第 7 列", html)
+        self.assertIn("坏模板保存", html, "表单应回显原输入")
+        self.assertIn('{"a": {{unknown_key}}}', html.replace('&quot;', '"'),
+                      "模板应回显原输入")
+        conn = _get_conn()
+        ep = db.get_api_endpoint_by_path(conn, "/api/ui-tpl-bad")
+        conn.close()
+        self.assertIsNone(ep, "非法模板不应落库")
+
+    def test_config_api_endpoint_edit_template_invalid_rejected(self):
+        """编辑保存非法模板 → 拒绝 + 回显原输入 + 库内原值不变"""
+        eid = self._create_endpoint_in_db(
+            url_path="/api/tpl-edit-bad", json_template='{"ok": {{data}}}')
+        form_data = urllib.parse.urlencode([
+            ("name", "改模板名"), ("url_path", "tpl-edit-bad"),
+            ("output_format", "json"), ("row_limit", "0"),
+            ("api_key", ""), ("allowed_origins", ""), ("rule_json", ""),
+            ("enabled", "1"), ("result_mode", "single"), ("result_index", "0"),
+            ("json_template", '{"x": {{nope}}}'),
+            ("action", "save_close"),
+        ]).encode()
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+            data=form_data, method="POST"))
+        html = resp.read().decode("utf-8")
+        self.assertIn("JSON 输出模板无效", html)
+        self.assertIn("改模板名", html, "表单应回显原输入")
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["json_template"], '{"ok": {{data}}}',
+                         "非法编辑不应改动库内原值")
+
+    def test_config_api_endpoint_save_template_clear(self):
+        """编辑表单清空模板 → 库内清空（NULL）"""
+        eid = self._create_endpoint_in_db(
+            url_path="/api/tpl-clear", json_template='{"ok": {{data}}}')
+        form_data = urllib.parse.urlencode([
+            ("name", "清模板"), ("url_path", "tpl-clear"),
+            ("output_format", "json"), ("row_limit", "0"),
+            ("api_key", ""), ("allowed_origins", ""), ("rule_json", ""),
+            ("enabled", "1"), ("result_mode", "single"), ("result_index", "0"),
+            ("json_template", ""),
+            ("action", "save_close"),
+        ]).encode()
+        _, opener = self._login_and_get_cookie()
+        opener.open(urllib.request.Request(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+            data=form_data, method="POST"))
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertIsNone(ep["json_template"])
+
+    def test_config_api_endpoint_template_js_parts(self):
+        """模板区 JS 关键件存在：CSV 禁用、模式联动、预览替换"""
+        _, opener = self._login_and_get_cookie()
+        resp = opener.open(
+            f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/new")
+        html = resp.read().decode("utf-8")
+        self.assertIn("ta.disabled = isCsv", html, "CSV 禁用模板输入")
+        self.assertIn("template-csv-hint", html)
+        self.assertIn("radios[i].addEventListener('change', updateTemplateMode)",
+                      html, "result_mode 切换联动")
+        self.assertIn("tpl-default-single", html)
+        self.assertIn("tpl-default-all", html)
+        self.assertIn("resetTemplateToDefault", html, "还原按钮 JS")
+        self.assertIn("JSON.parse(replaced)", html, "预览校验 JS")
+
     # =====================================================================
     # 客户端断开连接（ConnectionResetError）回归测试
     # =====================================================================
