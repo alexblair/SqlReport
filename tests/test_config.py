@@ -674,6 +674,40 @@ class TestApiEndpointsListPage(BaseConfigTest):
         self.assertIn("无效", body)
 
 
+class TestOverviewApiCard(BaseConfigTest):
+    """配置总览页 API 卡片显示接口说明摘要"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query) VALUES (?,?)",
+            ("测试报表", "SELECT 1"))
+        self.conn.commit()
+        self.long_desc = ("这是接口A的说明文本，描述接口用途与注意事项，"
+                          "内容比较长用于验证摘要截断展示效果")
+        db.add_api_endpoint(self.conn, 1, "接口A", "/api/a",
+                            description=self.long_desc)
+
+    def test_overview_card_shows_api_with_description(self):
+        """气泡列出接口名称与说明摘要（title 全文）"""
+        body = config.render_overview(self.conn)
+        self.assertIn("接口A", body)
+        self.assertIn("title=", body)
+        self.assertIn(self.long_desc, body)  # title 中为全文
+
+    def test_overview_card_shows_empty_placeholder(self):
+        """无说明接口显示占位符"""
+        db.add_api_endpoint(self.conn, 1, "接口B", "/api/b")
+        body = config.render_overview(self.conn)
+        self.assertIn("接口B", body)
+        self.assertIn("—", body)
+
+    def test_overview_card_count_still_present(self):
+        """接口总数提示保留"""
+        body = config.render_overview(self.conn)
+        self.assertIn("已配置 1 个 API 接口", body)
+
+
 class TestApiEndpointToggle(BaseConfigTest):
     """API 端点启用/禁用 toggle 处理"""
 

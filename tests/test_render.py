@@ -1715,12 +1715,12 @@ class TestBuildApiEndpointFormHtml(unittest.TestCase):
 class TestBuildApiEndpointsListHtml(unittest.TestCase):
     """build_api_endpoints_list_html 函数测试（列表快捷开关）"""
 
-    def _ep(self, eid, enabled=1, report_id=1):
+    def _ep(self, eid, enabled=1, report_id=1, description=""):
         return {"id": eid, "name": f"接口{eid}", "url_path": f"/api/ep{eid}",
                 "output_format": "json", "enabled": enabled,
                 "report_id": report_id, "result_mode": "single",
                 "result_index": 0, "allow_fetch_all": 1,
-                "static_cache": 1, "api_key": ""}
+                "static_cache": 1, "api_key": "", "description": description}
 
     def test_row_has_toggle_button_enabled(self):
         """启用端点行含禁用按钮（POST toggle）"""
@@ -1755,6 +1755,25 @@ class TestBuildApiEndpointsListHtml(unittest.TestCase):
         html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
         self.assertIn("编辑", html)
         self.assertIn("删除", html)
+
+    def test_list_has_description_column(self):
+        """列表包含说明列表头"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn("<th>说明</th>", html)
+
+    def test_list_description_truncated_with_title(self):
+        """长说明单元格截断摘要显示，title 保留全文"""
+        long_desc = ("这是一段很长的接口说明文本，用于描述接口的用途和调用注意事项，"
+                     "内容足够长以验证摘要截断展示与悬停全文效果")
+        html = build_api_endpoints_list_html([self._ep(1, description=long_desc)],
+                                             report_id=1)
+        self.assertIn(long_desc, html)  # title 全文
+        self.assertIn("…", html)  # 截断标记
+
+    def test_list_description_empty_placeholder(self):
+        """无说明时显示占位符"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn("—", html)
 
 
 class TestApiUrlsSectionHtml(unittest.TestCase):

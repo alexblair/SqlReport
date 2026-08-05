@@ -43,6 +43,7 @@ from render import (
     build_api_endpoints_list_html,
     build_api_endpoint_form_html,
     build_api_endpoint_preview_help_html,
+    _build_desc_summary_html,
 )
 
 
@@ -457,13 +458,27 @@ def render_overview(conn, flash: str = None) -> str:
     if flash:
         css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
         flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
-    api_endpoints_count = len(db.get_all_api_endpoints(conn))
+    api_endpoints = db.get_all_api_endpoints(conn)
+    api_endpoints_count = len(api_endpoints)
+    # 气泡内列出接口名称与说明摘要（截断 + title 全文），最多展示 5 个
+    items_html = ""
+    for ep in api_endpoints[:5]:
+        desc_html = _build_desc_summary_html(ep.get("description") or "")
+        desc_part = desc_html or '<span style="color:#cbd5e1">—</span>'
+        items_html += (f'<div style="margin:4px 0;display:flex;gap:8px;align-items:center">'
+                       f'<span style="font-weight:600;white-space:nowrap">{_escape(ep.get("name") or "")}</span>'
+                       f'<code style="font-size:12px;color:#94a3b8;background:#f1f5f9;padding:1px 6px;border-radius:4px">{_escape(ep.get("url_path") or "")}</code>'
+                       f'<span style="flex:1;min-width:0">{desc_part}</span></div>')
+    if len(api_endpoints) > 5:
+        items_html += (f'<div style="color:#94a3b8;font-size:12px;margin-top:4px">'
+                       f'…等共 {api_endpoints_count} 个接口</div>')
     api_card = f"""<div class="card" style="margin-top:8px">
 <div class="section-title" style="font-size:16px;margin-bottom:8px">
   <span>🔌 API 接口管理</span>
   <span class="actions">{_link_btn("/config/api-endpoints", "管理 API 接口", "btn btn-outline btn-sm")}</span>
 </div>
 <p style="color:#64748b;margin:0">已配置 {api_endpoints_count} 个 API 接口</p>
+{items_html}
 </div>"""
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + _render_pool_section(conn) + _render_user_section(conn)

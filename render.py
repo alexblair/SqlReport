@@ -1860,6 +1860,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
   </td>"""
         rows += f"""<tr>
   <td><strong>{ep_name}</strong></td>{report_name_cell}
+  <td>{_build_desc_summary_html(ep.get("description") or "") or '—'}</td>
   <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
   <td>{ep_format}</td>
   <td>{mode_display}</td>
@@ -1871,7 +1872,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
 </tr>"""
     extra_col = '<th>关联报表</th>' if show_report_name else ''
     extra_colspan = 1 if show_report_name else 0
-    total_cols = 9 + extra_colspan
+    total_cols = 10 + extra_colspan
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
     _sc_cfg = static_cache.get_static_cache_config()
@@ -1888,7 +1889,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
 {_sc_hint}
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th>{extra_col}<th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th>{extra_col}<th>说明</th><th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
 {rows or f'<tr><td colspan="{total_cols}" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
@@ -1908,6 +1909,23 @@ def _mask_api_key(key: str) -> str:
     if len(key) <= 8:
         return key[:2] + "***" + key[-2:]
     return key[:4] + "***" + key[-4:]
+
+
+def _build_desc_summary_html(desc_raw: str, max_chars: int = 40) -> str | None:
+    """构建接口说明的截断摘要 HTML（title 保留全文，悬停可见）。
+
+    纯展示：超出 max_chars 字符截断为摘要（省略号），title 属性保留全文；
+    空说明返回 None（调用方决定占位符）。
+    """
+    desc = (desc_raw or "").strip()
+    if not desc:
+        return None
+    title = _escape(desc)
+    summary = desc if len(desc) <= max_chars else desc[:max_chars] + "…"
+    return (f'<span title="{title}" '
+            f'style="display:inline-block;max-width:220px;overflow:hidden;'
+            f'text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;'
+            f'color:#64748b">{_escape(summary)}</span>')
 
 
 def _build_result_mode_ui(result_count: int, result_names_list: list,
