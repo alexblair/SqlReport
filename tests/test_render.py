@@ -1715,12 +1715,14 @@ class TestBuildApiEndpointFormHtml(unittest.TestCase):
 class TestBuildApiEndpointsListHtml(unittest.TestCase):
     """build_api_endpoints_list_html 函数测试（列表快捷开关）"""
 
-    def _ep(self, eid, enabled=1, report_id=1, description=""):
+    def _ep(self, eid, enabled=1, report_id=1, description="",
+            allow_fetch_all=1, static_cache=1, api_key=""):
         return {"id": eid, "name": f"接口{eid}", "url_path": f"/api/ep{eid}",
                 "output_format": "json", "enabled": enabled,
                 "report_id": report_id, "result_mode": "single",
-                "result_index": 0, "allow_fetch_all": 1,
-                "static_cache": 1, "api_key": "", "description": description}
+                "result_index": 0, "allow_fetch_all": allow_fetch_all,
+                "static_cache": static_cache, "api_key": api_key,
+                "description": description}
 
     def test_row_has_toggle_button_enabled(self):
         """启用端点行含禁用按钮（POST toggle）"""
@@ -1775,15 +1777,81 @@ class TestBuildApiEndpointsListHtml(unittest.TestCase):
         html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
         self.assertIn("—", html)
 
+    def test_name_is_link_to_endpoint_edit_new_tab(self):
+        """名称列链接到接口配置页且新开窗"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn('href="/config/reports/1/api_endpoints/1/edit"', html)
+        self.assertIn("target=\"_blank\"", html)
+        self.assertIn('title="打开接口配置"', html)
+
+    def test_report_name_is_link_to_report_page_new_tab(self):
+        """独立管理页：关联报表列链接到报表查看页且新开窗"""
+        ep = dict(self._ep(1), report_id=7, report_name="销售报表")
+        html = build_api_endpoints_list_html([ep], show_report_name=True)
+        self.assertIn('href="/report?id=7"', html)
+        self.assertIn("target=\"_blank\"", html)
+        self.assertIn("销售报表", html)
+
+    def test_url_cell_shows_three_urls(self):
+        """URL 列展示完整/全量/静态三种地址（data-kind 供 JS 填充 origin）"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1,
+                                             base_url="http://127.0.0.1:8000")
+        self.assertIn('data-kind="base"', html)
+        self.assertIn('data-kind="full"', html)
+        self.assertIn('data-kind="static"', html)
+        self.assertIn("完整 URL:", html)
+        self.assertIn("全量 URL:", html)
+        self.assertIn("静态 URL:", html)
+        self.assertIn("http://127.0.0.1:8000/api/ep1", html)
+        self.assertIn("http://127.0.0.1:8000/api/ep1?fetch_all=true", html)
+        self.assertIn("http://127.0.0.1:8000/api/ep1.json", html)
+
+    def test_url_row_disabled_when_fetch_all_off(self):
+        """allow_fetch_all=0 时全量 URL 置灰 + 原因提示 + 去开启链接"""
+        html = build_api_endpoints_list_html([self._ep(1, allow_fetch_all=0)],
+                                             report_id=1)
+        self.assertIn("opacity:0.55", html)
+        self.assertIn("未开启「允许全量获取」，请在接口配置中开启", html)
+        self.assertIn("去开启 ↗", html)
+        self.assertIn("disabled", html)
+
+    def test_url_row_disabled_when_static_cache_off(self):
+        """static_cache=0 时静态 URL 置灰 + 原因提示"""
+        html = build_api_endpoints_list_html([self._ep(1, static_cache=0)],
+                                             report_id=1)
+        self.assertIn("未开启「静态缓存」，请在接口配置中开启", html)
+        self.assertIn("去开启 ↗", html)
+
+    def test_api_key_copy_button(self):
+        """有 API Key 时掩码展示 + 复制完整值按钮（隐藏 code 存原始值）"""
+        ep = dict(self._ep(1), api_key="sk-abcdef1234567890")
+        html = build_api_endpoints_list_html([ep], report_id=1)
+        self.assertIn("sk-a***7890", html)
+        self.assertIn('id="api-key-raw-1"', html)
+        self.assertIn("sk-abcdef1234567890", html)
+        self.assertIn("copyToClipboard('api-key-raw-1')", html)
+
+    def test_api_key_empty_no_copy(self):
+        """无 API Key 时不显示复制按钮"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertNotIn("api-key-raw-1", html)
+
+    def test_admin_page_has_edit_button(self):
+        """独立管理页补上编辑入口（名称链接 + 操作列编辑按钮）"""
+        html = build_api_endpoints_list_html([self._ep(1)], show_report_name=True)
+        self.assertIn('href="/config/reports/1/api_endpoints/1/edit"', html)
+        self.assertIn(">编辑</a>", html)
+
 
 class TestApiUrlsSectionHtml(unittest.TestCase):
     """build_api_urls_section_html 测试 — 样式与 Debug 信息模块一致。"""
 
     def _ep(self, eid, path="/api/test", static_cache=1, enabled=1, description="",
-            report_id=1):
+            report_id=1, fetch_all=1):
         return {"id": eid, "name": f"接口{eid}", "url_path": path,
                 "static_cache": static_cache, "enabled": enabled,
-                "description": description, "report_id": report_id}
+                "description": description, "report_id": report_id,
+                "allow_fetch_all": fetch_all}
 
     def test_uses_debug_info_structure(self):
         """外层结构与 Debug 信息模块一致（debug-info/debug-toggle/toggleSection/debug-content hidden）。"""
@@ -1907,12 +1975,24 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
         self.assertNotIn("onsubmit=", html)
 
-    def test_static_url_hidden_when_static_cache_off(self):
-        """static_cache=0 时不显示静态 URL 行。"""
+    def test_static_url_disabled_when_static_cache_off(self):
+        """static_cache=0 时静态 URL 行置灰展示（不隐藏）：保留地址 + 原因提示 + 去开启链接。"""
         html = build_api_urls_section_html(
             [self._ep(1), self._ep(2, static_cache=0)], "http://127.0.0.1:8080")
         self.assertIn("api-static-1", html)
-        self.assertNotIn("api-static-2", html)
+        self.assertIn("api-static-2", html)
+        self.assertIn("opacity:0.55", html)
+        self.assertIn("未开启「静态缓存」，请在接口配置中开启", html)
+        self.assertIn("去开启 ↗", html)
+        self.assertIn('href="/config/reports/1/api_endpoints/2/edit"', html)
+
+    def test_full_url_disabled_when_fetch_all_off(self):
+        """allow_fetch_all=0 时全量 URL 行置灰 + 原因提示。"""
+        html = build_api_urls_section_html(
+            [self._ep(1, fetch_all=0)], "http://127.0.0.1:8080")
+        self.assertIn("opacity:0.55", html)
+        self.assertIn("未开启「允许全量获取」，请在接口配置中开启", html)
+        self.assertIn("去开启 ↗", html)
 
     def test_empty_returns_empty(self):
         """无 API 端点返回空字符串。"""

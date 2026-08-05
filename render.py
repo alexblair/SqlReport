@@ -1786,7 +1786,8 @@ function updateBatchCount() {{
 
 def build_api_endpoints_list_html(api_endpoints: list[dict],
                                    report_id: int = None,
-                                   show_report_name: bool = False) -> str:
+                                   show_report_name: bool = False,
+                                   base_url: str = "") -> str:
     """
     渲染 API 接口列表区块。
 
@@ -1794,12 +1795,19 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         api_endpoints: API 端点列表
         report_id: 关联报表 ID（为 None 时表示独立管理页，不带编辑/新增按钮）
         show_report_name: 是否显示关联报表名称列（独立管理页使用）
+        base_url: 服务器基础 URL（如 http://localhost:8080），仅作服务端兜底
+                  渲染值；页面加载后 JS 用 window.location.origin 覆盖
+                  （与 API 配置后台/报表查看页一致，显示用户实际访问的地址）
     """
+    _sc_cfg = static_cache.get_static_cache_config()
+    _sc_enabled = _sc_cfg.get("enable", True)
     rows = ""
     for ep in api_endpoints:
         ep_id = ep["id"]
-        ep_name = _escape(ep.get("name", ""))
-        ep_path = _escape(ep.get("url_path", ""))
+        ep_name_raw = ep.get("name", "")
+        ep_name = _escape(ep_name_raw)
+        ep_path_raw = ep.get("url_path", "")
+        ep_path = _escape(ep_path_raw)
         ep_format = _escape(ep.get("output_format", "json"))
         enabled = int(ep.get("enabled", 1))
         enabled_badge = ('<span style="color:#059669;font-weight:600">启用</span>'
@@ -1821,10 +1829,63 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         static_cache_display = ('<span style="color:#059669;font-weight:600">开</span>'
                                 if static_cache_on else
                                 '<span style="color:#94a3b8;font-weight:600">关</span>')
+        # 名称列：点击进入该接口的配置页（新开窗）
+        ep_edit_url = f"/config/reports/{ep['report_id']}/api_endpoints/{ep_id}/edit"
+        name_cell = (f'<td><a href="{ep_edit_url}" target="_blank" rel="noopener" '
+                     f'title="打开接口配置" '
+                     f'style="color:#4f46e5;text-decoration:none;font-weight:600">'
+                     f'{ep_name}</a></td>')
         report_name_cell = ""
         if show_report_name:
             rname = _escape(ep.get("report_name", ""))
-            report_name_cell = f'<td>{rname}</td>'
+            rpt_id = int(ep.get("report_id", 0) or 0)
+            if rpt_id:
+                report_name_cell = (f'<td><a href="/report?id={rpt_id}" '
+                                    f'target="_blank" rel="noopener" '
+                                    f'title="打开报表查看页" '
+                                    f'style="color:#4f46e5;text-decoration:none">'
+                                    f'{rname}</a></td>')
+            else:
+                report_name_cell = f'<td>{rname}</td>'
+        # URL 列：三种调用地址（完整/全量/静态），置灰能力未开启的行
+        full_disabled = not allow_fetch_all
+        full_hint = "未开启「允许全量获取」，请在接口配置中开启" if full_disabled else ""
+        if static_cache_on:
+            static_disabled = not _sc_enabled
+            static_hint = ("全局静态缓存已关闭（app_config.json 的 static_cache.enable）"
+                           if static_disabled else "")
+        else:
+            static_disabled = True
+            static_hint = "未开启「静态缓存」，请在接口配置中开启"
+        url_cell = ('<td style="min-width:300px">'
+                    + _build_api_url_row(f"api-url-{ep_id}", "完整 URL:",
+                                         ep_path_raw, "base", f"{base_url}{ep_path_raw}")
+                    + _build_api_url_row(f"api-full-{ep_id}", "全量 URL:",
+                                         ep_path_raw, "full",
+                                         f"{base_url}{ep_path_raw}?fetch_all=true",
+                                         disabled=full_disabled,
+                                         disabled_hint=full_hint,
+                                         edit_url=ep_edit_url)
+                    + _build_api_url_row(f"api-static-{ep_id}", "静态 URL:",
+                                         ep_path_raw, "static",
+                                         f"{base_url}{ep_path_raw}.json",
+                                         disabled=static_disabled,
+                                         disabled_hint=static_hint,
+                                         edit_url=ep_edit_url)
+                    + '</td>')
+        # API Key：掩码展示 + 复制完整值（复制按钮仅在有 key 时提供）
+        if api_key_raw:
+            key_cell = (f'<td style="white-space:nowrap">'
+                        f'<code style="font-size:12px;color:#94a3b8">{api_key_display}</code> '
+                        f'<code id="api-key-raw-{ep_id}" style="display:none">'
+                        f'{_escape(api_key_raw)}</code>'
+                        f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{ep_id}\')" '
+                        f'title="复制完整 API Key" '
+                        f'style="padding:2px 8px;font-size:12px;background:#fff;'
+                        f'border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#475569">复制</button>'
+                        f'</td>')
+        else:
+            key_cell = f'<td><code style="font-size:12px;color:#94a3b8">—</code></td>'
         # 快捷启用/禁用：POST 到独立管理页 toggle 端点，回跳来源页（禁用需确认）
         toggle_label = "禁用" if enabled else "启用"
         if report_id is not None:
@@ -1832,7 +1893,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         else:
             toggle_return_to = "/config/api-endpoints"
         toggle_confirm = (" onsubmit=\"return confirm('确定禁用 API 接口 "
-                          f"{_escape(ep_name)}？')\"") if enabled else ""
+                          f"{_escape(ep_name_raw)}？')\"") if enabled else ""
         toggle_btn = f"""<form method="post" action="/config/api-endpoints" style="display:inline"{toggle_confirm}>
       <input type="hidden" name="action" value="toggle">
       <input type="hidden" name="endpoint_id" value="{ep_id}">
@@ -1842,32 +1903,33 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         if report_id is not None:
             ops_cell = f"""<td class="ops-cell">
     {toggle_btn}
-    {_link_btn(f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit", "编辑")}
+    {_link_btn(ep_edit_url, "编辑")}
     <form method="post" action="/config/reports/{report_id}/api_endpoints/{ep_id}/delete" style="display:inline"
-          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
+          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name_raw)}？')">
       <button type="submit" class="btn btn-danger btn-sm">删除</button>
     </form>
   </td>"""
         else:
             ops_cell = f"""<td class="ops-cell">
     {toggle_btn}
+    {_link_btn(ep_edit_url, "编辑")}
     <form method="post" action="/config/api-endpoints" style="display:inline"
-          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
+          onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name_raw)}？')">
       <input type="hidden" name="action" value="delete">
       <input type="hidden" name="endpoint_id" value="{ep_id}">
       <button type="submit" class="btn btn-danger btn-sm">删除</button>
     </form>
   </td>"""
         rows += f"""<tr>
-  <td><strong>{ep_name}</strong></td>{report_name_cell}
+  {name_cell}{report_name_cell}
   <td>{_build_desc_summary_html(ep.get("description") or "") or '—'}</td>
-  <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#4f46e5">{ep_path}</code></td>
+  {url_cell}
   <td>{ep_format}</td>
   <td>{mode_display}</td>
   <td>{fetch_all_display}</td>
   <td>{static_cache_display}</td>
   <td>{enabled_badge}</td>
-  <td><code style="font-size:12px;color:#94a3b8">{api_key_display}</code></td>
+  {key_cell}
   {ops_cell}
 </tr>"""
     extra_col = '<th>关联报表</th>' if show_report_name else ''
@@ -1875,8 +1937,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
     total_cols = 10 + extra_colspan
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
-    _sc_cfg = static_cache.get_static_cache_config()
-    _sc_state = "开启" if _sc_cfg.get("enable", True) else "关闭"
+    _sc_state = "开启" if _sc_enabled else "关闭"
     _sc_dir = _sc_cfg.get("dir", "static_cache")
     _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#94a3b8">'
                 f'静态文件缓存: 全局 {_sc_state} | 存储目录: <code>{_escape(str(_sc_dir))}</code>'
@@ -1889,7 +1950,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
 {_sc_hint}
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th>{extra_col}<th>说明</th><th>URL 路径</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
+  <th>名称</th>{extra_col}<th>说明</th><th>调用地址</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
 </tr></thead><tbody>
 {rows or f'<tr><td colspan="{total_cols}" class="empty-state">暂无 API 接口配置</td></tr>'}
 </tbody></table>
@@ -2108,7 +2169,7 @@ _API_TEMPLATE_JS = r'''
     if (!urlPath || !pre || !err) return;
     btn.disabled = true;
     btn.textContent = '预览中...';
-    var fd = new FormData();
+    var fd = new URLSearchParams();
     var ta = document.getElementById('json-template-input');
     fd.append('json_template', ta ? ta.value : '');
     var ruleTa = document.getElementsByName('rule_json')[0];
@@ -2827,15 +2888,38 @@ def build_api_urls_section_html(api_endpoints: list[dict], base_url: str) -> str
 
 
 def _build_api_url_row(code_id: str, label: str, url_path: str,
-                       kind: str, url_value: str) -> str:
-    """构建一行 API URL 展示（标签 + code + 复制按钮，样式与 Debug 信息模块一致）。"""
-    return (f'<div style="margin:2px 0">'
+                       kind: str, url_value: str,
+                       disabled: bool = False,
+                       disabled_hint: str = "",
+                       edit_url: str = "") -> str:
+    """构建一行 API URL 展示（标签 + code + 复制按钮，样式与 Debug 信息模块一致）。
+
+    disabled=True 时行置灰：地址保留可见（用户能知道该能力存在但未启用）、
+    复制按钮禁用、title 悬浮提示原因，并提供「去开启」链接（新窗口打开接口配置页）。
+    """
+    code_style = ('font-size:12px;color:#94a3b8;text-decoration:line-through;'
+                  if disabled else
+                  'font-size:12px;background:#f1f5f9;padding:2px 6px;'
+                  'border-radius:4px;color:#4f46e5')
+    if disabled:
+        copy_btn = ('<button type="button" disabled '
+                    'style="padding:4px 10px;font-size:12px;background:#e2e8f0;color:#94a3b8;'
+                    'border:none;border-radius:4px;cursor:not-allowed">复制</button>')
+        fix_link = (f'<a href="{_escape(edit_url)}" target="_blank" rel="noopener" '
+                    f'title="在接口配置中开启该能力" '
+                    f'style="font-size:12px;color:#4f46e5;text-decoration:none;white-space:nowrap">去开启 ↗</a>'
+                    if edit_url else "")
+    else:
+        copy_btn = (f'<button onclick="copyToClipboard(\'{code_id}\')" '
+                    f'style="padding:4px 10px;font-size:12px;background:#4f46e5;color:#fff;'
+                    f'border:none;border-radius:4px;cursor:pointer">复制</button>')
+        fix_link = ""
+    return (f'<div style="margin:2px 0;opacity:{"0.55" if disabled else "1"}">'
             f'<span style="font-weight:500">{label}</span> '
             f'<code id="{code_id}" class="api-url-code" data-path="{_escape(url_path)}" '
-            f'data-kind="{kind}">{_escape(url_value)}</code> '
-            f'<button onclick="copyToClipboard(\'{code_id}\')" '
-            f'style="padding:4px 10px;font-size:12px;background:#4f46e5;color:#fff;'
-            f'border:none;border-radius:4px;cursor:pointer">复制</button>'
+            f'data-kind="{kind}" style="{code_style}" '
+            f'title="{_escape(disabled_hint) if disabled else ""}">{_escape(url_value)}</code> '
+            f'{copy_btn} {fix_link}'
             f'</div>')
 
 
@@ -2906,11 +2990,17 @@ def _build_api_description_html(ep: dict) -> str:
 
 
 def _build_single_api_url_html(ep: dict, base_url: str) -> str:
-    """构建单个 API 端点的 URL 显示区域（样式与 Debug 信息模块一致）。"""
+    """构建单个 API 端点的 URL 显示区域（样式与 Debug 信息模块一致）。
+
+    能力未开启的 URL 行置灰 + 原因提示（不隐藏），与配置列表页标准一致。
+    """
     ep_id = ep['id']
     ep_name = _escape(ep.get("name", "未命名"))
     url_path = ep.get("url_path", "")
     static_on = int(ep.get("static_cache", 1)) == 1
+    fetch_all_on = int(ep.get("allow_fetch_all", 1)) == 1
+    edit_url = f"/config/reports/{ep.get('report_id', 0)}/api_endpoints/{ep_id}/edit"
+    sc_enabled = static_cache.get_static_cache_config().get("enable", True)
 
     # url_path 已包含 /api/ 前缀，直接拼接。
     # 服务端先用 base_url 渲染占位值；页面加载后 JS 用 window.location.origin
@@ -2919,13 +3009,21 @@ def _build_single_api_url_html(ep: dict, base_url: str) -> str:
     full_url = f"{base_url}{url_path}?fetch_all=true"
     static_url = f"{base_url}{url_path}.json"
 
-    static_row = ""
-    if static_on:
-        static_row = _build_api_url_row(
-            f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url)
+    static_row = _build_api_url_row(
+        f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url,
+        disabled=not (static_on and sc_enabled),
+        disabled_hint=(("未开启「静态缓存」，请在接口配置中开启"
+                        if not static_on else
+                        "全局静态缓存已关闭（app_config.json 的 static_cache.enable）")
+                       if (not static_on or not sc_enabled) else ""),
+        edit_url=edit_url)
 
     rows = _build_api_url_row(f"api-url-{ep_id}", "完整 URL:", url_path, "base", base_api_url)
-    rows += _build_api_url_row(f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url)
+    rows += _build_api_url_row(
+        f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url,
+        disabled=not fetch_all_on,
+        disabled_hint="未开启「允许全量获取」，请在接口配置中开启" if not fetch_all_on else "",
+        edit_url=edit_url)
     rows += static_row
 
     return f"""<div class="debug-info" style="margin-top:8px">
@@ -2940,7 +3038,11 @@ def _build_single_api_url_html(ep: dict, base_url: str) -> str:
 
 
 def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> str:
-    """构建多个 API 端点的分组 URL 显示区域（样式与 Debug 信息模块一致）。"""
+    """构建多个 API 端点的分组 URL 显示区域（样式与 Debug 信息模块一致）。
+
+    能力未开启的 URL 行置灰 + 原因提示（不隐藏），与配置列表页标准一致。
+    """
+    sc_enabled = static_cache.get_static_cache_config().get("enable", True)
 
     # 构建每个 API 的 HTML
     api_items = ""
@@ -2949,6 +3051,8 @@ def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> st
         ep_name = _escape(ep.get("name", f"接口 {idx + 1}"))
         url_path = ep.get("url_path", "")
         static_on = int(ep.get("static_cache", 1)) == 1
+        fetch_all_on = int(ep.get("allow_fetch_all", 1)) == 1
+        edit_url = f"/config/reports/{ep.get('report_id', 0)}/api_endpoints/{ep_id}/edit"
 
         # url_path 已包含 /api/ 前缀，直接拼接。
         # 服务端先用 base_url 渲染占位值；页面加载后 JS 用 window.location.origin
@@ -2958,10 +3062,19 @@ def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> st
         static_url = f"{base_url}{url_path}.json"
 
         rows = _build_api_url_row(f"api-url-{ep_id}", "完整 URL:", url_path, "base", base_api_url)
-        rows += _build_api_url_row(f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url)
-        if static_on:
-            rows += _build_api_url_row(
-                f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url)
+        rows += _build_api_url_row(
+            f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url,
+            disabled=not fetch_all_on,
+            disabled_hint="未开启「允许全量获取」，请在接口配置中开启" if not fetch_all_on else "",
+            edit_url=edit_url)
+        rows += _build_api_url_row(
+            f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url,
+            disabled=not (static_on and sc_enabled),
+            disabled_hint=(("未开启「静态缓存」，请在接口配置中开启"
+                            if not static_on else
+                            "全局静态缓存已关闭（app_config.json 的 static_cache.enable）")
+                           if (not static_on or not sc_enabled) else ""),
+            edit_url=edit_url)
 
         sep = '<div style="border-top:1px dashed #cbd5e1;margin:8px 0"></div>' if idx > 0 else ""
         api_items += f"""{sep}

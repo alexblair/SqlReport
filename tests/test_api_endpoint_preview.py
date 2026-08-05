@@ -220,6 +220,19 @@ class TestApiEndpointPreview(MockMySQLMixin, unittest.TestCase):
         self.assertNotIn('id="preview-live-btn"', html)
         self.assertNotIn("/preview", html)
 
+    def test_live_preview_js_uses_urlencoded_not_multipart(self):
+        """预览 fetch 必须用 URLSearchParams（urlencoded），与后端
+        _parse_form_data（parse_qs）匹配。
+
+        bug 场景：前端用 new FormData() 提交时浏览器发 multipart/form-data，
+        后端 parse_qs 解析失败导致 json_template 字段丢失，模板永不生效
+        （预览总是输出默认结构）。
+        """
+        html = config.build_api_endpoint_form_html(1, "测试报表", {}, None,
+                                                   ["结果"], 1, self.eid, True)
+        self.assertIn("new URLSearchParams()", html)
+        self.assertNotIn("new FormData()", html)
+
     def test_preview_error_page_renders(self):
         """直接 GET 打开预览地址（无表单）：返回可交互指引页。"""
         code, body, headers = config.handle_api_endpoint_preview(self.conn, 1, self.eid, "")

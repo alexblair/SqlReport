@@ -26,6 +26,7 @@ import auth
 import redis_cache
 import static_cache
 import api_handler
+import app_config
 import html as html_mod
 from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
@@ -593,7 +594,10 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
     # 编辑模式下显示 API 接口列表
     if report_id and not copy_mode:
         api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
-        body += build_api_endpoints_list_html(api_endpoints, report_id)
+        _, port = app_config.get_server_config()
+        base_url = f"http://127.0.0.1:{port}"
+        body += build_api_endpoints_list_html(api_endpoints, report_id,
+                                              base_url=base_url)
     body += render_page_footer()
     return body
 
@@ -1508,10 +1512,13 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
         css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
         flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
 
+    _, port = app_config.get_server_config()
+    base_url = f"http://127.0.0.1:{port}"
     body = (render_page_header(title="Web 报表工具 - API 接口", active_nav="api", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
             + '<h2 style="margin-bottom:0">API 接口管理</h2>'
-            + build_api_endpoints_list_html(api_endpoints, show_report_name=True)
+            + build_api_endpoints_list_html(api_endpoints, show_report_name=True,
+                                            base_url=base_url)
             + render_page_footer())
     return 200, body, {}
 
