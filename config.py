@@ -18,11 +18,13 @@ URL 路由约定：
 
 import re
 import json
+import logging
 import urllib.parse
 import db
 import auth
 import redis_cache
 import static_cache
+import api_handler
 import html as html_mod
 from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
@@ -52,7 +54,7 @@ _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
     r"(?:/(add|batch-pool|batch-set-category|batch-cache)"
     r"|/(\d+)/(edit|delete|copy|move-up|move-down)"
-    r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete)))?$"
+    r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview)))?$"
 )
 
 
@@ -102,6 +104,10 @@ def parse_config_path(path: str) -> dict:
                     "endpoint_id": api_endpoint_id}
         if api_sub_action == "delete" and api_endpoint_id:
             return {"section": section, "action": "api_delete",
+                    "id": api_report_id, "report_id": api_report_id,
+                    "endpoint_id": api_endpoint_id}
+        if api_sub_action == "preview" and api_endpoint_id:
+            return {"section": section, "action": "api_preview",
                     "id": api_report_id, "report_id": api_report_id,
                     "endpoint_id": api_endpoint_id}
         return {"section": section, "action": None, "id": None,
@@ -1050,6 +1056,11 @@ def handle_request(conn, method: str, path: str, query: str,
             code, result = handle_api_endpoint_delete(
                 conn, route["report_id"], route["endpoint_id"], session_user=session_user)
             return _redirect_or_render(code, result)
+        elif route["action"] == "api_preview" and route["endpoint_id"]:
+            # 真实数据预览：返回 JSON（非 HTML），不重定向
+            return handle_api_endpoint_preview(
+                conn, route["report_id"], route["endpoint_id"], form_body or "",
+                session_user=session_user)
 
     if method == "POST":
         if route["section"] == "pools":
@@ -1337,6 +1348,110 @@ def handle_api_endpoint_delete(conn, report_id: int,
     db.delete_api_endpoint(conn, endpoint_id, session_user=session_user)
     return 302, (f"/config/reports/{report_id}/edit"
                    f"?flash=API 接口 {endpoint['name']} 已删除")
+
+
+# 真实数据预览最大返回行数（防大结果集拖慢页面）
+_PREVIEW_MAX_ROWS = 3
+
+
+def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
+                                form_body: str, session_user=None) -> tuple[int, str, dict]:
+    """真实数据预览：用表单未保存值构造临时端点（不落库）执行查询。
+
+    预览复用线上渲染链路（api_handler._execute_api_query + _format_output），
+    保证预览即最终输出；行数强制限制为 _PREVIEW_MAX_ROWS 行。
+
+    返回 (200, JSON, {"Content-Type": "application/json; charset=utf-8"})，
+    JSON 形如 {"ok": true, "output": <渲染后响应文本>} 或
+    {"ok": false, "error": <结构化错误消息（模板非法含行列号）>}。
+    """
+    json_headers = {"Content-Type": "application/json; charset=utf-8"}
+
+    def fail(message: str) -> tuple:
+        return 200, json.dumps({"ok": False, "error": message},
+                               ensure_ascii=False), json_headers
+
+    if not (form_body or "").strip():
+        # 直接 GET 打开预览地址：无表单值可执行，返回可交互指引页
+        return 200, _render_preview_help_page(report_id, endpoint_id), \
+            {"Content-Type": "text/html; charset=utf-8"}
+
+    endpoint = db.get_api_endpoint(conn, endpoint_id)
+    if not endpoint:
+        return fail("API 接口不存在")
+    if int(endpoint.get("report_id", 0)) != report_id:
+        return fail("API 接口不属于该报表")
+    if endpoint.get("output_format", "json") == "csv":
+        return fail("模板仅 JSON 格式支持，CSV 格式下无法预览")
+
+    data = _parse_form_data(form_body or "")
+    result_mode = data.get("result_mode", "single")
+    template_raw = data.get("json_template", "") or ""
+    tpl_err = _validate_json_template(template_raw, result_mode)
+    if tpl_err:
+        return fail(tpl_err)
+
+    # 构造临时端点：表单未保存值覆盖 DB 配置，不落库
+    tmp = dict(endpoint)
+    tmp["json_template"] = template_raw or None
+    tmp["result_mode"] = result_mode
+    tmp["result_index"] = int(data.get("result_index", 0) or 0)
+    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    tmp["columns"] = columns or None
+    tmp["filters"] = filters_str or None
+    tmp["sorts"] = sorts_str or None
+    form_row_limit = int(data.get("row_limit", 0) or 0)
+    tmp["row_limit"] = min(form_row_limit, _PREVIEW_MAX_ROWS) if form_row_limit > 0 else _PREVIEW_MAX_ROWS
+
+    try:
+        result = api_handler._execute_api_query(conn, tmp, "GET", "", {}, {})
+    except Exception as e:
+        logging.warning("真实数据预览查询执行失败: %s", e)
+        return fail(f"查询执行失败: {e}")
+
+    if isinstance(result[0], int):
+        status, resp_body, _ = result
+        if status != 200:
+            try:
+                msg = json.loads(resp_body).get("error", resp_body)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                msg = resp_body
+            return fail(f"查询执行失败: {msg}")
+        # result_mode=all 成功：resp_body 已是模板渲染后的最终 JSON
+        return 200, json.dumps({"ok": True, "output": resp_body},
+                               ensure_ascii=False), json_headers
+
+    data_rows, display_cols, total, page, ps, total_pages, output_format, add_bom, fetch_all = result
+    status, out_body, _ = api_handler._format_output(
+        data_rows, display_cols, total, page, ps, total_pages,
+        output_format, add_bom, fetch_all, template=tmp["json_template"] or "", meta=None)
+    if status != 200:
+        return fail("预览输出构建失败")
+    return 200, json.dumps({"ok": True, "output": out_body},
+                           ensure_ascii=False), json_headers
+
+
+def _render_preview_help_page(report_id: int, endpoint_id: int) -> str:
+    """预览地址被直接 GET 打开时返回的交互式指引页。"""
+    back_url = f"/config/reports/{report_id}/api_endpoints/{endpoint_id}/edit"
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<title>真实数据预览</title></head>"
+        "<body style='font-family:sans-serif;background:#f8fafc;margin:0;"
+        "padding:60px 20px;color:#0f172a'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;"
+        "border:1px solid #e2e8f0;border-radius:12px;padding:32px'>"
+        "<h2 style='margin-top:0'>真实数据预览</h2>"
+        "<p>预览需要携带当前编辑表单中的模板与规则参数，请通过"
+        "「用真实数据预览」按钮发起，或点击下方按钮返回编辑页填写。"
+        "</p><a href='" + back_url + "' style='display:inline-block;margin-top:12px;"
+        "padding:8px 20px;background:#6366f1;color:#fff;border-radius:8px;"
+        "text-decoration:none'>返回编辑页</a>"
+        "<div style='margin-top:24px;font-size:12px;color:#64748b'>"
+        "POST 请求需携带参数：json_template、rule_json、result_mode、"
+        "result_index、row_limit（均与编辑表单一致）。</div>"
+        "</div></body></html>"
+    )
 
 
 def handle_api_endpoints_request(conn, method: str, path: str, query: str,

@@ -2051,6 +2051,55 @@ _API_TEMPLATE_JS = r'''
     ta.value = TPL_DEFAULTS[currentTemplateMode()];
     renderTemplatePreview();
   }
+  function previewWithRealData() {
+    var btn = document.getElementById('preview-live-btn');
+    if (!btn) return;
+    var pre = document.getElementById('template-preview');
+    var err = document.getElementById('template-preview-error');
+    var urlPath = btn.getAttribute('data-url');
+    if (!urlPath || !pre || !err) return;
+    btn.disabled = true;
+    btn.textContent = '预览中...';
+    var fd = new FormData();
+    var ta = document.getElementById('json-template-input');
+    fd.append('json_template', ta ? ta.value : '');
+    var ruleTa = document.getElementsByName('rule_json')[0];
+    fd.append('rule_json', ruleTa ? ruleTa.value : '');
+    var radios = document.getElementsByName('result_mode');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) fd.append('result_mode', radios[i].value);
+    }
+    var idxSel = document.getElementsByName('result_index')[0];
+    fd.append('result_index', idxSel ? idxSel.value : '0');
+    var rlInput = document.getElementsByName('row_limit')[0];
+    fd.append('row_limit', rlInput ? rlInput.value : '0');
+    fetch(urlPath, {method: 'POST', body: fd})
+      .then(function(r) {
+        return r.json().catch(function() {
+          return {ok: false, error: '响应解析失败（HTTP ' + r.status + '）'};
+        });
+      })
+      .then(function(data) {
+        if (data && data.ok) {
+          try {
+            pre.textContent = JSON.stringify(JSON.parse(data.output), null, 2);
+          } catch (e) {
+            pre.textContent = data.output;
+          }
+          err.textContent = '';
+        } else {
+          pre.textContent = '';
+          err.textContent = '真实数据预览失败: ' + ((data && data.error) || '未知错误');
+        }
+      })
+      .catch(function(e) {
+        err.textContent = '真实数据预览失败: ' + e;
+      })
+      .then(function() {
+        btn.disabled = false;
+        btn.textContent = '用真实数据预览';
+      });
+  }
   function updateTemplateMode() {
     var mode = currentTemplateMode();
     var badgesSingle = document.getElementById('tpl-badges-single');
@@ -2068,10 +2117,12 @@ _API_TEMPLATE_JS = r'''
     var isCsv = fmtSel && fmtSel.value === 'csv';
     var ta = document.getElementById('json-template-input');
     var btn = document.getElementById('template-reset-btn');
+    var liveBtn = document.getElementById('preview-live-btn');
     var hint = document.getElementById('template-csv-hint');
     var section = document.getElementById('template-section');
     if (ta) ta.disabled = isCsv;
     if (btn) btn.disabled = isCsv;
+    if (liveBtn) liveBtn.disabled = isCsv;
     if (hint) hint.style.display = isCsv ? 'inline' : 'none';
     if (section) section.style.opacity = isCsv ? '0.55' : '1';
   }
@@ -2112,7 +2163,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     if is_edit is None:
         is_edit = endpoint is not None
     if is_edit:
-        ep_id = endpoint["id"]
+        ep_id = endpoint_id or (endpoint or {}).get("id")
         action_url = f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit"
         title = "编辑 API 接口"
     else:
@@ -2174,6 +2225,19 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         for v in ("json", "csv")
     )
     template_val = _escape((endpoint or {}).get("json_template") or "")
+
+    # 真实数据预览：仅编辑态可用（新增端点无 endpoint_id、无关联已存配置）
+    if endpoint_id is not None:
+        live_preview_html = (
+            '<div style="margin:10px 0">'
+            f'<button type="button" id="preview-live-btn" data-url="/config/reports/{report_id}/api_endpoints/{endpoint_id}/preview" '
+            'onclick="previewWithRealData()" '
+            'style="padding:6px 14px;cursor:pointer;border:1px solid #6366f1;border-radius:6px;background:#eef2ff;font-size:13px;color:#4338ca">用真实数据预览</button>'
+            '<span style="font-size:12px;color:#94a3b8;margin-left:8px">以当前表单未保存的模板/规则执行真实查询（最多 3 行数据），结果展示在下方预览区</span>'
+            '</div>'
+        )
+    else:
+        live_preview_html = ""
 
     return f"""<div class="card">
 <h2>{title}</h2>
@@ -2362,6 +2426,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         style="padding:6px 14px;cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:13px">还原为默认 JSON 格式</button>
       <span style="font-size:12px;color:#94a3b8;margin-left:8px">还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
     </div>
+    {live_preview_html}
 
     <div style="font-size:12px;color:#64748b;margin-top:10px">实时预览（样例数据）：</div>
     <pre id="template-preview" style="margin:4px 0 0 0;padding:12px;background:#0f172a;color:#e2e8f0;border-radius:6px;font-size:12px;line-height:1.6;overflow:auto;max-height:280px"></pre>

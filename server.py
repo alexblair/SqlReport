@@ -652,13 +652,19 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         return ""
 
     def _send_html(self, status: int, body: str, extra_headers: dict = None):
-        """发送 HTML 响应"""
+        """发送 HTML 响应
+
+        extra_headers 中的 Content-Type 可覆盖默认 text/html（如真实数据
+        预览返回 JSON），调用方自行保证 body 编码与之匹配。
+        """
+        extra_headers = extra_headers or {}
         self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type",
+                         extra_headers.get("Content-Type", "text/html; charset=utf-8"))
         if self._session_token:
             self.send_header("Set-Cookie", auth.make_set_cookie_header(self._session_token))
-        if extra_headers:
-            for k, v in extra_headers.items():
+        for k, v in extra_headers.items():
+            if k.lower() != "content-type":
                 self.send_header(k, v)
         self.end_headers()
         try:
