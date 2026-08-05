@@ -1213,6 +1213,7 @@ def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
     columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
     return {
         "name": data.get("name", ""),
+        "description": data.get("description", "") or "",
         "url_path": url_path,
         "output_format": data.get("output_format", "json"),
         "columns": columns,
@@ -1268,6 +1269,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             allow_fetch_all=allow_fetch_all,
             static_cache=static_cache_enabled,
             json_template=template_raw or None,
+            description=data.get("description") or None,
             session_user=session_user,
         )
         if not enabled:
@@ -1330,6 +1332,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             result_mode=result_mode,
             result_index=result_index,
             static_cache=static_cache_enabled,
+            description=data.get("description") or None,
             session_user=session_user,
         )
         if output_format != "csv":
@@ -1462,6 +1465,24 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
                 return 302, "/config/api-endpoints?flash=错误: API 接口不存在", {}
             except (ValueError, TypeError):
                 return 302, "/config/api-endpoints?flash=错误: 无效的接口 ID", {}
+        if action == "toggle" and endpoint_id:
+            try:
+                endpoint_id = int(endpoint_id)
+                endpoint = db.get_api_endpoint(conn, endpoint_id)
+                if endpoint:
+                    new_enabled = 0 if int(endpoint.get("enabled", 1)) else 1
+                    db.update_api_endpoint(conn, endpoint_id, enabled=new_enabled,
+                                           session_user=session_user)
+                    flash_msg = f"API 接口 {endpoint['name']} 已{'启用' if new_enabled else '禁用'}"
+                else:
+                    flash_msg = "错误: API 接口不存在"
+            except (ValueError, TypeError):
+                flash_msg = "错误: 无效的接口 ID"
+            return_to = data.get("return_to", [None])[0]
+            if return_to and return_to.startswith("/") and not return_to.startswith("//"):
+                sep = "&" if "?" in return_to else "?"
+                return 302, f"{return_to}{sep}flash={urllib.parse.quote(flash_msg)}", {}
+            return 302, f"/config/api-endpoints?flash={urllib.parse.quote(flash_msg)}", {}
         return 302, "/config/api-endpoints", {}
 
     api_endpoints = db.get_all_api_endpoints(conn)
@@ -1472,7 +1493,7 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
         css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
         flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
 
-    body = (render_page_header(title="Web 报表工具 - API 接口", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    body = (render_page_header(title="Web 报表工具 - API 接口", active_nav="api", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
             + '<h2 style="margin-bottom:0">API 接口管理</h2>'
             + build_api_endpoints_list_html(api_endpoints, show_report_name=True)

@@ -53,6 +53,8 @@ from render import (
     build_current_rules_section_html,
     # API 端点表单
     build_api_endpoint_form_html,
+    # API 端点列表
+    build_api_endpoints_list_html,
     # API URL 折叠区
     build_api_urls_section_html,
 )
@@ -83,6 +85,12 @@ class TestRenderPageHeader(unittest.TestCase):
         """输出包含导航栏"""
         result = render_page_header()
         self.assertIn('My<span>Report</span>', result)
+
+    def test_navbar_has_api_entry(self):
+        """导航栏包含 API 接口独立入口"""
+        result = render_page_header()
+        self.assertIn("API 接口", result)
+        self.assertIn('href="/config/api-endpoints"', result)
 
     def test_contains_container_div(self):
         """输出包含 container div 开头"""
@@ -1643,6 +1651,26 @@ class TestBuildApiEndpointFormHtml(unittest.TestCase):
         self.assertIn('&quot;status&quot;', result)
         self.assertIn('&quot;created_at&quot;', result)
 
+    def test_has_description_textarea(self):
+        """表单包含接口说明多行文本框"""
+        result = build_api_endpoint_form_html(1, "测试报表")
+        self.assertIn('name="description"', result)
+        self.assertIn("接口说明", result)
+        self.assertIn("<textarea", result)
+
+    def test_edit_echoes_description(self):
+        """编辑时回显已有接口说明（多行保留、HTML 转义）"""
+        endpoint = {
+            "id": 1, "name": "测试端点", "url_path": "/api/test",
+            "output_format": "json", "row_limit": 0,
+            "api_key": "", "allowed_origins": "", "enabled": 1,
+            "description": "第一行说明\n第二行说明 <b>转义</b>",
+        }
+        result = build_api_endpoint_form_html(1, "测试报表", endpoint)
+        self.assertIn("第一行说明", result)
+        self.assertIn("第二行说明", result)
+        self.assertIn("&lt;b&gt;", result)
+
     def test_edit_empty_fields(self):
         """编辑时三字段均为空"""
         endpoint = {
@@ -1684,12 +1712,59 @@ class TestBuildApiEndpointFormHtml(unittest.TestCase):
         self.assertIn('class="flash flash-error"', result)
 
 
+class TestBuildApiEndpointsListHtml(unittest.TestCase):
+    """build_api_endpoints_list_html 函数测试（列表快捷开关）"""
+
+    def _ep(self, eid, enabled=1, report_id=1):
+        return {"id": eid, "name": f"接口{eid}", "url_path": f"/api/ep{eid}",
+                "output_format": "json", "enabled": enabled,
+                "report_id": report_id, "result_mode": "single",
+                "result_index": 0, "allow_fetch_all": 1,
+                "static_cache": 1, "api_key": ""}
+
+    def test_row_has_toggle_button_enabled(self):
+        """启用端点行含禁用按钮（POST toggle）"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn('name="action" value="toggle"', html)
+        self.assertIn('name="endpoint_id" value="1"', html)
+        self.assertIn("禁用", html)
+
+    def test_row_toggle_disabled_shows_enable(self):
+        """禁用端点行显示启用按钮"""
+        html = build_api_endpoints_list_html([self._ep(1, enabled=0)], report_id=1)
+        self.assertIn("启用", html)
+
+    def test_toggle_return_to_report_edit(self):
+        """报表编辑页列表：toggle 后回跳到该报表编辑页"""
+        html = build_api_endpoints_list_html([self._ep(1, report_id=3)], report_id=3)
+        self.assertIn('name="return_to" value="/config/reports/3/edit"', html)
+
+    def test_toggle_return_to_admin_page(self):
+        """独立管理页列表：toggle 后回跳到独立管理页"""
+        html = build_api_endpoints_list_html([self._ep(1)], show_report_name=True)
+        self.assertIn('name="return_to" value="/config/api-endpoints"', html)
+
+    def test_disable_has_confirm(self):
+        """禁用操作带确认提示"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn("onsubmit=", html)
+        self.assertIn("confirm(", html)
+
+    def test_edit_delete_still_present(self):
+        """原有编辑/删除操作保留"""
+        html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
+        self.assertIn("编辑", html)
+        self.assertIn("删除", html)
+
+
 class TestApiUrlsSectionHtml(unittest.TestCase):
     """build_api_urls_section_html 测试 — 样式与 Debug 信息模块一致。"""
 
-    def _ep(self, eid, path="/api/test", static_cache=1):
+    def _ep(self, eid, path="/api/test", static_cache=1, enabled=1, description="",
+            report_id=1):
         return {"id": eid, "name": f"接口{eid}", "url_path": path,
-                "static_cache": static_cache}
+                "static_cache": static_cache, "enabled": enabled,
+                "description": description, "report_id": report_id}
 
     def test_uses_debug_info_structure(self):
         """外层结构与 Debug 信息模块一致（debug-info/debug-toggle/toggleSection/debug-content hidden）。"""
@@ -1725,6 +1800,93 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         """URL 拼接不应重复 /api。"""
         html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
         self.assertNotIn("/api//api/", html)
+
+    def test_badge_enabled(self):
+        """启用端点在接口名旁显示绿色启用徽章"""
+        html = build_api_urls_section_html([self._ep(1, enabled=1)], "http://x")
+        self.assertIn("#059669", html)
+        self.assertIn("启用", html)
+
+    def test_badge_disabled(self):
+        """禁用端点在接口名旁显示红色禁用徽章"""
+        html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
+        self.assertIn("#dc2626", html)
+        self.assertIn("禁用", html)
+
+    def test_description_keeps_newlines(self):
+        """说明文本保留换行（pre-wrap）且 HTML 转义"""
+        html = build_api_urls_section_html(
+            [self._ep(1, description="第一行说明\n第二行 <b>转义</b>")], "http://x")
+        self.assertIn("第一行说明", html)
+        self.assertIn("第二行", html)
+        self.assertIn("white-space:pre-wrap", html)
+        self.assertIn("&lt;b&gt;", html)
+
+    def test_long_description_truncated_with_button(self):
+        """长说明（含换行）截断显示并提供展开按钮"""
+        html = build_api_urls_section_html(
+            [self._ep(1, description="行一\n行二\n行三\n行四")], "http://x")
+        self.assertIn("toggleApiDesc", html)
+        self.assertIn("展开", html)
+        self.assertIn("webkit-line-clamp", html)
+
+    def test_short_description_no_button(self):
+        """短说明（无换行且未超阈值）完整显示、无展开按钮"""
+        html = build_api_urls_section_html(
+            [self._ep(1, description="简短说明")], "http://x")
+        self.assertNotIn("toggleApiDesc", html)
+        self.assertNotIn("展开", html)
+        self.assertIn("简短说明", html)
+
+    def test_no_description_no_block(self):
+        """无说明时不渲染说明块与展开按钮"""
+        html = build_api_urls_section_html([self._ep(1)], "http://x")
+        self.assertNotIn("toggleApiDesc", html)
+        self.assertNotIn("webkit-line-clamp", html)
+        self.assertNotIn("接口说明", html)
+
+    def test_grouped_badges_and_descriptions(self):
+        """分组形态每个接口均含徽章与说明"""
+        html = build_api_urls_section_html(
+            [self._ep(1, enabled=1, description="接口一说明"),
+             self._ep(2, enabled=0, description="接口二说明")], "http://x")
+        self.assertIn("接口一说明", html)
+        self.assertIn("接口二说明", html)
+        self.assertEqual(html.count("#059669"), 1)
+        self.assertEqual(html.count("#dc2626"), 1)
+
+    def test_admin_actions_row_enabled_ep(self):
+        """启用端点显示禁用按钮（POST toggle + 回跳来源）"""
+        html = build_api_urls_section_html([self._ep(1, enabled=1)], "http://x")
+        self.assertIn('name="action" value="toggle"', html)
+        self.assertIn('name="endpoint_id" value="1"', html)
+        self.assertIn('name="return_to"', html)
+        self.assertIn("禁用", html)
+
+    def test_admin_actions_row_disabled_ep(self):
+        """禁用端点显示启用按钮"""
+        html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
+        self.assertIn('name="action" value="toggle"', html)
+        self.assertIn("启用", html)
+
+    def test_config_button_opens_edit_form(self):
+        """配置按钮新窗口打开该接口编辑表单"""
+        html = build_api_urls_section_html([self._ep(1)], "http://x")
+        self.assertIn('target="_blank"', html)
+        self.assertIn("/config/reports/", html)
+        self.assertIn("/api_endpoints/1/edit", html)
+        self.assertIn("配置", html)
+
+    def test_report_page_disable_has_confirm(self):
+        """报表页禁用操作带确认提示（防误停服）"""
+        html = build_api_urls_section_html([self._ep(1, enabled=1)], "http://x")
+        self.assertIn("onsubmit=", html)
+        self.assertIn("confirm(", html)
+
+    def test_report_page_enable_no_confirm(self):
+        """报表页启用操作不确认（无损操作）"""
+        html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
+        self.assertNotIn("onsubmit=", html)
 
     def test_static_url_hidden_when_static_cache_off(self):
         """static_cache=0 时不显示静态 URL 行。"""

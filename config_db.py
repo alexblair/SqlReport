@@ -198,6 +198,7 @@ _SQLITE_SCHEMA = """
         allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
         static_cache     INTEGER NOT NULL DEFAULT 1,
         json_template    TEXT,
+        description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     );
 """
@@ -270,6 +271,7 @@ _MYSQL_SCHEMA = """
         allow_fetch_all  TINYINT NOT NULL DEFAULT 1,
         static_cache     TINYINT NOT NULL DEFAULT 1,
         json_template    TEXT,
+        description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
@@ -481,6 +483,16 @@ def _init_sqlite_migrations(conn) -> None:
         except Exception:
             conn.rollback()
 
+    # 迁移 13: 添加 description 列到 api_endpoints（接口说明，纯展示字段）
+    cursor = conn.execute("PRAGMA table_info(api_endpoints)")
+    api_cols = {row[1] for row in cursor.fetchall()}
+    if "description" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN description TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 
 def _init_mysql_migrations(conn) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -651,6 +663,19 @@ def _init_mysql_migrations(conn) -> None:
     if "json_template" not in api_cols:
         try:
             conn.execute("ALTER TABLE api_endpoints ADD COLUMN json_template TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 13: 添加 description 列到 api_endpoints（接口说明，纯展示字段）
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
+        api_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        api_cols = set()
+    if "description" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN description TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1208,6 +1233,7 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      allow_fetch_all: int = 1,
                      static_cache: int = 1,
                      json_template: str = None,
+                     description: str = None,
                      session_user=None) -> int:
     """
     新增 API 端点配置，返回自增 id。
@@ -1228,18 +1254,19 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
         allow_fetch_all: 是否接受 fetch_all 全量获取参数，1=接受（默认），0=忽略
         static_cache: 是否启用静态文件缓存（.json 变体），1=开启（默认），0=关闭
         json_template: JSON 输出模板文本（占位符语法），None/空=未启用
+        description: 接口说明（多行文本，纯展示字段，不进入 API 输出），None=无说明
     """
     cur = conn.execute(
         """INSERT INTO api_endpoints
            (report_id, name, url_path, output_format, columns, filters,
             sorts, row_limit, api_key, allowed_origins, enabled,
             result_mode, result_index, allow_fetch_all, static_cache,
-            json_template)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            json_template, description)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (report_id, name, url_path, output_format, columns, filters,
          sorts, row_limit, api_key, allowed_origins, enabled,
          result_mode, result_index, allow_fetch_all, static_cache,
-         json_template),
+         json_template, description),
     )
     conn.commit()
     _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
@@ -1317,6 +1344,21 @@ def _invalidate_after_endpoint_update(before: dict | None, url_path) -> None:
     _invalidate_api_static_cache(paths)
 
 
+def _CACHE_AFFECTING_ENDPOINT_FIELDS() -> frozenset:
+    """影响静态缓存输出内容的端点字段集合。
+
+    静态缓存文件内容是"SQL 结果 + 端点变换规则"的产物，只有这些字段变更
+    才需要删除缓存文件；纯元数据字段（如 description 接口说明）只影响页面
+    展示，变更不应触发失效重建。
+    """
+    return frozenset((
+        "name", "url_path", "output_format", "columns", "filters", "sorts",
+        "row_limit", "api_key", "allowed_origins", "enabled",
+        "result_mode", "result_index", "allow_fetch_all", "static_cache",
+        "json_template",
+    ))
+
+
 def update_api_endpoint(conn, endpoint_id: int,
                         name: str = _UNSET, url_path: str = _UNSET,
                         output_format: str = _UNSET,
@@ -1330,6 +1372,7 @@ def update_api_endpoint(conn, endpoint_id: int,
                         allow_fetch_all: int = _UNSET,
                         static_cache: int = _UNSET,
                         json_template: str = _UNSET,
+                        description: str = _UNSET,
                         session_user=None) -> bool:
     """
     更新 API 端点配置。仅更新非 _UNSET 的字段，影响行数 >0 返回 True。
@@ -1385,6 +1428,9 @@ def update_api_endpoint(conn, endpoint_id: int,
     if json_template is not _UNSET:
         sets.append("json_template=?")
         params.append(json_template)
+    if description is not _UNSET:
+        sets.append("description=?")
+        params.append(description)
     if not sets:
         return False
     engine = _get_engine()
@@ -1396,7 +1442,9 @@ def update_api_endpoint(conn, endpoint_id: int,
         params,
     )
     conn.commit()
-    if cur.rowcount > 0:
+    # 仅输出影响字段变更才使静态缓存失效；纯元数据字段（description）跳过
+    fields_changed = {s.split("=")[0] for s in sets if not s.startswith("updated_at")}
+    if cur.rowcount > 0 and fields_changed & _CACHE_AFFECTING_ENDPOINT_FIELDS():
         _invalidate_after_endpoint_update(before, url_path)
     entity_name = name if name is not _UNSET else (before or {}).get("name")
     after = get_api_endpoint(conn, endpoint_id)

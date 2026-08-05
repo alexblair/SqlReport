@@ -86,6 +86,7 @@ def _set_up_db():
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             static_cache INTEGER NOT NULL DEFAULT 1,
             json_template TEXT,
+            description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -210,6 +211,21 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(resp_headers2.get("Content-Type"),
                          "application/json; charset=utf-8")
         self.assertEqual(body2, body)
+
+    def test_static_output_excludes_description(self):
+        """静态缓存链路输出不含接口说明（description 只用于页面展示）。"""
+        rid = self._create_report()
+        self._create_endpoint(report_id=rid, url_path="/api/desc-static",
+                              description="静态链路说明\n不应出现")
+        status, body, resp_headers = self._request("/api/desc-static.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers.get("X-Static-Cache"), "miss")
+        self.assertNotIn("静态链路说明", body)
+        self.assertNotIn("description", body)
+        # 命中链路同样不含
+        status, body, resp_headers = self._request("/api/desc-static.json")
+        self.assertEqual(resp_headers.get("X-Static-Cache"), "hit")
+        self.assertNotIn("静态链路说明", body)
 
     def test_public_endpoint_accessible(self):
         """无 key 端点公开可访问。"""

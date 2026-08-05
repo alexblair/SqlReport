@@ -772,6 +772,39 @@ class TestMySQLMigrations(_MySQLCRUDTestBase):
             "ALTER TABLE api_endpoints ADD COLUMN json_template TEXT", ()
         )
 
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_13_adds_description_when_missing(self, mock_engine):
+        """description 列缺失时，应执行 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        # 迁移 8 的 SHOW TABLES 返回表已存在 → 跳过 CREATE TABLE
+        self.mock_cursor.fetchone.return_value = ("api_endpoints",)
+        # api_endpoints 列集：含 json_template、不含 description
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("report_id", "int(11)", "NO", "MUL", None, ""),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("url_path", "varchar(512)", "NO", "UNI", None, ""),
+            ("output_format", "varchar(10)", "NO", "", None, ""),
+            ("columns", "text", "YES", "", None, ""),
+            ("filters", "text", "YES", "", None, ""),
+            ("sorts", "text", "YES", "", None, ""),
+            ("row_limit", "int(11)", "YES", "", None, ""),
+            ("api_key", "varchar(255)", "YES", "", None, ""),
+            ("allowed_origins", "text", "YES", "", None, ""),
+            ("enabled", "tinyint(4)", "NO", "", None, ""),
+            ("result_mode", "varchar(10)", "NO", "", None, ""),
+            ("result_index", "int(11)", "NO", "", None, ""),
+            ("allow_fetch_all", "tinyint(4)", "NO", "", None, ""),
+            ("static_cache", "tinyint(4)", "NO", "", None, ""),
+            ("json_template", "text", "YES", "", None, ""),
+        ]
+
+        db._init_mysql_migrations(self.conn)
+
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE api_endpoints ADD COLUMN description TEXT", ()
+        )
+
 
 # ---------------------------------------------------------------------------
 # 测试连接池 CRUD（MySQL 路径）

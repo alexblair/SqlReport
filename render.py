@@ -100,6 +100,19 @@ function toggleSection(btn, label) {
   var hidden = content.classList.toggle("hidden");
   btn.textContent = hidden ? "\u25b6 " + label : "\u25bc " + label;
 }
+function toggleApiDesc(btn) {
+  var box = btn.previousElementSibling;
+  if (!box) return;
+  if (box.style.webkitLineClamp) {
+    box.style.webkitLineClamp = '';
+    box.style.display = 'block';
+    btn.textContent = '收起';
+  } else {
+    box.style.webkitLineClamp = '3';
+    box.style.display = '-webkit-box';
+    btn.textContent = '展开';
+  }
+}
 function toggleFilterInput(inputName, select) {
   var input = document.getElementsByName(inputName)[0];
   if (!input) return;
@@ -325,6 +338,7 @@ _PAGE_FOOTER = """</div>
 _NAV_ITEMS = [
     ("report", "/report", "报表页"),
     ("config", "/config", "配置管理"),
+    ("api", "/config/api-endpoints", "API 接口"),
     ("audit", "/audit", "审计日志"),
     ("logout", "/logout", "退出"),
 ]
@@ -1811,8 +1825,23 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         if show_report_name:
             rname = _escape(ep.get("report_name", ""))
             report_name_cell = f'<td>{rname}</td>'
+        # 快捷启用/禁用：POST 到独立管理页 toggle 端点，回跳来源页（禁用需确认）
+        toggle_label = "禁用" if enabled else "启用"
+        if report_id is not None:
+            toggle_return_to = f"/config/reports/{report_id}/edit"
+        else:
+            toggle_return_to = "/config/api-endpoints"
+        toggle_confirm = (" onsubmit=\"return confirm('确定禁用 API 接口 "
+                          f"{_escape(ep_name)}？')\"") if enabled else ""
+        toggle_btn = f"""<form method="post" action="/config/api-endpoints" style="display:inline"{toggle_confirm}>
+      <input type="hidden" name="action" value="toggle">
+      <input type="hidden" name="endpoint_id" value="{ep_id}">
+      <input type="hidden" name="return_to" value="{toggle_return_to}">
+      <button type="submit" class="btn btn-outline btn-sm">{toggle_label}</button>
+    </form>"""
         if report_id is not None:
             ops_cell = f"""<td class="ops-cell">
+    {toggle_btn}
     {_link_btn(f"/config/reports/{report_id}/api_endpoints/{ep_id}/edit", "编辑")}
     <form method="post" action="/config/reports/{report_id}/api_endpoints/{ep_id}/delete" style="display:inline"
           onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
@@ -1821,6 +1850,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
   </td>"""
         else:
             ops_cell = f"""<td class="ops-cell">
+    {toggle_btn}
     <form method="post" action="/config/api-endpoints" style="display:inline"
           onsubmit="return confirm('确定删除 API 接口 {_escape(ep_name)}？')">
       <input type="hidden" name="action" value="delete">
@@ -2204,6 +2234,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         flash_html = ""
 
     name = _escape(endpoint["name"]) if endpoint else ""
+    description = _escape((endpoint or {}).get("description") or "")
     url_path = endpoint["url_path"] if endpoint else ""
     # 从完整 URL 路径中剥离 /api/ 前缀，仅保留用户输入的后段
     if url_path.startswith("/api/"):
@@ -2275,6 +2306,10 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 <form method="post" action="{action_url}" class="config-form">
   <label>接口名称: <input type="text" name="name" value="{name}" required
     placeholder="例如: 客户数据 API"></label>
+
+  <label>接口说明（可选，仅页面展示，不进入 API 输出）:
+    <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持换行…" rows="4" style="min-height:80px;font-family:inherit">{description}</textarea>
+  </label>
 
   <label>URL 路径:
     <div style="display:flex;align-items:center;gap:0;margin-top:4px">
@@ -2786,6 +2821,72 @@ def _build_api_url_row(code_id: str, label: str, url_path: str,
             f'</div>')
 
 
+def _build_api_admin_actions_html(ep: dict) -> str:
+    """构建 API 管理操作行（启用/禁用切换 + 配置入口）。
+
+    报表查看页折叠区内展示：POST toggle 到独立管理页端点（带回跳来源），
+    配置按钮新窗口打开编辑表单。管理操作随折叠区默认收起，不打扰浏览者。
+    """
+    ep_id = int(ep.get("id", 0))
+    report_id = int(ep.get("report_id", 0))
+    if not ep_id:
+        return ""
+    enabled = int(ep.get("enabled", 1)) == 1
+    toggle_label = "禁用" if enabled else "启用"
+    # 禁用对外停服，需确认；启用为无损操作不确认
+    confirm_attr = (" onsubmit=\"return confirm('确定禁用 API 接口 "
+                    f"{_escape(ep.get('name') or '')}？')\"") if enabled else ""
+    return_to = f"/report?id={report_id}"
+    return f"""<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <form method="post" action="/config/api-endpoints" style="display:inline"{confirm_attr}>
+    <input type="hidden" name="action" value="toggle">
+    <input type="hidden" name="endpoint_id" value="{ep_id}">
+    <input type="hidden" name="return_to" value="{return_to}">
+    <button type="submit" class="btn btn-sm btn-outline" style="cursor:pointer">{toggle_label}</button>
+  </form>
+  <a href="/config/reports/{report_id}/api_endpoints/{ep_id}/edit" target="_blank" rel="noopener" class="btn btn-sm btn-outline">配置</a>
+</div>"""
+
+
+def _build_api_status_badge(enabled) -> str:
+    """构建接口状态徽章 HTML（启用=绿/禁用=红）。"""
+    return ('<span style="color:#059669;font-weight:600">启用</span>'
+            if int(enabled or 0) == 1 else
+            '<span style="color:#dc2626;font-weight:600">禁用</span>')
+
+
+# 接口说明超过该阈值（字符数）或含换行时截断显示 + 展开按钮
+_API_DESC_TRUNCATE_LEN = 80
+
+
+def _build_api_description_html(ep: dict) -> str:
+    """构建接口说明块 HTML（纯展示，保留换行，长文本截断 + 展开/收起）。
+
+    截断策略：说明长度超过阈值或含换行时，以 CSS line-clamp 限 3 行，
+    配"展开/收起"按钮（toggleApiDesc 切换）；短说明完整显示。
+    """
+    desc_raw = (ep.get("description") or "").strip()
+    if not desc_raw:
+        return ""
+    desc = _escape(desc_raw)
+    truncate = len(desc_raw) > _API_DESC_TRUNCATE_LEN or "\n" in desc_raw
+    if truncate:
+        box = (f'<div style="display:-webkit-box;-webkit-line-clamp:3;'
+               f'-webkit-box-orient:vertical;overflow:hidden;'
+               f'white-space:pre-wrap;word-break:break-word;'
+               f'margin:4px 0 2px 0;font-size:13px;color:#475569;line-height:1.6">'
+               f'{desc}</div>'
+               f'<button type="button" onclick="toggleApiDesc(this)" '
+               f'style="padding:2px 8px;font-size:12px;cursor:pointer;'
+               f'border:1px solid #cbd5e1;border-radius:4px;background:#fff;'
+               f'color:#4f46e5">展开</button>')
+    else:
+        box = (f'<div style="white-space:pre-wrap;word-break:break-word;'
+               f'margin:4px 0 2px 0;font-size:13px;color:#475569;line-height:1.6">'
+               f'{desc}</div>')
+    return f'<div class="api-desc" style="margin-top:2px">{box}</div>'
+
+
 def _build_single_api_url_html(ep: dict, base_url: str) -> str:
     """构建单个 API 端点的 URL 显示区域（样式与 Debug 信息模块一致）。"""
     ep_id = ep['id']
@@ -2812,8 +2913,10 @@ def _build_single_api_url_html(ep: dict, base_url: str) -> str:
     return f"""<div class="debug-info" style="margin-top:8px">
 <button class="debug-toggle" onclick="toggleSection(this, 'API 调用地址')" type="button">▶ API 调用地址</button>
 <div class="debug-content hidden">
-  <div style="margin-bottom:4px"><strong>接口名称:</strong> {ep_name}</div>
+  <div style="margin-bottom:4px"><strong>{ep_name}</strong> {_build_api_status_badge(ep.get("enabled", 1))}</div>
+  {_build_api_description_html(ep)}
   {rows}
+  {_build_api_admin_actions_html(ep)}
 </div>
 </div>"""
 
@@ -2844,8 +2947,10 @@ def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> st
 
         sep = '<div style="border-top:1px dashed #cbd5e1;margin:8px 0"></div>' if idx > 0 else ""
         api_items += f"""{sep}
-<div style="margin-bottom:2px"><strong>{ep_name}</strong></div>
-{rows}"""
+<div style="margin-bottom:2px"><strong>{ep_name}</strong> {_build_api_status_badge(ep.get("enabled", 1))}</div>
+{_build_api_description_html(ep)}
+{rows}
+{_build_api_admin_actions_html(ep)}"""
 
     return f"""<div class="debug-info" style="margin-top:8px">
 <button class="debug-toggle" onclick="toggleSection(this, 'API 调用地址 ({len(api_endpoints)} 个接口)')" type="button">▶ API 调用地址 ({len(api_endpoints)} 个接口)</button>

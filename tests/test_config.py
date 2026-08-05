@@ -8,6 +8,7 @@ test_config.py — config.py 单元测试
 
 import unittest
 import sqlite3
+import urllib.parse
 import config
 import db
 import auth
@@ -72,6 +73,7 @@ def _make_conn():
             allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
             static_cache    INTEGER NOT NULL DEFAULT 1,
             json_template   TEXT,
+            description     TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -670,6 +672,79 @@ class TestApiEndpointsListPage(BaseConfigTest):
             form_body="action=delete&endpoint_id=abc")
         self.assertEqual(code, 302)
         self.assertIn("无效", body)
+
+
+class TestApiEndpointToggle(BaseConfigTest):
+    """API 端点启用/禁用 toggle 处理"""
+
+    def setUp(self):
+        super().setUp()
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query) VALUES (?,?)",
+            ("测试报表", "SELECT 1"))
+        self.conn.commit()
+        self.eid = db.add_api_endpoint(
+            self.conn, 1, "开关端点", "/api/toggle-ep", enabled=1)
+
+    def _post(self, form_body):
+        return config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "", form_body=form_body)
+
+    def test_toggle_disables_enabled(self):
+        """启用端点 toggle 后禁用"""
+        code, body, headers = self._post(
+            f"action=toggle&endpoint_id={self.eid}")
+        self.assertEqual(code, 302)
+        self.assertEqual(db.get_api_endpoint(self.conn, self.eid)["enabled"], 0)
+
+    def test_toggle_enables_disabled(self):
+        """禁用端点 toggle 后启用"""
+        db.update_api_endpoint(self.conn, self.eid, enabled=0)
+        code, body, headers = self._post(
+            f"action=toggle&endpoint_id={self.eid}")
+        self.assertEqual(code, 302)
+        self.assertEqual(db.get_api_endpoint(self.conn, self.eid)["enabled"], 1)
+
+    def test_toggle_not_found(self):
+        """不存在的端点返回错误提示"""
+        code, body, headers = self._post("action=toggle&endpoint_id=999")
+        self.assertEqual(code, 302)
+        self.assertIn(urllib.parse.quote("错误"), body)
+
+    def test_toggle_invalid_id_format(self):
+        """无效 ID 格式返回错误提示"""
+        code, body, headers = self._post("action=toggle&endpoint_id=abc")
+        self.assertEqual(code, 302)
+        self.assertIn(urllib.parse.quote("错误"), body)
+
+    @unittest.mock.patch("config_db.static_cache.invalidate")
+    def test_toggle_invalidates_cache(self, mock_invalidate):
+        """toggle 落库走统一更新函数，触发静态缓存失效"""
+        self._post(f"action=toggle&endpoint_id={self.eid}")
+        mock_invalidate.assert_called_once()
+
+    @unittest.mock.patch("config_db._write_audit_log")
+    def test_toggle_audit_logged(self, mock_audit):
+        """toggle 产生审计日志（update_api_endpoint 内建）"""
+        self._post(f"action=toggle&endpoint_id={self.eid}")
+        args, kwargs = mock_audit.call_args
+        self.assertEqual(args[1], "update_api_endpoint")
+        self.assertEqual(kwargs["after_value"]["enabled"], 0)
+
+    def test_toggle_return_to_report(self):
+        """携带 return_to 时回跳到来源页并带 flash"""
+        code, body, headers = self._post(
+            f"action=toggle&endpoint_id={self.eid}&return_to=/report?id=1")
+        self.assertEqual(code, 302)
+        self.assertTrue(body.startswith("/report?id=1"), body)
+        self.assertIn("flash=", body)
+
+    def test_toggle_default_return(self):
+        """无 return_to 时回跳到独立管理页"""
+        code, body, headers = self._post(
+            f"action=toggle&endpoint_id={self.eid}")
+        self.assertEqual(code, 302)
+        self.assertTrue(body.startswith("/config/api-endpoints"), body)
 
 
 class TestApiEndpointsRoute(unittest.TestCase):

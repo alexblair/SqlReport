@@ -94,6 +94,7 @@ def _set_up_db():
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             static_cache INTEGER NOT NULL DEFAULT 1,
             json_template TEXT,
+            description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -366,6 +367,15 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("id", body["data"][0])
         self.assertIn("name", body["data"][0])
         self.assertNotIn("age", body["data"][0])
+
+    def test_api_response_excludes_description(self):
+        """API 响应体不含接口说明（description 只用于页面展示）"""
+        self._create_endpoint_in_db(url_path="/api/desc-isolated",
+                                     description="这是接口说明\n第二行不应出现")
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/desc-isolated")
+        body = resp.read().decode("utf-8")
+        self.assertNotIn("这是接口说明", body)
+        self.assertNotIn("description", body)
 
     def test_api_json_error_response(self):
         """Accept: application/json 时错误返回 JSON"""
@@ -1354,6 +1364,114 @@ class TestJsonTemplateColumn(unittest.TestCase):
                          '{"a": {{data}}}')
         self.assertEqual(kwargs["after_value"]["json_template"],
                          '{"b": {{total}}}')
+        conn.close()
+
+
+class TestDescriptionColumn(unittest.TestCase):
+    """api_endpoints.description 列：迁移、CRUD 读写与缓存失效联动。
+
+    注意：每个测试自建独立内存库（description 为纯展示字段）。
+    """
+
+    def _make_conn(self):
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        conn.execute(tb._SQL_CREATE_API_ENDPOINTS)
+        conn.execute("INSERT INTO report_configs (name, sql_query) VALUES (?, ?)",
+                     ("测试报表", "SELECT 1"))
+        conn.commit()
+        return conn
+
+    def test_new_schema_has_description_column(self):
+        """新库建表后 description 列存在"""
+        conn = self._make_conn()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        conn.close()
+        self.assertIn("description", cols)
+
+    def test_migration_adds_column_and_keeps_data(self):
+        """存量库（无 description 列）迁移后列存在、存量数据完好且为 NULL"""
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        old_schema = tb._SQL_CREATE_API_ENDPOINTS.replace(
+            "    json_template   TEXT,\n", "")
+        conn.execute(old_schema)
+        conn.execute("INSERT INTO api_endpoints (report_id, name, url_path) "
+                     "VALUES (1, '存量端点', '/api/legacy-desc')")
+        conn.commit()
+        from config_db import _init_sqlite_migrations
+        _init_sqlite_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        self.assertIn("description", cols)
+        row = conn.execute(
+            "SELECT name, url_path, description FROM api_endpoints").fetchone()
+        self.assertEqual(row[0], "存量端点")
+        self.assertEqual(row[1], "/api/legacy-desc")
+        self.assertIsNone(row[2], "存量端点迁移后 description 为 NULL")
+        conn.close()
+
+    def test_add_description_roundtrip(self):
+        """新增端点写入多行 description 可回读"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "说明端点", "/api/desc-write",
+            description="第一行用途说明\n第二行注意事项")
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["description"], "第一行用途说明\n第二行注意事项")
+
+    def test_add_description_default_null(self):
+        """不传 description 默认 NULL"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(conn, 1, "无说明", "/api/desc-null")
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertIsNone(ep["description"])
+
+    def test_update_description_roundtrip(self):
+        """更新 description 生效；不传保持原值；显式 None 可清除"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "更新说明", "/api/desc-update", description="旧说明")
+        db.update_api_endpoint(conn, eid, description="新说明\n第二行")
+        self.assertEqual(db.get_api_endpoint(conn, eid)["description"],
+                         "新说明\n第二行")
+        db.update_api_endpoint(conn, eid, name="改名")
+        self.assertEqual(db.get_api_endpoint(conn, eid)["description"],
+                         "新说明\n第二行")
+        db.update_api_endpoint(conn, eid, description=None)
+        self.assertIsNone(db.get_api_endpoint(conn, eid)["description"])
+        conn.close()
+
+    @unittest.mock.patch("config_db.static_cache.invalidate")
+    def test_update_description_only_does_not_invalidate(self, mock_invalidate):
+        """仅更新 description 不触发静态缓存失效（纯元数据字段）"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "说明端点", "/api/desc-cache", description="旧说明")
+        db.update_api_endpoint(conn, eid, description="新说明")
+        mock_invalidate.assert_not_called()
+        conn.close()
+
+    def test_update_output_field_still_invalidates(self):
+        """更新输出相关字段仍触发失效（回归保护：只跳过纯元数据字段）"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(conn, 1, "说明端点", "/api/desc-cache2")
+        with unittest.mock.patch("config_db.static_cache.invalidate") as mock_invalidate:
+            db.update_api_endpoint(conn, eid, row_limit=10)
+        mock_invalidate.assert_called_once()
         conn.close()
 
 

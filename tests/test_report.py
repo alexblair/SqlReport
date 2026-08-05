@@ -67,6 +67,7 @@ def _make_conn():
             allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
             static_cache    INTEGER NOT NULL DEFAULT 1,
             json_template   TEXT,
+            description     TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -129,6 +130,7 @@ def _make_conn2():
             allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
             static_cache    INTEGER NOT NULL DEFAULT 1,
             json_template   TEXT,
+            description     TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -206,6 +208,52 @@ class TestReportExecution(unittest.TestCase):
         self.assertIn("id", body)
         self.assertIn("name", body)
         self.assertIn("email", body)
+
+    @patch("report.execute_report")
+    def test_report_navbar_has_api_entry(self, mock_exec):
+        """报表页导航栏包含 API 接口独立入口"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn("API 接口", body)
+        self.assertIn('href="/config/api-endpoints"', body)
+
+    @patch("report.execute_report")
+    def test_report_renders_flash(self, mock_exec):
+        """报表页渲染 flash 提示（toggle 回跳后可见）"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1&flash=API 接口 测试端点 已禁用",
+                                               pool_override=self.mock_pool)
+        self.assertEqual(code, 200)
+        self.assertIn('class="flash flash-success"', body)
+        self.assertIn("API 接口 测试端点 已禁用", body)
+
+    @patch("report.execute_report")
+    def test_report_flash_error_style(self, mock_exec):
+        """错误类 flash 使用红色样式"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1&flash=错误: API 接口不存在",
+                                               pool_override=self.mock_pool)
+        self.assertIn('class="flash flash-error"', body)
+
+    @patch("report.execute_report")
+    def test_report_no_flash_no_banner(self, mock_exec):
+        """无 flash 参数时不渲染提示条（CSS 样式定义不算）"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertNotIn('class="flash flash-success"', body)
+        self.assertNotIn('class="flash flash-error"', body)
 
     @patch("report.execute_report")
     def test_report_empty_result(self, mock_exec):

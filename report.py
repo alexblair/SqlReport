@@ -440,6 +440,7 @@ _PAGE_HEADER = """<!DOCTYPE html>
   <div class="spacer"></div>
   <a href="/report" class="nav-active">报表页</a>
   <a href="/config">配置管理</a>
+  <a href="/config/api-endpoints">API 接口</a>
   <a href="/audit">审计日志</a>
   <a href="/logout">退出</a>
 </div>
@@ -1110,13 +1111,15 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        cols_raw: str = None,
                        sql_override: str = None,
                        active_index: int = 0,
-                       result_names_override: str = None) -> str:
+                       result_names_override: str = None,
+                       flash: str = None) -> str:
     """
     渲染报表数据展示页，支持多字段排序/筛选/自定义列/多结果集。
     cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
-              为 None 表示全部显示。
+               为 None 表示全部显示。
     sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL，不保存到数据库。
     active_index: 当前激活的结果集索引。
+    flash: 操作结果提示（如 API 快捷开关回跳），None=不显示。
     """
     report = db.get_report(conn, report_id)
     if not report:
@@ -1167,7 +1170,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
     return _build_report_html(conn, report, result, pool_config,
                               sorts or [], filters or [], refresh,
                               display_columns, sql_override, active_index,
-                              result_names_override=result_names_override)
+                              result_names_override=result_names_override,
+                              flash=flash)
 
 
 # ===================================================================
@@ -1182,13 +1186,15 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                        display_columns: list[str] = None,
                        sql_override: str = None,
                        active_index: int = 0,
-                       result_names_override: str = None) -> str:
+                       result_names_override: str = None,
+                       flash: str = None) -> str:
     """
     构建完整的报表 HTML，支持多结果集下拉切换。
     sorts/filters 均为列表。
     display_columns: 用户自定义的显示列列表（顺序 + 可见性），None 表示全部显示。
     sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL。
     active_index: 当前激活的结果集索引。
+    flash: 操作结果提示（如 API 快捷开关回跳），None=不显示。
     """
     sorts = sorts or []
     filters = filters or []
@@ -1280,6 +1286,10 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     filter_form_html = build_filter_form_html(filter_form_id, form_hidden_str)
 
     # ---- 组装最终 HTML ----
+    flash_html = ""
+    if flash:
+        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
+        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
     body = (_PAGE_HEADER +
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
@@ -1287,9 +1297,10 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             ('<div class="preview-badge" style="background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600">'
              '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
              '</div>' if sql_override else '') +
-            f'<div style="margin-bottom:10px">'
-            f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
-            f'</div>' +
+             f'<div style="margin-bottom:10px">'
+             f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
+             f'</div>' +
+            flash_html +
             memo_html +
             api_urls_html +
             debug_html +
@@ -1421,5 +1432,6 @@ def handle_request(conn, method: str, path: str, query: str,
         return 302, new_url, {}
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
-                              sorts, filters, refresh_flag, cols_raw, active_index=active_index)
+                              sorts, filters, refresh_flag, cols_raw,
+                              active_index=active_index, flash=_qs_val(qs, "flash"))
     return 200, html, {}
