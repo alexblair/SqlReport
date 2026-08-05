@@ -85,6 +85,7 @@ def _set_up_db():
             result_index INTEGER NOT NULL DEFAULT 0,
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             static_cache INTEGER NOT NULL DEFAULT 1,
+            json_template TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);

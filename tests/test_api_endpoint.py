@@ -93,6 +93,7 @@ def _set_up_db():
             result_index INTEGER NOT NULL DEFAULT 0,
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             static_cache INTEGER NOT NULL DEFAULT 1,
+            json_template TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -946,6 +947,131 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         handler.wfile.write.side_effect = BrokenPipeError("Broken pipe")
         srv.ReportHandler._handle_api(
             handler, "GET", "/api/broken-pipe-test", "", conn)
+        conn.close()
+
+
+# =====================================================================
+# json_template 列（迁移 12）测试
+# =====================================================================
+
+class TestJsonTemplateColumn(unittest.TestCase):
+    """api_endpoints.json_template 列：迁移、CRUD 读写与审计。
+
+    注意：不使用模块级共享临时库（TestApiEndpointIntegration.tearDownClass
+    会删除该文件，影响其后执行的类），每个测试自建独立内存库。
+    """
+
+    def _make_conn(self):
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        conn.execute(tb._SQL_CREATE_API_ENDPOINTS)
+        conn.execute("INSERT INTO report_configs (name, sql_query) VALUES (?, ?)",
+                     ("测试报表", "SELECT 1"))
+        conn.commit()
+        return conn
+
+    def test_new_schema_has_json_template_column(self):
+        """新库建表后 json_template 列存在"""
+        conn = self._make_conn()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        conn.close()
+        self.assertIn("json_template", cols)
+
+    def test_migration_adds_column_and_keeps_data(self):
+        """存量库（无 json_template 列）迁移后列存在、存量数据完好且为 NULL"""
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        old_schema = tb._SQL_CREATE_API_ENDPOINTS.replace(
+            "    static_cache    INTEGER NOT NULL DEFAULT 1,\n", "")
+        conn.execute(old_schema)
+        conn.execute("INSERT INTO api_endpoints (report_id, name, url_path) "
+                     "VALUES (1, '存量端点', '/api/legacy-tpl')")
+        conn.commit()
+        from config_db import _init_sqlite_migrations
+        _init_sqlite_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        self.assertIn("json_template", cols)
+        row = conn.execute(
+            "SELECT name, url_path, json_template FROM api_endpoints").fetchone()
+        self.assertEqual(row[0], "存量端点")
+        self.assertEqual(row[1], "/api/legacy-tpl")
+        self.assertIsNone(row[2], "存量端点迁移后 json_template 为 NULL")
+        conn.close()
+
+    def test_add_with_template_roundtrip(self):
+        """新增端点写入 json_template 可回读"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "模板端点", "/api/tpl-write",
+            json_template='{"rand99": {{data}}}')
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["json_template"], '{"rand99": {{data}}}')
+
+    def test_add_default_null(self):
+        """不传 json_template 默认 NULL"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(conn, 1, "无模板", "/api/tpl-null")
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertIsNone(ep["json_template"])
+
+    def test_update_template_roundtrip(self):
+        """更新 json_template 生效；不传保持原值；显式空串可清除"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "更新模板", "/api/tpl-update",
+            json_template='{"a": {{data}}}')
+        db.update_api_endpoint(conn, eid, json_template='{"b": {{total}}}')
+        ep = db.get_api_endpoint(conn, eid)
+        self.assertEqual(ep["json_template"], '{"b": {{total}}}')
+        db.update_api_endpoint(conn, eid, name="改名")
+        ep = db.get_api_endpoint(conn, eid)
+        self.assertEqual(ep["json_template"], '{"b": {{total}}}',
+                         "不传模板应保持原值")
+        db.update_api_endpoint(conn, eid, json_template="")
+        ep = db.get_api_endpoint(conn, eid)
+        self.assertEqual(ep["json_template"], "", "显式传空串可清除模板")
+        conn.close()
+
+    def test_update_static_cache_roundtrip(self):
+        """更新 static_cache 生效（既有参数曾为死参数，本测试固化修复）"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "缓存开关", "/api/tpl-sc", static_cache=1)
+        db.update_api_endpoint(conn, eid, static_cache=0)
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["static_cache"], 0)
+
+    @unittest.mock.patch("config_db._write_audit_log")
+    def test_update_audit_log_records_template_change(self, mock_audit):
+        """更新端点时审计日志记录 json_template 变更（before/after 双快照）"""
+        conn = self._make_conn()
+        eid = db.add_api_endpoint(
+            conn, 1, "审计端点", "/api/audit-tpl",
+            json_template='{"a": {{data}}}')
+        mock_audit.reset_mock()
+        db.update_api_endpoint(conn, eid, json_template='{"b": {{total}}}',
+                               session_user="admin")
+        args, kwargs = mock_audit.call_args
+        self.assertEqual(args[1], "update_api_endpoint")
+        self.assertEqual(kwargs["before_value"]["json_template"],
+                         '{"a": {{data}}}')
+        self.assertEqual(kwargs["after_value"]["json_template"],
+                         '{"b": {{total}}}')
         conn.close()
 
 
