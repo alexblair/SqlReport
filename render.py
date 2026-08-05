@@ -2140,6 +2140,33 @@ _API_TEMPLATE_JS = r'''
 '''
 
 
+def build_api_endpoint_preview_help_html(report_id: int, endpoint_id: int) -> str:
+    """渲染真实数据预览指引页（预览地址被直接 GET 打开时）。
+
+    预览需要携带表单未保存值（json_template/rule_json/result_mode/
+    result_index/row_limit），直接打开地址无法执行，给出返回编辑页的指引。
+    """
+    back_url = f"/config/reports/{report_id}/api_endpoints/{endpoint_id}/edit"
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<title>真实数据预览</title></head>"
+        "<body style='font-family:sans-serif;background:#f8fafc;margin:0;"
+        "padding:60px 20px;color:#0f172a'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;"
+        "border:1px solid #e2e8f0;border-radius:12px;padding:32px'>"
+        "<h2 style='margin-top:0'>真实数据预览</h2>"
+        "<p>预览需要携带当前编辑表单中的模板与规则参数，请通过"
+        "「用真实数据预览」按钮发起，或点击下方按钮返回编辑页填写。"
+        "</p><a href='" + back_url + "' style='display:inline-block;margin-top:12px;"
+        "padding:8px 20px;background:#6366f1;color:#fff;border-radius:8px;"
+        "text-decoration:none'>返回编辑页</a>"
+        "<div style='margin-top:24px;font-size:12px;color:#64748b'>"
+        "POST 请求需携带参数：json_template、rule_json、result_mode、"
+        "result_index、row_limit（均与编辑表单一致）。</div>"
+        "</div></body></html>"
+    )
+
+
 def build_api_endpoint_form_html(report_id: int, report_name: str,
                                  endpoint: dict = None,
                                  flash: str = None,

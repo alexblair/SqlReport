@@ -21,6 +21,7 @@ import json
 import logging
 import urllib.parse
 import db
+import config_db
 import auth
 import redis_cache
 import static_cache
@@ -41,6 +42,7 @@ from render import (
     _SQL_FORMATTER_JS,
     build_api_endpoints_list_html,
     build_api_endpoint_form_html,
+    build_api_endpoint_preview_help_html,
 )
 
 
@@ -1040,6 +1042,10 @@ def handle_request(conn, method: str, path: str, query: str,
         if route["action"] == "api_edit" and route["endpoint_id"]:
             return 200, render_api_endpoint_form_page(
                 conn, route["report_id"], route["endpoint_id"]), {}
+        if route["action"] == "api_preview" and route["endpoint_id"]:
+            # GET 直开预览地址：无表单值可执行，返回指引页
+            return 200, build_api_endpoint_preview_help_html(
+                route["report_id"], route["endpoint_id"]), {}
 
     # ---- POST 处理 ----
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
@@ -1184,6 +1190,12 @@ def render_api_endpoint_form_page(conn, report_id: int,
             + render_page_footer())
 
 
+def _template_raw_for_format(output_format: str, data: dict) -> str:
+    """按输出格式取模板文本：CSV 模式不支持模板，返回空串（不校验、不落库，
+    保留库中原值，切回 JSON 后模板仍可用）。"""
+    return "" if output_format == "csv" else data.get("json_template", "")
+
+
 def _validate_json_template(raw: str, result_mode: str) -> str | None:
     """校验 JSON 输出模板文本；返回错误消息（None=合法或未启用）。
 
@@ -1234,7 +1246,7 @@ def handle_api_endpoint_add(conn, report_id: int,
         result_index = int(data.get("result_index", 0) or 0)
         output_format = data.get("output_format", "json")
         # CSV 模式忽略模板字段（模板仅 JSON 有效），不校验、不落库
-        template_raw = "" if output_format == "csv" else data.get("json_template", "")
+        template_raw = _template_raw_for_format(output_format, data)
         tpl_err = _validate_json_template(template_raw, result_mode)
         if tpl_err:
             return 200, render_api_endpoint_form_page(
@@ -1295,7 +1307,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         output_format = data.get("output_format", "json")
         # CSV 模式忽略模板字段（模板仅 JSON 有效）：不校验、不更新（保留原值，
         # 切回 JSON 后模板仍可用）
-        template_raw = "" if output_format == "csv" else data.get("json_template", "")
+        template_raw = _template_raw_for_format(output_format, data)
         tpl_err = _validate_json_template(template_raw, result_mode)
         if tpl_err:
             tmp = _endpoint_from_form(data, url_path, result_mode)
@@ -1314,6 +1326,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             api_key=data.get("api_key") or None,
             allowed_origins=data.get("allowed_origins") or None,
             enabled=enabled,
+            allow_fetch_all=allow_fetch_all,
             result_mode=result_mode,
             result_index=result_index,
             static_cache=static_cache_enabled,
@@ -1373,10 +1386,10 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
 
     if not (form_body or "").strip():
         # 直接 GET 打开预览地址：无表单值可执行，返回可交互指引页
-        return 200, _render_preview_help_page(report_id, endpoint_id), \
-            {"Content-Type": "text/html; charset=utf-8"}
+        return 200, build_api_endpoint_preview_help_html(
+            report_id, endpoint_id), {"Content-Type": "text/html; charset=utf-8"}
 
-    endpoint = db.get_api_endpoint(conn, endpoint_id)
+    endpoint = config_db.get_api_endpoint(conn, endpoint_id)
     if not endpoint:
         return fail("API 接口不存在")
     if int(endpoint.get("report_id", 0)) != report_id:
@@ -1429,29 +1442,6 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
         return fail("预览输出构建失败")
     return 200, json.dumps({"ok": True, "output": out_body},
                            ensure_ascii=False), json_headers
-
-
-def _render_preview_help_page(report_id: int, endpoint_id: int) -> str:
-    """预览地址被直接 GET 打开时返回的交互式指引页。"""
-    back_url = f"/config/reports/{report_id}/api_endpoints/{endpoint_id}/edit"
-    return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        "<title>真实数据预览</title></head>"
-        "<body style='font-family:sans-serif;background:#f8fafc;margin:0;"
-        "padding:60px 20px;color:#0f172a'>"
-        "<div style='max-width:560px;margin:0 auto;background:#fff;"
-        "border:1px solid #e2e8f0;border-radius:12px;padding:32px'>"
-        "<h2 style='margin-top:0'>真实数据预览</h2>"
-        "<p>预览需要携带当前编辑表单中的模板与规则参数，请通过"
-        "「用真实数据预览」按钮发起，或点击下方按钮返回编辑页填写。"
-        "</p><a href='" + back_url + "' style='display:inline-block;margin-top:12px;"
-        "padding:8px 20px;background:#6366f1;color:#fff;border-radius:8px;"
-        "text-decoration:none'>返回编辑页</a>"
-        "<div style='margin-top:24px;font-size:12px;color:#64748b'>"
-        "POST 请求需携带参数：json_template、rule_json、result_mode、"
-        "result_index、row_limit（均与编辑表单一致）。</div>"
-        "</div></body></html>"
-    )
 
 
 def handle_api_endpoints_request(conn, method: str, path: str, query: str,

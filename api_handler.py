@@ -238,7 +238,7 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
             file_content = resp_body
         else:
             file_content = _attach_static_meta(resp_body, meta)
-        if _static_content_has_meta(file_content):
+        if static_cache.content_has_object_meta(file_content):
             written = static_cache.write_file(file_path, file_content)
         else:
             # 无 meta 模板输出：版本体现在文件名，模板变化自动失效重建
@@ -251,17 +251,6 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
     resp_headers["X-Static-Cache"] = "miss"
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
-
-
-def _static_content_has_meta(content: str) -> bool:
-    """静态文件内容是否含 meta 顶层键（决定写入方式与版本判定来源）。
-
-    内容不可解析时保守返回 True（走稳定文件 + 内容 meta 判定路径）。
-    """
-    try:
-        return "meta" in json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        return True
 
 
 def _build_static_meta(ttl_hours: int, url_key: str, config_version: str,

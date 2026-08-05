@@ -907,6 +907,59 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("全量", html)
         self.assertIn("允许", html)
 
+    def test_config_api_endpoint_edit_saves_allow_fetch_all(self):
+        """编辑保存 allow_fetch_all 开关落库（回归：曾丢失该字段不更新）。
+
+        修复场景：edit 路径改 update_kwargs 后丢失 allow_fetch_all 参数，
+        update_api_endpoint 仅更新传入字段 → 开关不再落库。
+        """
+        eid = self._create_endpoint_in_db(url_path="/api/ui-fetch-save", allow_fetch_all=1)
+        _, opener = self._login_and_get_cookie()
+        form_data = urllib.parse.urlencode({
+            "name": "全量开关编辑",
+            "url_path": "ui-fetch-save",
+            "output_format": "json",
+            "row_limit": "0",
+            "rule_json": "",
+            "enabled": "1",
+            "allow_fetch_all": "0",
+            "action": "save_close",
+        }).encode()
+        resp = opener.open(
+            urllib.request.Request(
+                f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+                data=form_data, method="POST",
+            )
+        )
+        resp.read()
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["allow_fetch_all"], 0, "编辑关闭全量开关应落库")
+        # 反向：勾选恢复为 1
+        _, opener2 = self._login_and_get_cookie()
+        form_data2 = urllib.parse.urlencode({
+            "name": "全量开关编辑",
+            "url_path": "ui-fetch-save",
+            "output_format": "json",
+            "row_limit": "0",
+            "rule_json": "",
+            "enabled": "1",
+            "allow_fetch_all": "1",
+            "action": "save_close",
+        }).encode()
+        resp2 = opener2.open(
+            urllib.request.Request(
+                f"{BASE_URL}/config/reports/{_TEST_REPORT_ID}/api_endpoints/{eid}/edit",
+                data=form_data2, method="POST",
+            )
+        )
+        resp2.read()
+        conn = _get_conn()
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["allow_fetch_all"], 1, "编辑勾选全量开关应落库")
+
     # ------------------------------------------------------------------
     # 静态文件缓存（.json 变体）UI
     # ------------------------------------------------------------------

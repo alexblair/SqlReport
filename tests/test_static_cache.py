@@ -358,6 +358,69 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
         self.assertNotIn("meta", parsed)
         self.assertEqual(len(parsed["rand99_rows"]), 3)
 
+    def test_template_meta_non_object_value(self):
+        """模板把 meta 改写为非对象值（键集内合法）：可命中，不 miss 重建循环。
+
+        修复场景：{"meta": {{data}}} 时 meta 为数组，原实现 try_read 对
+        非 dict meta 调 .get 抛 AttributeError → 每次请求 miss 重建 +
+        warning 日志噪音。
+        """
+        rid = self._create_report(ttl_hours=24)
+        self._create_endpoint(
+            report_id=rid,
+            json_template='{"rand99_rows": {{data}}, "meta": {{data}}}')
+        status, body1, headers1 = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers1.get("X-Static-Cache"), "miss")
+        self.assertEqual(len(json.loads(body1)["rand99_rows"]), 3)
+        # 二次请求必须命中（非对象 meta 走版本化文件判定）
+        status, body2, headers2 = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers2.get("X-Static-Cache"), "hit")
+        self.assertEqual(body2, body1)
+        # 改模板 → 版本变化 → miss 重建
+        conn = _get_conn()
+        eid = db.get_api_endpoint_by_path(conn, "/api/cust")["id"]
+        db.update_api_endpoint(
+            conn, eid, json_template='{"rand99_rows": {{data}}, "meta": {{data}}, "extra": 1}')
+        conn.close()
+        static_cache._last_invalidated.clear()
+        _, body3, headers3 = self._request("/api/cust.json")
+        self.assertEqual(headers3.get("X-Static-Cache"), "miss")
+        self.assertEqual(json.loads(body3)["extra"], 1)
+        _, _, headers4 = self._request("/api/cust.json")
+        self.assertEqual(headers4.get("X-Static-Cache"), "hit")
+
+    def test_remove_stale_versioned_keeps_newer_concurrent(self):
+        """清理旧版本文件时保留 mtime 新于 keep 的文件（并发写入保护）。
+
+        并发场景：写入方 A 完成双写后清理旧版本，此时并发方 B 刚写入
+        更新版本文件；清理不得删除 B 的新文件（最后写入者生效），
+        否则 B 的版本文件下次请求 miss 重建。
+        """
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        file_path = os.path.join(_CACHE_DIR, "api", "concurrent.json")
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        v_keep = static_cache._versioned_path(file_path, "aaaa1111")
+        v_newer = static_cache._versioned_path(file_path, "bbbb2222")
+        with open(v_keep, "w", encoding="utf-8") as f:
+            f.write("{}")
+        with open(v_newer, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.utime(v_keep, (1000, 1000))
+        os.utime(v_newer, (2000, 2000))
+        static_cache._remove_stale_versioned(file_path, keep=v_keep)
+        self.assertTrue(os.path.isfile(v_newer), "并发写入的更新版本文件必须保留")
+        self.assertTrue(os.path.isfile(v_keep), "keep 文件不得被清理")
+        # 旧版本（mtime 早于 keep）正常清理
+        v_old = static_cache._versioned_path(file_path, "0000ffff")
+        with open(v_old, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.utime(v_old, (500, 500))
+        static_cache._remove_stale_versioned(file_path, keep=v_newer)
+        self.assertFalse(os.path.isfile(v_old), "旧版本文件应被清理")
+        self.assertTrue(os.path.isfile(v_newer))
+
     def test_template_no_meta_change_invalidates_after_restart(self):
         """无 meta 模板改库 → 版本文件不匹配 → 自动失效重建（不依赖进程内存）。
 

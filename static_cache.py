@@ -77,16 +77,40 @@ def _versioned_path(file_path: str, version8: str) -> str:
     return f"{file_path[:-5]}.v{version8}.json"
 
 
-def _remove_stale_versioned(file_path: str, keep: str) -> None:
-    """删除该 url_path 下除 keep 外的全部版本文件（失败静默降级）。
+def content_has_object_meta(content: str) -> bool:
+    """内容是否含对象类型 meta 顶层键（可承载 config_version 自证版本）。
 
+    仅对象（dict）meta 才能承载 config_version 走稳定文件 + 内容判定路径；
+    模板把 meta 改写为非对象值（如 {"meta": {{data}}}，键集内合法）时视为
+    无 meta → 写入版本化文件，靠文件名版本判定，避免稳定文件每次命中判定
+    抛异常导致 miss 重建循环。
+    内容不可解析时保守返回 True（走稳定文件 + 内容 meta 判定路径）。
+
+    供 try_read 的版本判定与 api_handler 写入方式选择共用，避免两处
+    各自解析漂移。
+    """
+    try:
+        return isinstance(json.loads(content).get("meta"), dict)
+    except (json.JSONDecodeError, TypeError):
+        return True
+
+
+def _remove_stale_versioned(file_path: str, keep: str) -> None:
+    """删除该 url_path 下除 keep 外的全部旧版本文件（失败静默降级）。
+
+    并发保护：mtime 新于 keep 的版本文件不清理——那可能是并发写入方
+    刚写入的更新版本（最后写入者生效），删除会导致其下次 miss 重建。
     旧版本文件残留不影响命中判定（读取按精确版本路径），仅占用磁盘，
     由本清理函数与 invalidate 兜底清除。
     """
     try:
+        keep_mtime = os.path.getmtime(keep)
         for stale in glob.glob(f"{file_path[:-5]}.v*.json"):
-            if stale != keep:
-                os.remove(stale)
+            if stale == keep:
+                continue
+            if os.path.getmtime(stale) > keep_mtime:
+                continue
+            os.remove(stale)
     except OSError as e:
         logging.warning("static_cache 清理旧版本文件失败: %s", e)
 
@@ -98,9 +122,9 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
     命中条件（三者全满足）：
     1. 文件存在
     2. 版本一致：
-       - 文件含 meta 节点（默认输出）→ meta.config_version 与当前配置版本一致
-       - 文件无 meta 节点（自定义输出模板未引用 {{meta}}）→ 文件名为
-         {url_path}.v{版本8}.json 且版本前缀与当前配置版本一致
+       - 文件含对象类型 meta 节点（默认输出）→ meta.config_version 与当前配置版本一致
+       - 文件无 meta 节点（自定义输出模板未引用 {{meta}}，或 meta 被改写为
+         非对象值）→ 文件名为 {url_path}.v{版本8}.json 且版本前缀与当前配置版本一致
     3. mtime 未超 TTL（ttl_hours=0 表示永不过期）
 
     命中返回文件内容字符串，否则返回 None（调用方回退完整计算链路）。
@@ -111,16 +135,16 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
             return None
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        meta = json.loads(content).get("meta", {}) if content else {}
-        if meta.get("config_version") is not None:
+        meta = json.loads(content).get("meta") if content else None
+        if isinstance(meta, dict) and meta.get("config_version") is not None:
             if meta.get("config_version") != config_version:
                 return None
             read_path = file_path
             read_content = content
         else:
-            # 模板端点文件：无 meta 节点，无法自证版本。
-            # 版本体现在文件名（write_versioned_file 写入），改库即版本变化
-            # → 精确版本路径不存在 → miss，不依赖进程内存状态。
+            # 无 meta 节点（模板未引用 {{meta}} 或 meta 被改写为非对象值）：
+            # 无法自证版本。版本体现在文件名（write_versioned_file 写入），
+            # 改库即版本变化 → 精确版本路径不存在 → miss，不依赖进程内存状态。
             version_path = _versioned_path(file_path, config_version[:8])
             if not os.path.isfile(version_path):
                 return None

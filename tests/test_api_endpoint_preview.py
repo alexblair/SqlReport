@@ -227,6 +227,19 @@ class TestApiEndpointPreview(MockMySQLMixin, unittest.TestCase):
         self.assertIn("返回编辑页", body)
         self.assertIn(f"/config/reports/1/api_endpoints/{self.eid}/edit", body)
 
+    def test_preview_get_route_registered(self):
+        """GET /config/reports/<id>/api_endpoints/<eid>/preview 路由可达。
+
+        修复场景：GET 分支未分发 api_preview 动作，预览地址被直接打开时
+        落入报表页渲染（302），指引页在线上不可达、仅测试直调可触发。
+        """
+        code, body, _headers = config.handle_request(
+            self.conn, "GET",
+            f"/config/reports/1/api_endpoints/{self.eid}/preview", "")
+        self.assertEqual(code, 200)
+        self.assertIn("真实数据预览", body)
+        self.assertIn("返回编辑页", body)
+
 
 if __name__ == "__main__":
     unittest.main()
