@@ -171,5 +171,82 @@ class TestExecuteMySQLQueryTransactional(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(self.mock_cursor.execute.call_count, 3)
 
 
+# ---------------------------------------------------------------------------
+# 缺口5：execute_mysql_query 无结果集 → RuntimeError 语义
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteMySQLQueryNoResult(MockMySQLMixin, unittest.TestCase):
+    """无任何结果集时抛出 RuntimeError；混合语句只收集 SELECT 结果。"""
+
+    def test_all_ddl_raises_runtime_error(self):
+        """全部为 DDL（description=None）→ RuntimeError"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None
+        with self.assertRaises(RuntimeError) as ctx:
+            query_executor.execute_mysql_query(conn, "CREATE TABLE t (id INT)")
+        self.assertIn("未返回任何结果集", str(ctx.exception))
+        self.assertIn("SELECT", str(ctx.exception))
+
+    def test_all_dml_raises_runtime_error(self):
+        """全部为 DML（UPDATE）→ RuntimeError"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None
+        with self.assertRaises(RuntimeError):
+            query_executor.execute_mysql_query(conn, "UPDATE t SET a=1")
+
+    def test_empty_sql_raises_runtime_error(self):
+        """空 SQL / 纯注释 → RuntimeError（无结果集收集）"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None  # 注释语句执行后无结果集
+        with self.assertRaises(RuntimeError):
+            query_executor.execute_mysql_query(conn, "")
+        with self.assertRaises(RuntimeError):
+            query_executor.execute_mysql_query(conn, "-- 只有注释")
+
+    def test_comment_only_never_executes(self):
+        """纯注释：整段被拆为 1 条语句提交执行（无结果集 → RuntimeError）"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None  # 注释语句执行后 description 为空
+        with self.assertRaises(RuntimeError):
+            query_executor.execute_mysql_query(conn, "-- 只有注释")
+        # 真实行为：注释段仍会被 execute 提交给驱动（MySQL 端视为空语句）
+        self.assertEqual(cursor.execute.call_count, 1)
+
+    def test_mixed_ddl_and_select_returns_select_only(self):
+        """DDL + SELECT 混合 → 仅收集 SELECT 结果集"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None
+        state = {"i": 0}
+
+        def do_execute(*args, **kwargs):
+            if state["i"] == 1:
+                cursor.description = [("id",)]
+                cursor.fetchall.return_value = [(1,)]
+            state["i"] += 1
+
+        cursor.execute.side_effect = do_execute
+        results = query_executor.execute_mysql_query(
+            conn, "CREATE TABLE t (id INT); SELECT * FROM t")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["columns"], ["id"])
+        self.assertEqual(results[0]["rows"], [(1,)])
+        self.assertEqual(cursor.execute.call_count, 2)
+
+    def test_runtime_error_in_transaction_rolls_back(self):
+        """真实缺陷修复：transactional=True 且无结果集 → RuntimeError 在 COMMIT 之前抛出 → ROLLBACK 不 COMMIT"""
+        conn, cursor = self.make_mock_connection()
+        cursor.description = None
+        conn.begin = MagicMock()
+        conn.commit = MagicMock()
+        conn.rollback = MagicMock()
+
+        with self.assertRaises(RuntimeError):
+            query_executor.execute_mysql_query(
+                conn, "UPDATE t SET a=1", transactional=True)
+        conn.commit.assert_not_called()
+        conn.rollback.assert_called_once_with()
+
+
 if __name__ == "__main__":
     unittest.main()

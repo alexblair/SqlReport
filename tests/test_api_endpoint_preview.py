@@ -181,6 +181,50 @@ class TestApiEndpointPreview(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(resp["ok"], False)
         self.assertIn("不存在", resp["error"])
 
+    def test_preview_report_id_mismatch_rejected(self):
+        """缺口 17：端点属于报表B，却用报表A的 report_id 预览 → ok=False。
+
+        预览的 report_id 必须与端点绑定的报表一致（is_preview 与报表绑定语义）。
+        """
+        cur = self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
+            "prefer_cache,cache_ttl_hours,sort_order) "
+            "VALUES ('报表B','SELECT * FROM users',20,1,0,0,1)")
+        self.conn.commit()
+        rid_b = cur.lastrowid
+        cur = self.conn.execute(
+            "INSERT INTO api_endpoints (report_id,name,url_path,output_format,row_limit,"
+            "enabled,result_mode,result_index,allow_fetch_all,static_cache) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (rid_b, "端点B", "/api/ep-b", "json", 0, 1, "single", 0, 1, 1))
+        self.conn.commit()
+        eid_b = cur.lastrowid
+
+        code, body, _ = config.handle_api_endpoint_preview(
+            self.conn, 1, eid_b, "json_template=&result_mode=single")
+        resp = json.loads(body)
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["ok"], False, "report_id 与端点绑定报表不匹配应拒绝预览")
+        self.assertIn("不属于该报表", resp["error"])
+
+    def test_preview_csv_format_rejected(self):
+        """缺口 18：端点 output_format=csv 时预览被拒绝（预览仅 JSON 支持）。"""
+        cur = self.conn.execute(
+            "INSERT INTO api_endpoints (report_id,name,url_path,output_format,row_limit,"
+            "enabled,result_mode,result_index,allow_fetch_all,static_cache) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (1, "CSV端点", "/api/csv-ep", "csv", 0, 1, "single", 0, 1, 1))
+        self.conn.commit()
+        eid_csv = cur.lastrowid
+
+        code, body, _ = config.handle_api_endpoint_preview(
+            self.conn, 1, eid_csv, "json_template=&result_mode=single")
+        resp = json.loads(body)
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["ok"], False)
+        self.assertIn("CSV", resp["error"])
+        self.assertIn("无法预览", resp["error"])
+
     def test_preview_result_index_out_of_range(self):
         """result_index 越界：ok=False。"""
         _, _, resp = self._preview(result_index="5")

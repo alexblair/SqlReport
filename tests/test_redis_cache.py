@@ -412,5 +412,70 @@ class TestRedisCacheLogging(unittest.TestCase):
                             for msg in cm.output))
 
 
+# ---------------------------------------------------------------------------
+# 缺口12：Redis 连接超时/参数传递（_create_client 的连接参数生效）
+# ---------------------------------------------------------------------------
+
+
+class TestRedisClientParams(unittest.TestCase):
+    """_create_client 传递给 redis.Redis 的连接参数。"""
+
+    def test_create_client_passes_timeout_and_params(self):
+        """socket_timeout / socket_connect_timeout / decode_responses 等参数生效"""
+        cfg = {"enable": True, "host": "redis.example", "port": 6380, "db": 3,
+               "password": "secret", "key_prefix": "sr", "socket_timeout": 7}
+        with patch("redis.Redis") as m_redis:
+            mgr = RedisConnectionManager(cfg)
+            client = mgr._create_client()
+        m_redis.assert_called_once_with(
+            host="redis.example", port=6380, db=3, password="secret",
+            socket_timeout=7, socket_connect_timeout=7,
+            decode_responses=True)
+        self.assertIsNotNone(client)
+
+    def test_create_client_defaults(self):
+        """缺省参数：127.0.0.1:6379 / db=0 / 无密码 / 超时 5 秒"""
+        with patch("redis.Redis") as m_redis:
+            mgr = RedisConnectionManager({"enable": True})
+            mgr._create_client()
+        m_redis.assert_called_once_with(
+            host="127.0.0.1", port=6379, db=0, password=None,
+            socket_timeout=5, socket_connect_timeout=5,
+            decode_responses=True)
+
+    def test_create_client_empty_password_is_none(self):
+        """空密码配置 → password=None（避免 redis 以空密码连接报错）"""
+        with patch("redis.Redis") as m_redis:
+            mgr = RedisConnectionManager(
+                {"enable": True, "password": "", "host": "h", "port": 1})
+            mgr._create_client()
+        self.assertIsNone(m_redis.call_args[1]["password"])
+
+    def test_connect_timeout_applied_on_failure(self):
+        """超时连接失败 → connect() 返回 False 且不抛出（降级）"""
+        with patch("redis.Redis") as m_redis:
+            m_redis.return_value.ping.side_effect = Exception("Timeout")
+            mgr = RedisConnectionManager({"enable": True, "socket_timeout": 1})
+            ok = mgr.connect()
+        self.assertFalse(ok)
+        self.assertFalse(mgr.available)
+
+    def test_create_client_without_redis_raises_runtime_error(self):
+        """redis 未安装 → RuntimeError 提示安装（而非 ImportError 裸抛）"""
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "redis":
+                raise ImportError("No module named 'redis'")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            mgr = RedisConnectionManager({"enable": True})
+            with self.assertRaises(RuntimeError) as ctx:
+                mgr._create_client()
+        self.assertIn("redis 模块未安装", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

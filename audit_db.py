@@ -11,9 +11,11 @@ audit_db.py — 审计数据库模块
 
 import sqlite3
 import os
-import json
+import logging
 from datetime import datetime
 from typing import Any, Optional
+
+from app_config import serialize_json
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +100,39 @@ def init_audit_db(conn) -> None:
 # ---------------------------------------------------------------------------
 
 
+def record_operation(session_user, action, entity_type, entity_id=None,
+                     entity_name=None, before_value=None, after_value=None,
+                     details=None) -> None:
+    """写入一条 operation 类型审计日志（业务操作审计的统一入口）。
+
+    签名覆盖既有两处实现（auth._record_auth_event 与 config_db._write_audit_log）
+    的参数集；session_user 为空时跳过（不写日志）；异常降级为
+    logging.warning，避免审计失败影响业务操作（符合 conv 降级约定）。
+
+    details: 预留扩展字段（当前未写入审计表，仅保持签名一致）。
+    """
+    if not session_user:
+        return
+    try:
+        audit_conn = get_audit_db()
+        try:
+            insert_audit_log(
+                audit_conn,
+                type="operation",
+                session_user=session_user,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                entity_name=entity_name,
+                before_value=before_value,
+                after_value=after_value,
+            )
+        finally:
+            audit_conn.close()
+    except Exception as e:
+        logging.warning("审计日志写入失败: %s", e)
+
+
 def insert_audit_log(
     conn,
     *,
@@ -128,8 +163,8 @@ def insert_audit_log(
     """
     ts = timestamp or datetime.now().isoformat()
 
-    sv = json.dumps(before_value, ensure_ascii=False, default=str) if before_value is not None and not isinstance(before_value, str) else before_value
-    av = json.dumps(after_value, ensure_ascii=False, default=str) if after_value is not None and not isinstance(after_value, str) else after_value
+    sv = serialize_json(before_value) if before_value is not None and not isinstance(before_value, str) else before_value
+    av = serialize_json(after_value) if after_value is not None and not isinstance(after_value, str) else after_value
     rb = request_body
 
     cur = conn.execute(

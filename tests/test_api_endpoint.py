@@ -803,7 +803,7 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertIn("全量 URL:", html)
         self.assertIn("fetch-all-url-text", html)
         self.assertIn("fetch_all=true", html)
-        self.assertIn("copyText('fetch-all-url-text')", html)
+        self.assertIn("copyToClipboard('fetch-all-url-text')", html)
 
     def test_config_api_endpoint_fetch_all_url_row_visibility(self):
         """全量 URL 行初始可见性由服务端决定：默认勾选时显示，关闭时隐藏；

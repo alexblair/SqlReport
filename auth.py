@@ -33,28 +33,13 @@ _SALT_LENGTH = 16
 
 
 def _record_auth_event(session_user: str, action: str):
-    """记录登录/登出/登录失败事件到审计日志。
+    """记录登录/登出/登录失败事件到审计日志（薄包装，统一走 audit_db.record_operation）。
 
-    异常被静默吞掉，避免审计失败影响登录流程。
+    异常由 record_operation 内部降级为 logging.warning，
+    避免审计失败影响登录流程。
     """
-    if not session_user:
-        return
-    try:
-        from audit_db import get_audit_db, insert_audit_log
-        audit_conn = get_audit_db()
-        try:
-            insert_audit_log(
-                audit_conn,
-                type="operation",
-                session_user=session_user,
-                action=action,
-                entity_type="user",
-                entity_name=session_user,
-            )
-        finally:
-            audit_conn.close()
-    except Exception as e:
-        logging.warning("审计日志写入失败: %s", e)
+    from audit_db import record_operation
+    record_operation(session_user, action, "user", entity_name=session_user)
 
 
 def hash_password(password: str) -> str:
@@ -105,20 +90,27 @@ def load_sessions() -> None:
 
     在服务器启动时调用，使已登录用户无需重新登录。
     优雅降级：DB 不可用时仅打印警告，不阻止启动。
+    加载时顺带删除已过期的 session DB 行（清理失败不阻断加载）。
     """
+    rows = []
     try:
         conn = db.get_config_db()
         try:
             rows = list(db.get_all_sessions(conn))
+            try:
+                db.delete_expired_sessions(conn)
+            except Exception:
+                pass  # 清理过期行失败不阻断加载
         finally:
             conn.close()
-        with _sessions_lock:
-            for s in rows:
-                _sessions[s["token"]] = (s["username"], s["created_at"])
     except KeyboardInterrupt:
         raise  # Ctrl+C 正常传播
     except Exception as exc:
         print(f"[auth] session 加载失败（降级至纯内存）: {exc}")
+        return
+    with _sessions_lock:
+        for s in rows:
+            _sessions[s["token"]] = (s["username"], s["created_at"])
 
 
 def create_session(username: str) -> str:
@@ -208,6 +200,13 @@ def clear_all_sessions() -> None:
 # ---------------------------------------------------------------------------
 # HTTP Cookie 工具
 # ---------------------------------------------------------------------------
+
+
+def extract_bearer_token(auth_header: str) -> str | None:
+    """从 Authorization 头提取 Bearer token；非 Bearer 格式返回 None。"""
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:]
+    return None
 
 
 def parse_cookie(cookie_header: str) -> dict[str, str]:

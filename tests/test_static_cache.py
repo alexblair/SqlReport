@@ -985,6 +985,19 @@ class TestStaticCacheModule(unittest.TestCase):
 
     @patch("static_cache.get_static_cache_config",
            return_value={"enable": True, "dir": _CACHE_DIR})
+    def test_try_read_corrupted_json_returns_none(self, _m):
+        """缺口 24：缓存文件损坏（非法 JSON）/空文件 → try_read 视为 miss 返回 None。"""
+        p = static_cache.resolve_file_path("api/corrupt")
+        static_cache.write_file(p, "{{{broken json")
+        self.assertIsNone(static_cache.try_read(p, "v1", 0),
+                          "损坏 JSON 应视为 miss")
+
+        static_cache.write_file(p, "")
+        self.assertIsNone(static_cache.try_read(p, "v1", 0),
+                          "空文件应视为 miss")
+
+    @patch("static_cache.get_static_cache_config",
+           return_value={"enable": True, "dir": _CACHE_DIR})
     def test_try_read_versioned_file(self, _m):
         """无 meta 内容：版本体现在文件名，版本前缀匹配才命中。"""
         p = static_cache.resolve_file_path("api/verfile")

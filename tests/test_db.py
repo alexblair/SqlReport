@@ -403,5 +403,358 @@ class TestSessionCRUD(unittest.TestCase):
         self.assertIsNone(db.get_session(self.conn, "expired_tok"))
 
 
+# ---------------------------------------------------------------------------
+# 缺口 3：SQLite 侧排序 SQL 正确性（move_* 交换 sort_order）
+# ---------------------------------------------------------------------------
+
+
+class TestSortingSQL(unittest.TestCase):
+    """move_pool / move_report / move_category 的 SQLite 排序 SQL 行为"""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.executescript("""
+            CREATE TABLE connection_pools (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 3306,
+                user TEXT NOT NULL,
+                password TEXT NOT NULL,
+                database TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                parent_id INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE report_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                sql_query TEXT NOT NULL,
+                default_page_size INTEGER NOT NULL DEFAULT 20,
+                pool_id INTEGER,
+                category_id INTEGER,
+                memo TEXT,
+                result_names TEXT DEFAULT '',
+                prefer_cache INTEGER NOT NULL DEFAULT 1,
+                cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0);
+        """)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_get_all_sorts_by_sort_order_then_id(self):
+        """get_all_pools 排序 SQL：ORDER BY sort_order, id"""
+        db.add_pool(self.conn, "b", "h", 3306, "u", "p", "d")
+        db.add_pool(self.conn, "a", "h", 3306, "u", "p", "d")
+        pools = db.get_all_pools(self.conn)
+        self.assertEqual(pools[0]["name"], "b")  # sort_order 1
+        self.assertEqual(pools[1]["name"], "a")  # sort_order 2
+
+    def test_get_reports_sorts_by_sort_order(self):
+        """get_reports 排序 SQL：同一分类内 ORDER BY sort_order, id"""
+        db.add_category(self.conn, "c1")
+        db.add_category(self.conn, "c2")
+        # 后添加的报表 sort_order 更大，应排在后面
+        first = db.add_report(self.conn, "r2", "SELECT 1", 20, None, category_id=1)
+        second = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        reports = db.get_reports(self.conn, 1)
+        self.assertEqual([r["id"] for r in reports], [first, second])
+
+    def test_move_report_up_swaps_sort_order(self):
+        """move_report up 应交换相邻两项 sort_order"""
+        db.add_category(self.conn, "c1")
+        r1 = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        r2 = db.add_report(self.conn, "r2", "SELECT 1", 20, None, category_id=1)
+        ok = db.move_report(self.conn, r2, "up", category_id=1)
+        self.assertTrue(ok)
+        self.assertEqual(db.get_report(self.conn, r1)["sort_order"], 2)
+        self.assertEqual(db.get_report(self.conn, r2)["sort_order"], 1)
+
+    def test_move_report_down_swaps_sort_order(self):
+        """move_report down 应交换相邻两项 sort_order"""
+        db.add_category(self.conn, "c1")
+        r1 = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        r2 = db.add_report(self.conn, "r2", "SELECT 1", 20, None, category_id=1)
+        ok = db.move_report(self.conn, r1, "down", category_id=1)
+        self.assertTrue(ok)
+        self.assertEqual(db.get_report(self.conn, r1)["sort_order"], 2)
+        self.assertEqual(db.get_report(self.conn, r2)["sort_order"], 1)
+
+    def test_move_report_first_up_returns_false(self):
+        """首个报表 move-up 返回 False 且顺序不变（边界）"""
+        db.add_category(self.conn, "c1")
+        r1 = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        r2 = db.add_report(self.conn, "r2", "SELECT 1", 20, None, category_id=1)
+        before = [r["id"] for r in db.get_reports(self.conn, 1)]
+        self.assertFalse(db.move_report(self.conn, r1, "up", category_id=1))
+        self.assertEqual([r["id"] for r in db.get_reports(self.conn, 1)], before)
+
+    def test_move_report_last_down_returns_false(self):
+        """末尾报表 move-down 返回 False 且顺序不变（边界）"""
+        db.add_category(self.conn, "c1")
+        r1 = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        r2 = db.add_report(self.conn, "r2", "SELECT 1", 20, None, category_id=1)
+        self.assertFalse(db.move_report(self.conn, r2, "down", category_id=1))
+        self.assertEqual([r["id"] for r in db.get_reports(self.conn, 1)], [r1, r2])
+
+    def test_move_invalid_direction_returns_false(self):
+        """direction 非法值返回 False 且顺序不变（缺字段/非法值场景）"""
+        db.add_category(self.conn, "c1")
+        r1 = db.add_report(self.conn, "r1", "SELECT 1", 20, None, category_id=1)
+        self.assertFalse(db.move_report(self.conn, r1, "sideways", category_id=1))
+        self.assertFalse(db.move_report(self.conn, r1, "", category_id=1))
+
+    def test_move_report_missing_report_returns_false(self):
+        """移动不存在的报表返回 False"""
+        db.add_category(self.conn, "c1")
+        self.assertFalse(db.move_report(self.conn, 999, "up", category_id=1))
+
+    def test_move_category_up_swaps(self):
+        """move_category up 应交换分类 sort_order"""
+        db.add_category(self.conn, "c1")
+        db.add_category(self.conn, "c2")
+        self.assertTrue(db.move_category(self.conn, 2, "up"))
+        cats = db.get_all_categories(self.conn)
+        self.assertEqual([c["id"] for c in cats], [2, 1])
+
+    def test_move_pool_up_swaps(self):
+        """move_pool up 应交换连接池 sort_order"""
+        db.add_pool(self.conn, "p1", "h", 3306, "u", "p", "d")
+        db.add_pool(self.conn, "p2", "h", 3306, "u", "p", "d")
+        self.assertTrue(db.move_pool(self.conn, 2, "up"))
+        pools = db.get_all_pools(self.conn)
+        self.assertEqual([p["id"] for p in pools], [2, 1])
+
+
+# ---------------------------------------------------------------------------
+# 缺口 11：SQLite 迁移覆盖（1/2/3/4/5/6/7/8/9/10/11/12/13）与失败回滚
+# ---------------------------------------------------------------------------
+
+
+def _create_legacy_schema(conn, with_pool_notnull=False):
+    """创建最旧版 SQLite 库（缺失后续迁移引入的表/列）。
+
+    with_pool_notnull=True 时 report_configs.pool_id 为 NOT NULL（迁移 1 场景）。
+    """
+    conn.executescript("""
+        CREATE TABLE connection_pools (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 3306,
+            user TEXT NOT NULL,
+            password TEXT NOT NULL,
+            database TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL);
+    """)
+    pool_col = "pool_id INTEGER NOT NULL" if with_pool_notnull else "pool_id INTEGER"
+    conn.execute(f"""
+        CREATE TABLE report_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            sql_query TEXT NOT NULL,
+            default_page_size INTEGER NOT NULL DEFAULT 20,
+            {pool_col},
+            sort_order INTEGER NOT NULL DEFAULT 0)""")
+    conn.commit()
+
+
+def _table_info(conn, table):
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+class TestSQLiteMigrations(unittest.TestCase):
+    """_init_sqlite_migrations 各迁移号行为"""
+
+    def setUp(self):
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+
+    def tearDown(self):
+        self.conn.close()
+        self.engine_patcher.stop()
+
+    def test_migration_1_rebuilds_notnull_pool_id(self):
+        """迁移 1：旧版 pool_id NOT NULL 时应重建为可空"""
+        _create_legacy_schema(self.conn, with_pool_notnull=True)
+        db._init_sqlite_migrations(self.conn)
+        cols = _table_info(self.conn, "report_configs")
+        # notnull 判定：迁移后 pool_id 不再 NOT NULL
+        rows = self.conn.execute("PRAGMA table_info(report_configs)").fetchall()
+        pool_row = next(r for r in rows if r[1] == "pool_id")
+        self.assertEqual(pool_row[3], 0)
+
+    def test_migration_2_adds_category_id(self):
+        """迁移 2：report_configs 缺 category_id 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("category_id", _table_info(self.conn, "report_configs"))
+
+    def test_migration_3_creates_categories_table(self):
+        """迁移 3：缺 report_categories 表时应创建"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        tables = {r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("report_categories", tables)
+
+    def test_migration_4_adds_parent_id(self):
+        """迁移 4：report_categories 缺 parent_id 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("parent_id", _table_info(self.conn, "report_categories"))
+
+    def test_migration_5_adds_memo(self):
+        """迁移 5：report_configs 缺 memo 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("memo", _table_info(self.conn, "report_configs"))
+
+    def test_migration_6_adds_result_names(self):
+        """迁移 6：report_configs 缺 result_names 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("result_names", _table_info(self.conn, "report_configs"))
+
+    def test_migration_7_adds_cache_columns(self):
+        """迁移 7：prefer_cache / cache_ttl_hours 缺时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        cols = _table_info(self.conn, "report_configs")
+        self.assertIn("prefer_cache", cols)
+        self.assertIn("cache_ttl_hours", cols)
+
+    def test_migration_8_creates_api_endpoints_table(self):
+        """迁移 8：缺 api_endpoints 表时应创建"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        tables = {r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("api_endpoints", tables)
+
+    def test_migration_9_adds_result_mode_index(self):
+        """迁移 9：api_endpoints 缺 result_mode / result_index 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        cols = _table_info(self.conn, "api_endpoints")
+        self.assertIn("result_mode", cols)
+        self.assertIn("result_index", cols)
+
+    def test_migration_10_adds_allow_fetch_all(self):
+        """迁移 10：api_endpoints 缺 allow_fetch_all 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("allow_fetch_all", _table_info(self.conn, "api_endpoints"))
+
+    def test_migration_11_adds_static_cache(self):
+        """迁移 11：api_endpoints 缺 static_cache 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        self.assertIn("static_cache", _table_info(self.conn, "api_endpoints"))
+
+    def test_migration_12_13_add_json_template_description(self):
+        """迁移 12/13：api_endpoints 缺 json_template / description 时应补充"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        cols = _table_info(self.conn, "api_endpoints")
+        self.assertIn("json_template", cols)
+        self.assertIn("description", cols)
+
+    def test_migrations_preserve_existing_data(self):
+        """迁移不破坏存量数据（报表行保留）"""
+        _create_legacy_schema(self.conn)
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query,default_page_size) "
+            "VALUES (?,?,?)", ("存量报表", "SELECT 1", 20))
+        self.conn.commit()
+        db._init_sqlite_migrations(self.conn)
+        rows = self.conn.execute(
+            "SELECT name, sql_query FROM report_configs").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "存量报表")
+
+    def test_migration_idempotent_on_new_schema(self):
+        """新库上重复执行迁移应幂等"""
+        _create_legacy_schema(self.conn)
+        db._init_sqlite_migrations(self.conn)
+        db._init_sqlite_migrations(self.conn)  # 第二次不抛异常
+        db._init_sqlite_migrations(self.conn)
+
+
+class _AlterFailProxy:
+    """包装 sqlite3.Connection 的代理连接：ALTER TABLE 时抛异常、记录 rollback。
+
+    sqlite3.Connection 的 execute/rollback 是 C 层只读属性，无法直接替换，
+    通过 __getattr__ 委托 + 覆写目标方法实现模拟迁移失败。
+    """
+
+    def __init__(self, real: sqlite3.Connection, fail_alter: bool = True):
+        self._real = real
+        self.fail_alter = fail_alter
+        self.rollback_count = 0
+        self.alter_attempts = 0
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def execute(self, sql, *args):
+        if self.fail_alter and str(sql).strip().upper().startswith("ALTER TABLE"):
+            self.alter_attempts += 1
+            raise sqlite3.OperationalError("模拟迁移失败")
+        return self._real.execute(sql, *args)
+
+    def rollback(self):
+        self.rollback_count += 1
+        return self._real.rollback()
+
+
+class TestSQLiteMigrationRollback(unittest.TestCase):
+    """迁移失败回滚：ALTER TABLE 异常时应 rollback 并继续，不崩溃"""
+
+    def setUp(self):
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+
+    def tearDown(self):
+        self.conn.close()
+        self.engine_patcher.stop()
+
+    def test_alter_failure_rolls_back_and_continues(self):
+        """迁移 2 的 ALTER 失败：应调用 rollback 且后续迁移继续执行"""
+        _create_legacy_schema(self.conn)
+        proxy = _AlterFailProxy(self.conn, fail_alter=True)
+
+        # 不应抛出异常
+        db._init_sqlite_migrations(proxy)
+
+        self.assertGreater(proxy.alter_attempts, 0, "应触发 ALTER 失败")
+        self.assertGreater(proxy.rollback_count, 0, "ALTER 失败应触发 rollback")
+        # 失败后继续：迁移 3 仍创建了 report_categories 表
+        tables = {r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("report_categories", tables)
+
+    def test_migration_1_rebuild_keeps_working_after_alter_failure(self):
+        """ALTER 全部失败的极端场景下迁移仍不崩溃（逐条 try/except 隔离）"""
+        _create_legacy_schema(self.conn)
+        proxy = _AlterFailProxy(self.conn, fail_alter=True)
+        db._init_sqlite_migrations(proxy)
+        # 表仍可查询（结构不完整但不崩溃）
+        self.conn.execute("SELECT COUNT(*) FROM report_configs").fetchone()
+
+
 if __name__ == "__main__":
     unittest.main()

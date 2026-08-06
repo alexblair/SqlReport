@@ -17,6 +17,7 @@ from unittest.mock import patch, MagicMock
 import sqlite3
 import db
 import export
+import server as srv
 
 
 def _make_conn():
@@ -1508,6 +1509,194 @@ class TestExportParameterCombinations(unittest.TestCase):
         self.assertEqual(len(rows), 3)  # header + 2 data
         ages = [int(r[2]) for r in rows[1:]]
         self.assertEqual(ages, sorted(ages, reverse=True))
+
+
+# ===================================================================
+# 缺口7：导出 result_index 越界回退 0
+# ===================================================================
+
+
+class TestExportResultIndex(unittest.TestCase):
+    """多结果集导出：result 索引越界回退 0（export.py _load_and_transform 69-70 行）"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        # 两条 SELECT：do_execute 第 0 次为 (id,)，第 1 次为 (name,)
+        db.add_report(self.conn, "订单报表",
+                      "SELECT * FROM orders; SELECT * FROM customers", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306,
+                          "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+
+    def _setup_multi_result(self, mock_create_conn):
+        """模拟两个结果集：第 0 个为 (id,)，第 1 个为 (name,)。"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        state = {"i": 0}
+
+        def do_execute(*args, **kwargs):
+            i = state["i"]
+            state["i"] += 1
+            if i == 0:
+                mock_cursor.description = [("id",)]
+                mock_cursor.fetchall.return_value = [(1,)]
+            else:
+                mock_cursor.description = [("name",)]
+                mock_cursor.fetchall.return_value = [("张三",)]
+
+        mock_cursor.execute.side_effect = do_execute
+        mock_create_conn.return_value = mock_conn
+        return mock_conn, mock_cursor
+
+    @patch("db.create_mysql_connection")
+    def test_handle_export_result_index_out_of_range(self, mock_create_conn):
+        """handle_export：result=9 越界 → 回退第 0 个结果集正常导出"""
+        self._setup_multi_result(mock_create_conn)
+        code, content, _ = export.handle_export(
+            self.conn, "id=1&result=9&charset=utf8", pool_override=self.mock_pool)
+        self.assertEqual(code, 200)
+        text = content.decode("utf-8")
+        self.assertIn('"id"', text)
+        self.assertNotIn('"name"', text)
+
+    @patch("db.create_mysql_connection")
+    def test_handle_export_result_index_in_range(self, mock_create_conn):
+        """handle_export：result=1 在范围内 → 选择第 1 个结果集"""
+        self._setup_multi_result(mock_create_conn)
+        code, content, _ = export.handle_export(
+            self.conn, "id=1&result=1&charset=utf8", pool_override=self.mock_pool)
+        self.assertEqual(code, 200)
+        text = content.decode("utf-8")
+        self.assertIn('"name"', text)
+        self.assertNotIn('"id"', text)
+
+    @patch("db.create_mysql_connection")
+    def test_export_report_to_csv_index_out_of_range(self, mock_create_conn):
+        """export_report_to_csv：result_index 越界 → 使用第 0 个结果集"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("col1",), ("col2",)]
+        mock_cursor.fetchall.return_value = []
+        mock_create_conn.return_value = mock_conn
+
+        result = export.export_report_to_csv(
+            "SELECT * FROM t",
+            {"host": "h", "port": 3306, "user": "u", "password": "p",
+             "database": "d"},
+            result_index=5)
+        self.assertEqual(result, '\ufeff"col1","col2"\n')
+
+    @patch("db.create_mysql_connection")
+    def test_export_report_to_json_index_out_of_range(self, mock_create_conn):
+        """export_report_to_json：result_index 越界 → 使用第 0 个结果集"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("only",)]
+        mock_cursor.fetchall.return_value = [("v",)]
+        mock_create_conn.return_value = mock_conn
+
+        result = export.export_report_to_json(
+            "SELECT * FROM t",
+            {"host": "h", "port": 3306, "user": "u", "password": "p",
+             "database": "d"},
+            "报表", result_index=99)
+        data = json.loads(result)
+        self.assertEqual(data["报表"][0]["only"], "v")
+
+
+# ===================================================================
+# 缺口8：导出时连接池不存在 → 404
+# ===================================================================
+
+
+class TestExportPoolNotFound(unittest.TestCase):
+    """报表存在但关联连接池不存在 → 404"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        # 关闭 FK 约束，插入指向不存在连接池（999）的报表
+        self.conn.execute("PRAGMA foreign_keys=OFF")
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,sort_order) "
+            "VALUES (?,?,?,?,?)",
+            ("孤儿报表", "SELECT 1", 20, 999, 0),
+        )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_export_pool_not_found_404(self):
+        """pool 不存在 → 404 且提示关联连接池不存在"""
+        code, body, _ = export.handle_export(self.conn, "id=1")
+        self.assertEqual(code, 404)
+        self.assertIn("连接池不存在", body)
+
+    def test_export_pool_not_found_json_format(self):
+        """pool 不存在 + format=json → 同样 404"""
+        code, body, _ = export.handle_export(self.conn, "id=1&format=json")
+        self.assertEqual(code, 404)
+
+    def test_report_ok_pool_ok_no_404(self):
+        """对照：报表与连接池均存在时正常导出（不误报 404）"""
+        code, body, _ = export.handle_export(self.conn, "id=2")
+        # 报表 2 不存在 → 404（报表不存在语义），而非连接池 404
+        self.assertEqual(code, 404)
+        self.assertIn("报表不存在", body)
+
+
+# ===================================================================
+# 缺口9：导出时客户端断开（BrokenPipe/ConnectionReset 静默）
+# ===================================================================
+
+
+class TestExportClientDisconnect(unittest.TestCase):
+    """_handle_export 写响应时客户端断开的行为（F3 修复：与 _handle_api/_send_html 对齐静默）"""
+
+    def _make_handler(self, wfile):
+        """构造最小可用的 ReportHandler 实例（绕过 __init__）。"""
+        handler = srv.ReportHandler.__new__(srv.ReportHandler)
+        handler.wfile = wfile
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.headers = {}
+        handler._session_token = None
+        return handler
+
+    @patch("server.export_mod.handle_export", return_value=(200, b"data", {}))
+    def test_broken_pipe_silenced(self, mock_h):
+        """修复：_handle_export 捕获 BrokenPipeError 静默（不再冒泡二次写失败）"""
+        wfile = MagicMock()
+        wfile.write.side_effect = BrokenPipeError("客户端已断开")
+        handler = self._make_handler(wfile)
+        handler._handle_export("GET", "/export", "id=1", None)  # 不抛异常即通过
+
+    @patch("server.export_mod.handle_export", return_value=(200, b"data", {}))
+    def test_connection_reset_silenced(self, mock_h):
+        """修复：_handle_export 捕获 ConnectionResetError 静默"""
+        wfile = MagicMock()
+        wfile.write.side_effect = ConnectionResetError("连接重置")
+        handler = self._make_handler(wfile)
+        handler._handle_export("GET", "/export", "id=1", None)  # 不抛异常即通过
+
+    @patch("server.export_mod.handle_export", return_value=(200, b"data", {}))
+    def test_normal_write_succeeds(self, mock_h):
+        """对照：正常写响应不抛异常，响应头顺序正确"""
+        wfile = MagicMock()
+        handler = self._make_handler(wfile)
+        handler._handle_export("GET", "/export", "id=1", None)
+        wfile.write.assert_called_once_with(b"data")
+        handler.send_response.assert_called_once_with(200)
+        handler.end_headers.assert_called_once()
 
 
 if __name__ == "__main__":

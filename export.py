@@ -40,26 +40,28 @@ import zipfile
 from decimal import Decimal
 from typing import Optional, Union
 import db
-from report import format_cell, parse_filters, _parse_sorts
+import app_config
+from render import format_cell
+from report import parse_filters, parse_sorts, parse_result_index
 from result_transform import filter_rows, sort_rows, select_columns, column_indices
 
 
-def export_report_to_csv(sql_query: str, pool_config: dict,
-                         filters=None,
-                         columns: list[str] = None,
-                         result_index: int = 0,
-                         sorts=None) -> str:
+def _load_and_transform(sql_query: str, pool_config: dict,
+                        filters=None,
+                        columns: list[str] = None,
+                        result_index: int = 0,
+                        sorts=None) -> tuple:
     """
-    执行查询并将结果导出为 CSV 字符串。
+    执行查询并应用内存变换，返回导出所需的数据。
 
-    支持可选的 filters 参数（list[(col, op, val), ...]），
-    在导出前按条件过滤数据行（与报表页面筛选行为一致）。
-    columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
-    result_index: 多结果集时选择第几个结果（默认 0）。
-    sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
+    两导出函数（CSV / JSON）共用的头部流程：
+    连接 → 查询 → 多结果集越界回退 → 内存筛选 → 排序 →
+    输出列确定（自定义列回退全部列）→ 列索引映射。
 
-    返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
-    以 UTF-8 字符串形式返回。
+    返回 (output_columns, display_indices, rows)：
+      output_columns — 最终输出列名列表（按用户自定义顺序）
+      display_indices — output_columns 在 all_columns 中的索引列表
+      rows — 已筛选/排序的行数据列表
     """
     conn = db.create_mysql_connection(pool_config)
     try:
@@ -80,17 +82,64 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     # 确定输出列（按用户自定义顺序，无效列名回退全部列）
     output_columns = select_columns(all_columns, columns)
     display_indices = column_indices(output_columns, all_columns)
+    return output_columns, display_indices, filtered
 
+
+def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
+                encoding="utf-8", lineterminator="\n"):
+    """
+    将表头与行数据序列化为 CSV 文本（导出 / API / 审计页三处共用的统一实现）。
+
+    header: 表头列名列表。
+    rows: 每行数据列表（按 header 顺序取值）。
+
+    参数:
+        bom: 为 True 时输出开头写入 \\ufeff BOM 字符（UTF-8 场景便于 Excel 识别）。
+        quoting: csv 引号策略（默认 QUOTE_ALL 全字段加双引号）。
+        encoding: "utf-8" 返回 str；"utf-8-sig" 返回 utf-8-sig 编码的 bytes
+                  （自带 BOM 字节，等价于调用方自行 .encode("utf-8-sig")）。
+        lineterminator: 行结束符（默认 "\\n"；需要 CRLF 时传 "\\r\\n"）。
+
+    返回 str（encoding="utf-8"）或 bytes（encoding="utf-8-sig" 时）。
+    """
     output = io.StringIO()
-    # 写入 BOM，便于 Excel 识别编码（UTF-8 时有效，GBK 编码时由调用方处理）
-    output.write("\ufeff")
+    if bom:
+        output.write("\ufeff")
     writer = csv.writer(output, delimiter=",", quotechar='"',
-                        quoting=csv.QUOTE_ALL, lineterminator="\n")
-    writer.writerow(output_columns)
-    for row in filtered:
-        writer.writerow([row[i] for i in display_indices])
+                        quoting=quoting, lineterminator=lineterminator)
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow(row)
+    content = output.getvalue()
+    if encoding == "utf-8-sig":
+        return content.encode("utf-8-sig")
+    return content
 
-    return output.getvalue()
+
+def export_report_to_csv(sql_query: str, pool_config: dict,
+                         filters=None,
+                         columns: list[str] = None,
+                         result_index: int = 0,
+                         sorts=None) -> str:
+    """
+    执行查询并将结果导出为 CSV 字符串。
+
+    支持可选的 filters 参数（list[(col, op, val), ...]），
+    在导出前按条件过滤数据行（与报表页面筛选行为一致）。
+    columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
+    result_index: 多结果集时选择第几个结果（默认 0）。
+    sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
+
+    返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
+    以 UTF-8 字符串形式返回。
+    """
+    output_columns, display_indices, filtered = _load_and_transform(
+        sql_query, pool_config, filters, columns, result_index, sorts)
+
+    # 序列化为 CSV（QUOTE_ALL 全字段加双引号 + BOM + "\n" 行尾，与既有输出一致）
+    rows_out = [[row[i] for i in display_indices] for row in filtered]
+    return rows_to_csv(output_columns, rows_out, bom=True,
+                       quoting=csv.QUOTE_ALL, lineterminator="\n")
 
 
 class _JsonNoQuoteEncoder(json.JSONEncoder):
@@ -162,25 +211,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
       ]
     }
     """
-    conn = db.create_mysql_connection(pool_config)
-    try:
-        results = db.execute_mysql_query(conn, sql_query)
-        if result_index >= len(results):
-            result_index = 0
-        all_columns = results[result_index]["columns"]
-        rows = results[result_index]["rows"]
-    finally:
-        conn.close()
-
-    # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = filter_rows(rows, all_columns, filters or [])
-    # 应用排序（与报表页面一致）
-    if sorts:
-        filtered = sort_rows(filtered, all_columns, sorts)
-
-    # 确定输出列（按用户自定义顺序，无效列名回退全部列）
-    output_columns = select_columns(all_columns, columns)
-    display_indices = column_indices(output_columns, all_columns)
+    output_columns, display_indices, filtered = _load_and_transform(
+        sql_query, pool_config, filters, columns, result_index, sorts)
 
     # 构建行对象数组
     rows_data = []
@@ -298,9 +330,8 @@ def handle_export(conn, query: str,
     if "id" not in qs or not qs["id"][0]:
         return 400, "缺少报表 ID 参数", {}
 
-    try:
-        report_id = int(qs["id"][0])
-    except (ValueError, IndexError):
+    report_id = app_config.safe_int(qs["id"][0], None)
+    if report_id is None:
         return 400, "无效的报表 ID", {}
 
     report_config = db.get_report(conn, report_id)
@@ -317,8 +348,8 @@ def handle_export(conn, query: str,
     # 解析筛选参数（从查询字符串，与报表页面一致）
     filters = parse_filters(qs)
 
-    # 解析排序参数（与报表页面共享 _parse_sorts）
-    sorts = _parse_sorts(qs)
+    # 解析排序参数（与报表页面共享 parse_sorts）
+    sorts = parse_sorts(qs)
 
     # 解析自定义列参数
     custom_columns = None
@@ -347,12 +378,7 @@ def handle_export(conn, query: str,
         is_zip = True
 
     # 多结果集索引
-    result_index = 0
-    if "result" in qs and qs["result"][0]:
-        try:
-            result_index = max(0, int(qs["result"][0]))
-        except ValueError:
-            pass
+    result_index = parse_result_index(qs)
 
     # 执行导出
     try:

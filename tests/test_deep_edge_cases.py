@@ -857,54 +857,6 @@ class TestReportResultEdgeCases(unittest.TestCase):
 
 
 # ===================================================================
-# 8. _safe_sort_key 纯函数边界
-# ===================================================================
-
-class TestSafeSortKeyEdgeCases(unittest.TestCase):
-    """_safe_sort_key 纯函数边缘值"""
-
-    def test_safe_sort_key_none(self):
-        """✅ Positive: None → (1, '') 排在最后"""
-        key = report._safe_sort_key(None)
-        self.assertEqual(key, (1, ''))
-
-    def test_safe_sort_key_empty_string(self):
-        """✅ Positive: 空字符串 → (0, '')"""
-        key = report._safe_sort_key("")
-        self.assertEqual(key, (0, ''))
-
-    def test_safe_sort_key_zero(self):
-        """✅ Positive: 数字 0 → (0, '0')"""
-        key = report._safe_sort_key(0)
-        self.assertEqual(key, (0, '0'))
-
-    def test_safe_sort_key_boolean(self):
-        """✅ Positive: False → (0, 'False')"""
-        key = report._safe_sort_key(False)
-        self.assertEqual(key, (0, 'False'))
-
-    def test_none_always_last_asc(self):
-        """✅ Positive: 升序时 None 在最后"""
-        keys = [report._safe_sort_key("a"), report._safe_sort_key(None),
-                report._safe_sort_key("b")]
-        sorted_keys = sorted(keys)
-        self.assertEqual(sorted_keys[0], (0, 'a'))
-        self.assertEqual(sorted_keys[1], (0, 'b'))
-        self.assertEqual(sorted_keys[2], (1, ''))
-
-    def test_none_always_last_desc(self):
-        """✅ Positive: 降序时 None 在最后"""
-        keys = [report._safe_sort_key("a"), report._safe_sort_key(None),
-                report._safe_sort_key("b")]
-        # 降序 = reverse sorted
-        sorted_keys = sorted(keys, reverse=True)
-        # (1, '') 最大，所以排在降序第一位
-        self.assertEqual(sorted_keys[0], (1, ''))
-        self.assertEqual(sorted_keys[1], (0, 'b'))
-        self.assertEqual(sorted_keys[2], (0, 'a'))
-
-
-# ===================================================================
 # 9. report._parse_cols 边界
 # ===================================================================
 

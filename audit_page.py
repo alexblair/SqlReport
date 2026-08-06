@@ -11,7 +11,6 @@ audit_page.py — 审计日志页面处理
 """
 
 import csv
-import io
 import logging
 import os
 import time
@@ -19,9 +18,17 @@ import urllib.parse
 
 import audit_db
 import render
-from app_config import get_audit_db_config
+from app_config import get_audit_db_config, safe_int
+from export import rows_to_csv
 
 _FILTER_KEYS = ("type", "date_from", "date_to", "session_user", "keyword")
+
+# CSV 导出：表头与对应取值字段（保持既有顺序与字段集不变）
+_CSV_HEADER = ["时间", "类型", "操作者", "操作", "实体类型", "实体名称",
+               "HTTP方法", "HTTP路径", "状态码", "IP", "耗时(ms)"]
+_CSV_FIELDS = ["timestamp", "type", "session_user", "action",
+               "entity_type", "entity_name", "http_method", "http_path",
+               "http_status", "ip_address", "duration_ms"]
 
 
 def handle_audit_request(method: str, query: str,
@@ -48,7 +55,7 @@ def handle_audit_request(method: str, query: str,
         return _export_csv(filters)
 
     page = _qs_int(qs, "page", 1)
-    page_size = _qs_int(qs, "page_size", 20)
+    page_size = max(1, _qs_int(qs, "page_size", 20))
     flash = qs.get("flash", [None])[0]
 
     audit_conn = audit_db.get_audit_db()
@@ -111,25 +118,11 @@ def _export_csv(filters: dict) -> tuple:
     finally:
         audit_conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-    writer.writerow(["时间", "类型", "操作者", "操作", "实体类型", "实体名称",
-                     "HTTP方法", "HTTP路径", "状态码", "IP", "耗时(ms)"])
-    for r in rows:
-        writer.writerow([
-            r.get("timestamp", ""),
-            r.get("type", ""),
-            r.get("session_user", ""),
-            r.get("action", ""),
-            r.get("entity_type", ""),
-            r.get("entity_name", ""),
-            r.get("http_method", ""),
-            r.get("http_path", ""),
-            r.get("http_status", ""),
-            r.get("ip_address", ""),
-            r.get("duration_ms", ""),
-        ])
-    csv_data = output.getvalue().encode("utf-8-sig")
+    # 与既有输出逐字节一致：QUOTE_ALL + CRLF 行尾 + utf-8-sig 编码（自带 BOM 字节）
+    rows_out = [[r.get(key, "") for key in _CSV_FIELDS] for r in rows]
+    csv_data = rows_to_csv(_CSV_HEADER, rows_out, bom=False,
+                           quoting=csv.QUOTE_ALL, lineterminator="\r\n",
+                           encoding="utf-8-sig")
     headers = {
         "Content-Type": "text/csv; charset=utf-8-sig",
         "Content-Disposition":
@@ -151,6 +144,6 @@ def _collect_filters(params: dict) -> dict:
 def _qs_int(qs: dict, key: str, default: int) -> int:
     """从 parse_qs 结果中安全取整数参数。"""
     try:
-        return int(qs.get(key, [default])[0])
-    except (ValueError, IndexError):
+        return safe_int(qs.get(key, [default])[0], default)
+    except IndexError:
         return default

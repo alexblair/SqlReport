@@ -35,6 +35,16 @@ import file_permissions
 _MAX_LAST_INVALIDATED = 512
 _last_invalidated: OrderedDict[str, float] = OrderedDict()
 
+# 静态缓存文件统一后缀
+JSON_SUFFIX = ".json"
+
+
+def strip_json_suffix(path: str) -> str:
+    """剥离路径末尾的 .json 后缀（大小写不敏感），无后缀时原样返回。"""
+    if path.lower().endswith(JSON_SUFFIX):
+        return path[:-len(JSON_SUFFIX)]
+    return path
+
 
 def get_static_cache_config() -> dict:
     """读取 static_cache 配置段。
@@ -63,7 +73,7 @@ def resolve_file_path(url_path: str) -> str | None:
     非法路径返回 None。
     """
     base = os.path.realpath(get_static_cache_config()["dir"])
-    target = os.path.realpath(os.path.join(base, f"{url_path}.json"))
+    target = os.path.realpath(os.path.join(base, f"{url_path}{JSON_SUFFIX}"))
     if target != base and not target.startswith(base + os.sep):
         return None
     return target
@@ -75,7 +85,7 @@ def _versioned_path(file_path: str, version8: str) -> str:
     版本取 config_version 前 8 位（2^32 分之一冲突概率，冲突时仅退化为一次
     多余重建，由内容 meta 判定兜底，不产生错误结果）。
     """
-    return f"{file_path[:-5]}.v{version8}.json"
+    return f"{file_path[:-len(JSON_SUFFIX)]}.v{version8}{JSON_SUFFIX}"
 
 
 def content_has_object_meta(content: str) -> bool:
@@ -106,7 +116,7 @@ def _remove_stale_versioned(file_path: str, keep: str) -> None:
     """
     try:
         keep_mtime = os.path.getmtime(keep)
-        for stale in glob.glob(f"{file_path[:-5]}.v*.json"):
+        for stale in glob.glob(f"{file_path[:-len(JSON_SUFFIX)]}.v*{JSON_SUFFIX}"):
             if stale == keep:
                 continue
             if os.path.getmtime(stale) > keep_mtime:
@@ -231,7 +241,7 @@ def invalidate(url_path: str) -> bool:
         if os.path.exists(file_path):
             os.remove(file_path)
             removed = True
-        for stale in glob.glob(f"{file_path[:-5]}.v*.json"):
+        for stale in glob.glob(f"{file_path[:-len(JSON_SUFFIX)]}.v*{JSON_SUFFIX}"):
             os.remove(stale)
             removed = True
         return True

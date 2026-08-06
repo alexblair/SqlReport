@@ -24,7 +24,6 @@ URL 路由：
 
 import logging
 import urllib.parse
-import math
 import time
 import threading
 import db
@@ -32,13 +31,15 @@ from typing import Optional
 import redis_cache
 import static_cache
 import app_config
-from result_transform import filter_rows, sort_rows, select_columns
+import config_db
+from result_transform import filter_rows, sort_rows, select_columns, calc_total_pages
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
     _COMMON_JS,
     _SQL_HIGHLIGHT_JS,
     _SQL_FORMATTER_JS,
+    render_page_header,
     _OP_MAP, DEFAULT_OP, _escape, format_cell,
     build_filter_params as _build_filter_params,
     build_cols_param as _build_cols_param,
@@ -51,7 +52,7 @@ from render import (
     build_controls_bar_html, build_field_settings_panel_html,
     build_sort_settings_panel_html, build_filter_form_html,
     build_filter_action_html, build_report_switcher_html,
-    build_api_urls_section_html,
+    build_api_urls_section_html, build_flash_html,
 )
 
 # ===================================================================
@@ -131,18 +132,6 @@ _query_cache = QueryCache()
 
 
 # ===================================================================
-# 多字段排序/筛选工具
-# ===================================================================
-
-
-def _safe_sort_key(val):
-    """安全的排序键：None 始终在最后，其余转字符串比较"""
-    if val is None:
-        return (1, '')
-    return (0, str(val))
-
-
-# ===================================================================
 # URL 参数工具（URL 工具函数已移至 render.py，通过别名保持 API 兼容）
 # ===================================================================
 
@@ -204,7 +193,7 @@ def parse_filters(qs):
 _parse_filters = parse_filters  # 向后兼容别名
 
 
-def _parse_sorts(qs):
+def parse_sorts(qs):
     """
     从 parse_qs 结果中解析多字段排序参数。
 
@@ -229,6 +218,9 @@ def _parse_sorts(qs):
     return result
 
 
+_parse_sorts = parse_sorts  # 向后兼容别名
+
+
 def _parse_cols(qs, all_columns: list[str]) -> list[str]:
     """
     从 parse_qs 结果中解析自定义列顺序参数。
@@ -251,55 +243,35 @@ def _qs_val(qs: dict, key: str, default: str = None) -> Optional[str]:
     return vals[0] if vals else default
 
 
+def parse_result_index(qs: dict, key: str = "result", default: int = 0) -> int:
+    """从 parse_qs 结果中安全解析结果集索引，非法值回退 default。"""
+    if key in qs and qs[key][0]:
+        try:
+            return max(0, int(qs[key][0]))
+        except ValueError:
+            return default
+    return default
+
+
+def parse_result_names(raw: str, count: int = None) -> list[str]:
+    """解析结果集名称文本（每行一个，剔除空行）。
+
+    count 给定时补齐/截断到该数量，缺名自动补"结果{i+1}"（i 从 0 起）。
+    """
+    names = [n.strip() for n in raw.split("\n") if n.strip()]
+    if count is None:
+        return names
+    return [names[i] if i < len(names) else f"结果{i + 1}" for i in range(count)]
+
+
 # ===================================================================
 # HTML 模板（CSS）
 # ===================================================================
+# 公共 CSS（reset/body/navbar/container/card/btn/table/flash/empty-state/
+# sql-hl/pagination/jump-box 等）统一来自 render._COMMON_CSS，
+# 此处仅保留报表页特有类，经 render_page_header(extra_css=...) 追加。
 
 _CSS = """
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    background: #f1f5f9; color: #1e293b; min-height: 100vh;
-  }
-  .navbar {
-    background: linear-gradient(135deg, #1e293b, #334155);
-    padding: 0 24px; height: 60px; display: flex; align-items: center; gap: 24px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12); position: sticky; top: 0; z-index: 100;
-  }
-  .navbar .brand { color: #fff; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; text-decoration: none; }
-  .navbar .brand span { color: #818cf8; }
-  .navbar a:not(.brand) {
-    color: #cbd5e1; text-decoration: none; font-size: 14px; font-weight: 500;
-    padding: 6px 14px; border-radius: 6px; transition: background 0.2s, color 0.2s;
-  }
-  .navbar a:not(.brand):hover { background: rgba(255,255,255,0.1); color: #fff; }
-  .navbar .nav-active { color: #fff !important; background: rgba(255,255,255,0.12); }
-  .navbar .spacer { flex: 1; }
-  .container { max-width: 100%; margin: 0 auto; padding: 24px 5px; }
-  .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06); padding: 24px; margin-bottom: 20px; animation: fadeUp 0.3s ease-out; }
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-  h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.3px; }
-  h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
-    text-decoration: none; cursor: pointer; transition: all 0.15s; border: none;
-  }
-  .btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 2px 8px rgba(79,70,229,0.3); }
-  .btn-primary:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,0.35); }
-  .btn-success { background: #059669; color: #fff; box-shadow: 0 2px 8px rgba(5,150,105,0.3); }
-  .btn-success:hover { background: #047857; transform: translateY(-1px); }
-  .btn-outline { background: transparent; color: #475569; border: 1px solid #e2e8f0; }
-  .btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
-  .btn-sm { padding: 5px 12px; font-size: 13px; }
-  table {
-    border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
-  }
-  th {
-    background: #f8fafc; color: #475569; font-weight: 600; font-size: 13px;
-    text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px 6px;
-    border-bottom: 2px solid #e2e8f0; text-align: left; white-space: nowrap; vertical-align: bottom;
-  }
   th .sort-link {
     color: #475569; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
     transition: color 0.15s; cursor: pointer;
@@ -316,23 +288,6 @@ _CSS = """
   }
   th .filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.12); }
   th .filter-input::placeholder { color: #cbd5e1; }
-  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; text-align: left; white-space: nowrap; }
-  tbody tr:hover { background: #f8fafc; }
-  tbody tr:last-child td { border-bottom: none; }
-  .table-wrap {
-    overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;
-  }
-  .empty-state {
-    text-align: center; color: #94a3b8; padding: 48px 14px; font-size: 15px;
-  }
-  .empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
-  .flash {
-    padding: 14px 18px; border-radius: 8px; margin-bottom: 16px;
-    font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
-  }
-  .flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-  .flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-  .flash-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
   .debug-info {
     background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
     margin-bottom: 16px; font-size: 13px; color: #64748b;
@@ -355,21 +310,6 @@ _CSS = """
   .debug-toggle:hover { color:#475569; background:#f1f5f9; }
   .debug-content { padding: 0 16px 12px; }
   .debug-content.hidden { display: none; }
-  .sql-hl-keyword { font-weight:700; color:#7c3aed; }
-  .sql-hl-string { color:#059669; }
-  .sql-hl-number { color:#d97706; }
-  .sql-hl-comment { color:#94a3b8; font-style:italic; }
-  .sql-hl-function { font-weight:600; color:#2563eb; }
-  .pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
-  .pagination a, .pagination .page-btn, .pagination .page-span {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 36px; height: 36px; padding: 0 10px; border-radius: 8px;
-    font-size: 14px; text-decoration: none; color: #475569; transition: all 0.15s;
-  }
-  .pagination a { background: #fff; border: 1px solid #e2e8f0; }
-  .pagination a:hover { background: #f1f5f9; border-color: #cbd5e1; }
-  .pagination .active { background: #4f46e5 !important; color: #fff !important; border-color: #4f46e5 !important; font-weight: 600; }
-  .pagination .disabled { color: #cbd5e1; background: transparent; border: none; cursor: default; }
   .controls {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 14px 16px; background: #f8fafc; border-radius: 8px; margin-bottom: 16px;
@@ -413,12 +353,6 @@ _CSS = """
   }
   .report-list a:hover { color: #4338ca; }
   .report-list a::before { content: "→"; color: #94a3b8; font-weight: 400; }
-  .jump-box { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; }
-  .jump-box input {
-    width: 64px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
-    font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
-  }
-  .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
   .clear-filter {
     display: inline-block; margin-left: 8px; font-size: 12px; color: #94a3b8;
     text-decoration: none; cursor: pointer;
@@ -426,26 +360,14 @@ _CSS = """
   .clear-filter:hover { color: #dc2626; }
 """
 
-_PAGE_HEADER = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Web 报表工具</title>
-<style>""" + _CSS + """</style>
-</head>
-<body>
-<div class="navbar">
-  <a href="/report" class="brand">My<span>Report</span></a>
-  <div class="spacer"></div>
-  <a href="/report" class="nav-active">报表页</a>
-  <a href="/config">配置管理</a>
-  <a href="/config/api-endpoints">API 接口</a>
-  <a href="/audit">审计日志</a>
-  <a href="/logout">退出</a>
-</div>
-<div class="container">
-"""
+# _PAGE_HEADER 已删除：页面头部（<head>/导航栏/公共 CSS）统一由
+# render.render_page_header 生成，见 _render_page_header()。
+
+
+def _render_page_header() -> str:
+    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 导航高亮。"""
+    return render_page_header(title="Web 报表工具", active_nav="report", extra_css=_CSS)
+
 
 _FOOTER = r"""</div>
 <script>
@@ -749,7 +671,7 @@ class ReportResult:
                 "total": total if total is not None else len(rws)
             }]
             self.active_index = 0
-        elif results is not None and isinstance(results[0], str):
+        elif results is not None and results and isinstance(results[0], str):
             # 旧式兼容：results 其实是 columns，active_index 其实是 rows
             cols = results
             rws = active_index if isinstance(active_index, (list, tuple)) else []
@@ -769,28 +691,28 @@ class ReportResult:
     @property
     def columns(self) -> list[str]:
         """当前激活结果的列名"""
+        if not self.results:
+            return []
         return self.results[self.active_index]["columns"]
 
     @property
     def rows(self) -> list[tuple]:
         """当前激活结果的行数据"""
+        if not self.results:
+            return []
         return self.results[self.active_index]["rows"]
 
     @property
     def total(self) -> int:
         """当前激活结果的总行数"""
+        if not self.results:
+            return 0
         return self.results[self.active_index]["total"]
 
     @property
     def total_pages(self) -> int:
         """当前激活结果的总页数"""
-        t = self.total
-        ps = self.page_size
-        if ps <= 0:
-            return 1
-        if t <= 0:
-            return 1
-        return math.ceil(t / ps)
+        return calc_total_pages(self.total, self.page_size)
 
 
 def execute_report(report_id: int, sql_query: str, pool_config: dict,
@@ -852,8 +774,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         # 静态文件缓存联动：删除该报表全部 API 端点的静态文件（惰性重建）
         if conn is not None:
             try:
-                for ep in db.get_api_endpoints_by_report(conn, report_id):
-                    static_cache.invalidate(ep["url_path"])
+                config_db.invalidate_api_static_cache_by_report(conn, report_id)
             except Exception as e:
                 logging.warning("static_cache refresh 联动失败: %s", e)
 
@@ -891,14 +812,14 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
         if not redis_hit:
             # ---- 检查是否需要走 Redis 重建锁 ----
-            lock_acquired = True  # 默认：无锁场景直接查 MySQL
+            lock_held = False  # 本进程是否实际持有 Redis 重建锁
             _mgr = redis_cache.get_redis_manager() if (redis_avail and snapshot_key and lock_key) else None
             if _mgr:
-                lock_acquired = _mgr.acquire_lock(lock_key)
-                if not lock_acquired:
+                lock_held = _mgr.acquire_lock(lock_key)
+                if not lock_held:
                     # 锁已被占用 → 等待锁释放后重新读取 Redis
-                    lock_acquired = _mgr.wait_for_lock(lock_key)
-                    if lock_acquired:
+                    lock_held = _mgr.wait_for_lock(lock_key)
+                    if lock_held:
                         # 获取到锁后先检查 Redis 是否已有数据（可能已被其他进程写入）
                         _snap = _mgr.get_snapshot(snapshot_key)
                         if _snap is not None:
@@ -913,59 +834,65 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                                 "fresh": True,
                             }
 
-            if not redis_hit:
-                # ---- MySQL 查询 ----
-                clean_sql = sql_query.rstrip("; \t\n\r")
-                conn = db.create_mysql_connection(pool_config)
-                try:
-                    all_results = db.execute_mysql_query(conn, clean_sql, transactional=True)
-                except Exception as e:
-                    # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
-                    if _mgr and snapshot_key:
-                        _snap = _mgr.get_snapshot(snapshot_key)
-                        if _snap is not None:
-                            all_results = _snap.results
-                            cache_info = {
-                                "source": "redis_fallback",
-                                "timestamp": _snap.updated_at,
-                                "fresh": False,
-                            }
+            try:
+                if not redis_hit:
+                    # ---- MySQL 查询 ----
+                    clean_sql = sql_query.rstrip("; \t\n\r")
+                    conn = db.create_mysql_connection(pool_config)
+                    try:
+                        all_results = db.execute_mysql_query(conn, clean_sql, transactional=True)
+                    except Exception as e:
+                        # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
+                        if _mgr and snapshot_key:
+                            _snap = _mgr.get_snapshot(snapshot_key)
+                            if _snap is not None:
+                                all_results = _snap.results
+                                cache_info = {
+                                    "source": "redis_fallback",
+                                    "timestamp": _snap.updated_at,
+                                    "fresh": False,
+                                }
+                        if cache_info is None:
+                            raise
+                    finally:
+                        conn.close()
+
                     if cache_info is None:
-                        raise
-                finally:
-                    conn.close()
+                        # MySQL 查询成功 → 写入各层缓存
+                        _snap_ts = time.time()
+                        _redis_written = False
+                        if _mgr and prefer_cache and not is_preview:
+                            _snap = redis_cache.ReportSnapshot(
+                                results=all_results,
+                                sql_query=sql_query,
+                                updated_at=_snap_ts,
+                                config_version=config_version or "",
+                            )
+                            _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
+                            _redis_written = True
+                        cache.set(report_id, all_results, sql_query,
+                                         source="redis" if _redis_written else None,
+                                         source_timestamp=_snap_ts if _redis_written else None)
+                        if _redis_written:
+                            cache_info = {
+                                "source": "redis",
+                                "timestamp": _snap_ts,
+                                "fresh": True,
+                            }
+                        else:
+                            cache_info = {"source": "mysql"}
+            finally:
+                # 仅当本进程实际持有锁时才释放，覆盖成功/兜底/抛异常/锁等待命中快照全部路径；
+                # wait_for_lock 超时未获锁（lock_held=False）时不误删他人持有的锁。
+                if _mgr and lock_key and lock_held:
+                    _mgr.release_lock(lock_key)
 
-                if cache_info is None:
-                    # MySQL 查询成功 → 写入各层缓存
-                    _snap_ts = time.time()
-                    _redis_written = False
-                    if _mgr and prefer_cache and not is_preview:
-                        _snap = redis_cache.ReportSnapshot(
-                            results=all_results,
-                            sql_query=sql_query,
-                            updated_at=_snap_ts,
-                            config_version=config_version or "",
-                        )
-                        _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
-                        _redis_written = True
-                    cache.set(report_id, all_results, sql_query,
-                                     source="redis" if _redis_written else None,
-                                     source_timestamp=_snap_ts if _redis_written else None)
-                    if _redis_written:
-                        cache_info = {
-                            "source": "redis",
-                            "timestamp": _snap_ts,
-                            "fresh": True,
-                        }
-                    else:
-                        cache_info = {"source": "mysql"}
-
-            # 释放 Redis 重建锁
-            if _mgr and lock_key:
-                _mgr.release_lock(lock_key)
-            else:
-                # 兜底读成功，不写入进程缓存（数据可能过期）
-                pass
+    # 越界 result 索引安全回退：clamp 到 0..len(all_results)-1（保留 -1 哨兵语义）
+    if all_results:
+        if active_index != -1:
+            active_index = min(max(active_index, 0), len(all_results) - 1)
+    elif active_index != -1:
+        active_index = 0
 
     # 对每个结果集独立执行筛选、排序、分页
     report_results = []
@@ -1081,7 +1008,7 @@ def render_report_selector(conn) -> str:
     if not report_list:
         report_list = '<li style="color:#94a3b8;padding:16px;list-style:none">暂无可用报表</li>'
 
-    body = _PAGE_HEADER + """
+    body = _render_page_header() + """
 <div class="card">
   <h2>选择报表</h2>
   <div class="report-select">
@@ -1123,7 +1050,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
     """
     report = db.get_report(conn, report_id)
     if not report:
-        return _PAGE_HEADER + '<div class="flash flash-error">错误: 报表不存在</div>' + _FOOTER
+        return _render_page_header() + '<div class="flash flash-error">错误: 报表不存在</div>' + _FOOTER
 
     if page_size is None or page_size < 1:
         page_size = report["default_page_size"]
@@ -1133,13 +1060,13 @@ def render_report_page(conn, report_id: int, page: int = 1,
     else:
         pool_id = report["pool_id"]
         if pool_id is None:
-            return (_PAGE_HEADER +
+            return (_render_page_header() +
                     f'<div class="flash flash-error">该报表 "{_escape(report["name"])}" 关联的连接池已被删除。'
                     f' 请前往 <a href="/config" style="color:#4f46e5;font-weight:600">配置管理</a> 重新指定连接池。</div>' +
                     _FOOTER)
         pool_config = db.get_pool(conn, pool_id)
         if not pool_config:
-            return (_PAGE_HEADER +
+            return (_render_page_header() +
                     f'<div class="flash flash-error">错误: 报表 "{_escape(report["name"])}" 关联的连接池不存在</div>' +
                     _FOOTER)
 
@@ -1154,11 +1081,20 @@ def render_report_page(conn, report_id: int, page: int = 1,
         pool_host = pool_config.get("host", "?")
         pool_port = pool_config.get("port", "?")
         pool_user = pool_config.get("user", "?")
-        return (_PAGE_HEADER +
+        return (_render_page_header() +
                 f'<div class="flash flash-error">查询执行失败: {_escape(str(e))}'
                 f'<br><small>连接池: {_escape(str(pool_name))}'
                 f' ({_escape(str(pool_host))}:{pool_port}, 用户: {_escape(str(pool_user))})'
                 f'</small></div>' + _FOOTER)
+
+    # 越界/空结果集安全：以执行结果为准对 active_index 做上界 clamp（保留 -1 哨兵），
+    # 防止调用方构造越界 ReportResult 时 result.columns 等属性抛 IndexError 导致 500。
+    if result.results:
+        if result.active_index != -1:
+            result.active_index = min(max(result.active_index, 0), len(result.results) - 1)
+    elif result.active_index != -1:
+        result.active_index = 0
+    active_index = result.active_index
 
     # 从原始 cols 字符串解析自定义列（利用 execute_report 已获取的列名）
     all_cols = result.columns
@@ -1208,16 +1144,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     # ---- 多结果集 ----
     num_results = len(result.results)
-    # 解析 result_names（每行一个名称，JSON 格式字符串）
+    # 解析 result_names（每行一个名称，JSON 格式字符串），补齐/截断到实际结果数
     result_names_raw = result_names_override if result_names_override else (report.get("result_names", "") or "")
-    result_names_list = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
-    # 补齐或截断到实际结果数
-    result_names = []
-    for i in range(num_results):
-        if i < len(result_names_list):
-            result_names.append(result_names_list[i])
-        else:
-            result_names.append(f"结果{i + 1}")
+    result_names = parse_result_names(result_names_raw, num_results)
     swi = ("report" if not sql_override else "report/preview")
     result_selector_html = build_result_selector_html(
         report_id, qs_page_size, result_names, active_index, sql_override, swi)
@@ -1232,10 +1161,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     # ---- API URL 区域 ----
     try:
         api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
-        _, port = app_config.get_server_config()
         # base_url 仅作服务端兜底值（无 JS 时可用）；页面加载后 JS 用
         # window.location.origin 覆盖（与 API 配置后台一致，显示用户实际访问的地址）
-        base_url = f"http://127.0.0.1:{port}"
+        base_url = app_config.get_server_base_url()
         api_urls_html = build_api_urls_section_html(api_endpoints, base_url)
     except Exception:
         api_urls_html = ""
@@ -1286,15 +1214,12 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     filter_form_html = build_filter_form_html(filter_form_id, form_hidden_str)
 
     # ---- 组装最终 HTML ----
-    flash_html = ""
-    if flash:
-        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
-        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
-    body = (_PAGE_HEADER +
+    flash_html = build_flash_html(flash) if flash else ""
+    body = (_render_page_header() +
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
             f'<h2>{_escape(report["name"])}</h2>' +
-            ('<div class="preview-badge" style="background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600">'
+            ('<div class="preview-badge flash-warn" style="padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600">'
              '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
              '</div>' if sql_override else '') +
              f'<div style="margin-bottom:10px">'
@@ -1351,12 +1276,7 @@ def handle_request(conn, method: str, path: str, query: str,
         except (ValueError, TypeError, IndexError):
             return 200, render_report_selector(conn), {}
         sql_override = form_data.get("sql_query", [None])[0] or ""
-        preview_result = 0
-        if "result" in form_data and form_data["result"][0]:
-            try:
-                preview_result = max(0, int(form_data["result"][0]))
-            except ValueError:
-                pass
+        preview_result = parse_result_index(form_data)
         preview_names = form_data.get("result_names", [None])[0]
         return 200, render_report_page(conn, preview_id, sql_override=sql_override,
                                          active_index=preview_result,
@@ -1374,20 +1294,16 @@ def handle_request(conn, method: str, path: str, query: str,
 
     page = 1
     if "page" in qs and qs["page"][0]:
-        try:
-            page = max(1, int(qs["page"][0]))
-        except ValueError:
-            pass
+        page = max(1, app_config.safe_int(qs["page"][0], 1))
 
     page_size = None
     if "page_size" in qs and qs["page_size"][0]:
-        try:
-            page_size = max(1, int(qs["page_size"][0]))
-        except ValueError:
-            pass
+        parsed_page_size = app_config.safe_int(qs["page_size"][0], None)
+        if parsed_page_size is not None:
+            page_size = max(1, parsed_page_size)
 
     # 多字段排序
-    sorts = _parse_sorts(qs)
+    sorts = parse_sorts(qs)
     # 多字段筛选
     filters = _parse_filters(qs)
 
@@ -1396,15 +1312,10 @@ def handle_request(conn, method: str, path: str, query: str,
 
     # 刷新缓存
     refresh = _qs_val(qs, "refresh") or ""
-    refresh_flag = refresh in ("1", "true", "yes")
+    refresh_flag = refresh in app_config.TRUTHY_VALUES
 
     # 多结果集索引
-    active_index = 0
-    if "result" in qs and qs["result"][0]:
-        try:
-            active_index = max(0, int(qs["result"][0]))
-        except ValueError:
-            pass
+    active_index = parse_result_index(qs)
 
     # 刷新缓存：预填缓存后重定向到不带 refresh 参数的 URL，避免 F5 反复清空缓存
     if refresh_flag:

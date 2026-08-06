@@ -39,6 +39,7 @@ from render import (
     build_category_section_html,
     render_page_header,
     render_page_footer,
+    build_flash_html,
     _SQL_HIGHLIGHT_JS,
     _SQL_FORMATTER_JS,
     build_api_endpoints_list_html,
@@ -46,6 +47,7 @@ from render import (
     build_api_endpoint_preview_help_html,
     _build_desc_summary_html,
 )
+from report import parse_result_names
 
 
 # ---------------------------------------------------------------------------
@@ -53,11 +55,12 @@ from render import (
 # ---------------------------------------------------------------------------
 
 # 匹配 /config/pools/add, /config/pools/{id}/edit, /config/pools/{id}/copy,
-# /config/pools/{id}/move-up, /config/pools/{id}/move-down, /config/reports/batch-pool
+# /config/pools/{id}/move-up, /config/pools/{id}/move-down, /config/reports/batch-pool,
+# /config/reports/{id}/move-category
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
-    r"(?:/(add|batch-pool|batch-set-category|batch-cache)"
-    r"|/(\d+)/(edit|delete|copy|move-up|move-down)"
+    r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete)"
+    r"|/(\d+)/(edit|delete|copy|move-category|move-up|move-down)"
     r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview)))?$"
 )
 
@@ -68,7 +71,7 @@ def parse_config_path(path: str) -> dict:
 
     返回格式:
       {"section": "pools|users|reports|categories",
-       "action": "list|add|batch-pool|batch-set-category|batch-cache|edit|delete|copy|move-up|move-down|api_new|api_edit|api_delete",
+       "action": "list|add|batch-pool|batch-set-category|batch-cache|batch-delete|edit|delete|copy|move-up|move-down|api_new|api_edit|api_delete",
        "id": int|None,
        "report_id": int|None,
        "endpoint_id": int|None}
@@ -183,11 +186,6 @@ _CONFIG_EXTRA_CSS = """
   }
   .sql-preview.show { display: block; }
   .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .sql-hl-keyword  { color: #7c3aed; font-weight: 600; }
-  .sql-hl-function { color: #2563eb; }
-  .sql-hl-number   { color: #059669; }
-  .sql-hl-string   { color: #b91c1c; }
-  .sql-hl-comment  { color: #94a3b8; font-style: italic; }
   .section + .section { margin-top: 8px; }
   .ops-cell { white-space: nowrap; }
   .ops-cell form { display: inline; }
@@ -214,14 +212,16 @@ def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm") -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_pool_form(pool: dict = None, copy_mode: bool = False) -> str:
+def _render_pool_form(pool: dict = None, copy_mode: bool = False, is_edit: bool = None,
+                      prefill_copy_suffix: bool = True) -> str:
     """渲染连接池编辑/新增/复制表单"""
-    return build_pool_form_html(pool, copy_mode)
+    return build_pool_form_html(pool, copy_mode, is_edit=is_edit,
+                                prefill_copy_suffix=prefill_copy_suffix)
 
 
-def _render_user_form(user: dict = None) -> str:
+def _render_user_form(user: dict = None, is_edit: bool = None) -> str:
     """渲染用户编辑/新增表单"""
-    return build_user_form_html(user)
+    return build_user_form_html(user, is_edit=is_edit)
 
 
 def _report_form_pool_options(conn, cur_pool_id, is_edit):
@@ -384,9 +384,11 @@ function previewReport(form) {{
 </div>"""
 
 
-def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> str:
+def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_edit: bool = None,
+                        prefill_copy_suffix: bool = True) -> str:
     """渲染报表编辑/新增/复制表单"""
-    is_edit = report is not None and not copy_mode
+    if is_edit is None:
+        is_edit = report is not None and not copy_mode
     is_copy = report is not None and copy_mode
     if is_edit:
         action_url = f"/config/reports/{report['id']}/edit"
@@ -405,7 +407,7 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
     memo_val = _escape(report.get("memo") or "") if report else ""
     result_names_val = report.get("result_names") or "" if report else ""
 
-    if is_copy:
+    if is_copy and prefill_copy_suffix:
         name = _escape(report["name"] + " (副本)")
 
     pool_options, no_pool_opt, required_attr = _report_form_pool_options(
@@ -413,13 +415,13 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False) -> s
     category_options = _report_form_cat_options(
         conn, report.get("category_id") if report else "")
 
-    prefer_cache = int(report.get("prefer_cache", 1)) if report else 1
-    cache_ttl_hours = int(report.get("cache_ttl_hours", 0)) if report else 0
+    prefer_cache = _tolerant_int(report.get("prefer_cache"), 1) if report else 1
+    cache_ttl_hours = _tolerant_int(report.get("cache_ttl_hours"), 0) if report else 0
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
                               result_names_val=result_names_val,
-                              is_edit=is_edit, report_id=report["id"] if report else None,
+                              is_edit=is_edit, report_id=report.get("id") if report else None,
                               prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
 
 
@@ -457,8 +459,7 @@ def render_overview(conn, flash: str = None) -> str:
     """渲染配置总览页，包含三个配置段"""
     flash_html = ""
     if flash:
-        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
-        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
+        flash_html = build_flash_html(flash)
     api_endpoints = db.get_all_api_endpoints(conn)
     api_endpoints_count = len(api_endpoints)
     # 气泡内列出接口名称与说明摘要（截断 + title 全文），最多展示 5 个
@@ -487,32 +488,49 @@ def render_overview(conn, flash: str = None) -> str:
     return body
 
 
-def render_pool_form_page(conn, pool_id: int = None, flash: str = None, copy_mode: bool = False) -> str:
-    """渲染新增/编辑/复制连接池表单页"""
-    pool = db.get_pool(conn, pool_id) if pool_id else None
+def render_pool_form_page(conn, pool_id: int = None, flash: str = None, copy_mode: bool = False,
+                          pool: dict = None) -> str:
+    """渲染新增/编辑/复制连接池表单页
+
+    pool: 表单回显数据（保存失败时覆盖 DB 读取，保留用户原输入）
+    """
+    echo_pool = pool is not None
+    if pool is None:
+        pool = db.get_pool(conn, pool_id) if pool_id else None
     if pool_id and not pool:
         return render_overview(conn, flash="错误: 连接池不存在")
-    flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
+    is_edit = pool_id is not None and not copy_mode
+    flash_html = build_flash_html(flash) if flash else ""
     return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + _render_pool_form(pool, copy_mode) + render_page_footer())
+            + flash_html + _render_pool_form(pool, copy_mode, is_edit=is_edit,
+                                             prefill_copy_suffix=not echo_pool) + render_page_footer())
 
 
-def render_user_form_page(conn, user_id: int = None, flash: str = None) -> str:
-    """渲染新增/编辑用户表单页"""
-    user = db.get_user_by_id(conn, user_id) if user_id else None
+def render_user_form_page(conn, user_id: int = None, flash: str = None, user: dict = None) -> str:
+    """渲染新增/编辑用户表单页
+
+    user: 表单回显数据（保存失败时覆盖 DB 读取，保留用户原输入）
+    """
+    if user is None:
+        user = db.get_user_by_id(conn, user_id) if user_id else None
     if user_id and not user:
         return render_overview(conn, flash="错误: 用户不存在")
-    flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
+    is_edit = user_id is not None
+    flash_html = build_flash_html(flash) if flash else ""
     return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + _render_user_form(user) + render_page_footer())
+            + flash_html + _render_user_form(user, is_edit=is_edit) + render_page_footer())
 
 
-def render_category_form_page(conn, category_id: int = None, flash: str = None) -> str:
-    """渲染新增/编辑分类表单页"""
-    cat = db.get_category(conn, category_id) if category_id else None
+def render_category_form_page(conn, category_id: int = None, flash: str = None, cat: dict = None) -> str:
+    """渲染新增/编辑分类表单页
+
+    cat: 表单回显数据（保存失败时覆盖 DB 读取，保留用户原输入）
+    """
+    if cat is None:
+        cat = db.get_category(conn, category_id) if category_id else None
     if category_id and not cat:
         return render_overview(conn, flash="错误: 分类不存在")
-    flash_html = f'<div class="flash flash-error">{_escape(flash)}</div>' if flash else ""
+    flash_html = build_flash_html(flash) if flash else ""
     name = _escape(cat["name"]) if cat else ""
     cur_parent_id = cat["parent_id"] if cat else ""
     is_edit = category_id is not None
@@ -579,23 +597,26 @@ def _get_depth(cat: dict, all_cats: list[dict]) -> int:
     return depth
 
 
-def render_report_form_page(conn, report_id: int = None, flash: str = None, copy_mode: bool = False) -> str:
-    """渲染新增/编辑/复制报表表单页"""
-    report = db.get_report(conn, report_id) if report_id else None
+def render_report_form_page(conn, report_id: int = None, flash: str = None, copy_mode: bool = False,
+                            report: dict = None) -> str:
+    """渲染新增/编辑/复制报表表单页
+
+    report: 表单回显数据（保存失败时覆盖 DB 读取，保留用户原输入）
+    """
+    echo_report = report is not None
+    if report is None:
+        report = db.get_report(conn, report_id) if report_id else None
     if report_id and not report:
         return render_overview(conn, flash="错误: 报表不存在")
-    if flash:
-        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
-        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
-    else:
-        flash_html = ""
+    is_edit = report_id is not None and not copy_mode
+    flash_html = build_flash_html(flash) if flash else ""
     body = render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-    body += flash_html + _render_report_form(conn, report, copy_mode)
+    body += flash_html + _render_report_form(conn, report, copy_mode, is_edit=is_edit,
+                                             prefill_copy_suffix=not echo_report)
     # 编辑模式下显示 API 接口列表
     if report_id and not copy_mode:
         api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
-        _, port = app_config.get_server_config()
-        base_url = f"http://127.0.0.1:{port}"
+        base_url = app_config.get_server_base_url()
         body += build_api_endpoints_list_html(api_endpoints, report_id,
                                               base_url=base_url)
     body += render_page_footer()
@@ -609,8 +630,104 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
 
 def _parse_form_data(form_body: str) -> dict:
     """解析 URL 编码的表单数据"""
-    parsed = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-    return {k: v[-1] if v else "" for k, v in parsed.items()}
+    return app_config.parse_form_urlencoded(form_body)
+
+
+def _parse_report_form(data: dict) -> dict:
+    """解析报表表单公共字段（add/edit/copy 共用读路径）。"""
+    return {
+        "pool_id": int(data["pool_id"]) if data.get("pool_id") else None,
+        "category_id": int(data["category_id"]) if data.get("category_id") else None,
+        "memo": data.get("memo") or None,
+        "result_names": data.get("result_names") or "",
+        "prefer_cache": int(data.get("prefer_cache", 1) or 0),
+        "cache_ttl_hours": int(data.get("cache_ttl_hours", 0) or 0),
+    }
+
+
+def _save_or_render(data: dict, render_fn, args: tuple, kwargs: dict,
+                    success_flash: str, redirect_url: str) -> tuple[int, str]:
+    """统一「保存 / 保存并关闭」双按钮保存模式。
+
+    - action=save       → 200 + 渲染表单页（flash=success_flash，留在当前页）
+    - action=save_close → 302 + redirect_url?flash=success_flash（默认，返回上级）
+    """
+    action = data.get("action", "save_close")
+    if action == "save":
+        return 200, render_fn(*args, flash=success_flash, **kwargs)
+    return 302, f"{redirect_url}?flash={success_flash}"
+
+
+def _tolerant_int(value, default=None):
+    """容错 int 转换：非法值原样返回（用于保存失败时回显用户输入）。"""
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return value
+
+
+def _echo_int(value, default):
+    """严格 int 转换：非法或空值返回 default（用于回显端点数值字段）。"""
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _pool_from_form(data: dict, pool_id: int = None) -> dict:
+    """从表单数据构造临时连接池 dict（保存失败时表单回显用户原输入）。"""
+    pool = {
+        "name": data.get("name", ""),
+        "host": data.get("host", ""),
+        "port": data.get("port", "3306"),
+        "user": data.get("user", ""),
+        "password": data.get("password", ""),
+        "database": data.get("database", ""),
+    }
+    if pool_id is not None:
+        pool["id"] = pool_id
+    return pool
+
+
+def _user_from_form(data: dict, user_id: int = None) -> dict:
+    """从表单数据构造临时用户 dict（保存失败时表单回显用户原输入）。"""
+    user = {"username": data.get("username", "")}
+    if user_id is not None:
+        user["id"] = user_id
+    return user
+
+
+def _report_from_form(data: dict, report_id: int = None) -> dict:
+    """从表单数据构造临时报表 dict（保存失败时表单回显用户原输入）。"""
+    report = {
+        "name": data.get("name", ""),
+        "sql_query": data.get("sql_query", ""),
+        "default_page_size": data.get("default_page_size", "20"),
+        "pool_id": _tolerant_int(data.get("pool_id")),
+        "category_id": _tolerant_int(data.get("category_id")),
+        "memo": data.get("memo", ""),
+        "result_names": data.get("result_names", ""),
+        "prefer_cache": _tolerant_int(data.get("prefer_cache"), 1),
+        "cache_ttl_hours": data.get("cache_ttl_hours", "0"),
+    }
+    if report_id is not None:
+        report["id"] = report_id
+    return report
+
+
+def _category_from_form(data: dict, category_id: int = None) -> dict:
+    """从表单数据构造临时分类 dict（保存失败时表单回显用户原输入）。"""
+    cat = {
+        "name": data.get("name", ""),
+        "parent_id": data.get("parent_id", ""),
+    }
+    if category_id is not None:
+        cat["id"] = category_id
+    return cat
 
 
 def _normalize_api_url_path(path: str) -> str:
@@ -621,14 +738,7 @@ def _normalize_api_url_path(path: str) -> str:
     此函数确保存储到 DB 时补全为 /api/<suffix> 格式。
     同时兼容旧格式（已有 /api/ 前缀）以确保向后兼容。
     """
-    path = path.strip()
-    if not path:
-        raise ValueError("URL 路径不能为空")
-    if path.startswith("/api/"):
-        return path
-    if path.startswith("/api"):
-        return "/api/" + path[4:].lstrip("/")
-    return "/api/" + path.lstrip("/")
+    return app_config.ensure_api_prefix(path)
 
 
 def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
@@ -669,13 +779,13 @@ def handle_pool_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
         pid = db.add_pool(conn, data["name"], data["host"], int(data["port"]),
                           data["user"], data["password"], data["database"],
                           session_user=session_user)
-        action = data.get("action", "save_close")
-        if action == "save":
-            return 200, render_pool_form_page(
-                conn, pid, flash=f"连接池 {data['name']} 已创建 (id={pid})")
-        return 302, f"/config?flash=连接池 {data['name']} 已创建 (id={pid})"
+        return _save_or_render(
+            data, render_pool_form_page, (conn, pid), {},
+            success_flash=f"连接池 {data['name']} 已创建 (id={pid})",
+            redirect_url="/config")
     except Exception as e:
-        return 200, render_pool_form_page(conn, flash=f"错误: {e}")
+        return 200, render_pool_form_page(conn, flash=f"错误: {e}",
+                                          pool=_pool_from_form(data))
 
 
 def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -693,27 +803,32 @@ def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> t
                             int(data["port"]), data["user"], password, data["database"],
                             session_user=session_user)
         if ok:
-            action = data.get("action", "save_close")
-            if action == "save":
-                return 200, render_pool_form_page(
-                    conn, pool_id,
-                    flash=f"连接池 {data['name']} 已更新")
-            return 302, f"/config?flash=连接池 {data['name']} 已更新"
+            return _save_or_render(
+                data, render_pool_form_page, (conn, pool_id), {},
+                success_flash=f"连接池 {data['name']} 已更新",
+                redirect_url="/config")
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
-        return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}")
+        return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}",
+                                          pool=_pool_from_form(data, pool_id))
 
 
 def handle_pool_copy(conn, pool_id: int, form_body: str, session_user=None) -> tuple[int, str]:
     """处理复制连接池（新增一个同名+副本的连接池）"""
     data = _parse_form_data(form_body)
+    src = db.get_pool(conn, pool_id)
+    if not src:
+        return 200, render_pool_form_page(conn, pool_id, flash="错误: 连接池不存在",
+                                          copy_mode=True,
+                                          pool=_pool_from_form(data, pool_id))
     try:
         pid = db.add_pool(conn, data["name"], data["host"], int(data["port"]),
                           data["user"], data["password"], data["database"],
                           session_user=session_user)
         return 302, f"/config?flash=连接池 {data['name']} 已创建（复制自 id={pool_id}）"
     except Exception as e:
-        return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}", copy_mode=True)
+        return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}", copy_mode=True,
+                                          pool=_pool_from_form(data, pool_id))
 
 
 def handle_pool_delete(conn, pool_id: int, session_user=None) -> tuple[int, str]:
@@ -733,7 +848,8 @@ def handle_user_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
         uid = db.add_user(conn, data["username"], pw_hash, session_user=session_user)
         return 302, f"/config?flash=用户 {data['username']} 已创建 (id={uid})"
     except Exception as e:
-        return 200, render_user_form_page(conn, flash=f"错误: {e}")
+        return 200, render_user_form_page(conn, flash=f"错误: {e}",
+                                          user=_user_from_form(data))
 
 
 def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -742,11 +858,15 @@ def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> t
     target = db.get_user_by_id(conn, user_id)
     if not target:
         return 302, "/config?flash=错误: 用户不存在"
-    password_hash = auth.hash_password(data["password"]) if data.get("password") else target["password_hash"]
-    ok = db.update_user(conn, user_id, data["username"], password_hash, session_user=session_user)
-    if ok:
-        return 302, f"/config?flash=用户 {data['username']} 已更新"
-    return 302, "/config?flash=错误: 更新失败"
+    try:
+        password_hash = auth.hash_password(data["password"]) if data.get("password") else target["password_hash"]
+        ok = db.update_user(conn, user_id, data["username"], password_hash, session_user=session_user)
+        if ok:
+            return 302, f"/config?flash=用户 {data['username']} 已更新"
+        return 302, "/config?flash=错误: 更新失败"
+    except Exception as e:
+        return 200, render_user_form_page(conn, user_id, flash=f"错误: {e}",
+                                          user=_user_from_form(data, user_id))
 
 
 def handle_user_delete(conn, user_id: int, session_user=None) -> tuple[int, str]:
@@ -767,25 +887,21 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
     """
     data = _parse_form_data(form_body)
     try:
-        pool_id = int(data["pool_id"]) if data.get("pool_id") else None
-        category_id = int(data["category_id"]) if data.get("category_id") else None
-        memo = data.get("memo") or None
-        result_names = data.get("result_names") or ""
-        prefer_cache = int(data.get("prefer_cache", 1) or 0)
-        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
+        rf = _parse_report_form(data)
         rid = db.add_report(conn, data["name"], data["sql_query"],
-                            int(data["default_page_size"]), pool_id, category_id, memo,
-                            result_names=result_names,
-                            prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
+                            int(data["default_page_size"]), rf["pool_id"],
+                            rf["category_id"], rf["memo"],
+                            result_names=rf["result_names"],
+                            prefer_cache=rf["prefer_cache"],
+                            cache_ttl_hours=rf["cache_ttl_hours"],
                             session_user=session_user)
-        action = data.get("action", "save_close")
-        if action == "save":
-            return 200, render_report_form_page(
-                conn, rid,
-                flash=f"报表 {data['name']} 已创建 (id={rid})")
-        return 302, f"/config?flash=报表 {data['name']} 已创建 (id={rid})"
+        return _save_or_render(
+            data, render_report_form_page, (conn, rid), {},
+            success_flash=f"报表 {data['name']} 已创建 (id={rid})",
+            redirect_url="/config")
     except Exception as e:
-        return 200, render_report_form_page(conn, flash=f"错误: {e}")
+        return 200, render_report_form_page(conn, flash=f"错误: {e}",
+                                            report=_report_from_form(data))
 
 
 def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -795,27 +911,23 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
     if not rpt:
         return 302, "/config?flash=错误: 报表不存在"
     try:
-        pool_id = int(data["pool_id"]) if data.get("pool_id") else None
-        category_id = int(data["category_id"]) if data.get("category_id") else None
-        memo = data.get("memo") or None
-        result_names = data.get("result_names") or ""
-        prefer_cache = int(data.get("prefer_cache", 1) or 0)
-        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
+        rf = _parse_report_form(data)
         ok = db.update_report(conn, report_id, data["name"], data["sql_query"],
-                              int(data["default_page_size"]), pool_id, category_id, memo,
-                              result_names=result_names,
-                              prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
+                              int(data["default_page_size"]), rf["pool_id"],
+                              rf["category_id"], rf["memo"],
+                              result_names=rf["result_names"],
+                              prefer_cache=rf["prefer_cache"],
+                              cache_ttl_hours=rf["cache_ttl_hours"],
                               session_user=session_user)
         if ok:
-            action = data.get("action", "save_close")
-            if action == "save":
-                return 200, render_report_form_page(
-                    conn, report_id,
-                    flash=f"报表 {data['name']} 已更新")
-            return 302, f"/config?flash=报表 {data['name']} 已更新"
+            return _save_or_render(
+                data, render_report_form_page, (conn, report_id), {},
+                success_flash=f"报表 {data['name']} 已更新",
+                redirect_url="/config")
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
-        return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}")
+        return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}",
+                                            report=_report_from_form(data, report_id))
 
 
 def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -824,26 +936,27 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
     遵循「保存」/「保存并关闭」双按钮业务逻辑，与新建报表一致。
     """
     data = _parse_form_data(form_body)
+    src = db.get_report(conn, report_id)
+    if not src:
+        return 200, render_report_form_page(conn, report_id, flash="错误: 报表不存在",
+                                            copy_mode=True,
+                                            report=_report_from_form(data, report_id))
     try:
-        pool_id = int(data["pool_id"]) if data.get("pool_id") else None
-        category_id = int(data["category_id"]) if data.get("category_id") else None
-        memo = data.get("memo") or None
-        result_names = data.get("result_names") or ""
-        prefer_cache = int(data.get("prefer_cache", 1) or 0)
-        cache_ttl_hours = int(data.get("cache_ttl_hours", 0) or 0)
+        rf = _parse_report_form(data)
         rid = db.add_report(conn, data["name"], data["sql_query"],
-                            int(data["default_page_size"]), pool_id, category_id, memo,
-                            result_names=result_names,
-                            prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
+                            int(data["default_page_size"]), rf["pool_id"],
+                            rf["category_id"], rf["memo"],
+                            result_names=rf["result_names"],
+                            prefer_cache=rf["prefer_cache"],
+                            cache_ttl_hours=rf["cache_ttl_hours"],
                             session_user=session_user)
-        action = data.get("action", "save_close")
-        if action == "save":
-            return 200, render_report_form_page(
-                conn, rid,
-                flash=f"报表 {data['name']} 已创建（复制自 id={report_id}）")
-        return 302, f"/config?flash=报表 {data['name']} 已创建（复制自 id={report_id}）"
+        return _save_or_render(
+            data, render_report_form_page, (conn, rid), {},
+            success_flash=f"报表 {data['name']} 已创建（复制自 id={report_id}）",
+            redirect_url="/config")
     except Exception as e:
-        return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True)
+        return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True,
+                                            report=_report_from_form(data, report_id))
 
 
 def handle_report_delete(conn, report_id: int, session_user=None) -> tuple[int, str]:
@@ -859,11 +972,19 @@ def handle_report_move_category(conn, report_id: int, form_body: str, session_us
     """处理报表移动到指定分类"""
     data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
     cat_str = data.get("category_id", [None])[0]
-    category_id = int(cat_str) if cat_str else None
+    try:
+        category_id = int(cat_str) if cat_str else None
+    except (ValueError, TypeError):
+        return 302, "/config?flash=错误: 分类 ID 无效"
     rpt = db.get_report(conn, report_id)
     if not rpt:
         return 302, "/config?flash=错误: 报表不存在"
-    db.move_report_to_category(conn, report_id, category_id, session_user=session_user)
+    if category_id is not None and not db.get_category(conn, category_id):
+        return 302, "/config?flash=错误: 目标分类不存在"
+    try:
+        db.move_report_to_category(conn, report_id, category_id, session_user=session_user)
+    except Exception as e:
+        return 302, f"/config?flash=错误: 移动分类失败: {e}"
     cat_name = "未分类"
     if category_id is not None:
         cat = db.get_category(conn, category_id)
@@ -880,7 +1001,8 @@ def handle_category_add(conn, form_body: str, session_user=None) -> tuple[int, s
         cid = db.add_category(conn, data["name"], parent_id, session_user=session_user)
         return 302, f"/config?flash=分类 {data['name']} 已创建"
     except Exception as e:
-        return 200, render_category_form_page(conn, flash=f"错误: {e}")
+        return 200, render_category_form_page(conn, flash=f"错误: {e}",
+                                              cat=_category_from_form(data))
 
 
 def handle_category_edit(conn, category_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -894,7 +1016,8 @@ def handle_category_edit(conn, category_id: int, form_body: str, session_user=No
         db.update_category(conn, category_id, data["name"], parent_id, session_user=session_user)
         return 302, f"/config?flash=分类 {data['name']} 已更新"
     except Exception as e:
-        return 200, render_category_form_page(conn, category_id, flash=f"错误: {e}")
+        return 200, render_category_form_page(conn, category_id, flash=f"错误: {e}",
+                                              cat=_category_from_form(data, category_id))
 
 
 def handle_category_delete(conn, category_id: int, session_user=None) -> tuple[int, str]:
@@ -908,13 +1031,21 @@ def handle_category_delete(conn, category_id: int, session_user=None) -> tuple[i
 
 def handle_batch_set_category(conn, form_body: str) -> tuple[int, str]:
     """处理报表批量设置分类"""
-    data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-    report_ids = [int(v) for v in data.get("report_ids", []) if v]
-    cat_str = data.get("category_id", [None])[0]
-    category_id = int(cat_str) if cat_str else None
+    try:
+        data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+        report_ids = [int(v) for v in data.get("report_ids", []) if v]
+        cat_str = data.get("category_id", [None])[0]
+        category_id = int(cat_str) if cat_str else None
+    except (ValueError, TypeError):
+        return 302, "/config?flash=错误: 报表 ID 或分类 ID 无效"
     if not report_ids:
         return 302, "/config?flash=错误: 未选择任何报表"
-    affected = db.batch_set_report_category(conn, report_ids, category_id)
+    if category_id is not None and not db.get_category(conn, category_id):
+        return 302, "/config?flash=错误: 目标分类不存在"
+    try:
+        affected = db.batch_set_report_category(conn, report_ids, category_id)
+    except Exception as e:
+        return 302, f"/config?flash=错误: 批量设置分类失败: {e}"
     cat_name = "未分类"
     if category_id is not None:
         cat = db.get_category(conn, category_id)
@@ -925,26 +1056,40 @@ def handle_batch_set_category(conn, form_body: str) -> tuple[int, str]:
 
 def handle_batch_pool(conn, form_body: str) -> tuple[int, str]:
     """处理报表批量修改连接池"""
-    data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-    report_ids = [int(v) for v in data.get("report_ids", []) if v]
-    pool_id_str = data.get("pool_id", [None])[0]
-    pool_id = int(pool_id_str) if pool_id_str else None
+    try:
+        data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+        report_ids = [int(v) for v in data.get("report_ids", []) if v]
+        pool_id_str = data.get("pool_id", [None])[0]
+        pool_id = int(pool_id_str) if pool_id_str else None
+    except (ValueError, TypeError):
+        return 302, "/config?flash=错误: 报表 ID 或连接池 ID 无效"
     if not report_ids:
         return 302, "/config?flash=错误: 未选择报表"
-    n = db.batch_update_report_pool(conn, report_ids, pool_id)
+    if pool_id is not None and not db.get_pool(conn, pool_id):
+        return 302, "/config?flash=错误: 目标连接池不存在"
+    try:
+        n = db.batch_update_report_pool(conn, report_ids, pool_id)
+    except Exception as e:
+        return 302, f"/config?flash=错误: 批量修改连接池失败: {e}"
     pool_label = pool_id if pool_id else "无"
     return 302, f"/config?flash=已更新 {n} 个报表的连接池为 (id={pool_label})"
 
 
 def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     """处理报表批量更新缓存配置"""
-    data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
-    report_ids = [int(v) for v in data.get("report_ids", []) if v]
+    try:
+        data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+        report_ids = [int(v) for v in data.get("report_ids", []) if v]
+        cache_switch = data.get("cache_switch", [""])[0]
+        modify_ttl = data.get("modify_ttl", [""])[0] == "1"
+        cache_ttl_hours = None
+        if modify_ttl:
+            ttl_val = data.get("cache_ttl_hours", ["0"])[0]
+            cache_ttl_hours = int(ttl_val) if ttl_val else 0
+    except (ValueError, TypeError):
+        return 302, "/config?flash=错误: 报表 ID 或缓存 TTL 无效"
     if not report_ids:
         return 302, "/config?flash=错误: 未选择报表"
-
-    cache_switch = data.get("cache_switch", [""])[0]
-    modify_ttl = data.get("modify_ttl", [""])[0] == "1"
 
     prefer_cache = None
     if cache_switch == "1":
@@ -952,12 +1097,10 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     elif cache_switch == "0":
         prefer_cache = 0
 
-    cache_ttl_hours = None
-    if modify_ttl:
-        ttl_val = data.get("cache_ttl_hours", ["0"])[0]
-        cache_ttl_hours = int(ttl_val) if ttl_val else 0
-
-    affected = db.batch_update_report_cache(conn, report_ids, prefer_cache, cache_ttl_hours)
+    try:
+        affected = db.batch_update_report_cache(conn, report_ids, prefer_cache, cache_ttl_hours)
+    except Exception as e:
+        return 302, f"/config?flash=错误: 批量更新缓存配置失败: {e}"
 
     redis_updated = 0
     redis_failed = 0
@@ -985,8 +1128,7 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     if cache_switch == "0":
         for rid in report_ids:
             try:
-                for ep in db.get_api_endpoints_by_report(conn, rid):
-                    static_cache.invalidate(ep["url_path"])
+                config_db.invalidate_api_static_cache_by_report(conn, rid)
             except Exception as e:
                 logging.warning("static_cache 批量关缓存联动失败: %s", e)
 
@@ -996,6 +1138,22 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     if redis_failed > 0:
         parts.append(f"Redis 失败 {redis_failed}")
     return 302, f"/config?flash={'，'.join(parts)}"
+
+
+def handle_batch_delete(conn, form_body: str, session_user=None) -> tuple[int, str]:
+    """处理报表批量删除（级联删除关联 API 端点并失效静态缓存）"""
+    try:
+        data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+        report_ids = [int(v) for v in data.get("report_ids", []) if v]
+    except (ValueError, TypeError):
+        return 302, "/config?flash=错误: 报表 ID 无效"
+    if not report_ids:
+        return 302, "/config?flash=错误: 未选择报表"
+    try:
+        affected = db.batch_delete_reports(conn, report_ids, session_user=session_user)
+    except Exception as e:
+        return 302, f"/config?flash=错误: 批量删除报表失败: {e}"
+    return 302, f"/config?flash=已删除 {affected} 个报表"
 
 
 # ---------------------------------------------------------------------------
@@ -1134,6 +1292,9 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] == "batch-cache":
                 code, result = handle_batch_cache(conn, form_body or "")
                 return _redirect_or_render(code, result)
+            elif route["action"] == "batch-delete":
+                code, result = handle_batch_delete(conn, form_body or "", session_user=session_user)
+                return _redirect_or_render(code, result)
             elif route["action"] == "move-category" and route["id"]:
                 code, result = handle_report_move_category(conn, route["id"], form_body or "", session_user=session_user)
                 return _redirect_or_render(code, result)
@@ -1195,7 +1356,7 @@ def render_api_endpoint_form_page(conn, report_id: int,
         return render_overview(conn, flash="错误: API 接口不存在")
 
     result_names_raw = (report.get("result_names") or "").strip()
-    result_names_list = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
+    result_names_list = parse_result_names(result_names_raw)
     result_count = len(result_names_list) if result_names_list else _estimate_result_count(report["sql_query"])
 
     return (render_page_header(title="Web 报表工具 - 配置", active_nav="config",
@@ -1229,7 +1390,12 @@ def _validate_json_template(raw: str, result_mode: str) -> str | None:
 
 def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
     """从表单数据构造临时端点 dict（保存失败时表单回显用户原输入）。"""
-    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    try:
+        columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    except ValueError:
+        columns = ""
+        filters_str = data.get("rule_json", "") or ""
+        sorts_str = ""
     return {
         "name": data.get("name", ""),
         "description": data.get("description", "") or "",
@@ -1238,16 +1404,54 @@ def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
         "columns": columns,
         "filters": filters_str,
         "sorts": sorts_str,
-        "row_limit": int(data.get("row_limit", 0) or 0),
+        "row_limit": _echo_int(data.get("row_limit"), 0),
         "api_key": data.get("api_key") or "",
         "allowed_origins": data.get("allowed_origins") or "",
+        "enabled": _echo_int(data.get("enabled"), 0),
+        "allow_fetch_all": _echo_int(data.get("allow_fetch_all"), 1),
+        "static_cache": _echo_int(data.get("static_cache"), 1),
+        "result_mode": result_mode,
+        "result_index": _echo_int(data.get("result_index"), 0),
+        "json_template": data.get("json_template", "") or "",
+    }
+
+
+def _parse_endpoint_form(data: dict) -> dict:
+    """从表单数据解析 API 端点全部字段（add/edit 共用读路径）。
+
+    产出字段含 name/url_path/output_format/columns/filters_str/sorts_str/
+    row_limit/enabled/allow_fetch_all/static_cache/result_mode/result_index/
+    template_raw/api_key/allowed_origins/description。
+    """
+    output_format = data.get("output_format", "json")
+    result_mode = data.get("result_mode", "single")
+    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    return {
+        "name": data["name"],
+        "url_path": _normalize_api_url_path(data["url_path"]),
+        "output_format": output_format,
+        "columns": columns,
+        "filters_str": filters_str,
+        "sorts_str": sorts_str,
+        "row_limit": int(data.get("row_limit", 0) or 0),
         "enabled": int(data.get("enabled", 0) or 0),
         "allow_fetch_all": int(data.get("allow_fetch_all", 1) or 0),
         "static_cache": int(data.get("static_cache", 1) or 0),
         "result_mode": result_mode,
         "result_index": int(data.get("result_index", 0) or 0),
-        "json_template": data.get("json_template", "") or "",
+        # CSV 模式忽略模板字段（模板仅 JSON 有效）：不校验、不落库
+        "template_raw": _template_raw_for_format(output_format, data),
+        "api_key": data.get("api_key") or None,
+        "allowed_origins": data.get("allowed_origins") or None,
+        "description": data.get("description") or None,
     }
+
+
+def _endpoint_unique_error(err_msg: str, url_path: str = "") -> str:
+    """将 UNIQUE 约束错误转换为重复路径提示，非唯一错误原样返回。"""
+    if "UNIQUE" in err_msg or "unique" in err_msg:
+        return f"URL 路径 '{url_path}' 已存在"
+    return err_msg
 
 
 def handle_api_endpoint_add(conn, report_id: int,
@@ -1255,57 +1459,47 @@ def handle_api_endpoint_add(conn, report_id: int,
     """处理新增 API 端点表单提交"""
     data = _parse_form_data(form_body)
     try:
-        row_limit = int(data.get("row_limit", 0) or 0)
-        enabled = int(data.get("enabled", 0) or 0)
-        allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
-        static_cache_enabled = int(data.get("static_cache", 1) or 0)
-        columns, filters_str, sorts_str = _parse_rule_json(
-            data.get("rule_json", ""))
-        url_path = _normalize_api_url_path(data["url_path"])
-        result_mode = data.get("result_mode", "single")
-        result_index = int(data.get("result_index", 0) or 0)
-        output_format = data.get("output_format", "json")
-        # CSV 模式忽略模板字段（模板仅 JSON 有效），不校验、不落库
-        template_raw = _template_raw_for_format(output_format, data)
-        tpl_err = _validate_json_template(template_raw, result_mode)
+        pf = _parse_endpoint_form(data)
+        tpl_err = _validate_json_template(pf["template_raw"], pf["result_mode"])
         if tpl_err:
             return 200, render_api_endpoint_form_page(
                 conn, report_id,
-                endpoint=_endpoint_from_form(data, url_path, result_mode),
+                endpoint=_endpoint_from_form(data, pf["url_path"], pf["result_mode"]),
                 is_edit=False,
                 flash=f"错误: JSON 输出模板无效: {tpl_err}")
         eid = db.add_api_endpoint(
-            conn, report_id, data["name"], url_path,
-            output_format=output_format,
-            columns=columns or None,
-            filters=filters_str or None,
-            sorts=sorts_str or None,
-            row_limit=row_limit,
-            api_key=data.get("api_key") or None,
-            allowed_origins=data.get("allowed_origins") or None,
-            result_mode=result_mode,
-            result_index=result_index,
-            allow_fetch_all=allow_fetch_all,
-            static_cache=static_cache_enabled,
-            json_template=template_raw or None,
-            description=data.get("description") or None,
+            conn, report_id, pf["name"], pf["url_path"],
+            output_format=pf["output_format"],
+            columns=pf["columns"] or None,
+            filters=pf["filters_str"] or None,
+            sorts=pf["sorts_str"] or None,
+            row_limit=pf["row_limit"],
+            api_key=pf["api_key"],
+            allowed_origins=pf["allowed_origins"],
+            result_mode=pf["result_mode"],
+            result_index=pf["result_index"],
+            allow_fetch_all=pf["allow_fetch_all"],
+            static_cache=pf["static_cache"],
+            json_template=pf["template_raw"] or None,
+            description=pf["description"],
             session_user=session_user,
         )
-        if not enabled:
+        if not pf["enabled"]:
             db.update_api_endpoint(conn, eid, enabled=0, session_user=session_user)
-        action = data.get("action", "save_close")
-        if action == "save":
-            return 200, render_api_endpoint_form_page(
-                conn, report_id, eid,
-                flash=f"API 接口 {data['name']} 已创建 (id={eid})")
-        return 302, (f"/config/reports/{report_id}/edit"
-                       f"?flash=API 接口 {data['name']} 已创建 (id={eid})")
+        return _save_or_render(
+            data, render_api_endpoint_form_page,
+            (conn, report_id, eid), {},
+            success_flash=f"API 接口 {pf['name']} 已创建 (id={eid})",
+            redirect_url=f"/config/reports/{report_id}/edit")
     except Exception as e:
-        err_msg = str(e)
-        if "UNIQUE" in err_msg or "unique" in err_msg:
-            err_msg = f"URL 路径 '{data.get('url_path', '')}' 已存在"
+        err_msg = _endpoint_unique_error(str(e), data.get("url_path", ""))
         return 200, render_api_endpoint_form_page(
-            conn, report_id, flash=f"错误: {err_msg}")
+            conn, report_id,
+            endpoint=_endpoint_from_form(data,
+                                         _normalize_api_url_path(data.get("url_path", "")),
+                                         data.get("result_mode", "single")),
+            is_edit=False,
+            flash=f"错误: {err_msg}")
 
 
 def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
@@ -1316,62 +1510,51 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         endpoint = db.get_api_endpoint(conn, endpoint_id)
         if not endpoint:
             return 302, "/config?flash=错误: API 接口不存在"
-        row_limit = int(data.get("row_limit", 0) or 0)
-        enabled = int(data.get("enabled", 0) or 0)
-        allow_fetch_all = int(data.get("allow_fetch_all", 1) or 0)
-        static_cache_enabled = int(data.get("static_cache", 1) or 0)
-        columns, filters_str, sorts_str = _parse_rule_json(
-            data.get("rule_json", ""))
-        url_path = _normalize_api_url_path(data["url_path"])
-        result_mode = data.get("result_mode", "single")
-        result_index = int(data.get("result_index", 0) or 0)
-        output_format = data.get("output_format", "json")
-        # CSV 模式忽略模板字段（模板仅 JSON 有效）：不校验、不更新（保留原值，
-        # 切回 JSON 后模板仍可用）
-        template_raw = _template_raw_for_format(output_format, data)
-        tpl_err = _validate_json_template(template_raw, result_mode)
+        pf = _parse_endpoint_form(data)
+        tpl_err = _validate_json_template(pf["template_raw"], pf["result_mode"])
         if tpl_err:
-            tmp = _endpoint_from_form(data, url_path, result_mode)
+            tmp = _endpoint_from_form(data, pf["url_path"], pf["result_mode"])
             tmp["id"] = endpoint_id
             return 200, render_api_endpoint_form_page(
                 conn, report_id, endpoint_id, endpoint=tmp, is_edit=True,
                 flash=f"错误: JSON 输出模板无效: {tpl_err}")
         update_kwargs = dict(
-            name=data["name"],
-            url_path=url_path,
-            output_format=output_format,
-            columns=columns or None,
-            filters=filters_str or None,
-            sorts=sorts_str or None,
-            row_limit=row_limit,
-            api_key=data.get("api_key") or None,
-            allowed_origins=data.get("allowed_origins") or None,
-            enabled=enabled,
-            allow_fetch_all=allow_fetch_all,
-            result_mode=result_mode,
-            result_index=result_index,
-            static_cache=static_cache_enabled,
-            description=data.get("description") or None,
+            name=pf["name"],
+            url_path=pf["url_path"],
+            output_format=pf["output_format"],
+            columns=pf["columns"] or None,
+            filters=pf["filters_str"] or None,
+            sorts=pf["sorts_str"] or None,
+            row_limit=pf["row_limit"],
+            api_key=pf["api_key"],
+            allowed_origins=pf["allowed_origins"],
+            enabled=pf["enabled"],
+            allow_fetch_all=pf["allow_fetch_all"],
+            result_mode=pf["result_mode"],
+            result_index=pf["result_index"],
+            static_cache=pf["static_cache"],
+            description=pf["description"],
             session_user=session_user,
         )
-        if output_format != "csv":
-            update_kwargs["json_template"] = template_raw or None
+        if pf["output_format"] != "csv":
+            update_kwargs["json_template"] = pf["template_raw"] or None
         ok = db.update_api_endpoint(conn, endpoint_id, **update_kwargs)
         if ok:
-            action = data.get("action", "save_close")
-            if action == "save":
-                return 200, render_api_endpoint_form_page(
-                    conn, report_id, endpoint_id,
-                    flash=f"API 接口 {data['name']} 已更新")
-            return 302, (f"/config/reports/{report_id}/edit"
-                           f"?flash=API 接口 {data['name']} 已更新")
+            return _save_or_render(
+                data, render_api_endpoint_form_page,
+                (conn, report_id, endpoint_id), {},
+                success_flash=f"API 接口 {pf['name']} 已更新",
+                redirect_url=f"/config/reports/{report_id}/edit")
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
-        err_msg = str(e)
-        if "UNIQUE" in err_msg or "unique" in err_msg:
-            err_msg = f"URL 路径 '{data.get('url_path', '')}' 已存在"
+        err_msg = _endpoint_unique_error(str(e), data.get("url_path", ""))
+        tmp = _endpoint_from_form(data,
+                                  _normalize_api_url_path(data.get("url_path", "")),
+                                  data.get("result_mode", "single"))
+        tmp["id"] = endpoint_id
         return 200, render_api_endpoint_form_page(
-            conn, report_id, endpoint_id, flash=f"错误: {err_msg}")
+            conn, report_id, endpoint_id, endpoint=tmp, is_edit=True,
+            flash=f"错误: {err_msg}")
 
 
 def handle_api_endpoint_delete(conn, report_id: int,
@@ -1380,6 +1563,9 @@ def handle_api_endpoint_delete(conn, report_id: int,
     endpoint = db.get_api_endpoint(conn, endpoint_id)
     if not endpoint:
         return 302, "/config?flash=错误: API 接口不存在"
+    if int(endpoint.get("report_id", 0)) != report_id:
+        return 302, (f"/config/reports/{report_id}/edit"
+                       f"?flash=错误: API 接口不属于该报表")
     db.delete_api_endpoint(conn, endpoint_id, session_user=session_user)
     return 302, (f"/config/reports/{report_id}/edit"
                    f"?flash=API 接口 {endpoint['name']} 已删除")
@@ -1507,13 +1693,9 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
     api_endpoints = db.get_all_api_endpoints(conn)
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
     flash = qs.get("flash", [None])[0]
-    flash_html = ""
-    if flash:
-        css_cls = " flash-error" if flash.startswith("错误") else " flash-success"
-        flash_html = f'<div class="flash{css_cls}">{_escape(flash)}</div>'
+    flash_html = build_flash_html(flash) if flash else ""
 
-    _, port = app_config.get_server_config()
-    base_url = f"http://127.0.0.1:{port}"
+    base_url = app_config.get_server_base_url()
     body = (render_page_header(title="Web 报表工具 - API 接口", active_nav="api", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
             + '<h2 style="margin-bottom:0">API 接口管理</h2>'

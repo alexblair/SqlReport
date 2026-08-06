@@ -60,12 +60,34 @@ class _MySQLRow:
 
 
 class _MySQLCursor:
-    """MySQL 游标包装，提供 fetchone/fetchall/rowcount/lastrowid 接口。"""
+    """MySQL 游标包装，提供与 sqlite3.Cursor 兼容的接口子集。
+
+    支持 execute/description/fetchone/fetchall/rowcount/lastrowid/close，
+    使 _MySQLConnection.cursor() 返回的游标可直接用于 execute_mysql_query。
+    """
 
     def __init__(self, cursor):
         self._cursor = cursor
         self.rowcount = cursor.rowcount
         self.lastrowid = cursor.lastrowid
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+    def execute(self, sql: str, params=None):
+        import mysql.connector
+
+        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s
+        mysql_sql = sql.replace("?", "%s") if params is not None else sql
+        try:
+            self._cursor.execute(mysql_sql, params or ())
+        except mysql.connector.Error:
+            self._cursor.close()
+            raise
+        self.rowcount = self._cursor.rowcount
+        self.lastrowid = self._cursor.lastrowid
+        return self
 
     def fetchone(self):
         row = self._cursor.fetchone()
@@ -73,6 +95,9 @@ class _MySQLCursor:
 
     def fetchall(self):
         return [_MySQLRow(r) for r in self._cursor.fetchall()]
+
+    def close(self):
+        self._cursor.close()
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +127,11 @@ class _MySQLConnection:
         except mysql.connector.Error:
             cursor.close()
             raise
+        return _MySQLCursor(cursor)
+
+    def cursor(self):
+        """兼容 sqlite3.Connection.cursor()：返回 _MySQLCursor 包装游标。"""
+        cursor = self._conn.cursor(dictionary=True, buffered=True)
         return _MySQLCursor(cursor)
 
     def executescript(self, sql: str):
@@ -336,6 +366,8 @@ def execute_mysql_query(conn, sql: str, params: tuple = (),
                 columns = [desc[0] for desc in cur.description]
                 rows = cur.fetchall()
                 results.append({"columns": columns, "rows": rows})
+        if not results:
+            raise RuntimeError("查询未返回任何结果集（SQL 中缺少 SELECT 语句）")
         if transactional:
             conn.commit()
     except Exception:
@@ -347,8 +379,6 @@ def execute_mysql_query(conn, sql: str, params: tuple = (),
         raise
     finally:
         cur.close()
-    if not results:
-        raise RuntimeError("查询未返回任何结果集（SQL 中缺少 SELECT 语句）")
     return results
 
 

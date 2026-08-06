@@ -158,7 +158,8 @@ The `config_db` field supports a **list of configurations**, toggled via the `en
 {
     "server": {
         "host": "0.0.0.0",
-        "port": 8080
+        "port": 8080,
+        "trust_xff": false
     },
     "static_cache": {
         "enable": true,
@@ -182,6 +183,8 @@ The `config_db` field supports a **list of configurations**, toggled via the `en
     ]
 }
 ```
+
+`server.trust_xff`（默认 `false`）：审计日志的客户端 IP 默认取 socket 对端地址；仅当部署于可信反向代理（如 Nginx，已覆写 `X-Forwarded-For`）之后才设为 `true` 以信任该请求头首 IP，防止客户端伪造来源 IP。
 
 MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 二选一）：
 

@@ -39,7 +39,7 @@ import audit_db
 import audit_page
 import file_permissions
 import static_cache
-from app_config import get_server_config, get_log_config, get_error_log_config, get_audit_db_config
+from app_config import get_server_config, get_log_config, get_error_log_config, get_audit_db_config, get_trust_xff
 
 # ---------------------------------------------------------------------------
 # 配置（从 app_config.json 加载，支持环境变量 HOST / PORT 覆盖）
@@ -51,6 +51,8 @@ _start_time = time.time()
 # ---------------------------------------------------------------------------
 # 登录页 HTML
 # ---------------------------------------------------------------------------
+# 公共基础片段（reset / body 字体栈 / fadeUp 关键帧）来自 render._BASE_CSS，
+# 与全站页面（render._COMMON_CSS）保持单一来源。
 
 _LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -58,10 +60,8 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Web 报表工具 - 登录</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<style>""" + render._BASE_CSS + """
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     display: flex; justify-content: center; align-items: center;
     min-height: 100vh; margin: 0;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -70,10 +70,6 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     background: #fff; padding: 40px; border-radius: 16px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.15); width: 380px;
     animation: fadeUp 0.4s ease-out;
-  }
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
   }
   .login-box h1 {
     text-align: center; color: #1e293b; margin-bottom: 8px;
@@ -187,19 +183,44 @@ def _match_route(method: str, path: str) -> RouteEntry | None:
     """在路由表中查找匹配的路由条目。
 
     Args:
-        method: HTTP 方法（GET/POST）。
+        method: HTTP 方法（GET/POST/OPTIONS）。
         path: URL 路径。
 
     Returns:
-        匹配的 RouteEntry，未匹配返回 None。
+        匹配的 RouteEntry，未匹配返回 None（方法不支持或路径未知）。
     """
     for route in ROUTES:
         if not route.pattern.search(path):
             continue
-        if route.method != "*" and method != route.method:
+        if route.method == "*":
+            # 通配路由仅实际分发 GET/POST/OPTIONS，其余方法视为不支持
+            if method not in ("GET", "POST", "OPTIONS"):
+                continue
+        elif method != route.method:
             continue
         return route
     return None
+
+
+_METHOD_ORDER = {m: i for i, m in enumerate(
+    ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"))}
+
+
+def _allowed_methods_for_path(path: str) -> list[str]:
+    """计算路径允许的 HTTP 方法列表（用于 405 响应 Allow 头）。"""
+    methods: set[str] = set()
+    for route in ROUTES:
+        if not route.pattern.search(path):
+            continue
+        if route.method == "*":
+            methods.update(("GET", "POST", "OPTIONS"))
+        else:
+            methods.add(route.method)
+    return sorted(methods, key=_METHOD_ORDER.get)
+
+
+class BodyReadError(Exception):
+    """请求体读取/解码失败（客户端请求错误，应返回 400）。"""
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +246,15 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._handle("OPTIONS")
 
+    def do_PUT(self):
+        self._handle("PUT")
+
+    def do_DELETE(self):
+        self._handle("DELETE")
+
+    def do_PATCH(self):
+        self._handle("PATCH")
+
     def _handle(self, method: str):
         """基于路由表分发请求"""
         self._session_token = None
@@ -235,6 +265,11 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
         route = _match_route(method, path)
         if route is None:
+            allowed = _allowed_methods_for_path(path)
+            if allowed:
+                return self._send_html(
+                    405, "<h1>405 — 方法不允许</h1>",
+                    {"Allow": ", ".join(allowed)})
             return self._send_html(404, "<h1>404 — 页面不存在</h1>")
 
         if route.needs_auth and not self._authenticate():
@@ -244,6 +279,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             conn = db.get_config_db()
             try:
                 getattr(self, route.handler)(method, path, query, conn)
+            except BodyReadError as e:
+                logging.warning("请求体读取失败: %s", e)
+                self._send_html(400, f"请求体读取失败: {e}",
+                                {"Content-Type": "text/plain; charset=utf-8"})
             except Exception as e:
                 logging.error("未捕获异常: %s", e, exc_info=True)
                 self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
@@ -252,6 +291,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         else:
             try:
                 getattr(self, route.handler)(method, path, query, None)
+            except BodyReadError as e:
+                logging.warning("请求体读取失败: %s", e)
+                self._send_html(400, f"请求体读取失败: {e}",
+                                {"Content-Type": "text/plain; charset=utf-8"})
             except Exception as e:
                 logging.error("未捕获异常: %s", e, exc_info=True)
                 self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
@@ -385,10 +428,14 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         for key, val in headers.items():
             self.send_header(key, val)
         self.end_headers()
-        if isinstance(body, bytes):
-            self.wfile.write(body)
-        else:
-            self.wfile.write(body.encode("utf-8"))
+        try:
+            if isinstance(body, bytes):
+                self.wfile.write(body)
+            else:
+                self.wfile.write(body.encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError):
+            # 客户端已断开连接，放弃发送响应（与 _handle_api/_send_html 一致）
+            logging.info("导出响应发送失败（客户端已断开）")
 
     def _handle_api(self, method: str, path: str, query: str, conn=None):
         """
@@ -398,7 +445,12 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         由调用方管理连接生命周期。
         """
         query_params = urllib.parse.parse_qs(query, keep_blank_values=True)
-        body = self._read_body() if method == "POST" else ""
+        try:
+            body = self._read_body() if method == "POST" else ""
+        except BodyReadError as e:
+            self._send_html(400, f"请求体读取失败: {e}",
+                            {"Content-Type": "text/plain; charset=utf-8"})
+            return
 
         client_ip = _get_client_ip(self.headers, self.client_address)
         start = time.time()
@@ -413,33 +465,14 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         )
         duration_ms = int((time.time() - start) * 1000)
 
-        # 记录 API 审计日志
+        # 记录 API 审计日志（与 _log_api_call 共用，内联块语义一致）
         api_key = query_params.get("api_key", [""])[0] or ""
         if not api_key:
             auth_header = dict(self.headers).get("Authorization", "")
-            if auth_header.startswith("Bearer "):
-                api_key = auth_header[7:]
-        try:
-            audit_conn = audit_db.get_audit_db()
-            try:
-                audit_db.insert_audit_log(
-                    audit_conn,
-                    type="api",
-                    session_user=f"api_key:{api_key}" if api_key else "anonymous",
-                    action="api_call",
-                    entity_type="api_endpoint",
-                    entity_name=path,
-                    http_method=method,
-                    http_path=path,
-                    http_status=status,
-                    duration_ms=duration_ms,
-                    ip_address=client_ip,
-                    request_body=body if method == "POST" else "",
-                )
-            finally:
-                audit_conn.close()
-        except Exception:
-            pass
+            api_key = auth.extract_bearer_token(auth_header) or ""
+        self._log_api_call(path, method, status, api_key=api_key,
+                           duration_ms=duration_ms,
+                           request_body=body if method == "POST" else "")
 
         self.send_response(status)
         found_content_type = False
@@ -463,6 +496,39 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
     # ---- 辅助方法 ----
 
+    def _write_audit_log(self, *, log_type, session_user, action, entity_type,
+                         entity_name, http_method, http_path, http_status,
+                         duration_ms, ip_address, request_body):
+        """统一写入审计日志（get_audit_db → insert_audit_log → close）。
+
+        页面访问（_log_web_access）与 API 调用（_log_api_call）共用的
+        写入链路；request_body 为 None 时按 POST 惰性读取；异常静默吞掉，
+        避免审计失败影响业务处理。
+        """
+        try:
+            audit_conn = audit_db.get_audit_db()
+            try:
+                if request_body is None:
+                    request_body = self._read_body() if http_method == "POST" else ""
+                audit_db.insert_audit_log(
+                    audit_conn,
+                    type=log_type,
+                    session_user=session_user,
+                    action=action,
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    http_method=http_method,
+                    http_path=http_path,
+                    http_status=http_status,
+                    duration_ms=duration_ms,
+                    ip_address=ip_address,
+                    request_body=request_body,
+                )
+            finally:
+                audit_conn.close()
+        except Exception:
+            pass
+
     def _log_web_access(self, path: str, method: str, status: int,
                         duration_ms: int = 0, request_body: str = None):
         """记录页面访问（web_access 类型）到审计日志。
@@ -475,57 +541,37 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         user = self._get_current_user()
         if not user:
             return
-        try:
-            audit_conn = audit_db.get_audit_db()
-            try:
-                if request_body is None:
-                    request_body = self._read_body() if method == "POST" else ""
-                audit_db.insert_audit_log(
-                    audit_conn,
-                    type="web_access",
-                    session_user=user,
-                    action="page_view",
-                    entity_type="page",
-                    entity_name=path,
-                    http_method=method,
-                    http_path=path,
-                    http_status=status,
-                    duration_ms=duration_ms,
-                    ip_address=_get_client_ip(self.headers, self.client_address),
-                    request_body=request_body,
-                )
-            finally:
-                audit_conn.close()
-        except Exception:
-            pass
+        self._write_audit_log(
+            log_type="web_access",
+            session_user=user,
+            action="page_view",
+            entity_type="page",
+            entity_name=path,
+            http_method=method,
+            http_path=path,
+            http_status=status,
+            duration_ms=duration_ms,
+            ip_address=_get_client_ip(self.headers, self.client_address),
+            request_body=request_body,
+        )
 
     def _log_api_call(self, path: str, method: str, status: int,
                       api_key: str = "", duration_ms: int = 0,
                       request_body: str = None):
         """记录 API 调用（api 类型）到审计日志。"""
-        try:
-            audit_conn = audit_db.get_audit_db()
-            try:
-                if request_body is None:
-                    request_body = self._read_body() if method == "POST" else ""
-                audit_db.insert_audit_log(
-                    audit_conn,
-                    type="api",
-                    session_user=f"api_key:{api_key}" if api_key else "anonymous",
-                    action="api_call",
-                    entity_type="api_endpoint",
-                    entity_name=path,
-                    http_method=method,
-                    http_path=path,
-                    http_status=status,
-                    duration_ms=duration_ms,
-                    ip_address=_get_client_ip(self.headers, self.client_address),
-                    request_body=request_body,
-                )
-            finally:
-                audit_conn.close()
-        except Exception:
-            pass
+        self._write_audit_log(
+            log_type="api",
+            session_user=f"api_key:{api_key}" if api_key else "anonymous",
+            action="api_call",
+            entity_type="api_endpoint",
+            entity_name=path,
+            http_method=method,
+            http_path=path,
+            http_status=status,
+            duration_ms=duration_ms,
+            ip_address=_get_client_ip(self.headers, self.client_address),
+            request_body=request_body,
+        )
 
     def _handle_audit(self, method: str, path: str, query: str, conn=None):
         """委托给 audit_page.py，使用 _handle() 传入的共享连接"""
@@ -547,10 +593,16 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             self._send_html(code, body, headers)
 
     def _read_body(self) -> str:
-        """读取 POST 请求体"""
-        length = int(self.headers.get("Content-Length", 0))
+        """读取 POST 请求体；读取或解码失败时抛出 BodyReadError。"""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            raise BodyReadError("无效的 Content-Length")
         if length > 0:
-            return self.rfile.read(length).decode("utf-8")
+            try:
+                return self.rfile.read(length).decode("utf-8")
+            except (UnicodeDecodeError, ValueError, OSError) as e:
+                raise BodyReadError(f"请求体读取失败: {e}") from e
         return ""
 
     def _send_html(self, status: int, body: str, extra_headers: dict = None):
@@ -590,12 +642,14 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
 
 def _get_client_ip(headers, client_address) -> str:
     """
-    获取客户端真实 IP（优先 X-Forwarded-For，其次直接连接的 remote_addr）。
+    获取客户端 IP。
 
-    参数:
-        headers: HTTP 请求头对象
-        client_address: (host, port) 元组
+    默认取 socket 对端地址（client_address[0]）；仅当 server.trust_xff
+    配置开启时才信任 X-Forwarded-For 首 IP。X-Forwarded-For 可由客户端
+    直接伪造，未置于可信代理之后时无条件信任存在 IP 伪造风险。
     """
+    if not get_trust_xff():
+        return client_address[0]
     xff = headers.get("X-Forwarded-For", "")
     if xff:
         ips = [ip.strip() for ip in xff.split(",")]
@@ -752,10 +806,6 @@ def main():
             pass
         server.server_close()
         logging.info("服务器已关闭")
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

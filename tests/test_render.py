@@ -1473,6 +1473,9 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         self.assertIn("批量修改连接池", result)
         self.assertIn("批量设置分类", result)
         self.assertIn("批量更新缓存配置", result)
+        self.assertIn("批量删除报表", result)
+        self.assertIn("batchDeleteReports()", result)
+        self.assertIn("/config/reports/batch-delete", result)
 
     def test_contains_add_buttons(self):
         """包含新增分类和新增报表按钮"""

@@ -27,6 +27,8 @@ json_template.py — API JSON 输出模板引擎（纯标准库，零依赖）
 import json
 import re
 
+from app_config import serialize_json
+
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 # 单结果集模式可用占位符
@@ -78,7 +80,7 @@ def is_template_enabled(template: str | None) -> bool:
 
 def _value_to_json(value) -> str:
     """值序列化为 JSON 片段（与响应序列化约定一致）。"""
-    return json.dumps(value, ensure_ascii=False, default=str)
+    return serialize_json(value)
 
 
 def _pos_to_line_col(text: str, pos: int) -> tuple[int, int]:

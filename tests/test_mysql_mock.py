@@ -460,6 +460,37 @@ class TestMySQLConnectionExecute(_MySQLConnectionTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 测试 _MySQLConnection.cursor()
+# ---------------------------------------------------------------------------
+
+class TestMySQLConnectionCursor(_MySQLConnectionTestBase):
+    """测试 _MySQLConnection.cursor()（修复缺口：包装连接可直接传入 execute_mysql_query）。"""
+
+    def test_cursor_returns_mysql_cursor(self):
+        """cursor() 应返回 _MySQLCursor 实例。"""
+        result = self.conn.cursor()
+        self.assertIsInstance(result, db._MySQLCursor)
+
+    def test_cursor_requests_dictionary_cursor(self):
+        """cursor() 应以 dictionary=True 创建游标（与 execute() 一致）。"""
+        self.conn.cursor()
+        self.mock_raw.cursor.assert_called_once_with(dictionary=True, buffered=True)
+
+    def test_wrapped_connection_usable_in_execute_mysql_query(self):
+        """_MySQLConnection 可直接传入 execute_mysql_query，不抛 AttributeError。"""
+        import query_executor
+        self.mock_cursor.description = [("id",)]
+        self.mock_cursor.fetchall.return_value = [{"id": 1}]
+
+        results = query_executor.execute_mysql_query(self.conn, "SELECT id FROM t")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["columns"], ["id"])
+        self.assertEqual(results[0]["rows"][0]["id"], 1)
+        self.mock_cursor.execute.assert_called_once_with("SELECT id FROM t", ())
+
+
+# ---------------------------------------------------------------------------
 # 测试 _MySQLConnection.executescript()
 # ---------------------------------------------------------------------------
 
@@ -803,6 +834,170 @@ class TestMySQLMigrations(_MySQLCRUDTestBase):
 
         self.mock_cursor.execute.assert_any_call(
             "ALTER TABLE api_endpoints ADD COLUMN description TEXT", ()
+        )
+
+    # ---- 缺口 11 补充：迁移 3/4/6/7/8/9/10/11 ----
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_3_is_noop(self, mock_engine):
+        """迁移 3 无操作（由建表 DDL 覆盖），不抛异常即可。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = None
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)  # 不应抛异常
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_4_adds_parent_id_when_missing(self, mock_engine):
+        """report_categories 缺 parent_id 时应执行 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = None
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "UNI", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_categories ADD COLUMN parent_id INTEGER", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_6_adds_result_names_when_missing(self, mock_engine):
+        """report_configs 缺 result_names 时应执行 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = None
+        # report_configs 列集：含 category_id/memo，缺 result_names
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs ADD COLUMN result_names TEXT", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_7_adds_cache_columns_when_missing(self, mock_engine):
+        """report_configs 缺 prefer_cache / cache_ttl_hours 时应各执行一次 ADD。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = None
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+            ("result_names", "text", "YES", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs ADD COLUMN prefer_cache TINYINT NOT NULL DEFAULT 1", ()
+        )
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs ADD COLUMN cache_ttl_hours INTEGER NOT NULL DEFAULT 0", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_8_creates_api_endpoints_when_missing(self, mock_engine):
+        """api_endpoints 表不存在时应执行 CREATE TABLE。"""
+        self.mock_cursor.reset_mock()
+        # SHOW TABLES LIKE 'api_endpoints' 返回空 → 表不存在
+        self.mock_cursor.fetchone.return_value = None
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        create_calls = [c for c in self.mock_cursor.execute.call_args_list
+                        if c[0][0].startswith("CREATE TABLE api_endpoints")]
+        self.assertEqual(len(create_calls), 1)
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_9_adds_result_mode_index_when_missing(self, mock_engine):
+        """api_endpoints 缺 result_mode / result_index 时应各执行一次 ADD。"""
+        self.mock_cursor.reset_mock()
+        # 迁移 8：表已存在 → 跳过 CREATE TABLE
+        self.mock_cursor.fetchone.return_value = ("api_endpoints",)
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("report_id", "int(11)", "NO", "MUL", None, ""),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("url_path", "varchar(512)", "NO", "UNI", None, ""),
+            ("output_format", "varchar(10)", "NO", "", None, ""),
+            ("columns", "text", "YES", "", None, ""),
+            ("filters", "text", "YES", "", None, ""),
+            ("sorts", "text", "YES", "", None, ""),
+            ("row_limit", "int(11)", "YES", "", None, ""),
+            ("api_key", "varchar(255)", "YES", "", None, ""),
+            ("allowed_origins", "text", "YES", "", None, ""),
+            ("enabled", "tinyint(4)", "NO", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE api_endpoints ADD COLUMN result_mode VARCHAR(10) NOT NULL DEFAULT 'single'", ()
+        )
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE api_endpoints ADD COLUMN result_index INTEGER NOT NULL DEFAULT 0", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_10_adds_allow_fetch_all_when_missing(self, mock_engine):
+        """api_endpoints 缺 allow_fetch_all 时应执行 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_endpoints",)
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("report_id", "int(11)", "NO", "MUL", None, ""),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("url_path", "varchar(512)", "NO", "UNI", None, ""),
+            ("output_format", "varchar(10)", "NO", "", None, ""),
+            ("columns", "text", "YES", "", None, ""),
+            ("filters", "text", "YES", "", None, ""),
+            ("sorts", "text", "YES", "", None, ""),
+            ("row_limit", "int(11)", "YES", "", None, ""),
+            ("api_key", "varchar(255)", "YES", "", None, ""),
+            ("allowed_origins", "text", "YES", "", None, ""),
+            ("enabled", "tinyint(4)", "NO", "", None, ""),
+            ("result_mode", "varchar(10)", "NO", "", None, ""),
+            ("result_index", "int(11)", "NO", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE api_endpoints ADD COLUMN allow_fetch_all TINYINT NOT NULL DEFAULT 1", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_11_adds_static_cache_when_missing(self, mock_engine):
+        """api_endpoints 缺 static_cache 时应执行 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_endpoints",)
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("report_id", "int(11)", "NO", "MUL", None, ""),
+            ("name", "varchar(255)", "NO", "", None, ""),
+            ("url_path", "varchar(512)", "NO", "UNI", None, ""),
+            ("output_format", "varchar(10)", "NO", "", None, ""),
+            ("columns", "text", "YES", "", None, ""),
+            ("filters", "text", "YES", "", None, ""),
+            ("sorts", "text", "YES", "", None, ""),
+            ("row_limit", "int(11)", "YES", "", None, ""),
+            ("api_key", "varchar(255)", "YES", "", None, ""),
+            ("allowed_origins", "text", "YES", "", None, ""),
+            ("enabled", "tinyint(4)", "NO", "", None, ""),
+            ("result_mode", "varchar(10)", "NO", "", None, ""),
+            ("result_index", "int(11)", "NO", "", None, ""),
+            ("allow_fetch_all", "tinyint(4)", "NO", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE api_endpoints ADD COLUMN static_cache TINYINT NOT NULL DEFAULT 1", ()
         )
 
 
@@ -1780,6 +1975,131 @@ class TestMySQLMixedTypes(MockMySQLMixin, unittest.TestCase):
         score_str = format_cell(bob_row[2])
         self.assertNotIn("e", score_str.lower())
         self.assertAlmostEqual(float(score_str), 1e-10)
+
+
+# ---------------------------------------------------------------------------
+# 缺口4：多语句分割边界（_split_sql_statements）
+# ---------------------------------------------------------------------------
+
+class TestSplitSQLStatements(unittest.TestCase):
+    """SQL 按 ; 分割的边界：引号/注释内分号、结尾分号、空语句。"""
+
+    def test_plain_multi_statements(self):
+        """普通多条语句"""
+        self.assertEqual(db._split_sql_statements("SELECT 1; SELECT 2"),
+                         ["SELECT 1", "SELECT 2"])
+
+    def test_semicolon_inside_single_quotes(self):
+        """单引号字符串内的分号不是分隔符"""
+        self.assertEqual(db._split_sql_statements("SELECT 'a;b'; SELECT 2"),
+                         ["SELECT 'a;b'", "SELECT 2"])
+
+    def test_semicolon_inside_double_quotes(self):
+        """双引号字符串内的分号不是分隔符"""
+        self.assertEqual(db._split_sql_statements('SELECT "a;b"'),
+                         ['SELECT "a;b"'])
+
+    def test_semicolon_inside_backticks(self):
+        """反引号标识符内的分号不是分隔符"""
+        self.assertEqual(db._split_sql_statements("SELECT `a;b`"),
+                         ["SELECT `a;b`"])
+
+    def test_doubled_quote_escape_inside_string(self):
+        """'' 转义引号：字符串内的分号仍是内容"""
+        self.assertEqual(db._split_sql_statements("SELECT 'a'';b'"),
+                         ["SELECT 'a'';b'"])
+
+    def test_backslash_escaped_quote_inside_string(self):
+        """反斜杠转义引号：字符串内的分号仍是内容"""
+        self.assertEqual(db._split_sql_statements("SELECT 'a\\';b'"),
+                         ["SELECT 'a\\';b'"])
+
+    def test_semicolon_inside_dash_comment(self):
+        """行注释 -- 内的分号不是分隔符"""
+        sql = "SELECT 1 -- 注释;带分号\n; SELECT 2"
+        self.assertEqual(db._split_sql_statements(sql),
+                         ["SELECT 1 -- 注释;带分号", "SELECT 2"])
+
+    def test_semicolon_inside_hash_comment(self):
+        """行注释 # 内的分号不是分隔符"""
+        sql = "SELECT 1 # 注释;带分号\n; SELECT 2"
+        self.assertEqual(db._split_sql_statements(sql),
+                         ["SELECT 1 # 注释;带分号", "SELECT 2"])
+
+    def test_semicolon_inside_block_comment(self):
+        """块注释 /* */ 内的分号不是分隔符"""
+        sql = "SELECT 1 /* 注释;带分号 */; SELECT 2"
+        self.assertEqual(db._split_sql_statements(sql),
+                         ["SELECT 1 /* 注释;带分号 */", "SELECT 2"])
+
+    def test_trailing_semicolon_no_empty_statement(self):
+        """结尾分号不产生空语句"""
+        self.assertEqual(db._split_sql_statements("SELECT 1;"),
+                         ["SELECT 1"])
+
+    def test_empty_statements_skipped(self):
+        """连续分号/开头分号跳过空语句"""
+        self.assertEqual(db._split_sql_statements(";SELECT 1;;;SELECT 2;"),
+                         ["SELECT 1", "SELECT 2"])
+
+    def test_none_returns_empty(self):
+        """None 输入返回空列表"""
+        self.assertEqual(db._split_sql_statements(None), [])
+
+    def test_blank_returns_empty(self):
+        """纯空白/分号输入返回空列表"""
+        self.assertEqual(db._split_sql_statements("   ;  ;"), [])
+
+    def test_execute_mysql_query_quoted_semicolon_single_statement(self):
+        """execute_mysql_query：引号内分号不被拆成多条执行"""
+        mock_conn, mock_cursor = MockMySQLMixin.make_mock_connection()
+        mock_cursor.description = [("v",)]
+        mock_cursor.fetchall.return_value = [("a;b",)]
+        import query_executor
+        results = query_executor.execute_mysql_query(
+            mock_conn, "SELECT 'a;b'")
+        self.assertEqual(mock_cursor.execute.call_count, 1)
+        self.assertEqual(len(results), 1)
+
+
+# ---------------------------------------------------------------------------
+# 缺口6：_MySQLConnection.begin() 委托（start_transaction 兼容）
+# ---------------------------------------------------------------------------
+
+class TestMySQLConnectionBegin(_MySQLConnectionTestBase):
+    """_MySQLConnection.begin() 应委托给原始连接的 start_transaction。"""
+
+    def test_begin_delegates_to_start_transaction(self):
+        """begin() → raw.start_transaction()"""
+        self.conn.begin()
+        self.mock_raw.start_transaction.assert_called_once_with()
+
+    def test_execute_mysql_query_uses_begin_on_wrapper(self):
+        """execute_mysql_query(transactional=True) 对含 begin 的连接走 begin 分支（不调 start_transaction）"""
+        conn = MagicMock(spec=["begin", "cursor", "commit", "rollback", "close"])
+        cursor = MagicMock()
+        conn.cursor.return_value = cursor
+        cursor.description = [("id",)]
+        cursor.fetchall.return_value = [(1,)]
+        import query_executor
+        query_executor.execute_mysql_query(
+            conn, "SELECT 1", transactional=True)
+        conn.begin.assert_called_once_with()
+        conn.commit.assert_called_once_with()
+        conn.rollback.assert_not_called()
+
+    def test_execute_mysql_query_falls_back_to_start_transaction(self):
+        """无 begin 属性的连接（如原生 mysql.connector）→ 直接调 start_transaction"""
+        raw = MagicMock(spec=["cursor", "commit", "rollback",
+                              "start_transaction", "close"])
+        cursor = MagicMock()
+        raw.cursor.return_value = cursor
+        cursor.description = [("id",)]
+        cursor.fetchall.return_value = [(1,)]
+        import query_executor
+        query_executor.execute_mysql_query(raw, "SELECT 1", transactional=True)
+        raw.start_transaction.assert_called_once_with()
+        raw.commit.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

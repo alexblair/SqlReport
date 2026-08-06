@@ -92,6 +92,23 @@ class TestRenderBasic(unittest.TestCase):
         self.assertTrue(ok, error)
         self.assertEqual(json.loads(output)["meta"], meta)
 
+    def test_meta_non_object_value_rendered(self):
+        # 缺口 20：meta 为非对象值（列表/字符串/数值）时按普通值序列化，不抛异常
+        ok, output, error = render_template(
+            '{"meta": {{meta}}}', self._ctx(meta=[1, 2, 3]))
+        self.assertTrue(ok, error)
+        self.assertEqual(json.loads(output), {"meta": [1, 2, 3]})
+
+        ok, output, error = render_template(
+            '{"meta": {{meta}}}', self._ctx(meta="str-meta"))
+        self.assertTrue(ok, error)
+        self.assertEqual(json.loads(output), {"meta": "str-meta"})
+
+        ok, output, error = render_template(
+            '{"meta": {{meta}}}', self._ctx(meta=42))
+        self.assertTrue(ok, error)
+        self.assertEqual(json.loads(output), {"meta": 42})
+
     def test_chinese_keys_and_values(self):
         template = ('{"物资列表": {{data}}, "总行数": {{total}}}')
         ok, output, error = render_template(template, self._ctx())
@@ -158,6 +175,22 @@ class TestRenderErrors(unittest.TestCase):
         ok, output, error = render_template(template, self._ctx())
         self.assertFalse(ok)
 
+    def test_adjacent_placeholders_matched_independently(self):
+        # 缺口 21：相邻占位符 {{a}}{{b}} 各自独立匹配替换
+        ok, output, error = render_template(
+            '"{{total}}{{page}}"', {"total": 1, "page": 2,
+                                    "data": [], "page_size": 20,
+                                    "total_pages": 1, "full": False, "meta": None})
+        self.assertTrue(ok, error)
+        self.assertEqual(json.loads(output), "12")
+
+    def test_unclosed_placeholder_left_as_text(self):
+        # 缺口 21：未闭合占位符（缺 }}}）不匹配正则，原样保留为文本
+        ok, output, error = render_template(
+            '{"raw": "{{unclosed"}', self._ctx())
+        self.assertTrue(ok, error)
+        self.assertEqual(json.loads(output), {"raw": "{{unclosed"})
+
     def test_render_blank_template(self):
         ok, output, error = render_template("   ", self._ctx())
         self.assertFalse(ok)
@@ -200,6 +233,13 @@ class TestValidate(unittest.TestCase):
         ok, error = validate_template('{"a": {{data}},}', SINGLE_KEYS)
         self.assertFalse(ok)
         self.assertIn("JSON", error)
+
+    def test_invalid_keyset_raises_value_error(self):
+        # 缺口 22：非法键集（不在 SINGLE_KEYS/ALL_KEYS 内）直接抛 ValueError
+        with self.assertRaises(ValueError):
+            validate_template('{"data": {{data}}}', ("bogus",))
+        with self.assertRaises(ValueError):
+            validate_template('{"data": {{data}}}', None)
 
 
 if __name__ == "__main__":

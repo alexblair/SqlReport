@@ -25,6 +25,11 @@ from app_config import get_active_db_config as _get_active_db_config
 _UNSET = object()
 
 
+def _placeholders(n: int) -> str:
+    """生成 n 个 ? 占位符（逗号分隔），用于 IN (...) 子句。"""
+    return ",".join("?" for _ in range(n))
+
+
 # ---------------------------------------------------------------------------
 # 审计日志辅助
 # ---------------------------------------------------------------------------
@@ -35,29 +40,13 @@ def _write_audit_log(session_user, action, entity_type,
                      before_value=None, after_value=None):
     """如果 session_user 不为 None，写入一条 operation 类型审计日志到 audit.db。
 
-    异常被静默吞掉，避免审计失败影响业务操作。
+    薄包装：统一走 audit_db.record_operation（保持本名称供测试 patch 与
+    既有调用点使用）；异常降级为 logging.warning，避免审计失败影响业务操作。
     """
-    if session_user is None:
-        return
-    from audit_db import get_audit_db, insert_audit_log
-    try:
-        audit_conn = get_audit_db()
-        try:
-            insert_audit_log(
-                audit_conn,
-                type="operation",
-                session_user=session_user,
-                action=action,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                entity_name=entity_name,
-                before_value=before_value,
-                after_value=after_value,
-            )
-        finally:
-            audit_conn.close()
-    except Exception:
-        pass
+    from audit_db import record_operation
+    record_operation(session_user, action, entity_type,
+                     entity_id=entity_id, entity_name=entity_name,
+                     before_value=before_value, after_value=after_value)
 
 
 # ---------------------------------------------------------------------------
@@ -751,34 +740,45 @@ def delete_pool(conn, pool_id: int, session_user=None) -> bool:
     return cur.rowcount > 0
 
 
+def _move_item(conn, get_items, table, obj_id, direction, audit_action,
+               entity_type, session_user=None,
+               id_col="id", sort_col="sort_order", entity_id_extra=None) -> bool:
+    """move_pool / move_report / move_category 的公共实现（等价重构）。
+
+    get_items(conn) 返回按 sort_order 排序的行列表（dict，含 id_col/sort_col/name 键）。
+    取列表 → 找 idx → up/down 判定 swap_idx → 两条 UPDATE 交换 sort_order → commit → 审计。
+    找不到对象、direction 非法或已到边界时返回 False 且不 commit。
+    审计 entity_id 默认为 obj_id；entity_id_extra 非 None 时用作审计 entity_id（预留槽）。
+    """
+    items = get_items(conn)
+    idx = next((i for i, it in enumerate(items) if it[id_col] == obj_id), None)
+    if idx is None:
+        return False
+    if direction == "up" and idx > 0:
+        swap_idx = idx - 1
+    elif direction == "down" and idx < len(items) - 1:
+        swap_idx = idx + 1
+    else:
+        return False
+    swap_id = items[swap_idx][id_col]
+    so_a = items[idx][sort_col] or idx
+    so_b = items[swap_idx][sort_col] or swap_idx
+    conn.execute(f"UPDATE {table} SET {sort_col}=? WHERE {id_col}=?", (so_b, obj_id))
+    conn.execute(f"UPDATE {table} SET {sort_col}=? WHERE {id_col}=?", (so_a, swap_id))
+    conn.commit()
+    _write_audit_log(session_user, audit_action, entity_type,
+                     obj_id if entity_id_extra is None else entity_id_extra,
+                     items[idx].get("name"))
+    return True
+
+
 def move_pool(conn, pool_id: int, direction: str, session_user=None) -> bool:
     """
     调整连接池排序。direction 为 'up' 或 'down'。
     与相邻项交换 sort_order，返回 True 表示移动成功。
     """
-    pools = get_all_pools(conn)
-    idx = None
-    for i, p in enumerate(pools):
-        if p["id"] == pool_id:
-            idx = i
-            break
-    if idx is None:
-        return False
-    if direction == "up" and idx > 0:
-        swap_idx = idx - 1
-    elif direction == "down" and idx < len(pools) - 1:
-        swap_idx = idx + 1
-    else:
-        return False
-    swap_id = pools[swap_idx]["id"]
-    so_a = pools[idx]["sort_order"] or idx
-    so_b = pools[swap_idx]["sort_order"] or swap_idx
-    conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_b, pool_id))
-    conn.execute("UPDATE connection_pools SET sort_order=? WHERE id=?", (so_a, swap_id))
-    conn.commit()
-    _write_audit_log(session_user, "move_pool", "pool", pool_id,
-                     pools[idx].get("name"))
-    return True
+    return _move_item(conn, get_all_pools, "connection_pools", pool_id,
+                      direction, "move_pool", "pool", session_user)
 
 
 # ---------------------------------------------------------------------------
@@ -933,30 +933,14 @@ def move_report(conn, report_id: int, direction: str,
         if report is None:
             return False
         category_id = report.get("category_id")
-    reports = get_reports(conn, category_id)
-    idx = next((i for i, r in enumerate(reports) if r["id"] == report_id), None)
-    if idx is None:
-        return False
-    if direction == "up" and idx > 0:
-        swap_idx = idx - 1
-    elif direction == "down" and idx < len(reports) - 1:
-        swap_idx = idx + 1
-    else:
-        return False
-    swap_id = reports[swap_idx]["id"]
-    so_a = reports[idx]["sort_order"] or idx
-    so_b = reports[swap_idx]["sort_order"] or swap_idx
-    conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_b, report_id))
-    conn.execute("UPDATE report_configs SET sort_order=? WHERE id=?", (so_a, swap_id))
-    conn.commit()
-    _write_audit_log(session_user, "move_report", "report", report_id,
-                     reports[idx].get("name"))
-    return True
+    return _move_item(conn, lambda c: get_reports(c, category_id),
+                      "report_configs", report_id, direction,
+                      "move_report", "report", session_user)
 
 
 def batch_update_report_pool(conn, report_ids: list[int], pool_id) -> int:
     """批量更新报表的连接池，返回更新的行数。"""
-    placeholders = ",".join("?" for _ in report_ids)
+    placeholders = _placeholders(len(report_ids))
     cur = conn.execute(
         f"UPDATE report_configs SET pool_id=? WHERE id IN ({placeholders})",
         [pool_id] + report_ids,
@@ -986,7 +970,7 @@ def batch_update_report_cache(
         params.append(cache_ttl_hours)
     if not sets:
         return 0
-    placeholders = ",".join("?" for _ in report_ids)
+    placeholders = _placeholders(len(report_ids))
     cur = conn.execute(
         f"UPDATE report_configs SET {','.join(sets)} WHERE id IN ({placeholders})",
         params + report_ids,
@@ -1055,25 +1039,8 @@ def move_category(conn, category_id: int, direction: str, session_user=None) -> 
     调整分类排序。direction 为 'up' 或 'down'。
     与相邻项交换 sort_order，返回 True 表示移动成功。
     """
-    cats = get_all_categories(conn)
-    idx = next((i for i, c in enumerate(cats) if c["id"] == category_id), None)
-    if idx is None:
-        return False
-    if direction == "up" and idx > 0:
-        swap_idx = idx - 1
-    elif direction == "down" and idx < len(cats) - 1:
-        swap_idx = idx + 1
-    else:
-        return False
-    swap_id = cats[swap_idx]["id"]
-    so_a = cats[idx]["sort_order"] or idx
-    so_b = cats[swap_idx]["sort_order"] or swap_idx
-    conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_b, category_id))
-    conn.execute("UPDATE report_categories SET sort_order=? WHERE id=?", (so_a, swap_id))
-    conn.commit()
-    _write_audit_log(session_user, "move_category", "category", category_id,
-                     cats[idx].get("name"))
-    return True
+    return _move_item(conn, get_all_categories, "report_categories", category_id,
+                      direction, "move_category", "category", session_user)
 
 
 def get_reports_by_category(conn):
@@ -1144,7 +1111,7 @@ def get_parent_categories(conn, category_id: int) -> list[dict]:
     """返回指定分类的所有祖先（从根到父），不包含自身。"""
     ancestors = []
     current = get_category(conn, category_id)
-    seen = set()
+    seen = {category_id} if current else set()
     while current and current.get("parent_id") is not None:
         pid = current["parent_id"]
         if pid in seen:
@@ -1161,7 +1128,7 @@ def get_parent_categories(conn, category_id: int) -> list[dict]:
 
 def batch_set_report_category(conn, report_ids: list[int], category_id) -> int:
     """批量设置报表分类，返回受影响行数。"""
-    placeholders = ",".join("?" for _ in report_ids)
+    placeholders = _placeholders(len(report_ids))
     cur = conn.execute(
         f"UPDATE report_configs SET category_id=? WHERE id IN ({placeholders})",
         [category_id] + report_ids,
@@ -1214,6 +1181,14 @@ def clear_sessions(conn) -> None:
     """清空所有 session 记录。"""
     conn.execute("DELETE FROM sessions")
     conn.commit()
+
+
+def delete_expired_sessions(conn) -> int:
+    """删除所有已过期（超过 24 小时）的 session 记录，返回删除行数。"""
+    cur = conn.execute("DELETE FROM sessions WHERE created_at <= ?",
+                       (time.time() - 86400,))
+    conn.commit()
+    return cur.rowcount
 
 
 # ---------------------------------------------------------------------------
@@ -1322,6 +1297,19 @@ def _invalidate_api_static_cache(paths) -> None:
     for p in paths:
         if p:
             static_cache.invalidate(p)
+
+
+def invalidate_api_static_cache_by_report(conn, report_id: int,
+                                          endpoints: list = None) -> None:
+    """使某报表下全部 API 端点的静态缓存文件失效（幂等，惰性重建）。
+
+    endpoints 显式传入端点快照（如删除前取出的列表）时以快照为准，
+    避免删除后查询为空导致漏失效。
+    """
+    if endpoints is None:
+        endpoints = get_api_endpoints_by_report(conn, report_id)
+    for ep in endpoints:
+        _invalidate_api_static_cache([ep.get("url_path")])
 
 
 def _invalidate_after_endpoint_update(before: dict | None, url_path) -> None:
@@ -1476,8 +1464,37 @@ def delete_api_endpoints_by_report(conn, report_id: int, session_user=None) -> i
     )
     conn.commit()
     if cur.rowcount > 0:
-        _invalidate_api_static_cache(ep.get("url_path") for ep in before_list)
+        invalidate_api_static_cache_by_report(conn, report_id, endpoints=before_list)
     _write_audit_log(session_user, "delete_api_endpoints_by_report", "api_endpoint",
                      entity_name=f"report_id={report_id}",
                      before_value=before_list if before_list else None)
     return cur.rowcount
+
+
+def batch_delete_reports(conn, report_ids: list[int], session_user=None) -> int:
+    """批量删除报表及其 API 端点，返回删除的报表数。
+
+    级联删除报表下全部 API 端点并失效其静态缓存文件（删除即失效，惰性重建）；
+    审计按报表逐条记录（与 delete_report 语义一致）。
+    """
+    if not report_ids:
+        return 0
+    placeholders = _placeholders(len(report_ids))
+    rows = conn.execute(
+        f"SELECT id, name FROM report_configs WHERE id IN ({placeholders})",
+        report_ids,
+    ).fetchall()
+    affected = 0
+    for row in rows:
+        rid = row["id"]
+        endpoints = get_api_endpoints_by_report(conn, rid)
+        if endpoints:
+            conn.execute("DELETE FROM api_endpoints WHERE report_id=?", (rid,))
+            invalidate_api_static_cache_by_report(conn, rid, endpoints=endpoints)
+        cur = conn.execute("DELETE FROM report_configs WHERE id=?", (rid,))
+        if cur.rowcount > 0:
+            affected += 1
+            _write_audit_log(session_user, "delete_report", "report", rid,
+                             row["name"], before_value=dict(row))
+    conn.commit()
+    return affected

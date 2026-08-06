@@ -124,6 +124,72 @@ class TestSession(unittest.TestCase):
         self.assertEqual(auth._sessions["tok_load2"][0], "bob")
         self.assertAlmostEqual(auth._sessions["tok_load1"][1], now, delta=1)
 
+    def test_load_sessions_purges_expired_db_rows(self):
+        """load_sessions 加载时顺带删除过期 session 的 DB 行（修复缺陷）。
+
+        过期的 session 行不再残留 DB：加载后内存只含未过期 session，
+        sessions 表中过期行已被删除。
+        """
+        import sqlite3
+        uri = "file:t2_auth_purge?mode=memory&cache=shared"
+
+        def _open():
+            c = sqlite3.connect(uri, uri=True)
+            c.row_factory = sqlite3.Row
+            return c
+
+        seed = _open()
+        seed.execute(
+            "CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, username TEXT NOT NULL, created_at REAL NOT NULL)"
+        )
+        seed.execute("DELETE FROM sessions")
+        now = time.time()
+        seed.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+            ("tok_fresh", "alice", now),
+        )
+        seed.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+            ("tok_expired", "bob", now - auth._SESSION_TTL - 100),
+        )
+        seed.commit()
+
+        with patch("db.get_config_db", side_effect=_open):
+            auth._sessions.clear()
+            auth.load_sessions()
+
+        self.assertIn("tok_fresh", auth._sessions)
+        self.assertNotIn("tok_expired", auth._sessions)
+        check = _open()
+        try:
+            remaining = [r[0] for r in check.execute("SELECT token FROM sessions").fetchall()]
+        finally:
+            check.close()
+            seed.close()
+        self.assertEqual(remaining, ["tok_fresh"], "过期 session 行应被删除")
+
+    def test_load_sessions_purge_failure_does_not_block(self):
+        """清理过期行失败不阻断加载（不抛异常，session 仍正常载入）。"""
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE sessions (token TEXT PRIMARY KEY, username TEXT NOT NULL, created_at REAL NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?,?,?)",
+            ("tok_keep", "alice", time.time()),
+        )
+        conn.commit()
+
+        with patch("db.get_config_db", return_value=conn), \
+             patch("db.delete_expired_sessions",
+                   side_effect=RuntimeError("DB down")):
+            auth._sessions.clear()
+            auth.load_sessions()  # 不应抛异常
+
+        self.assertIn("tok_keep", auth._sessions)
+
     def test_session_expiry(self):
         """过期的 session 应返回 None 并被清理"""
         token = auth.create_session("alice")

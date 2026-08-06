@@ -10,9 +10,24 @@ result_transform.py — 结果集变换模块（纯函数，无 IO）
 - 筛选操作符：contains / eq / neq / gt / lt / gte / lte / isempty / notempty
 - 排序：稳定排序，None 值始终在最后，不受升降序影响
 - 列选择：仅保留存在且不重复的列（保序）；空请求或全部无效时回退全部列
+- 总页数：page_size 或 total 非正时返回 1（防除零），否则向上取整
 """
 
+import math
+
 # ---------------------------------------------------------------------------
+
+
+def calc_total_pages(total: int, page_size: int) -> int:
+    """计算总页数。
+
+    边界保护（与既有调用方行为一致）：
+    - page_size <= 0 或 total <= 0 → 返回 1（防止除零）
+    - 其余 → math.ceil(total / page_size) 向上取整
+    """
+    if page_size <= 0 or total <= 0:
+        return 1
+    return math.ceil(total / page_size)
 
 
 def _try_float(val):

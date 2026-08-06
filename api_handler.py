@@ -15,20 +15,20 @@ api_handler.py — API 数据接口请求处理模块
 
 import json
 import csv
-import io
 import os
-import math
 import time
 import logging
-import hashlib
 import secrets
-import urllib.parse
 
 import db
-from report import execute_report
+import app_config
+import auth
+from report import execute_report, parse_result_names
 import static_cache
 from json_template import is_template_enabled, render_template
-from result_transform import select_columns, column_indices
+from result_transform import select_columns, column_indices, calc_total_pages
+from redis_cache import _md5_hex
+from export import rows_to_csv
 
 _CORS_BASE = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -39,8 +39,8 @@ _CORS_BASE = {
 # fetch_all 全量获取时的内部页大小：足够大以避免内存分页切片，实际行数以 total 为准
 _FETCH_ALL_PAGE_SIZE = 10 ** 9
 
-# fetch_all 参数合法值（大小写不敏感）
-_FETCH_ALL_VALUES = {"true", "1", "yes"}
+# fetch_all 参数合法值（大小写不敏感），复用公共真值常量
+_FETCH_ALL_VALUES = app_config.TRUTHY_VALUES
 
 
 def generate_api_key() -> str:
@@ -75,8 +75,11 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
     start = time.time()
 
     norm_path = _normalise_path(path)
-    if not norm_path.startswith("/api"):
-        return 404, _error_response("接口不存在", "NOT_FOUND", headers), {}
+    # 校验 /api 前缀（兼容无斜杠的 "/api" 形态，保持历史行为）
+    if not (norm_path == app_config.API_PREFIX[:-1]
+            or norm_path.startswith(app_config.API_PREFIX)):
+        body, err_headers = _error_response("接口不存在", "NOT_FOUND", headers)
+        return 404, body, err_headers
 
     # 静态缓存目标解析（仅 GET 触发）：原路径未命中且以 .json 结尾时，
     # 剥离后缀再查一次（防端点 URL 本身以 .json 结尾被误伤）
@@ -91,7 +94,8 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
 
     if endpoint is None:
         _log_api_call(norm_path, client_ip, 404, time.time() - start)
-        return 404, _error_response("接口不存在或已禁用", "NOT_FOUND", headers), {}
+        body, err_headers = _error_response("接口不存在或已禁用", "NOT_FOUND", headers)
+        return 404, body, err_headers
 
     if method == "OPTIONS":
         cors_headers = _build_cors_headers(endpoint, headers)
@@ -101,7 +105,14 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
     auth_error = _validate_api_key(endpoint, headers, query_params)
     if auth_error:
         _log_api_call(norm_path, client_ip, 401, time.time() - start)
-        return 401, _error_response(auth_error, "UNAUTHORIZED", headers), {}
+        body, err_headers = _error_response(auth_error, "UNAUTHORIZED", headers)
+        return 401, body, err_headers
+
+    # 非法 JSON 请求体：Content-Type=application/json 且解析失败 → 400 拒绝
+    # （解析失败与"未传 body"区分：空 body 回退预设，不视为解析失败）
+    if method == "POST" and _is_invalid_json_body(body, headers):
+        body, err_headers = _error_response("请求体 JSON 解析失败", "INVALID_JSON", headers)
+        return 400, body, err_headers
 
     # 静态缓存分支：鉴权之后、执行查询之前
     # 仅 JSON 格式端点 + 端点开关开启 + 全局开关启用时进入，否则回退普通 API 链路
@@ -124,6 +135,11 @@ def _normalise_path(path: str) -> str:
     return "/" + path.lstrip("/")
 
 
+def _endpoint_template(endpoint: dict) -> str:
+    """返回端点的 JSON 输出模板（未配置时为空串）。"""
+    return endpoint.get("json_template") or ""
+
+
 def _lookup_endpoint(conn, norm_path: str) -> dict | None:
     """从数据库查找匹配的 API 端点。"""
     return db.get_api_endpoint_by_path(conn, norm_path)
@@ -131,15 +147,21 @@ def _lookup_endpoint(conn, norm_path: str) -> dict | None:
 
 def _static_base_path(norm_path: str) -> str | None:
     """路径以 .json 结尾（大小写不敏感）时返回剥离后缀的路径，否则返回 None。"""
-    if not norm_path.lower().endswith(".json"):
+    if not norm_path.lower().endswith(static_cache.JSON_SUFFIX):
         return None
-    return norm_path[:-len(".json")]
+    return static_cache.strip_json_suffix(norm_path)
+
+
+def _rows_to_dicts(rows, display_cols, col_indices) -> list:
+    """将行元组列表按列索引映射为 [{列名: 值}] 字典列表。"""
+    return [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)}
+            for row in rows]
 
 
 def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
                             query_params: dict, headers: dict) -> tuple:
     """执行普通 API 链路（查询 + 格式化 + CORS），静态分支回退共用。"""
-    template = endpoint.get("json_template") or ""
+    template = _endpoint_template(endpoint)
     result = _execute_api_query(conn, endpoint, method, body, query_params, headers)
     if isinstance(result, tuple):
         return result
@@ -192,16 +214,17 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
 def _compute_static_config_version(endpoint: dict, report: dict) -> str:
     """计算静态缓存配置版本（MD5 of sql + pool_id + 端点变换配置）。
 
-    静态文件内容是"SQL 结果 + 端点变换规则（字段/筛选/排序/条数）"的产物，
-    任一变化都会改变文件内容，必须纳入版本计算；否则编辑端点配置后
+    静态文件内容是"SQL 结果 + 端点变换规则（字段/筛选/排序/条数/结果集选择/模板）"
+    的产物，任一变化都会改变文件内容，必须纳入版本计算；否则编辑端点配置后
     旧文件在 TTL 内持续命中（缓存陈旧）。
     """
     parts = [report["sql_query"], str(report.get("pool_id") or "")]
-    for key in ("columns", "filters", "sorts", "row_limit", "json_template"):
+    for key in ("columns", "filters", "sorts", "row_limit", "json_template",
+                "result_mode", "result_index"):
         value = endpoint.get(key)
         if value is not None and value != "":
             parts.append(f"{key}={value}")
-    return hashlib.md5("|".join(parts).encode("utf-8")).hexdigest()
+    return _md5_hex("|".join(parts))
 
 
 def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
@@ -216,7 +239,7 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
     if os.path.exists(file_path):
         static_cache.record_invalidated(url_key)
     last_invalidated = static_cache.get_last_invalidated(url_key)
-    template = endpoint.get("json_template") or ""
+    template = _endpoint_template(endpoint)
     meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
     result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
                                 force_full=True, meta=meta)
@@ -274,21 +297,21 @@ def _build_static_meta(ttl_hours: int, url_key: str, config_version: str,
 
 def _format_local_time(ts: float) -> str:
     """格式化为服务器本地时区时间（秒级精度），如 2026-08-04 18:30:22 +0800。"""
-    return time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(ts))
+    return app_config.format_local_time(ts)
 
 
 def _attach_static_meta(resp_body: str, meta: dict) -> str:
     """将 meta 节点平铺附加到 JSON 响应体顶层。"""
     body = json.loads(resp_body)
     body["meta"] = meta
-    return json.dumps(body, ensure_ascii=False, default=str)
+    return app_config.serialize_json(body)
 
 
 def _get_result_name(report, result_index: int, result_obj) -> str:
     """获取结果集的显示名称，优先使用 result_names，否则自动命名。"""
     result_names_raw = (report.get("result_names") or "").strip()
     if result_names_raw:
-        names = [n.strip() for n in result_names_raw.split("\n") if n.strip()]
+        names = parse_result_names(result_names_raw)
         if result_index < len(names):
             return names[result_index]
     cols = result_obj.results[result_index]["columns"]
@@ -313,14 +336,17 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     report_id = endpoint["report_id"]
     report = db.get_report(conn, report_id)
     if report is None:
-        return 500, _error_response("关联报表不存在", "INTERNAL_ERROR", headers), {}
+        body, err_headers = _error_response("关联报表不存在", "INTERNAL_ERROR", headers)
+        return 500, body, err_headers
 
     pool_id = report.get("pool_id")
     if pool_id is None:
-        return 500, _error_response("报表未配置连接池", "INTERNAL_ERROR", headers), {}
+        body, err_headers = _error_response("报表未配置连接池", "INTERNAL_ERROR", headers)
+        return 500, body, err_headers
     pool_config = db.get_pool(conn, pool_id)
     if pool_config is None:
-        return 500, _error_response("连接池配置不存在", "INTERNAL_ERROR", headers), {}
+        body, err_headers = _error_response("连接池配置不存在", "INTERNAL_ERROR", headers)
+        return 500, body, err_headers
 
     filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all = \
         _resolve_params(endpoint, method, body, query_params, headers)
@@ -365,11 +391,10 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         for i, res in enumerate(result.results):
             disp_cols = select_columns(res["columns"], columns)
             col_indices_local = column_indices(disp_cols, res["columns"])
-            data_rows = [{disp_cols[ii]: row[idx] for ii, idx in enumerate(col_indices_local)}
-                         for row in res["rows"]]
+            data_rows = _rows_to_dicts(res["rows"], disp_cols, col_indices_local)
             total = res["total"]
             total_all_rows += total
-            total_pages = max(1, math.ceil(total / ps)) if ps > 0 else 1
+            total_pages = calc_total_pages(total, ps)
             item = {
                 "name": _get_result_name(report, i, result),
                 "data": data_rows,
@@ -382,7 +407,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                 item["full"] = True
             results_list.append(item)
 
-        template = endpoint.get("json_template") or ""
+        template = _endpoint_template(endpoint)
         if is_template_enabled(template):
             context = _build_all_context(
                 results_list, page,
@@ -391,26 +416,27 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
             if rendered is not None:
                 return 200, rendered, {"Content-Type": "application/json; charset=utf-8"}
 
-        resp_body = json.dumps({
+        resp_body = app_config.serialize_json({
             "results": results_list,
             "mode": "all",
             "page": page,
             "page_size": total_all_rows if fetch_all else ps,
-        } | ({"full": True} if fetch_all else {}), ensure_ascii=False, default=str)
+        } | ({"full": True} if fetch_all else {}))
         return 200, resp_body, {"Content-Type": "application/json; charset=utf-8"}
 
     # 单结果集模式 — 校验索引
     if result_index >= len(result.results):
-        return 400, _error_response(
+        body, err_headers = _error_response(
             f"结果集索引 {result_index} 超出范围，该查询仅返回 {len(result.results)} 个结果集",
             "INVALID_RESULT_INDEX", headers
-        ), {}
+        )
+        return 400, body, err_headers
 
     all_cols = result.columns
     all_rows = result.rows
     display_cols = select_columns(all_cols, columns)
     col_indices = column_indices(display_cols, all_cols)
-    data_rows = [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)} for row in all_rows]
+    data_rows = _rows_to_dicts(all_rows, display_cols, col_indices)
 
     display_ps = result.total if fetch_all else ps
     return ApiQueryResult(
@@ -499,10 +525,26 @@ def _parse_post_body(body: str, headers: dict) -> dict | None:
             return None
     else:
         try:
-            parsed = urllib.parse.parse_qs(body, keep_blank_values=True)
-            return {k: v[-1] if v else "" for k, v in parsed.items()}
+            return app_config.parse_form_urlencoded(body)
         except Exception:
             return None
+
+
+def _is_invalid_json_body(body: str, headers: dict) -> bool:
+    """Content-Type=application/json 且 body 非空但 JSON 解析失败 → 非法。
+
+    空 body（无请求体）不视为解析失败，回退端点预设规则。
+    """
+    if not body:
+        return False
+    content_type = (headers.get("Content-Type", "") or "").lower()
+    if "application/json" not in content_type:
+        return False
+    try:
+        json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return True
+    return False
 
 
 def _validate_api_key(endpoint: dict, headers: dict, query_params: dict) -> str | None:
@@ -523,10 +565,9 @@ def _validate_api_key(endpoint: dict, headers: dict, query_params: dict) -> str 
 
     # 从 Authorization 头获取
     auth_header = (headers.get("Authorization", "") or "")
-    if auth_header.startswith("Bearer "):
-        provided = auth_header[7:]
-        if provided == expected_key:
-            return None
+    provided = auth.extract_bearer_token(auth_header)
+    if provided is not None and provided == expected_key:
+        return None
 
     # 从查询参数获取
     qp = query_params or {}
@@ -626,10 +667,7 @@ def _apply_get_overrides(query_params: dict,
 
 def _safe_int(val, default: int) -> int:
     """安全转换为 int，失败返回默认值。"""
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return default
+    return app_config.safe_int(val, default)
 
 
 def _resolve_fetch_all(endpoint: dict, method: str, body: str,
@@ -719,7 +757,7 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
     }
     if full:
         resp["full"] = True
-    return 200, json.dumps(resp, ensure_ascii=False, default=str), {
+    return 200, app_config.serialize_json(resp), {
         "Content-Type": "application/json; charset=utf-8",
     }
 
@@ -735,20 +773,21 @@ def _format_csv_response(data_rows: list[dict], columns: list[str],
     返回:
         (HTTP 状态码, CSV 字符串, 响应头字典)
     """
-    output = io.StringIO()
-    if add_bom:
-        output.write('\ufeff')
-    writer = csv.DictWriter(output, fieldnames=columns, extrasaction='ignore')
-    writer.writeheader()
-    for row in data_rows:
-        writer.writerow(row)
-    csv_body = output.getvalue()
+    # DictWriter 语义（QUOTE_MINIMAL + CRLF 行尾 + BOM 可选）经 rows_to_csv
+    # 参数化保持逐字节一致：按 header 顺序取值，忽略行内多余键（extrasaction='ignore'）
+    rows_out = [[row.get(c, "") for c in columns] for row in data_rows]
+    csv_body = rows_to_csv(columns, rows_out, bom=add_bom,
+                           quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
     return 200, csv_body, {"Content-Type": "text/csv; charset=utf-8"}
 
 
-def _error_response(message: str, code: str, headers: dict) -> str:
+def _error_response(message: str, code: str, headers: dict) -> tuple:
     """
     构建错误响应（按 Accept 头决定 JSON 或纯文本）。
+
+    返回 (响应体字符串, 响应头字典)；响应头携带与 body 一致的 Content-Type：
+    - Accept 含 application/json → application/json; charset=utf-8
+    - 否则 → text/plain; charset=utf-8
 
     参数:
         message: 错误消息
@@ -757,8 +796,9 @@ def _error_response(message: str, code: str, headers: dict) -> str:
     """
     accept = (headers.get("Accept", "") or "")
     if "application/json" in accept:
-        return json.dumps({"error": message, "code": code}, ensure_ascii=False)
-    return message
+        body = json.dumps({"error": message, "code": code}, ensure_ascii=False)
+        return body, {"Content-Type": "application/json; charset=utf-8"}
+    return message, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 def _log_api_call(path: str, client_ip: str, status: int,

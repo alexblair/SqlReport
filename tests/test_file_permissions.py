@@ -246,5 +246,129 @@ class TestWriteFileIntegration(unittest.TestCase):
         m_apply_to.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# 缺口15：组不存在时降级关闭（load_permissions 返回 False，不阻塞启动）
+# ---------------------------------------------------------------------------
+
+
+class TestGroupMissingDegradation(unittest.TestCase):
+    def tearDown(self):
+        _reset_state()
+
+    @patch("file_permissions.os.geteuid", return_value=0)
+    def test_load_disabled_unknown_group(self, _m):
+        """组不存在 → 降级关闭并记 warning（不抛异常）。"""
+        with patch("app_config.get_file_permissions_config",
+                   return_value={"enable": True, "user": "root",
+                                 "group": "no_such_group_xyz"}):
+            with self.assertLogs("root", level="WARNING") as logs:
+                self.assertFalse(file_permissions.load_permissions())
+        self.assertFalse(file_permissions.is_enabled())
+        self.assertTrue(any("组" in m for m in logs.output),
+                        "应记录组不存在的 warning")
+
+    @patch("file_permissions.os.geteuid", return_value=0)
+    def test_load_disabled_unknown_numeric_gid(self, _m):
+        """数字 gid 不存在 → 同样降级关闭。"""
+        with patch("app_config.get_file_permissions_config",
+                   return_value={"enable": True, "user": "root",
+                                 "group": "299999"}):
+            self.assertFalse(file_permissions.load_permissions())
+        self.assertFalse(file_permissions.is_enabled())
+
+    @patch("file_permissions.os.geteuid", return_value=0)
+    def test_load_disabled_unknown_user_unknown_group(self, _m):
+        """用户与组都不存在 → 关闭（uid 先判 None 短路，不报组）。"""
+        with patch("app_config.get_file_permissions_config",
+                   return_value={"enable": True, "user": "no_user_xyz",
+                                 "group": "no_group_xyz"}):
+            self.assertFalse(file_permissions.load_permissions())
+        self.assertFalse(file_permissions.is_enabled())
+
+    def test_disabled_after_load_failure_write_still_works(self):
+        """load 失败后 static_cache 写入不受影响（权限关闭=原行为）。"""
+        with patch("app_config.get_file_permissions_config",
+                   return_value={"enable": True, "user": "root",
+                                 "group": "no_such_group_xyz"}), \
+                patch("static_cache.get_static_cache_config",
+                      return_value={"enable": True, "dir": _CACHE_DIR}):
+            self.assertFalse(file_permissions.load_permissions())
+            p = static_cache.resolve_file_path("api/after_group_fail")
+            self.assertTrue(static_cache.write_file(p, "{}"))
+        self.assertTrue(os.path.isfile(p))
+
+
+# ---------------------------------------------------------------------------
+# 缺口16：权限应用失败静默降级（chown/chmod/walk/makedirs 失败不抛异常）
+# ---------------------------------------------------------------------------
+
+
+class TestApplyFailureDegradation(unittest.TestCase):
+    def setUp(self):
+        _enable_for_test()
+        self._tmp = tempfile.mkdtemp(prefix="fp_fail_")
+
+    def tearDown(self):
+        _reset_state()
+
+    @patch("file_permissions.os.chmod")
+    @patch("file_permissions.os.chown",
+           side_effect=OSError("chown: Operation not permitted"))
+    def test_apply_to_chown_error_no_raise(self, m_chown, m_chmod):
+        """chown 失败（如权限不足）→ 记录 warning，不抛异常。"""
+        p = os.path.join(self._tmp, "a.json")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("{}")
+        with self.assertLogs("root", level="WARNING") as logs:
+            file_permissions.apply_to(p)   # 不应抛
+        m_chown.assert_called_once_with(p, 33, 33)
+        self.assertTrue(any("无法应用权限" in m for m in logs.output))
+
+    @patch("file_permissions.os.chown")
+    @patch("file_permissions.os.chmod",
+           side_effect=OSError("chmod: EPERM"))
+    def test_apply_to_chmod_error_no_raise(self, m_chmod, m_chown):
+        """chmod 失败 → 记录 warning，不抛异常（chown 已成功也吞掉）。"""
+        p = os.path.join(self._tmp, "b.json")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("{}")
+        with self.assertLogs("root", level="WARNING"):
+            file_permissions.apply_to(p)
+        m_chown.assert_called_once_with(p, 33, 33)
+
+    @patch("file_permissions.os.walk",
+           side_effect=OSError("walk: ENOENT"))
+    def test_apply_tree_walk_error_no_raise(self, m_walk):
+        """os.walk 失败 → 记录 warning，不抛异常。"""
+        with self.assertLogs("root", level="WARNING") as logs:
+            file_permissions.apply_tree("/no/such/dir")
+        m_walk.assert_called_once_with("/no/such/dir")
+        self.assertTrue(any("遍历目录失败" in m for m in logs.output))
+
+    @patch("file_permissions.os.makedirs",
+           side_effect=OSError("mkdir: EACCES"))
+    def test_refresh_tree_makedirs_error_no_raise(self, m_mkdir):
+        """根目录创建失败 → 记录 warning 并返回，不抛异常。"""
+        with self.assertLogs("root", level="WARNING") as logs:
+            file_permissions.refresh_tree("/no/such/root")
+        m_mkdir.assert_called_once_with("/no/such/root")
+        self.assertTrue(any("创建缓存目录失败" in m for m in logs.output))
+
+    @patch("file_permissions.os.chmod")
+    @patch("file_permissions.os.chown",
+           side_effect=OSError("chown: EPERM"))
+    def test_write_file_survives_apply_failure(self, m_chown, m_chmod):
+        """应用失败时 static_cache.write_file 仍完成写入（降级不阻塞）。"""
+        p = os.path.join(self._tmp, "c.json")
+        with patch("static_cache.get_static_cache_config",
+                   return_value={"enable": True, "dir": _CACHE_DIR}):
+            with self.assertLogs("root", level="WARNING"):
+                ok = static_cache.write_file(p, '{"ok": true}')
+        self.assertTrue(ok)
+        self.assertTrue(os.path.isfile(p))
+        with open(p, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), '{"ok": true}')
+
+
 if __name__ == "__main__":
     unittest.main()

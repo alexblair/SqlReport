@@ -27,6 +27,8 @@ config_db 支持多配置列表，通过 enable 字段切换当前使用的引�
 
 import json
 import os
+import time
+import urllib.parse
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -36,6 +38,12 @@ from typing import Any
 DEFAULT_CONFIG_PATH = "app_config.json"
 _DEFAULT_HOST = "0.0.0.0"
 _DEFAULT_PORT = 8080
+
+# API 路径统一前缀
+API_PREFIX = "/api/"
+
+# 真值字符串集合（大小写敏感，与历史调用点语义一致）
+TRUTHY_VALUES = frozenset({"true", "1", "yes"})
 
 # ---------------------------------------------------------------------------
 # 内部状态
@@ -114,6 +122,90 @@ def get_server_config() -> tuple[str, int]:
     except (ValueError, TypeError):
         port = _DEFAULT_PORT
     return host, port
+
+
+def get_server_base_url() -> str:
+    """返回 API URL 展示用的服务端兜底 base_url（http://127.0.0.1:{port}）。
+
+    仅作无 JS 时的服务端渲染兜底值，页面加载后 JS 用 window.location.origin 覆盖。
+    """
+    _, port = get_server_config()
+    return f"http://127.0.0.1:{port}"
+
+
+def get_trust_xff() -> bool:
+    """解析配置文件 server 段的 trust_xff 开关（是否信任 X-Forwarded-For 首 IP）。
+
+    配置文件示例:
+        "server": {
+            "host": "0.0.0.0",
+            "port": 8080,
+            "trust_xff": false
+        }
+
+    默认 False：客户端 IP 取 socket 对端地址（X-Forwarded-For 首 IP 可被伪造）。
+    仅当部署在可信反向代理（如 Nginx）之后且代理已覆写 XFF 时才应开启。
+    """
+    cfg = get_config()
+    server_cfg = cfg.get("server", {})
+    return bool(server_cfg.get("trust_xff", False))
+
+
+def safe_int(val, default: int) -> int:
+    """安全转换为 int，转换失败（非数字/None）返回默认值。"""
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def parse_form_urlencoded(body: str) -> dict:
+    """解析 URL 编码的表单/请求体为 dict（重复键取最后一个值）。"""
+    parsed = urllib.parse.parse_qs(body, keep_blank_values=True)
+    return {k: v[-1] if v else "" for k, v in parsed.items()}
+
+
+def ensure_api_prefix(path: str) -> str:
+    """确保路径以 /api/ 开头：已有 /api 前缀时规范化，否则补全。
+
+    兼容旧格式（已有 /api 前缀）以确保向后兼容；空路径抛 ValueError。
+    """
+    path = path.strip()
+    if not path:
+        raise ValueError("URL 路径不能为空")
+    if path.startswith(API_PREFIX):
+        return path
+    if path.startswith("/api"):
+        return API_PREFIX + path[4:].lstrip("/")
+    return API_PREFIX + path.lstrip("/")
+
+
+def strip_api_prefix(path: str) -> str:
+    """剥离路径的 /api 前缀，仅保留后段（/api/x → x；/api → ''；无前缀原样返回）。"""
+    if path.startswith(API_PREFIX):
+        return path[len(API_PREFIX):]
+    if path.startswith("/api"):
+        return path[4:]
+    return path
+
+
+def format_local_time(ts, with_tz: bool = True) -> str:
+    """格式化为服务器本地时区时间（秒级精度）。
+
+    with_tz=True 时含时区偏移（如 2026-08-04 18:30:22 +0800）；
+    with_tz=False 时不含时区偏移（如 2026-08-04 18:30:22）。
+    """
+    if with_tz:
+        return time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(ts))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def serialize_json(obj, **kwargs) -> str:
+    """序列化 JSON 字符串（ensure_ascii=False、default=str，与全项目序列化约定一致）。
+
+    额外参数（如 indent）通过 kwargs 透传给 json.dumps。
+    """
+    return json.dumps(obj, ensure_ascii=False, default=str, **kwargs)
 
 
 def get_active_db_config() -> dict[str, Any]:

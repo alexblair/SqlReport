@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Optional
 
-from app_config import get_redis_config
+from app_config import get_redis_config, serialize_json as _serialize_json
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -54,12 +54,12 @@ class ReportSnapshot:
 
     def to_json(self) -> str:
         """序列化为 JSON 字符串。"""
-        return json.dumps({
+        return _serialize_json({
             "results": self.results,
             "sql_query": self.sql_query,
             "updated_at": self.updated_at,
             "config_version": self.config_version,
-        }, ensure_ascii=False, default=str)
+        })
 
     @classmethod
     def from_json(cls, data: str) -> "ReportSnapshot":
@@ -78,13 +78,21 @@ class ReportSnapshot:
 # ---------------------------------------------------------------------------
 
 
+def _md5_hex(content: str) -> str:
+    """计算字符串的 MD5 十六进制摘要（配置版本计算的公共助手）。
+
+    供本模块 compute_config_version 与 api_handler 静态缓存版本计算共用，
+    保证两处版本算法采用完全一致的摘要方式。
+    """
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+
 def compute_config_version(sql_query: str, pool_id: Optional[int]) -> str:
     """计算报表的配置版本号（MD5 of sql + pool_id）。
 
     配置变化时版本号变化，旧快照自然淘汰。
     """
-    raw = f"{sql_query}|{pool_id}"
-    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+    return _md5_hex(f"{sql_query}|{pool_id}")
 
 
 def build_snapshot_key(prefix: str, report_id: int,
