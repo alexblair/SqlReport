@@ -169,6 +169,25 @@ class TestApply(unittest.TestCase):
         file_permissions.apply_to(p)
         m_chmod.assert_called_once_with(p, 0o755)
 
+    def test_apply_to_skips_symlink(self):
+        """符号链接跳过：不跟随链接改写目标文件（防止误改系统解释器）。
+
+        回归：static_cache 目录被错误配置为整个 web 树时，os.walk 会遍历到
+        venv/bin/python3 -> /usr/bin/python3 这类符号链接，os.chown/os.chmod
+        默认 follow_symlinks=True 会把 /usr/bin/python3.12 改成 www-data 并
+        剥掉执行位。此处验证 apply_to 对符号链接直接返回。
+        """
+        target = os.path.join(self._tmp, "real.json")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("{}")
+        link = os.path.join(self._tmp, "link.json")
+        os.symlink(target, link)
+        with patch("file_permissions.os.chown") as m_chown, \
+                patch("file_permissions.os.chmod") as m_chmod:
+            file_permissions.apply_to(link)
+            m_chown.assert_not_called()
+            m_chmod.assert_not_called()
+
     @patch("file_permissions.os.chmod")
     @patch("file_permissions.os.chown")
     def test_apply_tree_recursive(self, m_chown, m_chmod):
@@ -187,6 +206,66 @@ class TestApply(unittest.TestCase):
         for f in files:
             self.assertIn(call(f, 33, 33), m_chown.call_args_list,
                           f"文件 {f} 应被 chown")
+
+    @patch("file_permissions.os.chmod")
+    @patch("file_permissions.os.chown")
+    def test_apply_tree_skips_symlink_in_walk(self, m_chown, m_chmod):
+        """apply_tree 遍历到的文件符号链接不跟随改写目标。
+
+        回归：目录树下存在指向外部文件的符号链接（如 venv/bin/python3 ->
+        /usr/bin/python3）时，os.walk 会把链接列入 filenames，apply_to
+        必须跳过，避免连带修改链接目标。
+        """
+        target = os.path.join(self._tmp, "real.json")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.symlink(target, os.path.join(self._tmp, "ext_link.json"))
+        file_permissions.apply_tree(self._tmp)
+        for call_args in m_chown.call_args_list:
+            self.assertFalse(
+                os.path.islink(call_args.args[0]),
+                f"符号链接 {call_args.args[0]} 不应被 chown")
+        for call_args in m_chmod.call_args_list:
+            self.assertFalse(
+                os.path.islink(call_args.args[0]),
+                f"符号链接 {call_args.args[0]} 不应被 chmod")
+        self.assertTrue(os.path.islink(os.path.join(self._tmp, "ext_link.json")),
+                        "符号链接本身应保留")
+
+    def test_apply_dirs_from_applies_each_ancestor(self):
+        """从权限根到叶子目录的每一级都应用目录权限（含两端）。"""
+        root = os.path.join(self._tmp, "api")
+        leaf = os.path.join(root, "fish", "bidding")
+        os.makedirs(leaf)
+        with patch("file_permissions.os.chmod") as m_chmod, \
+                patch("file_permissions.os.chown") as m_chown:
+            file_permissions.apply_dirs_from(root, leaf)
+        for d in (leaf, os.path.join(root, "fish"), root):
+            self.assertIn(call(d, 33, 33), m_chown.call_args_list,
+                          f"目录 {d} 应被 chown")
+            self.assertIn(call(d, 0o755), m_chmod.call_args_list,
+                          f"目录 {d} 应被 chmod")
+
+    def test_apply_dirs_from_leaf_equals_root(self):
+        """叶子即权限根：只处理该目录本身。"""
+        root = os.path.join(self._tmp, "api")
+        os.makedirs(root)
+        with patch("file_permissions.os.chmod") as m_chmod, \
+                patch("file_permissions.os.chown") as m_chown:
+            file_permissions.apply_dirs_from(root, root)
+        m_chown.assert_called_once_with(root, 33, 33)
+        m_chmod.assert_called_once_with(root, 0o755)
+
+    def test_apply_dirs_from_outside_root_noop(self):
+        """叶子不在权限根之下：不越界处理（no-op）。"""
+        root = os.path.join(self._tmp, "api")
+        outside = os.path.join(self._tmp, "elsewhere", "deep")
+        os.makedirs(outside)
+        with patch("file_permissions.os.chmod") as m_chmod, \
+                patch("file_permissions.os.chown") as m_chown:
+            file_permissions.apply_dirs_from(root, outside)
+        m_chown.assert_not_called()
+        m_chmod.assert_not_called()
 
     @patch("file_permissions.os.chmod")
     @patch("file_permissions.os.chown")
@@ -218,13 +297,16 @@ class TestWriteFileIntegration(unittest.TestCase):
 
     @patch("file_permissions.apply_tree")
     @patch("file_permissions.apply_to")
+    @patch("file_permissions.apply_dirs_from")
     @patch("static_cache.get_static_cache_config",
            return_value={"enable": True, "dir": _CACHE_DIR})
-    def test_write_file_applies_permissions_before_replace(self, _m, m_apply_to,
-                                                            m_apply_tree):
-        """启用时：目录树刷新权限，临时文件在 replace 前应用文件权限。"""
+    def test_write_file_applies_permissions_before_replace(
+            self, _m, m_dirs, m_apply_to, m_apply_tree):
+        """启用时：祖先目录 + 目录树刷新权限，临时文件在 replace 前应用权限。"""
         p = static_cache.resolve_file_path("api/perm")
         self.assertTrue(static_cache.write_file(p, '{"a": 1}'))
+        m_dirs.assert_called_once_with(
+            static_cache.permissions_root(), os.path.dirname(p))
         m_apply_tree.assert_called_once_with(os.path.dirname(p))
         self.assertEqual(m_apply_to.call_count, 1)
         tmp_path = m_apply_to.call_args[0][0]

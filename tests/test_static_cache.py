@@ -1050,5 +1050,43 @@ class TestStaticCacheModule(unittest.TestCase):
         self.assertIsNotNone(static_cache.get_last_invalidated("api/x"))
 
 
+class TestPermissionsRoot(unittest.TestCase):
+    """permissions_root()：权限调整根目录 = {dir}/api（缓存实际落点）。
+
+    产品约束：API 端点 URL 必须以 /api/ 开头，缓存文件全部落在 {dir}/api 下，
+    file_permissions 只以该子目录为权限起点，不得波及 dir 内其他内容。
+    """
+
+    @patch("app_config.get_config",
+           return_value={"static_cache": {"enable": True,
+                                          "dir": "/var/cache/sr"}})
+    def test_absolute_dir_appends_api(self, _m):
+        """绝对路径 dir → {dir}/api。"""
+        self.assertEqual(static_cache.permissions_root(),
+                         os.path.realpath("/var/cache/sr/api"))
+
+    @patch("app_config.get_config",
+           return_value={"static_cache": {"enable": True,
+                                          "dir": "/var/cache/sr/"}})
+    def test_trailing_slash_normalised(self, _m):
+        """dir 带尾斜杠 → 归一化后仍为 {dir}/api。"""
+        self.assertEqual(static_cache.permissions_root(),
+                         os.path.realpath("/var/cache/sr/api"))
+
+    @patch("app_config.get_config",
+           return_value={"static_cache": {"enable": True,
+                                          "dir": "cache_rel"}})
+    def test_relative_dir_resolved(self, _m):
+        """相对路径 dir → realpath 解析后追加 api。"""
+        self.assertEqual(static_cache.permissions_root(),
+                         os.path.realpath(os.path.join("cache_rel", "api")))
+
+    @patch("app_config.get_config", return_value={})
+    def test_default_dir(self, _m):
+        """配置缺失 → 默认 dir=static_cache → static_cache/api。"""
+        self.assertEqual(static_cache.permissions_root(),
+                         os.path.realpath(os.path.join("static_cache", "api")))
+
+
 if __name__ == "__main__":
     unittest.main()

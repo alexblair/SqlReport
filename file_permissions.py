@@ -1,10 +1,15 @@
 """
-file_permissions.py — 运行时文件权限管理（仅 static_cache 缓存目录）
+file_permissions.py — 运行时文件权限管理（仅 static_cache 缓存落点 {dir}/api）
 
 背景：程序以 root 运行，static_cache 的 .json 缓存文件经 tempfile.mkstemp
 创建（0600 root:root），NGINX 直出（adr-0005）时以非 root 用户运行的
 worker 无法读取。本模块在配置中指定缓存文件/目录的属主（用户、组）与
-权限位，程序启动时刷新缓存目录树，此后新增文件按配置权限建立。
+权限位，程序启动时刷新缓存落点目录树，此后新增文件按配置权限建立。
+
+权限作用域：仅 static_cache.permissions_root()（即 {static_cache.dir}/api）
+之下的目录与文件。缓存 URL 必须以 /api/ 开头，故全部缓存文件落在该子目录；
+以它而非 static_cache.dir 为起点，可避免 dir 指向包含其他程序的目录时
+被一并 chown/chmod。
 
 配置段（app_config.json）:
     "file_permissions": {
@@ -144,6 +149,11 @@ def apply_to(path: str, is_dir: bool | None = None) -> None:
     """
     if not _enabled:
         return
+    if os.path.islink(path):
+        # 符号链接不跟随：os.chown/os.chmod 默认 follow_symlinks=True，
+        # 会连带改写链接目标（如 venv 中指向 /usr/bin/python3 的链接，
+        # 曾把系统解释器改成 www-data 并剥掉执行位），故一律跳过
+        return
     try:
         if is_dir is None:
             mode = _dir_mode if os.path.isdir(path) else _file_mode
@@ -153,6 +163,32 @@ def apply_to(path: str, is_dir: bool | None = None) -> None:
         os.chmod(path, mode)
     except OSError as e:
         logging.warning("file_permissions: 无法应用权限到 %s: %s", path, e)
+
+
+def apply_dirs_from(root: str, leaf: str) -> None:
+    """应用 root 到 leaf（含两端）每一级目录的目录权限。
+
+    供写入路径使用：中间目录由 os.makedirs 递归创建，属主为进程用户
+    （root:root 0755），apply_tree 只覆盖文件所在目录层，父级祖先会漏
+    权限；本函数把从权限根到文件目录的全部祖先逐级修正。
+
+    安全边界：leaf 不在 root 之下时直接返回，绝不越界处理 root 外的目录。
+    """
+    if not _enabled:
+        return
+    root = os.path.realpath(root)
+    leaf = os.path.realpath(leaf)
+    if leaf != root and not leaf.startswith(root + os.sep):
+        return
+    dirs = []
+    d = leaf
+    while True:
+        dirs.append(d)
+        if d == root:
+            break
+        d = os.path.dirname(d)
+    for d in reversed(dirs):
+        apply_to(d, is_dir=True)
 
 
 def apply_tree(root: str) -> None:

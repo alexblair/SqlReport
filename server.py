@@ -709,10 +709,12 @@ def setup_logging():
 
 def main():
     setup_logging()
-    # 初始化运行时文件权限（仅 static_cache 缓存目录）：
-    # 启动时对缓存目录树整树刷新属主/权限，覆盖历史遗留 root:root 文件
+    # 初始化运行时文件权限（仅 static_cache 缓存落点 {dir}/api）：
+    # 启动时对缓存目录树整树刷新属主/权限，覆盖历史遗留 root:root 文件。
+    # 以 {dir}/api 为起点而非 {dir}：dir 可能指向包含其他程序的目录，
+    # 权限调整不得波及缓存之外的内容。
     if file_permissions.load_permissions():
-        cache_root = os.path.realpath(static_cache.get_static_cache_config()["dir"])
+        cache_root = static_cache.permissions_root()
         file_permissions.refresh_tree(cache_root)
     try:
         # 初始化配置数据库

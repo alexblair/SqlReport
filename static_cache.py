@@ -4,6 +4,8 @@ static_cache.py — API 静态文件缓存（.json 变体）
 职责：
 1. 配置读取：app_config.json 的 static_cache 段（enable 默认 true、dir 默认 static_cache）
 2. 路径映射：{dir}/{url_path}.json，子目录自动创建，realpath 校验防 `..` 穿越（dir 支持相对路径或外部绝对路径）
+3. 权限根：permissions_root() 返回 {dir}/api（全部缓存文件的落点），
+   file_permissions 仅以该子目录为权限调整起点，避免波及 dir 内其他内容
 3. 命中判定：文件存在 + 版本一致（默认输出比对内容 meta.config_version；
    自定义输出模板未引用 {{meta}} 时比对文件名内嵌版本 {url_path}.v{版本8}.json，
    版本不匹配即 miss，不依赖进程内存）+ mtime 未超 TTL
@@ -63,6 +65,17 @@ def get_static_cache_config() -> dict:
         "enable": bool(cfg.get("enable", True)),
         "dir": str(cfg.get("dir", "static_cache")),
     }
+
+
+def permissions_root() -> str:
+    """返回缓存权限管理的根目录：{dir}/api。
+
+    产品约束：所有 API 端点 URL 必须以 /api/ 开头（config_db 校验），
+    故缓存文件全部落在 {dir}/api/ 下。file_permissions 只以该子目录为
+    权限调整起点——即使 dir 指向包含其他程序的目录（如整个 web 根），
+    也只管理缓存实际落点，不波及 dir 内其他内容。
+    """
+    return os.path.join(os.path.realpath(get_static_cache_config()["dir"]), "api")
 
 
 def resolve_file_path(url_path: str) -> str | None:
@@ -182,6 +195,10 @@ def write_file(file_path: str, content: str) -> bool:
     try:
         base_dir = os.path.dirname(file_path)
         os.makedirs(base_dir, exist_ok=True)
+        # 中间目录由 makedirs 递归创建（属主为进程用户 root:root），
+        # 需把从权限根 {dir}/api 到文件目录的全部祖先逐级修正，避免
+        # 深层写入后上层目录权限不匹配配置
+        file_permissions.apply_dirs_from(permissions_root(), base_dir)
         file_permissions.apply_tree(base_dir)
         fd, tmp_path = tempfile.mkstemp(dir=base_dir, suffix=".tmp")
         try:
