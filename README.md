@@ -345,6 +345,27 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 - 端点级开关：API 端点表单的「静态文件缓存（.json 变体）」勾选框（默认开启），可单独关闭某端点
 - **失效联动**：报表页「重建缓存」与批量缓存配置「关闭缓存」会同步删除对应静态文件（删除即失效，下次 `.json` 请求惰性重建）
 
+### 缓存文件权限 / Cache File Permissions
+
+程序以 root 运行时，`.json` 缓存文件默认以 `0600 root:root` 建立（`tempfile.mkstemp`），NGINX 等非 root 进程直出（见下节）时无法读取。通过 `file_permissions` 配置段指定缓存目录/文件的属主与权限位，启动时对缓存目录树做一次整树刷新，此后新增文件均按配置权限建立：
+
+```json
+"file_permissions": {
+    "enable": true,
+    "user": "nginx",
+    "group": "nginx",
+    "dir_mode": "0755",
+    "file_mode": "0644"
+}
+```
+
+- `enable`：默认关闭；关闭或整个段缺失时行为与未引入该功能完全一致
+- `user` / `group`：缓存目录与文件的属主/属组（支持名称或数字 uid/gid），启动时解析
+- `dir_mode` / `file_mode`：可选，八进制字符串（JSON 无八进制字面量）；缺省 `0755` / `0644`。目录需含 `x` 权限（NGINX 需进入），文件需含 `r` 权限（NGINX 需读取）
+- 仅配置 `user`/`group` 时 mode 用默认 `0755`/`0644`（否则 `0600` 下 NGINX 仍无法读取）
+- 程序非 root、用户/组不存在时降级关闭并记 `logging.warning`，不阻塞启动与写入
+- 权限仅作用于 static_cache 缓存目录树，不含 `config.db`/`audit.db`/日志文件
+
 ### NGINX 集成 / NGINX Integration
 
 NGINX 三种接入方式，按端点鉴权策略选择：
@@ -507,6 +528,7 @@ SqlReport/
 ├── audit_page.py          # 审计日志页面处理（浏览/清理/CSV 导出）
 ├── redis_cache.py         # Redis 快照缓存层
 ├── api_handler.py         # API 接口处理器（API 端点查询 + 静态缓存 + 具名结果结构）
+├── file_permissions.py    # 运行时文件权限管理（static_cache 目录属主/权限）
 ├── tests/                 # 单元测试
 │   ├── __init__.py
 │   ├── test_auth.py
@@ -520,6 +542,7 @@ SqlReport/
 │   ├── test_redis_cache.py
 │   ├── test_report.py
 │   ├── test_server.py
+│   ├── test_file_permissions.py
 │   └── test_state_machine.py
 ├── config.db              # SQLite 配置数据库（自动创建，不提交）
 ├── install.sh             # 自动化依赖安装脚本（venv + pip install）

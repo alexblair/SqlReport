@@ -25,6 +25,14 @@
         "dir": "static_cache"
     },
 
+    "file_permissions": {
+        "enable": false,
+        "user": "nginx",
+        "group": "nginx",
+        "dir_mode": "0755",
+        "file_mode": "0644"
+    },
+
     "audit_db": {
         "path": "audit.db"
     },

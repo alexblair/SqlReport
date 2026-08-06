@@ -27,6 +27,7 @@ import time
 from collections import OrderedDict
 
 import app_config
+import file_permissions
 
 # 模块级失效时刻记录：url_path → 上次判定失效的时间戳（进程内存）
 # 有界容量：只保留最近 MAX_LAST_INVALIDATED 条，防止长期运行无界增长
@@ -164,14 +165,19 @@ def write_file(file_path: str, content: str) -> bool:
     """原子写入缓存文件（临时文件 + os.replace），失败返回 False。
 
     并发写入时最后 replace 者生效，文件内容始终完整（同版本内容等价）。
+    启用 file_permissions 时：目录树先刷新配置权限（新增子目录以配置
+    权限建立），临时文件在 os.replace 前应用配置属主/权限（replace
+    保留源文件属主，故必须在 replace 前完成 chown/chmod）。
     """
     try:
         base_dir = os.path.dirname(file_path)
         os.makedirs(base_dir, exist_ok=True)
+        file_permissions.apply_tree(base_dir)
         fd, tmp_path = tempfile.mkstemp(dir=base_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
+            file_permissions.apply_to(tmp_path, is_dir=False)
             os.replace(tmp_path, file_path)
         except Exception:
             try:

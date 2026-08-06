@@ -37,6 +37,8 @@ import export as export_mod
 import api_handler
 import audit_db
 import audit_page
+import file_permissions
+import static_cache
 from app_config import get_server_config, get_log_config, get_error_log_config, get_audit_db_config
 
 # ---------------------------------------------------------------------------
@@ -653,6 +655,11 @@ def setup_logging():
 
 def main():
     setup_logging()
+    # 初始化运行时文件权限（仅 static_cache 缓存目录）：
+    # 启动时对缓存目录树整树刷新属主/权限，覆盖历史遗留 root:root 文件
+    if file_permissions.load_permissions():
+        cache_root = os.path.realpath(static_cache.get_static_cache_config()["dir"])
+        file_permissions.refresh_tree(cache_root)
     try:
         # 初始化配置数据库
         conn = db.get_config_db()

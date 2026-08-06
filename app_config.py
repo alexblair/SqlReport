@@ -194,6 +194,25 @@ def get_error_log_config() -> dict:
     }
 
 
+def get_file_permissions_config() -> dict:
+    """解析 file_permissions 配置段。
+
+    配置文件示例:
+        "file_permissions": {
+            "enable": true,
+            "user": "nginx",
+            "group": "nginx",
+            "dir_mode": "0755",
+            "file_mode": "0644"
+        }
+
+    dir_mode/file_mode 可选（八进制字符串），缺省值由调用方决定
+    （file_permissions 默认 0755/0644）。
+    缺失或未启用时返回 {"enable": False}。
+    """
+    return get_config().get("file_permissions", {"enable": False})
+
+
 def get_audit_db_config() -> dict:
     """解析 audit_db 配置段。
 
