@@ -1,77 +1,94 @@
 <div align="center">
-  <h1>SqlReport</h1>
-  <p><strong>轻量级 MySQL 网页报表工具 · Lightweight MySQL Web Report Tool</strong></p>
-  <p>
-    <em>纯 Python 3 标准库，零框架依赖，一键部署</em><br/>
-    <em>Pure Python 3 stdlib, zero framework dependencies, one-click deploy</em>
-  </p>
-  <p>
-    <a href="#-features">English</a> ·
-    <a href="#-功能特性">中文</a>
-  </p>
+
+# 🐬 SqlReport
+
+### SQL in. Reports & APIs out. — Zero dependencies, one command.
+
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-brightgreen)](LICENSE)
+[![Dependencies](https://img.shields.io/badge/dependencies-1%20(pip)-blueviolet)](requirements.txt)
+[![Framework](https://img.shields.io/badge/framework-none-important)](https://docs.python.org/3/library/http.server.html)
+[![MySQL](https://img.shields.io/badge/MySQL-5.7%20%2F%208.0-orange)](https://www.mysql.com/)
+
+Pure Python 3 stdlib · No framework · No build step · Single-process deploy
+
+```
+git clone https://github.com/alexblair/SqlReport.git && cd SqlReport
+./install.sh && source venv/bin/activate
+python server.py
+```
+
+**In 60 seconds: open a browser, log in, write one SQL — your teammates get a web report they can filter, sort and export; third-party systems get an HTTP API.**
+
+[Features](#-features) · [Quick Start](#-quick-start) · [中文文档](./README-CN.md) · [English](./README.md)
+
 </div>
 
 ---
 
-## 📦 功能特性
+## 💡 Why another tool?
 
-| 特性 | 说明 |
-|------|------|
-| **连接池管理** | 可视化 CRUD 管理 MySQL 连接池，支持调序、复制 |
-| **用户管理** | 多用户支持，密码哈希存储（SHA-256 + salt） |
-| **报表配置** | 自定义 SQL 查询、绑定连接池、默认每页行数、备注、所属分类；支持复制 |
-| **分类树管理** | 无限层级分类，树形缩进展示，支持调序、新增、删除、重命名 |
-| **批量操作** | 批量删除报表，分类内全选/反选 |
-| **SQL 格式化 & 高亮预览** | 编辑报表时一键格式化 SQL，切换语法高亮预览 |
-| **分页表格** | 内存分页、显示总页数、跳转任意页 |
-| **多字段排序** | 点击列头排序，支持多列组合排序，带排序管理面板（添加/删除/调序） |
-| **多字段筛选** | 支持包含、等于、不等于、大于、小于、大于等于、小于等于、为空、非空 9 种操作符；筛选值支持 `*` 通配、英文逗号多值（或）、`\` 转义（作用于包含/等于/不等于，含/等于/不等于敏感度不同） |
-| **字段设置** | 拖拽排序、显示/隐藏列，自由控制表格展示字段 |
-| **CSV 导出** | 一键导出完整查询结果，UTF-8 BOM 确保 Excel 正确识别中文 |
-| **JSON 导出** | 支持 JSON 格式导出，可选数字无引号模式 |
-| **字符集切换** | 导出时可选 GBK / UTF-8 编码，满足不同系统需求 |
-| **ZIP 压缩包** | 导出结果可选打包为 ZIP 压缩文件 |
-| **配置存储双引擎** | 支持 SQLite / MySQL 两种配置存储方案，通过 `app_config.json` 切换 |
-| **编辑-查看双向关联** | 报表页一键跳转编辑页，编辑页可直接查看报表或实时预览未保存的 SQL |
-| **健康检查端点** | `GET /health` 返回 JSON 状态（status + uptime），无需认证 |
-| **API 接口独立管理** | 独立管理页 `/config/api-endpoints`，展示全局 API 接口列表及关联报表 |
-| **API 静态文件缓存** | 端点 URL 后追加 `.json` 获取全量静态输出（零查询零计算），miss 自动回退重建，支持 NGINX 直出集成 |
-| **Session 滑动过期** | 24 小时 TTL，每次请求自动刷新，重启后通过 SQLite 持久化恢复 |
-| **导出支持排序** | CSV/JSON 导出时应用当前排序状态（与报表页面行为一致） |
-| **事务性 SQL 执行** | 支持 BEGIN/COMMIT/ROLLBACK 包装的多语句事务执行 |
-| **错误日志独立输出** | WARNING 及以上级别可配置独立日志文件，与普通日志分离 |
-| **审计日志自动轮转** | 可配置保留天数，启动时和每次访问时自动清理过期记录 |
-| **ThreadingHTTPServer** | 多线程 HTTP 服务器，提升并发处理能力 |
-| **全局异常兜底** | 未捕获异常返回 500 错误页，避免直接崩溃 |
-| **Redis 可观测性** | 所有静默异常（`except: pass`）改为结构化日志输出 |
-| **纯标准库** | 仅依赖 `mysql-connector-python`，其余全部使用 Python 内置模块 |
+> You just want a **page for your business folks to look at data**, and an **endpoint for third-party systems to fetch data**.
+> You don't want to deploy a "BI stack" that needs Postgres + Redis + Celery + a headless browser,
+> you don't want to carry weekly ops overhead just for a couple of charts, and you definitely don't want to build a full web application.
+
+**SqlReport does exactly one thing: it turns your SQL into web reports and HTTP APIs.**
+It is built for people who write SQL — developers, ops engineers, data engineers, and SQL-literate analysts.
+
+- 🚀 **Absurdly light to deploy**: 1 pip package, `python server.py` and it runs. No Docker, no JVM, no Node, no build step
+- 📡 **Report-as-API**: one SQL is both a web report and an authenticated, CORS-enabled HTTP API endpoint any system can call
+- ⚡ **High concurrency without burning resources**: 3-layer cache (process / Redis / DB) + API static file cache — append `.json` to an endpoint URL and serve a pre-computed static file, NGINX-ready
+- 🔒 **Compliance out of the box**: full audit log, PBKDF2 password hashing, sliding-expiry sessions, transactional SQL execution, MIT license — no AGPL baggage
+
+### Where we fit / Positioning vs. mainstream open-source BI
+
+| | **SqlReport** | Metabase | Apache Superset | Redash |
+|---|---|---|---|---|
+| Target user | **People who write SQL** | Non-technical business users | Data teams | SQL analysts |
+| Deployment | 1 Python file + 1 pip package | JVM app + metadata DB | Web + Postgres + Redis + Celery + headless browser | Web + Postgres + Redis + workers |
+| Time to first report | **Minutes** (just one SQL) | Minutes | Hours (semantic layer first) | Minutes |
+| Report-as-API | ✅ Native (API Key + CORS + templates) | Needs extra dev | Needs extra dev | Needs extra dev |
+| API static cache / NGINX direct serve | ✅ Native (`.json` variant) | ❌ | ❌ | ❌ |
+| Query cache layers | ✅ Process + Redis + DB fallback | In-process | Redis | Redis |
+| Charts & visualizations | ❌ Table-first (deliberate choice) | ✅ 25+ chart types | ✅ 40+ chart types | Basic charts |
+| Audit log | ✅ Built-in | Paid tier | Needs setup | Partial |
+| License | **MIT** | AGPL (often banned by legal depts) | Apache 2.0 | BSD-2 (stalled) |
+| Maintenance | Actively developed | Active | Active | Mostly stalled |
+
+> **Why no charts?** Over 80% of internal reporting needs are "look at data, filter, sort, export" — tables + filtering + sorting + export already cover that.
+> Rather than shipping a mediocre chart library and going head-to-head with Superset, we polish the table experience to the extreme and keep API the differentiator that nobody else has.
+
+---
 
 ## ✨ Features
 
 | Feature | Description |
 |---------|-------------|
 | **Connection Pool Mgmt** | Visual CRUD for MySQL connection pools with reorder and copy |
-| **User Management** | Multi-user support with salted SHA-256 password hashing |
+| **User Management** | Multi-user support with salted PBKDF2-SHA-256 password hashing |
 | **Report Configuration** | Custom SQL, bind pool, page size, memo, category; with copy support |
 | **Category Tree** | Unlimited depth categories, tree-indented display, reorder/add/rename/delete |
-| **Batch Operations** | Batch delete reports, select all/deselect per category |
-| **SQL Formatter & Preview** | One-click SQL formatting, toggle syntax-highlighted preview |
+| **Batch Operations** | Batch delete reports, batch update cache/pool/category, select all/deselect per category |
+| **SQL Formatter & Preview** | One-click SQL formatting, toggle syntax-highlighted preview, live-preview unsaved SQL |
 | **Paginated Tables** | In-memory pagination with total pages and page jump |
 | **Multi-column Sorting** | Click column headers, multi-column combo sort with management panel |
-| **Multi-field Filtering** | 9 operators: contains, eq, neq, gt, lt, gte, lte, is empty, not empty; values support `*` wildcard, comma multi-value (OR), `\` escaping (for contains/eq/neq) |
+| **Multi-field Filtering** | 9 operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty); values support `*` wildcard, comma multi-value (OR), `\` escaping — one shared syntax across report/export/API/audit pages |
 | **Column Settings** | Drag-and-drop column reorder, show/hide fields |
 | **CSV Export** | Full dataset export with UTF-8 BOM for Excel compatibility |
 | **JSON Export** | JSON format export with optional numeric no-quotes mode |
 | **Charset Selection** | GBK or UTF-8 encoding for exports |
 | **ZIP Compression** | Package export results as ZIP archive |
+| **Multi Result Sets** | One multi-statement SQL returns several result sets, each in its own tab with independent filter/sort state |
+| **Report-as-API** | Publish any report as an HTTP API: API Key auth, CORS, JSON/CSV output, preset rules, request override, custom JSON templates |
+| **API Static File Cache** | Append `.json` to endpoint URL for static full output (zero query/compute), auto rebuild on miss, NGINX serve-ready |
 | **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
+| **3-Layer Query Cache** | L1 process memory (300s TTL) → L2 Redis snapshot (versioned keys + distributed lock) → L3 DB direct (Redis fallback) |
 | **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
 | **Health Check** | `GET /health` returns JSON status (status + uptime), no auth required |
 | **API Endpoint Indep. Mgmt** | Standalone page `/config/api-endpoints` with global list & linked report |
-| **API Static File Cache** | Append `.json` to endpoint URL for static full output (zero query/compute), auto rebuild on miss, NGINX serve-ready |
 | **Session Sliding Expiry** | 24h TTL, refreshed on each request, persisted via SQLite across restarts |
 | **Export with Sorting** | CSV/JSON exports apply current sort state (consistent with report view) |
-| **Transactional SQL** | Multi-statement execution wrapped in BEGIN/COMMIT/ROLLBACK |
+| **Transactional SQL** | Multi-statement execution wrapped in BEGIN/COMMIT/ROLLBACK, full rollback on failure |
 | **Error Log Output** | Configurable separate log file for WARNING+ level messages |
 | **Audit Log Rotation** | Configurable retention days, auto-cleanup on startup and page visits |
 | **ThreadingHTTPServer** | Multi-threaded HTTP server for better concurrency |
@@ -81,78 +98,68 @@
 
 ---
 
-## 🚀 快速开始 / Quick Start
+## 🚀 Quick Start
 
-### 前置要求 / Prerequisites
+### Prerequisites
 
 - Python 3.11+
 - MySQL 5.7+ / 8.0+
 
-### 安装 / Installation
+### Installation
 
 ```bash
-# 克隆仓库 / Clone the repo
+# Clone the repo
 git clone https://github.com/alexblair/SqlReport.git
 cd SqlReport
 
-# 一键安装（创建 venv + 安装依赖）/ One-click setup (venv + deps)
+# One-click setup (venv + deps)
 ./install.sh
 
-# 激活虚拟环境后启动服务 / Activate venv, then start the server
+# Activate venv, then start the server
 source venv/bin/activate
 python server.py
 ```
 
-一键安装脚本 `install.sh` 会自动创建虚拟环境并安装 `requirements.txt` 中的所有依赖。你也可以手动安装：
+The `install.sh` script creates a virtual environment and installs all dependencies from `requirements.txt` automatically. Manual installation works too:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 
-# 安装外部依赖 / Install external dependencies
+# Install external dependencies
 pip install -r requirements.txt
-# 或手动逐个安装: pip install mysql-connector-python redis
-#   - mysql-connector-python: MySQL 查询连接器（必需）
-#   - redis: Redis 快照缓存（可选，启用后需在 app_config.json 设置 "enable": true）
+# Or manually: pip install mysql-connector-python redis
+#   - mysql-connector-python: MySQL query connector (required)
+#   - redis: Redis snapshot cache (optional, set "enable": true in app_config.json)
 ```
 
-服务默认监听 `http://0.0.0.0:8000`。
+The server listens at `http://0.0.0.0:8080` by default (overridable via the `HOST` / `PORT` env vars or the `server` section of the config file).
 
-The server listens at `http://0.0.0.0:8000` by default.
+The API static file cache directory `static_cache/` is created automatically on first cache write (no manual setup); in production, consider including it in your backup/cleanup strategy. Its location can be changed via `static_cache.dir` in `app_config.json` (relative path or **external absolute path**, see the "API Static File Cache" section below).
 
-API 静态文件缓存的存储目录 `static_cache/` 在首次写入缓存时自动创建（无需手工建目录）；生产环境建议将该目录纳入备份/清理策略，位置可通过 `app_config.json` 的 `static_cache.dir` 调整（支持相对路径或**外部绝对路径**，详见下文「API 静态文件缓存」章节）。
+### First Login
 
-### 首次登录 / First Login
+Open your browser and navigate to `http://localhost:8080`, then log in with the default admin account:
 
-打开浏览器访问 `http://localhost:8000`，使用默认管理员账户登录：
+| Username | Password |
+|----------|----------|
+| `admin`  | `admin123` |
 
-Open your browser and navigate to `http://localhost:8000`, then log in with the default admin account:
-
-| 用户名 / Username | 密码 / Password |
-|-------------------|----------------|
-| `admin`           | `admin123`     |
-
-> ⚠️ **首次登录后请立即修改密码！** / Please change password immediately after first login!
-
-登录后进入 `/config` 页面配置连接池、用户和报表。
+> ⚠️ **Please change the password immediately after first login!**
 
 After login, go to `/config` to configure connection pools, users, and reports.
 
 ---
 
-## 🔧 配置文件 / Configuration File
-
-应用通过 `app_config.json`（或 `CONFIG_FILE` 环境变量指定路径）控制配置数据库的存储引擎。
+## 🔧 Configuration File
 
 The application uses `app_config.json` (or the `CONFIG_FILE` env var) to select the config database engine.
 
-`config_db` 支持**多配置列表**格式，通过 `enable` 字段切换当前使用的引擎。旧版单 dict 格式仍兼容。
-
 The `config_db` field supports a **list of configurations**, toggled via the `enable` flag. The legacy single-dict format is still supported.
 
-### 完整示例 / Full Example
+### Full Example
 
-`static_cache.dir` 支持相对路径或外部绝对路径（如 `/var/cache/sqlreport_static`）；目录在首次写入时自动创建。
+`static_cache.dir` accepts a relative path or an external absolute path (e.g. `/var/cache/sqlreport_static`); the directory is created automatically on first write.
 
 ```json
 {
@@ -184,9 +191,9 @@ The `config_db` field supports a **list of configurations**, toggled via the `en
 }
 ```
 
-`server.trust_xff`（默认 `false`）：审计日志的客户端 IP 默认取 socket 对端地址；仅当部署于可信反向代理（如 Nginx，已覆写 `X-Forwarded-For`）之后才设为 `true` 以信任该请求头首 IP，防止客户端伪造来源 IP。
+`server.trust_xff` (default `false`): the client IP in audit logs is taken from the socket peer address by default; set it to `true` only when deployed behind a trusted reverse proxy (e.g. Nginx that overwrites `X-Forwarded-For`) to trust the first IP in that header, preventing client IP spoofing.
 
-MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 二选一）：
+In MySQL mode, an optional `socket` key specifies a Unix socket path (mutually exclusive with `host`/`port`):
 
 ```json
 {
@@ -199,7 +206,7 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 }
 ```
 
-### 日志配置 / Log Configuration
+### Log Configuration
 
 ```json
 {
@@ -214,13 +221,13 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 }
 ```
 
-- `log.enable` — `true` 开启常规文件日志，`false` 关闭（默认）
-- `log.path` — 日志文件路径，默认为 `run.log`（项目根目录）
-- `error_log.enable` — `true` 开启独立错误日志文件（WARNING 及以上级别），`false` 关闭（默认）
-- `error_log.path` — 错误日志文件路径，默认为 `error.log`
-- 日志包含启动信息、请求记录和错误信息
+- `log.enable` — `true` enables regular file logging, `false` disables (default)
+- `log.path` — log file path, defaults to `run.log` (project root)
+- `error_log.enable` — `true` enables a separate error log file (WARNING and above), `false` disables (default)
+- `error_log.path` — error log file path, defaults to `error.log`
+- Logs include startup info, request records and error messages
 
-### 审计日志配置 / Audit Log Configuration
+### Audit Log Configuration
 
 ```json
 {
@@ -231,22 +238,20 @@ MySQL 模式可选通过 `socket` 指定 Unix socket 路径（与 `host`/`port` 
 }
 ```
 
-- `path` — 审计数据库文件路径，默认为 `audit.db`
-- `retention_days` — 保留天数（0 = 永久保存），启动时和每次访问审计页时自动清理过期记录
+- `path` — audit database file path, defaults to `audit.db`
+- `retention_days` — retention days (0 = keep forever); expired records are cleaned up on startup and on every audit page visit
 
-> ⚠️ `app_config.json` 包含数据库密码，已加入 `.gitignore`，请勿提交到版本控制。
->
-> `app_config.json` contains credentials and is in `.gitignore` — do not commit.
+> ⚠️ `app_config.json` contains credentials and is in `.gitignore` — do not commit.
 
 ---
 
-## 📄 API JSON 输出模板 / API JSON Output Template
+## 📄 API JSON Output Template
 
-API 端点支持自定义 JSON 输出结构：管理员在端点配置页维护一段 JSON 模板，值位置用 `{{占位符}}` 引用数据，**留空 = 默认输出**（`{"data": ..., "total": N, ...}`）。
+API endpoints support a custom JSON output structure: an admin maintains a JSON template on the endpoint config page, with `{{placeholders}}` referencing data values. **Leaving it empty = default output** (`{"data": ..., "total": N, ...}`).
 
-### 用法 / Usage
+### Usage
 
-以默认 JSON 为起点，改键名/位置即可。例如把默认结构改为只输出数据数组与总数：
+Start from the default JSON and change key names/positions. For example, output only the data array and total count:
 
 ```json
 {
@@ -255,57 +260,55 @@ API 端点支持自定义 JSON 输出结构：管理员在端点配置页维护�
 }
 ```
 
-渲染结果为：
+Rendered result:
 
 ```json
 {"count": 42, "items": [{"id": 1, "name": "张三"}, ...]}
 ```
 
-### 占位符 / Placeholders
+### Placeholders
 
-占位符键集随「结果集输出模式」切换：
+The placeholder key set follows the **result set output mode**:
 
-- **single（单结果集）**：`{{data}}` 数据数组、`{{total}}` 总行数、`{{page}}` 页码、`{{page_size}}` 每页条数、`{{total_pages}}` 总页数、`{{full}}` 全量标记、`{{meta}}` 静态缓存 meta
-- **all（全部结果集）**：`{{results}}` 结果集数组（每项含 name/data/total/page/page_size/total_pages）、`{{mode}}` 模式（固定 "all"）、`{{page}}`、`{{page_size}}`、`{{full}}`、`{{meta}}`
+- **single (one result set)**: `{{data}}` data array, `{{total}}` row count, `{{page}}` page number, `{{page_size}}` page size, `{{total_pages}}` total pages, `{{full}}` full marker, `{{meta}}` static cache meta
+- **all (all result sets)**: `{{results}}` result set array (each item has name/data/total/page/page_size/total_pages), `{{mode}}` mode (fixed "all"), `{{page}}`, `{{page_size}}`, `{{full}}`, `{{meta}}`
 
-规则：
+Rules:
 
-- 模板中**不出现的字段即不输出**；默认输出在 `fetch_all` 时才带 `"full": true`，模板需要时手动加 `{{full}}`
-- 键集内键缺失输出 `null`（如普通链路无 meta 时 `{{meta}}` 得 null）；**键集外占位符保存时被拒绝**（页面提示所在行列）
-- **CSV 格式不支持模板**（表单已禁用）；模板渲染运行期失败自动回退默认输出，不影响接口可用性
-- 与静态缓存联动：模板文本变化自动纳入 config_version 计算，`.json` 静态变体随即失效重建；模板含 `{{meta}}` 时输出 meta 节点，不含则不附加
+- **Fields absent from the template are not output**; the default output includes `"full": true` only on `fetch_all` — add `{{full}}` manually in a template if needed
+- A missing key within the set outputs `null` (e.g. `{{meta}}` is null when there is no meta on the normal path); **placeholders outside the key set are rejected on save** (the page reports the line/column)
+- **Templates are not supported for CSV** (form disabled); if template rendering fails at runtime, it falls back to the default output without breaking the endpoint
+- Static cache integration: template text changes are included in the config_version calculation, invalidating and rebuilding the `.json` static variant; the `meta` node is emitted when the template contains `{{meta}}`, and omitted otherwise
 
-### 真实数据预览 / Live Preview
+### Live Preview
 
-编辑端点页（已保存的端点）模板区旁有「用真实数据预览」按钮：以当前表单**未保存**的模板与规则（筛选/排序/字段选择）执行真实查询（最多 3 行数据，不落库、不影响线上端点），把渲染结果展示在预览区；模板非法时显示含行列位置的结构化错误，查询执行失败时显示结构化错误消息。新增端点（尚未保存）不提供该按钮。
+On the endpoint edit page (for already-saved endpoints), the "Live preview with real data" button executes a real query using the **unsaved** template and rules (filter/sort/column selection) from the current form (at most 3 rows, not persisted, no impact on the live endpoint) and shows the rendered result in the preview area; an invalid template shows a structured error with line/column position, a failed query shows a structured error message. New (unsaved) endpoints do not have this button.
 
 ---
 
-## 📄 API 静态文件缓存 / API Static File Cache
+## 📄 API Static File Cache
 
-为高并发、高流量场景提供**静态化输出**：在 API 端点 URL 后追加 `.json` 即可访问该端点的静态缓存文件——命中时直接返回文件内容，零查询、零计算、零 Redis 存取。
+For high-concurrency, high-traffic scenarios, **static output** is provided: append `.json` to an API endpoint URL to access the endpoint's static cache file — on hit, the file bytes are returned directly with zero queries, zero computation, zero Redis access.
 
-The `.json` variant serves a pre-computed static file of the endpoint's full output. On hit, the server just returns the file bytes.
+### How it works
 
-### 功能说明 / How it works
+- **Content**: full dataset (fetch_all semantics, `page:1`, `page_size:total`, `total_pages:1`, `full:true`) + top-level `meta` node, compatible with the original API output structure (only an extra `meta` key)
+- **Hit conditions**: file exists + config version (SQL/connection pool MD5) matches + not expired
+- **Self-healing on miss**: if the file is missing, expired, or deleted by a third party, the full API pipeline (Redis → MySQL) runs automatically and rebuilds the file — the caller never notices
+- **Auth**: identical to the normal API — an endpoint with an empty `api_key` is public; otherwise the key is required (`Authorization: Bearer` header or `?api_key=` param), missing/wrong keys return 401
+- **Response header**: `X-Static-Cache: hit|miss` tells whether the request hit the cache; `Content-Type: application/json; charset=utf-8`
+- **GET only**: POST requests, CSV-format endpoints and non-200 responses never participate
 
-- **内容**：全量数据（fetch_all 语义，`page:1`、`page_size:total`、`total_pages:1`、`full:true`）+ 顶层平铺 `meta` 节点，与原始 API 输出结构兼容（仅多一个 `meta` 键）
-- **命中条件**：文件存在 + 配置版本（SQL/连接池 MD5）一致 + 未过期
-- **miss 自愈**：文件缺失、过期、被第三方删除时，自动回退完整 API 计算链路（Redis → MySQL），成功后重建文件，调用方无感知
-- **鉴权**：与普通 API 完全一致——端点 `api_key` 为空则公开；非空必须带 key（`Authorization: Bearer` 头或 `?api_key=` 参数），缺失/错误返回 401
-- **响应头**：`X-Static-Cache: hit|miss` 标识本次请求是否命中；`Content-Type: application/json; charset=utf-8`
-- **仅 GET 触发**：POST 请求、CSV 格式端点、非 200 响应均不参与
-
-### 调用示例 / Usage
+### Usage
 
 ```bash
-# 静态缓存路径（首次 miss → 回退计算并重建；后续请求 hit 直出）
+# Static cache path (first miss → falls back to compute and rebuilds; subsequent requests hit directly)
 curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers.json"
-# 普通 API（无静态缓存）保持不变
+# Normal API (no static cache) stays the same
 curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 ```
 
-响应体示例：
+Example response body:
 
 ```json
 {
@@ -324,16 +327,16 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 }
 ```
 
-`meta` 字段说明（时间均为服务器本地时区、秒级精度）：
+`meta` fields (times are server-local, second precision):
 
-| 字段 | 说明 |
+| Field | Description |
 |---|---|
-| `generated_at` | 文件生成时间 |
-| `expires_at` | 失效时间 = 生成时间 + 报表 `cache_ttl_hours`；`cache_ttl_hours=0`（永久）时为 `null` |
-| `last_invalidated_at` | 该缓存路径"上次被判定失效"的时刻：因版本不匹配/过期重建时记录本次时刻；因文件缺失（首次/第三方删除）重建时沿用历史记录；无记录时为 `null` |
-| `config_version` | 内部字段：配置版本 MD5（SQL + 连接池 + 端点字段/筛选/排序/条数/JSON 模板），命中判定用；任一变化都会自动失效重建 |
+| `generated_at` | File generation time |
+| `expires_at` | Expiry = generation time + report `cache_ttl_hours`; `null` when `cache_ttl_hours=0` (permanent) |
+| `last_invalidated_at` | The moment this cache path was last judged invalid: recorded on rebuild due to version mismatch/expiry; carried over on rebuild due to missing file (first run/third-party deletion); `null` when no record |
+| `config_version` | Internal field: config version MD5 (SQL + connection pool + endpoint columns/filters/sorts/row limit/JSON template), used for hit determination; any change invalidates and rebuilds automatically |
 
-### 配置 / Configuration
+### Configuration
 
 ```json
 "static_cache": {
@@ -342,15 +345,15 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 }
 ```
 
-- `enable`：全局开关，默认 `true`
-- `dir`：静态文件存储目录，支持**相对路径或外部绝对路径**（默认 `static_cache`）。路径解析通过 `os.path.realpath()` 完成，绝对路径如 `/var/cache/sqlreport_static` 直接使用，相对路径如 `../external_cache` 相对进程工作目录解析；无论何种形式，目录在首次写入缓存时**自动创建**（`os.makedirs(exist_ok=True)`）。写入失败（如权限不足、磁盘满）时，系统仅记录 `logging.warning` 并自动回退到普通 API 链路，不影响正常请求。
-- **TTL 无独立配置**：失效时间与端点关联报表的 `cache_ttl_hours` 完全一致（0=永不过期，仅靠手动清理/配置变更失效）
-- 端点级开关：API 端点表单的「静态文件缓存（.json 变体）」勾选框（默认开启），可单独关闭某端点
-- **失效联动**：报表页「重建缓存」与批量缓存配置「关闭缓存」会同步删除对应静态文件（删除即失效，下次 `.json` 请求惰性重建）
+- `enable`: global switch, default `true`
+- `dir`: static file storage directory, accepts a **relative path or external absolute path** (default `static_cache`). Resolution goes through `os.path.realpath()`; absolute paths like `/var/cache/sqlreport_static` are used as-is, relative paths like `../external_cache` resolve against the process working directory. Either way the directory is **auto-created** on first cache write (`os.makedirs(exist_ok=True)`). On write failure (e.g. permission denied, disk full) the system only logs `logging.warning` and falls back to the normal API path — regular requests are unaffected.
+- **No independent TTL**: expiry follows the linked report's `cache_ttl_hours` exactly (0 = never expires, only manual cleanup/config changes invalidate)
+- Endpoint-level switch: the "Static file cache (.json variant)" checkbox on the API endpoint form (enabled by default) can disable it per endpoint
+- **Invalidation linkage**: "Rebuild cache" on the report page and "Disable cache" in batch cache config delete the corresponding static files (deletion = invalidation; the next `.json` request lazily rebuilds)
 
-### 缓存文件权限 / Cache File Permissions
+### Cache File Permissions
 
-程序以 root 运行时，`.json` 缓存文件默认以 `0600 root:root` 建立（`tempfile.mkstemp`），NGINX 等非 root 进程直出（见下节）时无法读取。通过 `file_permissions` 配置段指定缓存目录/文件的属主与权限位，启动时对缓存目录树做一次整树刷新，此后新增文件均按配置权限建立：
+When the program runs as root, `.json` cache files are created with `0600 root:root` by default (`tempfile.mkstemp`), which non-root processes like NGINX cannot read when serving them directly (see next section). Use the `file_permissions` config section to specify the owner and permission bits of the cache directory/files; on startup the whole cache directory tree is refreshed once, and all new files are created with the configured permissions:
 
 ```json
 "file_permissions": {
@@ -362,21 +365,21 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 }
 ```
 
-- `enable`：默认关闭；关闭或整个段缺失时行为与未引入该功能完全一致
-- `user` / `group`：缓存目录与文件的属主/属组（支持名称或数字 uid/gid），启动时解析
-- `dir_mode` / `file_mode`：可选，八进制字符串（JSON 无八进制字面量）；缺省 `0755` / `0644`。目录需含 `x` 权限（NGINX 需进入），文件需含 `r` 权限（NGINX 需读取）
-- 仅配置 `user`/`group` 时 mode 用默认 `0755`/`0644`（否则 `0600` 下 NGINX 仍无法读取）
-- 程序非 root、用户/组不存在时降级关闭并记 `logging.warning`，不阻塞启动与写入
-- 权限仅作用于 static_cache 缓存目录树，不含 `config.db`/`audit.db`/日志文件
+- `enable`: off by default; when off or the whole section is missing, behavior is identical to before this feature existed
+- `user` / `group`: owner/group of the cache directory and files (name or numeric uid/gid), resolved at startup
+- `dir_mode` / `file_mode`: optional, octal strings (JSON has no octal literals); default `0755` / `0644`. Directories need `x` (NGINX must traverse), files need `r` (NGINX must read)
+- With only `user`/`group` configured, modes fall back to `0755`/`0644` (otherwise NGINX still cannot read `0600` files)
+- When the program is not root, or the user/group does not exist, the feature degrades to disabled with a `logging.warning` — startup and writes are not blocked
+- Permissions apply only to the static_cache directory tree, not to `config.db`/`audit.db`/log files
 
-### NGINX 集成 / NGINX Integration
+### NGINX Integration
 
-NGINX 三种接入方式，按端点鉴权策略选择：
+Three NGINX integration modes, chosen by endpoint auth policy:
 
-**场景 1：公开端点（api_key 为空）静态直出 + miss 回退应用（推荐）**
+**Scenario 1: public endpoint (empty api_key) static direct-serve + miss falls back to the app (recommended)**
 
 ```nginx
-# static_cache.dir 配置为 /opt/sqlreport/static_cache（与 app_config.json 一致）
+# static_cache.dir set to /opt/sqlreport/static_cache (must match app_config.json)
 location ~ ^/api/(?<api_file>.+)\.json$ {
     root /opt/sqlreport;
     # /api/customers.json → /opt/sqlreport/static_cache/api/customers.json
@@ -388,23 +391,23 @@ location ~ ^/api/(?<api_file>.+)\.json$ {
 }
 
 location @api_upstream {
-    proxy_pass http://127.0.0.1:8000;
+    proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 
-**场景 2：带 api_key 端点 → 全部落应用（鉴权、静态读取都在应用内完成）**
+**Scenario 2: endpoints with api_key → everything goes to the app (auth and static reads both handled in-app)**
 
 ```nginx
 location /api/ {
-    proxy_pass http://127.0.0.1:8000;
+    proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 
-**场景 3：rewrite 直出变体（无回退，文件不存在返回 404）**
+**Scenario 3: rewrite direct-serve variant (no fallback, 404 when the file does not exist)**
 
 ```nginx
 location ~ ^/api/(?<api_file>.+)\.json$ {
@@ -415,7 +418,7 @@ location ~ ^/api/(?<api_file>.+)\.json$ {
 }
 ```
 
-**域名前缀映射完整案例**：`https://a.com/fishapi/` → `http://127.0.0.1:8101/api/`（后端系统约束的 API 地址开头为 `/api/`），保留完整 API Key 鉴权能力，缓存与系统一致（NGINX 层不设独立缓存）：
+**Full domain-prefix mapping example**: `https://a.com/fishapi/` → `http://127.0.0.1:8101/api/` (the backend system requires API paths to start with `/api/`), keeping full API Key auth and cache consistency (no independent cache at the NGINX layer):
 
 ```nginx
 # /etc/nginx/conf.d/a.com-fishapi.conf
@@ -424,14 +427,14 @@ server {
     server_name a.com;
 
     location /fishapi/ {
-        # 剥掉 /fishapi/ 前缀，换成系统约束的 /api/ 前缀
-        # rewrite 不影响查询串，?api_key=xxx 原样透传
+        # Strip the /fishapi/ prefix, replace with the /api/ prefix the system requires
+        # rewrite does not touch the query string, ?api_key=xxx passes through as-is
         rewrite ^/fishapi/(.*)$ /api/$1 break;
 
         proxy_pass http://127.0.0.1:8101;
         proxy_http_version 1.1;
 
-        # Host 保留客户端域名（后端日志审计用）
+        # Keep the client domain in Host (used by backend audit logs)
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -445,94 +448,96 @@ server {
 }
 ```
 
-验证：
+Verify:
 
 ```bash
 nginx -t && systemctl reload nginx
 curl -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers"
-curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json"   # 看 X-Static-Cache
+curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json"   # check X-Static-Cache
 ```
 
-**NGINX 集成注意事项**：
+**NGINX integration notes**:
 
-1. **鉴权边界**：场景 1/3 的静态直出会绕过应用鉴权，**仅适用于 api_key 为空的公开端点**；配置了 key 的端点必须走场景 2，否则等于公开数据
-2. **TTL 由应用保证**：NGINX 直出不检查过期，过期文件会持续直出；需要 NGINX 层也过期时，用 `expires` 指令或部署任务按 `meta.expires_at` 清理
-3. **安全**：正则 location 已限定 `.json` 后缀；`try_files` 对 `..` 返回 404；建议禁止该目录的脚本执行
-4. 后端端口按实际部署调整（默认 `python server.py` 监听端口见 `app_config.json` 的 `server` 段）
-
-## 🖥️ 页面说明 / Pages
-
-### 配置页 `/config`
-
-三合一配置管理界面，左侧导航切换：
-
-- **连接池** — 添加/编辑/删除/复制 MySQL 连接配置，支持上下调序
-- **用户** — 添加/编辑/删除系统用户
-- **报表** — 配置 SQL 查询、绑定的连接池、默认每页行数、所属分类、备注
-- **分类** — 无限层级树形管理，支持调序、新增、删除、重命名
-- **API 接口** — 独立管理页 `/config/api-endpoints`，全局 API 接口列表及关联报表名称
-
-报表编辑表单特色：
-- SQL 编辑器带格式化按钮和语法高亮预览切换
-- 备注字段用于记录报表用途
-- 【查看】按钮：点击新窗口打开该报表的查看页面
-- 【预览】按钮：点击新窗口以当前表单中的 SQL（未保存）实时预览查询结果，方便检查 SQL 编写是否正确
-- 【保存】成功后返回列表页
-
-报表列表页特色：
-- 分类树形展示，缩进表示层级
-- 每个报表行内带有上下移动按钮
-- 分类级全选/反选，支持批量删除
-- 报表可跨分类移动（下拉选择目标分类）
-- 备注字段截取前 15 字符预览
-
-### 报表页 `/report`
-
-- 分类树形下拉选择报表
-- 自动执行 SQL 查询并缓存结果（带缓存时间戳和重建按钮）
-- 分页浏览（可选 10/20/50/100/200 行）
-- 多字段排序 — 点击列头 ▲▼ 箭头，支持组合排序，带排序管理面板（拖拽/添加/删除）
-- 多字段筛选 — 每列独立操作符（包含/等于/不等于/大于/小于/≥/≤/为空/非空），支持多列同时过滤；筛选值支持**统一匹配表达式**：`*` 通配（任意位置/多次）、英文逗号多值（段间"或"）、`\` 转义（`\*`/`\,`/`\\` 按字面匹配，适用于数据含这些字符的场景），仅"包含/等于/不等于"参与解析，多列条件之间"且"；报表页、导出、API 预设与审计页关键字共用同一语法（帮助弹窗 `?` 查看示例）；审计页关键字中 `%`/`_` 按字面量匹配
-- 字段设置面板 — 拖拽调整列顺序、勾选显示/隐藏列、全选/全不选
-- 备注显示 — 报表备注可折叠展开
-- 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面
-- 强制刷新缓存（重新查询数据库）
-
-### 导出功能 `/export`
-
-- 完整数据集导出（不分页，保留当前筛选和排序）
-- 支持 **CSV** 和 **JSON** 两种格式
-- UTF-8 BOM 编码（CSV）确保 Excel 正确识别中文
-- 字符集可选 GBK / UTF-8
-- JSON 数字无引号模式（数值保持数字类型）
-- ZIP 压缩包打包下载
-- 支持应用自定义字段设置（仅导出选定列并按指定顺序）
+1. **Auth boundary**: the static direct-serve in scenarios 1/3 bypasses app auth — **only for public endpoints with an empty api_key**; endpoints with a key must use scenario 2, otherwise the data is effectively public
+2. **TTL is guaranteed by the app**: NGINX direct-serve does not check expiry, stale files keep being served; to expire at the NGINX layer too, use the `expires` directive or a deploy task that cleans up by `meta.expires_at`
+3. **Security**: the regex location restricts `.json` suffixes; `try_files` returns 404 for `..`; disable script execution in that directory
+4. Adjust the backend port to your deployment (the default `python server.py` listen port is the `server` section of `app_config.json`)
 
 ---
 
-## 🏗️ 项目结构 / Project Structure
+## 🖥️ Pages
+
+### Config page `/config`
+
+All-in-one config management, switched via the left navigation:
+
+- **Pools** — add/edit/delete/copy MySQL connection configs, reorder up/down
+- **Users** — add/edit/delete system users
+- **Reports** — configure SQL queries, bound pool, default page size, category, memo
+- **Categories** — unlimited-depth tree management, reorder/add/rename/delete
+- **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
+
+Report edit form highlights:
+- SQL editor with format button and syntax-highlighted preview toggle
+- Memo field for documenting report purpose
+- [View] button: opens the report page in a new window
+- [Preview] button: live-previews the query result using the current form SQL (unsaved), handy for checking SQL correctness
+- [Save] returns to the list page on success
+
+Report list page highlights:
+- Tree display with indentation for hierarchy
+- Up/down move buttons per report row
+- Category-level select all/deselect, batch delete
+- Reports can be moved across categories (target category dropdown)
+- Memo truncated to 15 chars for preview
+
+### Report page `/report`
+
+- Category tree dropdown to select a report
+- Auto-runs the SQL and caches the result (with cache timestamp and rebuild button)
+- Paginated browsing (10/20/50/100/200 rows per page)
+- Multi-column sorting — click column headers ▲▼ arrows, combo sort with a management panel (drag/add/remove)
+- Multi-field filtering — per-column operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty), multiple columns at once; filter values support a **unified match expression**: `*` wildcard (any position/repetition), comma multi-value (OR between segments), `\` escaping (`\*`/`\,`/`\\` match literally, for data containing those characters); only contains/eq/neq participate in parsing, multiple column conditions combine with AND; the report page, export, API presets and audit-page keyword share the same syntax (help popup `?` for examples); in the audit page keyword, `%`/`_` match literally
+- Column settings panel — drag to reorder columns, check to show/hide, select all/none
+- Memo display — collapsible report memo
+- [Edit] button: opens the report's config edit page in a new window
+- Force-refresh cache (re-query the database)
+
+### Export `/export`
+
+- Full dataset export (no pagination, keeps current filters and sorting)
+- **CSV** and **JSON** formats
+- UTF-8 BOM encoding (CSV) for correct Chinese text in Excel
+- Charset selectable: GBK / UTF-8
+- JSON numeric no-quotes mode (numbers keep their types)
+- ZIP archive download
+- Applies custom column settings (export only selected columns, in the chosen order)
+
+---
+
+## 🏗️ Project Structure
 
 ```
 SqlReport/
-├── server.py              # HTTP 服务器入口、路由分发（ThreadingHTTPServer）
-├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点）
-├── report.py              # 报表页、分页、排序、筛选
-├── result_transform.py    # 结果集变换（筛选/排序/列选择，页面/导出/API 共用）
-├── export.py              # CSV/JSON/ZIP 导出（支持排序）
-├── auth.py                # 用户认证、Session 管理（滑动过期 + SQLite 持久化）
-├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
-├── app_config.py          # 应用配置文件加载器
-├── app_config.json        # 应用配置文件（含密码，不提交）
-├── app_config.example.json# 配置文件模板
-├── config_db.py           # 配置数据库引擎选择
-├── query_executor.py      # MySQL 查询执行器（事务支持、?→%s 占位符转换）
-├── render.py              # HTML 模板（string.Template 常量）
-├── audit_db.py            # 审计日志数据库（含自动轮转）
-├── audit_page.py          # 审计日志页面处理（浏览/清理/CSV 导出）
-├── redis_cache.py         # Redis 快照缓存层
-├── api_handler.py         # API 接口处理器（API 端点查询 + 静态缓存 + 具名结果结构）
-├── file_permissions.py    # 运行时文件权限管理（static_cache 目录属主/权限）
-├── tests/                 # 单元测试
+├── server.py              # HTTP server entry, route dispatch (ThreadingHTTPServer)
+├── config.py              # Config page CRUD (pools/users/reports/categories/API endpoints)
+├── report.py              # Report page, pagination, sorting, filtering
+├── result_transform.py    # Result set transforms (filter/sort/column select, shared by page/export/API)
+├── export.py              # CSV/JSON/ZIP export (with sorting)
+├── auth.py                # User auth, Session management (sliding expiry + SQLite persistence)
+├── db.py                  # Config storage (SQLite/MySQL dual engine) + query connection mgmt
+├── app_config.py          # App config file loader
+├── app_config.json        # App config file (contains credentials, not committed)
+├── app_config.example.json# Config file template
+├── config_db.py           # Config database engine selection
+├── query_executor.py      # MySQL query executor (transaction support, ?→%s placeholder conversion)
+├── render.py              # HTML templates (string.Template constants)
+├── audit_db.py            # Audit log database (with auto rotation)
+├── audit_page.py          # Audit log page (browse/cleanup/CSV export)
+├── redis_cache.py         # Redis snapshot cache layer
+├── api_handler.py         # API endpoint handler (endpoint queries + static cache + named result structure)
+├── file_permissions.py    # Runtime file permission management (static_cache owner/perms)
+├── tests/                 # Unit tests
 │   ├── __init__.py
 │   ├── test_auth.py
 │   ├── test_base.py
@@ -547,17 +552,17 @@ SqlReport/
 │   ├── test_server.py
 │   ├── test_file_permissions.py
 │   └── test_state_machine.py
-├── config.db              # SQLite 配置数据库（自动创建，不提交）
-├── install.sh             # 自动化依赖安装脚本（venv + pip install）
-├── requirements.txt       # pip 依赖清单
-├── manage_service.sh      # Systemd 服务管理脚本
-├── git-purge.sh           # Git 仓库重写工具（清理历史/更改作者/代理支持）
-└── AGENTS.md              # AI 开发代理指引
+├── config.db              # SQLite config database (auto-created, not committed)
+├── install.sh             # Automated dependency installer (venv + pip install)
+├── requirements.txt       # pip dependency list
+├── manage_service.sh      # Systemd service management script
+├── git-purge.sh           # Git history rewrite tool (clean history/change author/proxy support)
+└── AGENTS.md              # AI development agent guide
 ```
 
 ---
 
-## 🧪 运行测试 / Running Tests
+## 🧪 Running Tests
 
 ```bash
 source venv/bin/activate
@@ -566,54 +571,54 @@ python -m unittest discover -s tests/ -v
 
 ---
 
-## ⚙️ 环境变量 / Environment Variables
+## ⚙️ Environment Variables
 
-| 变量 / Variable | 默认值 / Default | 说明 / Description |
-|----------------|------------------|-------------------|
-| `CONFIG_FILE` | `app_config.json` | 应用配置文件路径 |
-| `CONFIG_DB` | `config.db` | SQLite 数据库文件路径（配置文件中的 `path` 优先级更高） |
-| `HOST` | `0.0.0.0` | HTTP 服务监听地址 |
-| `PORT` | `8000` | HTTP 服务监听端口 |
-
----
-
-## 📜 技术栈 / Tech Stack
-
-| 层级 / Layer | 技术 / Technology |
-|-------------|------------------|
-| Web 服务器 | `http.server.ThreadingHTTPServer` (Python stdlib) |
-| 配置存储 | SQLite (Python stdlib `sqlite3`) 或 MySQL (`mysql-connector-python`)，通过 `app_config.json` 切换 |
-| 数据查询 | MySQL via `mysql-connector-python` |
-| 认证 | Cookie + SHA-256 salt hash + 滑动过期 (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
-| 前端 | 纯 HTML + 内联 CSS（无 JS 框架） |
-| 测试 | `unittest` (Python stdlib) |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_FILE` | `app_config.json` | App config file path |
+| `CONFIG_DB` | `config.db` | SQLite database file path (`path` in the config file takes precedence) |
+| `HOST` | `0.0.0.0` | HTTP listen address |
+| `PORT` | `8080` | HTTP listen port |
 
 ---
 
-## 🤝 贡献 / Contributing
+## 📜 Tech Stack
 
-欢迎提交 Issue 和 Pull Request！
+| Layer | Technology |
+|-------|------------|
+| Web server | `http.server.ThreadingHTTPServer` (Python stdlib) |
+| Config storage | SQLite (Python stdlib `sqlite3`) or MySQL (`mysql-connector-python`), switched via `app_config.json` |
+| Data queries | MySQL via `mysql-connector-python` |
+| Auth | Cookie + PBKDF2-SHA-256 salted hash + sliding expiry (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
+| Frontend | Pure HTML + inline CSS (no JS framework) |
+| Tests | `unittest` (Python stdlib) |
+
+---
+
+## 🤝 Contributing
 
 Issues and PRs are welcome!
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交修改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
-## 📐 开发规范 / Development Standards
+## 📐 Development Standards
 
-- **依赖同步规则**：新增或删减 pip 依赖包时，必须同步更新以下三处文件：
-  1. `requirements.txt` — 依赖清单
-  2. `README.md` — 安装说明章节
-  3. `install.sh` — 安装脚本中的 `pip install` 命令（若有变更）
+- **Dependency sync rule**: when adding or removing pip dependencies, all three files below must be updated together:
+  1. `requirements.txt` — dependency list
+  2. `README.md` / `README-CN.md` — installation sections
+  3. `install.sh` — `pip install` command (if changed)
+
+- **README bilingual sync rule**: `README.md` (English) and `README-CN.md` (Chinese) are maintained in parallel as a mirror pair — any change to one must be applied to the other with an equivalent translation in the same commit. Feature additions, fixes, and config changes must never touch only one of the two.
 
 ---
 
-## 📄 许可 / License
+## 📄 License
 
 MIT License © 2024 [alexblair](https://github.com/alexblair)
 
@@ -621,6 +626,4 @@ MIT License © 2024 [alexblair](https://github.com/alexblair)
 
 <div align="center">
   <sub>Built with ❤️ using only Python standard library</sub>
-  <br/>
-  <sub>仅用 Python 标准库构建</sub>
 </div>

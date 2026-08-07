@@ -1666,10 +1666,12 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
                 endpoint = db.get_api_endpoint(conn, endpoint_id)
                 if endpoint:
                     db.delete_api_endpoint(conn, endpoint_id, session_user=session_user)
-                    return 302, "/config/api-endpoints?flash=API 接口已删除", {}
-                return 302, "/config/api-endpoints?flash=错误: API 接口不存在", {}
+                    flash_msg = "API 接口已删除"
+                else:
+                    flash_msg = "错误: API 接口不存在"
             except (ValueError, TypeError):
-                return 302, "/config/api-endpoints?flash=错误: 无效的接口 ID", {}
+                flash_msg = "错误: 无效的接口 ID"
+            return 302, f"/config/api-endpoints?flash={urllib.parse.quote(flash_msg)}", {}
         if action == "toggle" and endpoint_id:
             try:
                 endpoint_id = int(endpoint_id)

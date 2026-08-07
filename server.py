@@ -223,6 +223,27 @@ class BodyReadError(Exception):
     """请求体读取/解码失败（客户端请求错误，应返回 400）。"""
 
 
+# URL 结构保留字符 + 百分号（避免双重编码已编码部分），供 Location 兜底编码使用
+_LOCATION_SAFE = "/:?&=@+$#%;,~!*'()[]-._"
+
+
+def _safe_location(location: str) -> str:
+    """确保 Location 头值可被 latin-1 编码（http.server 响应头编码限制）。
+
+    调用方应显式百分号编码（如 flash 消息用 urllib.parse.quote）；此函数仅
+    作为兜底：检测到非 ASCII 字符时对整个 Location 做百分号编码（保留 URL
+    结构字符），并记录警告提示调用方修复。ASCII 输入原样返回。
+    """
+    try:
+        location.encode("latin-1")
+        return location
+    except UnicodeEncodeError:
+        logging.warning(
+            "302 Location 含非 ASCII 字符未编码，自动百分号编码（调用方应显式编码）: %s",
+            location)
+        return urllib.parse.quote(location, safe=_LOCATION_SAFE)
+
+
 # ---------------------------------------------------------------------------
 # 请求处理器
 # ---------------------------------------------------------------------------
@@ -629,7 +650,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _send_redirect(self, location: str):
         """发送 302 重定向"""
         self.send_response(302)
-        self.send_header("Location", location)
+        self.send_header("Location", _safe_location(location))
         if self._session_token:
             self.send_header("Set-Cookie", auth.make_set_cookie_header(self._session_token))
         self.end_headers()

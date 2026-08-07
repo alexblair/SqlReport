@@ -424,6 +424,33 @@ class TestLoginPage(unittest.TestCase):
         self.assertNotIn("用户名或密码错误", html)
 
 
+class TestSafeLocation(unittest.TestCase):
+    """server._safe_location 兜底编码（http.server 响应头仅支持 latin-1）"""
+
+    def test_ascii_location_unchanged(self):
+        """纯 ASCII Location 原样返回"""
+        self.assertEqual(srv._safe_location("/report?id=1"), "/report?id=1")
+
+    def test_encoded_location_unchanged(self):
+        """已百分号编码的 Location 不被双重编码"""
+        loc = "/config/api-endpoints?flash=%E9%94%99%E8%AF%AF"
+        self.assertEqual(srv._safe_location(loc), loc)
+
+    def test_non_ascii_location_encoded(self):
+        """含中文的 Location 被兜底编码且可 latin-1 编码"""
+        out = srv._safe_location("/config/api-endpoints?flash=API 接口已删除")
+        out.encode("latin-1")
+        self.assertNotIn("接口", out)
+        self.assertIn("flash=", out)
+
+    def test_non_ascii_location_keeps_structure(self):
+        """兜底编码保留 URL 结构字符与已编码部分"""
+        out = srv._safe_location("/a/b?x=中文&y=%E4%B8%AD&z=1")
+        self.assertTrue(out.startswith("/a/b?x="))
+        self.assertIn("&y=%E4%B8%AD", out)
+        self.assertIn("&z=1", out)
+
+
 class TestReportRefreshIntegration(unittest.TestCase):
     """T3 批次：refresh=1 的 HTTP 层 302 全流程（缺口 1/2）
 
@@ -646,6 +673,84 @@ class TestHttpStatusCodes(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 404)
             self.assertNotEqual(e.headers.get("Location"), "/login")
+
+
+class TestApiEndpointDeleteIntegration(unittest.TestCase):
+    """API 端点独立管理页删除端到端：中文 flash 302 不产生 500
+
+    回归：delete 分支直拼中文 flash 进 Location，send_header latin-1 编码
+    头时抛 UnicodeEncodeError → 500（报错信息逐字为
+    'latin-1' codec can't encode characters in position 42-46）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """强制 SQLite 临时库 + 动态空闲端口启动 HTTP 服务器"""
+        cls._engine_patch = patch("db._get_engine", return_value="sqlite3")
+        cls._engine_patch.start()
+        cls._dbcfg_patch = patch("db._get_db_config",
+                                 return_value={"path": _tmp_db.name})
+        cls._dbcfg_patch.start()
+        _set_up_db()
+        conn = db.get_config_db()
+        db.add_report(conn, "删除集成报表", "SELECT 1", 20, None, prefer_cache=0)
+        conn.execute(
+            "INSERT INTO api_endpoints (report_id,name,url_path,output_format) "
+            "VALUES (?,?,?,?)",
+            (1, "删除集成端点", "/api/del-e2e", "json"))
+        conn.commit()
+        conn.close()
+        srv.PORT = 0
+        server = http.server.ThreadingHTTPServer((srv.HOST, 0), srv.ReportHandler)
+        cls.port = server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        srv._server_ref = server
+        cls._thread = threading.Thread(target=server.serve_forever, daemon=True)
+        cls._thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        _stop_server()
+        cls._dbcfg_patch.stop()
+        cls._engine_patch.stop()
+
+    def test_delete_endpoint_returns_302_not_500(self):
+        """POST delete 成功 → 302（此前 500），Location 可 latin-1 编码"""
+        opener, _, _ = _login_opener(self.base_url)
+        req = urllib.request.Request(
+            f"{self.base_url}/config/api-endpoints",
+            data=urllib.parse.urlencode({"action": "delete", "endpoint_id": 1}).encode(),
+            method="POST",
+        )
+        try:
+            opener.open(req)
+            self.fail("delete 应返回 302，实际 200")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            loc = e.headers["Location"]
+        loc.encode("latin-1")
+        self.assertIn("flash=", loc)
+
+    def test_delete_endpoint_redirect_target_renders(self):
+        """302 后跟随 Location 目标页可渲染 200，且显示删除成功 flash"""
+        opener, cj, _ = _login_opener(self.base_url)
+        req = urllib.request.Request(
+            f"{self.base_url}/config/api-endpoints",
+            data=urllib.parse.urlencode({"action": "delete", "endpoint_id": 1}).encode(),
+            method="POST",
+        )
+        try:
+            opener.open(req)
+            self.fail("delete 应返回 302，实际 200")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            target = e.headers["Location"]
+        follow = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        resp = follow.open(f"{self.base_url}{target}")
+        self.assertEqual(resp.status, 200)
+        html = resp.read().decode("utf-8")
+        self.assertIn("API 接口已删除", html)
 
 
 if __name__ == "__main__":

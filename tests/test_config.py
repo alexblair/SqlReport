@@ -657,13 +657,34 @@ class TestApiEndpointsListPage(BaseConfigTest):
         self.assertIn("/config/api-endpoints", body)
         self.assertIsNone(db.get_api_endpoint(self.conn, 1))
 
+    def test_api_endpoints_delete_location_latin1_encodable(self):
+        """删除成功后 302 Location 必须可 latin-1 编码（http.server 响应头限制）
+
+        回归：delete 分支曾把中文 flash 直拼 Location，send_header 以 latin-1
+        编码头时抛 UnicodeEncodeError → 500。
+        """
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=1")
+        self.assertEqual(code, 302)
+        body.encode("latin-1")
+        self.assertIn("flash=", body)
+
     def test_api_endpoints_delete_not_found(self):
         """验证删除不存在的端点返回错误"""
         code, body, headers = config.handle_api_endpoints_request(
             self.conn, "POST", "/config/api-endpoints", "",
             form_body="action=delete&endpoint_id=999")
         self.assertEqual(code, 302)
-        self.assertIn("错误", body)
+        self.assertIn(urllib.parse.quote("错误"), body)
+
+    def test_api_endpoints_delete_not_found_location_latin1_encodable(self):
+        """删除不存在端点的 Location 也必须 latin-1 可编码"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=999")
+        self.assertEqual(code, 302)
+        body.encode("latin-1")
 
     def test_api_endpoints_delete_invalid_id(self):
         """验证无效 ID 处理"""
@@ -671,7 +692,15 @@ class TestApiEndpointsListPage(BaseConfigTest):
             self.conn, "POST", "/config/api-endpoints", "",
             form_body="action=delete&endpoint_id=abc")
         self.assertEqual(code, 302)
-        self.assertIn("无效", body)
+        self.assertIn(urllib.parse.quote("无效"), body)
+
+    def test_api_endpoints_delete_invalid_id_location_latin1_encodable(self):
+        """无效 ID 分支的 Location 也必须 latin-1 可编码"""
+        code, body, headers = config.handle_api_endpoints_request(
+            self.conn, "POST", "/config/api-endpoints", "",
+            form_body="action=delete&endpoint_id=abc")
+        self.assertEqual(code, 302)
+        body.encode("latin-1")
 
 
 class TestOverviewApiCard(BaseConfigTest):

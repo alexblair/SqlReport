@@ -80,11 +80,16 @@ Type=simple
 User=root
 WorkingDirectory=${PROJECT_DIR}
 ExecStart=${PROJECT_DIR}/venv/bin/python ${PROJECT_DIR}/server.py
-Restart=on-failure
+
+# ===== 自动复活配置（任何退出都会重启，除非手动 stop） =====
+Restart=always
 RestartSec=5
+StartLimitBurst=5
+StartLimitInterval=60
+# ============================================================
+
 StandardOutput=journal
 StandardError=journal
-# 限制资源
 LimitNOFILE=65536
 
 [Install]
