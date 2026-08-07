@@ -25,7 +25,7 @@
 | **SQL 格式化 & 高亮预览** | 编辑报表时一键格式化 SQL，切换语法高亮预览 |
 | **分页表格** | 内存分页、显示总页数、跳转任意页 |
 | **多字段排序** | 点击列头排序，支持多列组合排序，带排序管理面板（添加/删除/调序） |
-| **多字段筛选** | 支持包含、等于、不等于、大于、小于、大于等于、小于等于、为空、非空 9 种操作符 |
+| **多字段筛选** | 支持包含、等于、不等于、大于、小于、大于等于、小于等于、为空、非空 9 种操作符；筛选值支持 `*` 通配、英文逗号多值（或）、`\` 转义（作用于包含/等于/不等于，含/等于/不等于敏感度不同） |
 | **字段设置** | 拖拽排序、显示/隐藏列，自由控制表格展示字段 |
 | **CSV 导出** | 一键导出完整查询结果，UTF-8 BOM 确保 Excel 正确识别中文 |
 | **JSON 导出** | 支持 JSON 格式导出，可选数字无引号模式 |
@@ -58,7 +58,7 @@
 | **SQL Formatter & Preview** | One-click SQL formatting, toggle syntax-highlighted preview |
 | **Paginated Tables** | In-memory pagination with total pages and page jump |
 | **Multi-column Sorting** | Click column headers, multi-column combo sort with management panel |
-| **Multi-field Filtering** | 9 operators: contains, eq, neq, gt, lt, gte, lte, is empty, not empty |
+| **Multi-field Filtering** | 9 operators: contains, eq, neq, gt, lt, gte, lte, is empty, not empty; values support `*` wildcard, comma multi-value (OR), `\` escaping (for contains/eq/neq) |
 | **Column Settings** | Drag-and-drop column reorder, show/hide fields |
 | **CSV Export** | Full dataset export with UTF-8 BOM for Excel compatibility |
 | **JSON Export** | JSON format export with optional numeric no-quotes mode |
@@ -492,7 +492,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - 自动执行 SQL 查询并缓存结果（带缓存时间戳和重建按钮）
 - 分页浏览（可选 10/20/50/100/200 行）
 - 多字段排序 — 点击列头 ▲▼ 箭头，支持组合排序，带排序管理面板（拖拽/添加/删除）
-- 多字段筛选 — 每列独立操作符（包含/等于/不等于/大于/小于/≥/≤/为空/非空），支持多列同时过滤
+- 多字段筛选 — 每列独立操作符（包含/等于/不等于/大于/小于/≥/≤/为空/非空），支持多列同时过滤；筛选值支持**统一匹配表达式**：`*` 通配（任意位置/多次）、英文逗号多值（段间"或"）、`\` 转义（`\*`/`\,`/`\\` 按字面匹配，适用于数据含这些字符的场景），仅"包含/等于/不等于"参与解析，多列条件之间"且"；报表页、导出、API 预设与审计页关键字共用同一语法（帮助弹窗 `?` 查看示例）；审计页关键字中 `%`/`_` 按字面量匹配
 - 字段设置面板 — 拖拽调整列顺序、勾选显示/隐藏列、全选/全不选
 - 备注显示 — 报表备注可折叠展开
 - 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面

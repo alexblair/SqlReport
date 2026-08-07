@@ -2,6 +2,13 @@
 test_audit_db.py — audit_db 模块测试
 
 测试审计数据库的建表、插入、查询、筛选、分页、删除、导出功能。
+
+筛选匹配表达式批次覆盖（T3，keyword 与报表侧同一语法）：
+1. keyword 通配 — 前缀/后缀/中间 `*` 翻译为 SQL LIKE %
+2. keyword 多值 — 逗号 OR 展开、空段忽略、全空忽略、与 type AND 组合
+3. 缺陷修复回归 — 字面 `%`/`_` 转义（旧行为误当 SQL 通配，已翻转断言）
+4. 转义 — `\\*` 字面星号与未转义 `*` 通配互斥
+5. 链路 — export/delete 复用同一 keyword 翻译
 """
 
 import unittest
@@ -273,6 +280,174 @@ class TestAuditDB(unittest.TestCase):
         rows = query_audit_logs(self.conn, {})
         self.assertEqual(len(rows), 1)
         self.assertIsNotNone(rows[0]["timestamp"])
+
+
+class TestAuditKeywordExpression(unittest.TestCase):
+    """审计页 keyword 统一匹配表达式（通配符 + 多值 + 转义）"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db_path = self.tmp.name
+        self.tmp.close()
+
+        import app_config
+        self._orig_get_config = app_config.get_config
+        app_config.get_config = lambda: {
+            "audit_db": {"path": self.db_path},
+        }
+        self.conn = _connect_audit_db()
+        init_audit_db(self.conn)
+        self._insert_sample()
+
+    def tearDown(self):
+        self.conn.close()
+
+        import app_config
+        app_config.get_config = self._orig_get_config
+
+        try:
+            os.unlink(self.db_path)
+        except OSError:
+            pass
+
+    def _insert_sample(self):
+        """插入若干条测试数据（同主类样例 + 特殊字符行）。"""
+        for i in range(5):
+            insert_audit_log(
+                self.conn, type="operation", session_user="admin",
+                action="create_pool", entity_type="pool",
+                entity_name=f"pool_{i}", entity_id=i + 1,
+            )
+        insert_audit_log(
+            self.conn, type="operation", session_user="user1",
+            action="login", entity_type="user", entity_name="user1",
+        )
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="login_failed", entity_type="user", entity_name="unknown",
+        )
+        insert_audit_log(
+            self.conn, type="web_access", session_user="admin",
+            action="page_view", entity_type="page", entity_name="/config",
+            http_method="GET", http_path="/config", http_status=200,
+        )
+        insert_audit_log(
+            self.conn, type="api", session_user="api_key:test123",
+            action="api_call", entity_type="api_endpoint",
+            entity_name="/api/report/1", http_method="GET",
+            http_path="/api/report/1", http_status=200,
+        )
+
+    def _insert_special(self):
+        """插入含特殊字符的对照行（字面 % / _ / * 场景）。"""
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="100%完成", entity_type="misc",
+        )
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="100分", entity_type="misc",
+        )
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="a_b", entity_type="misc",
+        )
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="axb", entity_type="misc",
+        )
+        insert_audit_log(
+            self.conn, type="operation", session_user="admin",
+            action="a*b", entity_type="misc",
+        )
+
+    def test_keyword_plain_regression(self):
+        """回归：无通配 keyword 子串匹配不变"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "create_pool"}), 5)
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "/config"}), 1)
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "user1"}), 1)
+
+    def test_keyword_wildcard_prefix(self):
+        """通配前缀 create_* → action 以 create_ 开头的行"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "create_*"}), 5)
+
+    def test_keyword_wildcard_suffix(self):
+        """通配后缀 *failed → login_failed"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "*failed"}), 1)
+
+    def test_keyword_wildcard_middle(self):
+        """通配中间 login*ailed → login_failed"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "login*ailed"}), 1)
+
+    def test_keyword_multivalue_or(self):
+        """多值 OR：user1 或 /config → 两行"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "user1,/config"}), 2)
+
+    def test_keyword_mixed_wildcard_multivalue(self):
+        """多值混合通配：create_* 或 page_* → 6 行"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "create_*,page_*"}), 6)
+
+    def test_keyword_literal_percent(self):
+        """缺陷修复回归：% 从 SQL 通配改为字面量"""
+        self._insert_special()
+        rows = query_audit_logs(self.conn, {"keyword": "100%"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "100%完成")
+        self.assertNotIn(
+            "100分",
+            [r["action"] for r in rows],
+            "旧行为 % 当通配会误匹配 '100分'，现已按字面量匹配",
+        )
+
+    def test_keyword_literal_underscore(self):
+        """缺陷修复回归：_ 从 SQL 单字符通配改为字面量"""
+        self._insert_special()
+        rows = query_audit_logs(self.conn, {"keyword": "a_b"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "a_b")
+        self.assertNotIn(
+            "axb",
+            [r["action"] for r in rows],
+            "旧行为 _ 当单字符通配会误匹配 'axb'，现已按字面量匹配",
+        )
+
+    def test_keyword_escaped_star(self):
+        """\\* 转义 → 字面星号（a\\*b 只匹配 a*b）"""
+        self._insert_special()
+        rows = query_audit_logs(self.conn, {"keyword": r"a\*b"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "a*b")
+
+    def test_keyword_unescaped_star_wildcard(self):
+        """未转义 * → 通配（a*b 匹配 a*b、axb、a_b）"""
+        self._insert_special()
+        rows = query_audit_logs(self.conn, {"keyword": "a*b"})
+        actions = sorted(r["action"] for r in rows)
+        self.assertEqual(actions, ["a*b", "a_b", "axb"])
+
+    def test_keyword_empty_segments_ignored(self):
+        """空段忽略：create_pool,,login → 7 行"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": "create_pool,,login"}), 7)
+
+    def test_keyword_all_empty_ignored(self):
+        """全空多值（" , "）→ keyword 条件忽略，返回全部"""
+        self.assertEqual(count_audit_logs(self.conn, {"keyword": " , "}), 9)
+
+    def test_keyword_and_type_combined(self):
+        """keyword 与 type 组合 AND"""
+        self.assertEqual(
+            count_audit_logs(self.conn, {"keyword": "create_*", "type": "operation"}), 5)
+
+    def test_export_with_wildcard_keyword(self):
+        """导出带通配 keyword"""
+        rows = export_audit_logs(self.conn, {"keyword": "create_*"})
+        self.assertEqual(len(rows), 5)
+
+    def test_delete_with_multivalue_keyword(self):
+        """清理带多值 keyword"""
+        deleted = delete_audit_logs(self.conn, {"keyword": "user1,/config"})
+        self.assertEqual(deleted, 2)
+        self.assertEqual(count_audit_logs(self.conn, {}), 7)
 
 
 if __name__ == "__main__":

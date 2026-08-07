@@ -670,6 +670,17 @@ def _safe_int(val, default: int) -> int:
     return app_config.safe_int(val, default)
 
 
+def _filter_val_str(val) -> str:
+    """筛选值归一化为字符串（None → 空串，数字/布尔等 → str）。
+
+    filter_rows 入口另有 str 防御（result_transform.parse_filter_expr），
+    此处归一化保证下游 filters 元组的 val 恒为 str（契约一致性）。
+    """
+    if val is None:
+        return ""
+    return str(val)
+
+
 def _resolve_fetch_all(endpoint: dict, method: str, body: str,
                        query_params: dict, headers: dict = None) -> bool:
     """
@@ -721,7 +732,7 @@ def _resolve_params(endpoint: dict, method: str, body: str,
     add_bom = bool(query_params and "pretty" in query_params)
     fetch_all = _resolve_fetch_all(endpoint, method, body, query_params, headers)
 
-    filters = [(f["col"], f.get("op", "contains"), f.get("val", ""))
+    filters = [(f["col"], f.get("op", "contains"), _filter_val_str(f.get("val")))
                for f in preset_filters if "col" in f]
     sorts = [(s["col"], s.get("dir", "asc"))
              for s in preset_sorts if "col" in s]

@@ -188,6 +188,50 @@ class TestExportToCSV(unittest.TestCase):
         self.assertIn("name", text)
         self.assertIn("age", text)
 
+    @patch("db.create_mysql_connection")
+    def test_export_with_wildcard_filter(self, mock_create_conn):
+        """通配筛选导出：f_name=*e 只导出含 e 的行（与页面同一语义）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("name",), ("age",)]
+        mock_cursor.fetchall.return_value = [
+            ("Alice", 25), ("Bob", 30), ("Charlie", 35), ("dave", 40),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        code, csv_content, _ = export.handle_export(
+            self.conn, "id=1&f_name=*e", pool_override=self.mock_pool)
+
+        text = self._decode(csv_content)
+        self.assertEqual(code, 200)
+        self.assertIn("Alice", text)
+        self.assertNotIn("Bob", text)
+        self.assertIn("Charlie", text)
+        self.assertIn("dave", text)
+
+    @patch("db.create_mysql_connection")
+    def test_export_with_multivalue_filter(self, mock_create_conn):
+        """多值筛选导出：f_name=Bob,dave 命中任一即导出"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("name",), ("age",)]
+        mock_cursor.fetchall.return_value = [
+            ("Alice", 25), ("Bob", 30), ("Charlie", 35), ("dave", 40),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        code, csv_content, _ = export.handle_export(
+            self.conn, "id=1&f_name=Bob,dave", pool_override=self.mock_pool)
+
+        text = self._decode(csv_content)
+        self.assertEqual(code, 200)
+        self.assertNotIn("Alice", text)
+        self.assertIn("Bob", text)
+        self.assertNotIn("Charlie", text)
+        self.assertIn("dave", text)
+
     def test_export_missing_id(self):
         """缺少 id 参数应返回 400"""
         code, body, _ = export.handle_export(self.conn, "")

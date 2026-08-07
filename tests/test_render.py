@@ -1,8 +1,18 @@
-"""test_render.py — HTML 渲染模板函数测试"""
+"""test_render.py — HTML 渲染模板函数测试
+
+筛选匹配表达式批次覆盖（T2/T4，渲染层断言）：
+- 筛选值 URL 回路往返（build_filter_params → parse_qs → parse_filters 原值，
+  空值按现状契约返回 []）— TestFilterUrlRoundtrip
+- 列头筛选输入框 placeholder 带（*通配,多值）提示、悬停 title
+- 筛选操作区 ? 帮助入口（默认收起弹窗 + toggle JS）— TestFilterActionHtml
+"""
 
 import unittest
+import urllib.parse
 from datetime import datetime
 from decimal import Decimal
+import report as report_mod
+from filter_help import FILTER_HINT_SUFFIX
 from render import (
     render_page_header, render_page_footer, render_navbar,
     # URL 参数工具
@@ -316,6 +326,55 @@ class TestFilterHiddenInputs(unittest.TestCase):
         """空列表返回空字符串"""
         result = filter_hidden_inputs([])
         self.assertEqual(result, "")
+
+
+class TestFilterUrlRoundtrip(unittest.TestCase):
+    """筛选值 URL 回路往返：输入 → build_filter_params → parse_qs → parse_filters → 原值
+
+    匹配表达式语法（`*`、逗号多值、`\` 转义）使值含特殊字符成为常态，
+    往返必须不丢字符、不被误解（HTML 转义与 URL 编码互不冲突）。
+    """
+
+    def _roundtrip(self, filters):
+        qs_str = build_filter_params(filters)
+        qs = urllib.parse.parse_qs(qs_str, keep_blank_values=True)
+        return report_mod.parse_filters(qs)
+
+    def test_wildcard_value_roundtrip(self):
+        """含 * 的值往返不丢"""
+        result = self._roundtrip([("name", "contains", "张*明")])
+        self.assertEqual(result, [("name", "contains", "张*明")])
+
+    def test_multivalue_roundtrip(self):
+        """含逗号的值往返不丢（编码后不被误解为多个参数）"""
+        result = self._roundtrip([("city", "contains", "北京,上海")])
+        self.assertEqual(result, [("city", "contains", "北京,上海")])
+
+    def test_escape_sequence_roundtrip(self):
+        """含转义序列的值往返不丢（\\* \\, \\\\）"""
+        result = self._roundtrip([("name", "contains", r"a\*b")])
+        self.assertEqual(result, [("name", "contains", r"a\*b")])
+        result2 = self._roundtrip([("name", "contains", r"1\,234")])
+        self.assertEqual(result2, [("name", "contains", r"1\,234")])
+        result3 = self._roundtrip([("name", "contains", r"a\\b")])
+        self.assertEqual(result3, [("name", "contains", r"a\\b")])
+
+    def test_ampersand_and_equals_in_value(self):
+        """值含 & 与 = 时往返不丢（state_machine 风险点）"""
+        result = self._roundtrip([("name", "contains", "a&b=c")])
+        self.assertEqual(result, [("name", "contains", "a&b=c")])
+
+    def test_empty_value_roundtrip(self):
+        """空值不产生条件（parse_filters 现状契约：空值跳过）"""
+        result = self._roundtrip([("name", "contains", "")])
+        self.assertEqual(result, [])
+
+    def test_hidden_inputs_preserve_special_values(self):
+        """隐藏 input 保留通配/多值/转义原文（HTML 转义不破坏字符）"""
+        html = filter_hidden_inputs([("city", "contains", "北京,上海")])
+        self.assertIn("北京,上海", html)
+        html2 = filter_hidden_inputs([("name", "contains", r"a\*b")])
+        self.assertIn(r"a\*b", html2)
 
 
 class TestBuildColsParam(unittest.TestCase):
@@ -775,7 +834,13 @@ class TestBuildTableHeaderHtml(unittest.TestCase):
         cols = ["name"]
         result = build_table_header_html(cols, cols, [], [], 1, 20, "", "")
         self.assertIn("filter-input", result)
-        self.assertIn('placeholder="筛选 name..."', result)
+        self.assertIn(f'placeholder="筛选 name{FILTER_HINT_SUFFIX}"', result)
+
+    def test_filter_input_placeholder_hint(self):
+        """筛选输入框 placeholder 带统一语法提示（引用单一来源常量）"""
+        cols = ["name"]
+        result = build_table_header_html(cols, cols, [], [], 1, 20, "", "")
+        self.assertIn(FILTER_HINT_SUFFIX, result)
 
     def test_current_filter_value(self):
         """显示当前筛选值"""
@@ -1095,6 +1160,14 @@ class TestBuildFilterActionHtml(unittest.TestCase):
         action, clear = build_filter_action_html(1, 20, [], "", "", [])
         self.assertIn("筛选", action)
         self.assertIn("清除筛选", action)
+
+    def test_contains_filter_help_entry(self):
+        """筛选操作区含 ? 帮助入口（默认收起弹窗，单一来源渲染）"""
+        action, _ = build_filter_action_html(1, 20, [], "", "", [])
+        self.assertIn("filter-help-btn", action)
+        self.assertIn("filter-help-popup", action)
+        self.assertIn("display:none", action)
+        self.assertIn("toggleFilterHelp", action)
 
     def test_clear_html_empty_when_no_filters(self):
         """无筛选时 clear_html 为空"""

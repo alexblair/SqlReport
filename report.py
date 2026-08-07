@@ -288,6 +288,9 @@ _CSS = """
   }
   th .filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.12); }
   th .filter-input::placeholder { color: #cbd5e1; }
+  /* 05 工单：表头列保守 min-width 保证筛选输入框可用；聚焦展开为固定宽度（桌面） */
+  th { min-width: 100px; }
+  th .filter-input:focus { width: 220px; }
   .debug-info {
     background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
     margin-bottom: 16px; font-size: 13px; color: #64748b;
@@ -632,6 +635,52 @@ function formatDebugSQL() {
 }
 document.addEventListener('DOMContentLoaded', formatDebugSQL);
 """ + _SQL_HIGHLIGHT_JS + _SQL_FORMATTER_JS + _COMMON_JS + r"""
+var filterTouchInit = (function () {
+  var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  if (!coarse) return;
+  var vv = window.visualViewport;
+  function expand(el) {
+    var rect = el.getBoundingClientRect();
+    var offset = vv ? (vv.offsetTop || 0) : 0;
+    el.classList.add('filter-input-touch');
+    el.dataset.filterVvTop = String(rect.top);
+    el.dataset.filterVvOffset = String(offset);
+    el.style.position = 'fixed';
+    el.style.left = Math.max(0, Math.min(rect.left, (vv ? vv.width : window.innerWidth) - 320)) + 'px';
+    el.style.top = (rect.top + offset) + 'px';
+    el.style.width = 'min(320px, 80vw)';
+    el.style.zIndex = '1000';
+  }
+  function collapse(el) {
+    el.classList.remove('filter-input-touch');
+    delete el.dataset.filterVvTop;
+    delete el.dataset.filterVvOffset;
+    el.style.position = '';
+    el.style.left = '';
+    el.style.top = '';
+    el.style.width = '';
+    el.style.zIndex = '';
+  }
+  function recalc() {
+    var offset = vv ? (vv.offsetTop || 0) : 0;
+    document.querySelectorAll('.filter-input.filter-input-touch').forEach(function (el) {
+      var dy = offset - (parseFloat(el.dataset.filterVvOffset) || 0);
+      el.style.top = ((parseFloat(el.dataset.filterVvTop) || 0) + dy) + 'px';
+    });
+  }
+  document.addEventListener('focusin', function (e) {
+    if (e.target.classList && e.target.classList.contains('filter-input')) expand(e.target);
+  });
+  document.addEventListener('focusout', function (e) {
+    if (e.target.classList && e.target.classList.contains('filter-input')) collapse(e.target);
+  });
+  document.addEventListener('click', function (e) {
+    document.querySelectorAll('.filter-input.filter-input-touch').forEach(function (el) {
+      if (e.target !== el) collapse(el);
+    });
+  });
+  if (vv) vv.addEventListener('resize', recalc);
+})();
 </script>
 </body></html>"""
 

@@ -30,6 +30,13 @@ test_report_extra.py — 报表执行与预览域补充测试（T3 批次）
 26. preview result_names_override 参数
 27. page_url_base 死参数（仅报告，不测）
 
+筛选匹配表达式批次覆盖（T5，渲染产物断言，TestFilterInputUX）：
+- 表头列 min-width=100px、桌面 :focus 展开 220px（CSS 断言）
+- 触屏 pointer:coarse 检测 → fixed 视口定位（getBoundingClientRect +
+  visualViewport resize 重算）、失焦/点击外部收回、非触屏互斥 return
+- 悬停 title 显示完整筛选值
+（T4 帮助入口/placeholder 断言在 test_render.py 与 test_audit_page.py）
+
 已知缺陷测试以 docstring 标注"已知缺陷"：断言期望安全行为，
 当前实现不满足 → 测试失败即暴露缺陷（详见批次回传报告）。
 """
@@ -863,6 +870,72 @@ class TestApiSectionDegrade(BaseReportTest):
         self.assertEqual(code, 200)
         self.assertIn("测试报表", body)
         self.assertIn("<td>1</td>", body)
+
+
+class TestFilterInputUX(BaseReportTest):
+    """05 工单：筛选输入框交互优化（聚焦展开 + 触屏适配）渲染产物断言"""
+
+    def _render(self, filters_qs: str = ""):
+        """渲染正式报表页（mock 查询）返回 body"""
+        with patch("report.execute_report") as mock_exec:
+            mock_exec.return_value = report.ReportResult(
+                columns=["id", "name"], rows=[(1, "a"), (2, "b")],
+                total=2, page=1, page_size=20)
+            qs = "id=1" + ("&" + filters_qs if filters_qs else "")
+            code, body, _ = report.handle_request(self.conn, "GET", "/report", qs)
+        self.assertEqual(code, 200)
+        return body
+
+    def test_th_min_width_rule(self):
+        """表头列保守 min-width（100px）保证窄列输入框可用"""
+        body = self._render()
+        self.assertIn("min-width: 100px", body)
+
+    def test_desktop_focus_expand_css(self):
+        """桌面：聚焦展开为固定较宽宽度（CSS :focus 展开）"""
+        body = self._render()
+        self.assertIn(".filter-input:focus", body)
+        self.assertIn("width: 220px", body)
+
+    def test_touch_detection_branch(self):
+        """触屏：pointer: coarse 检测分支存在"""
+        body = self._render()
+        self.assertIn("pointer: coarse", body)
+        self.assertIn("matchMedia", body)
+
+    def test_touch_fixed_overlay_logic(self):
+        """触屏：fixed 视口定位浮层（getBoundingClientRect 计算 + fixed 定位）"""
+        body = self._render()
+        self.assertIn("getBoundingClientRect", body)
+        self.assertIn("position = 'fixed'", body)
+
+    def test_touch_visual_viewport_recalc(self):
+        """触屏：visualViewport resize（软键盘）实时重算位置"""
+        body = self._render()
+        self.assertIn("visualViewport", body)
+        self.assertIn("addEventListener('resize'", body)
+
+    def test_blur_collapse_branch(self):
+        """失焦收回：focusout 分支存在"""
+        body = self._render()
+        self.assertIn("focusout", body)
+        self.assertIn("collapse", body)
+
+    def test_click_outside_collapse_branch(self):
+        """点击外部收回：click 委托分支存在"""
+        body = self._render()
+        self.assertIn("addEventListener('click'", body)
+        self.assertIn("filter-input-touch", body)
+
+    def test_non_touch_mutual_exclusion(self):
+        """非触屏互斥：粗指针不命中时提前返回，不执行触屏逻辑"""
+        body = self._render()
+        self.assertIn("if (!coarse) return", body)
+
+    def test_hover_title_shows_full_value(self):
+        """悬停 title 显示完整值（桌面增强，非聚焦）"""
+        body = self._render("f_name=long_value_xyz&op_name=eq")
+        self.assertIn('title="long_value_xyz"', body)
 
 
 if __name__ == "__main__":

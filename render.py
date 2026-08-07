@@ -21,6 +21,7 @@ from decimal import Decimal
 import app_config
 import redis_cache
 import static_cache
+from filter_help import render_filter_help, FILTER_HINT_SUFFIX
 
 # ---------------------------------------------------------------------------
 # 公共 CSS（全站单一来源：report.py + config.py + audit + 登录页共享）
@@ -1056,8 +1057,8 @@ def build_table_header_html(columns, display_columns, sorts, filters,
       style="padding:2px 2px;font-size:11px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;width:auto;min-width:52px;flex-shrink:0;cursor:pointer"
       onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
     <input type="text" class="filter-input" form="{filter_form_id}"
-      name="{filter_input_name}" placeholder="筛选 {_escape(col)}..."
-      value="{_escape(cur_fval)}"
+      name="{filter_input_name}" placeholder="筛选 {_escape(col)}{FILTER_HINT_SUFFIX}"
+      value="{_escape(cur_fval)}" title="{_escape(cur_fval)}"
       style="{input_style}" {input_disabled}>
   </div>
 </th>""")
@@ -1272,6 +1273,7 @@ def build_filter_action_html(report_id, page_size, sorts, cols_param,
     filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
                          f'<a href="{clear_href}" class="btn btn-outline btn-sm">清除筛选</a>'
+                         + render_filter_help() +
                          f'</div>')
 
     clear_html = ""
@@ -2888,12 +2890,13 @@ def render_audit_page(
     <form method="get" action="/audit" style="display:contents">
       <label>类型: <select name="type">{type_html}</select></label>
       <label>操作者: <input type="text" name="session_user" value="{html_mod.escape(session_user_val)}" placeholder="操作者"></label>
-      <label>关键字: <input type="text" name="keyword" value="{html_mod.escape(keyword_val)}" placeholder="操作/实体/路径"></label>
+      <label>关键字: <input type="text" name="keyword" value="{html_mod.escape(keyword_val)}" placeholder="关键字{FILTER_HINT_SUFFIX}"></label>
       <div class="date-shortcuts">{range_btns}</div>
       <label>从: <input type="datetime-local" name="date_from" value="{html_mod.escape(date_from)}"></label>
       <label>到: <input type="datetime-local" name="date_to" value="{html_mod.escape(date_to)}"></label>
       <div class="filter-btns">
         <button type="submit" class="btn btn-sm btn-primary">筛选</button>
+        {render_filter_help()}
         <button type="button" class="btn btn-sm btn-danger" onclick="confirmClean()">清理</button>
       </div>
     </form>

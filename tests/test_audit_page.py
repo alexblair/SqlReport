@@ -18,6 +18,8 @@ import urllib.parse
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from filter_help import FILTER_HINT_SUFFIX
+
 import audit_db
 import audit_page
 import server as srv
@@ -128,6 +130,21 @@ class TestAuditPageRender(_AuditConnTestCase):
             "GET", "flash=%E6%B8%85%E7%90%86%E6%88%90%E5%8A%9F")
         self.assertEqual(code, 200)
         self.assertIn("清理成功", body)
+
+    def test_render_filter_help_entry(self):
+        """筛选表单旁含 ? 帮助入口（默认收起，单一来源渲染）"""
+        code, body, _ = audit_page.handle_audit_request("GET", "")
+        self.assertEqual(code, 200)
+        self.assertIn("filter-help-btn", body)
+        self.assertIn("filter-help-popup", body)
+        self.assertIn("display:none", body)
+        self.assertIn("toggleFilterHelp", body)
+
+    def test_render_keyword_placeholder_hint(self):
+        """关键字输入框 placeholder 带统一语法提示（引用单一来源常量）"""
+        code, body, _ = audit_page.handle_audit_request("GET", "")
+        self.assertEqual(code, 200)
+        self.assertIn(f'placeholder="关键字{FILTER_HINT_SUFFIX}"', body)
 
     def test_post_clean_redirects(self):
         """POST clean：302 重定向回审计页并带结果消息（Location 为 URL 编码）"""

@@ -6,6 +6,11 @@ test_api_endpoint.py — API 端点功能集成测试
 - Mock db.create_mysql_connection 避免真实 MySQL 依赖
 - CRUD 测试直接调用 config_db 函数
 - HTTP 测试通过 urllib.request 发送真实 HTTP 请求
+
+筛选匹配表达式批次覆盖（T2，API 链路）：
+- API filter JSON 通配/多值/混合（contains 通配、多值 eq、通配+多值）
+- 数字等非字符串 filter val 不再 500（T1 str 防御 + _filter_val_str 归一化）
+- POST 覆盖 rules filters 同样支持通配与数字 val
 """
 
 import unittest
@@ -622,6 +627,78 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         body = json.loads(resp.read().decode("utf-8"))
         self.assertTrue(body["full"])
         self.assertEqual(len(body["data"]), 3)
+
+    # =====================================================================
+    # 筛选匹配表达式（通配符 + 多值，契约扩展）
+    # =====================================================================
+
+    def test_api_filter_wildcard_contains(self):
+        """预设筛选 val 支持 * 通配（contains 张* → 张三）"""
+        self._create_endpoint_in_db(
+            url_path="/api/wildcard-ep",
+            filters='[{"col":"name","op":"contains","val":"张*"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/wildcard-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["data"][0]["name"], "张三")
+
+    def test_api_filter_multivalue_eq_in(self):
+        """预设筛选 val 多值 eq = IN 语义（active,inactive → 全部）"""
+        self._create_endpoint_in_db(
+            url_path="/api/multivalue-ep",
+            filters='[{"col":"status","op":"eq","val":"active,inactive"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/multivalue-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 3)
+
+    def test_api_filter_multivalue_mixed_wildcard(self):
+        """预设筛选多值与通配混合（张三,王* → 张三、王五）"""
+        self._create_endpoint_in_db(
+            url_path="/api/mixed-ep",
+            filters='[{"col":"name","op":"contains","val":"张三,王*"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/mixed-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 2)
+        names = sorted(row["name"] for row in body["data"])
+        self.assertEqual(names, ["张三", "王五"])
+
+    def test_api_filter_val_numeric_no_500(self):
+        """回归：预设 val 为数字（JSON 未加引号）→ 不 500，按字符串处理"""
+        self._create_endpoint_in_db(
+            url_path="/api/num-val-ep",
+            filters='[{"col":"name","op":"contains","val":100}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/num-val-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 0)
+
+    def test_api_post_override_filters_numeric_val_no_500(self):
+        """回归：POST 覆盖 filters 的 val 为数字 → 不 500"""
+        self._create_endpoint_in_db(url_path="/api/post-num-val")
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/post-num-val",
+            data=json.dumps({"filters": [{"col": "name", "op": "contains",
+                                          "val": 100}]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(req)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 0)
+
+    def test_api_post_override_filters_wildcard(self):
+        """POST 覆盖 filters 支持通配符（张* → 张三）"""
+        self._create_endpoint_in_db(url_path="/api/post-wildcard")
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/post-wildcard",
+            data=json.dumps({"filters": [{"col": "name", "op": "contains",
+                                          "val": "张*"}]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(req)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["data"][0]["name"], "张三")
 
     def test_api_fetch_all_post_form(self):
         """POST form-urlencoded fetch_all=1 返回全量"""

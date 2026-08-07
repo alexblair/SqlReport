@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app_config import serialize_json
+from result_transform import parse_filter_expr
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +187,39 @@ def insert_audit_log(
 # ---------------------------------------------------------------------------
 
 
+def _keyword_to_like_patterns(keyword: str) -> list:
+    """统一匹配表达式 → SQL LIKE 模式列表（多值 OR 语义）。
+
+    消费 result_transform.parse_filter_expr（全系统唯一语法解析落点）：
+    - `*` 通配 → SQL `%`
+    - 字面 `%` / `_`（用户输入）→ 转义为字面量（ESCAPE '\\'），
+      修正旧行为把它们当 SQL 通配符的隐患（与报表侧纯文本语义对齐）
+    - 段 strip / 空段忽略 / `\\*` `\\,` `\\\\` 转义由解析层完成
+
+    返回空列表表示 keyword 条件应忽略（如全空多值）。
+    每段为子串语义（首尾补 %，与旧 %keyword% 行为一致）；用户输入中的
+    `*` 通配翻译为 `%`，故 *abc → %abc%，等价子串匹配。
+    """
+    patterns = []
+    for tokens in parse_filter_expr(keyword):
+        parts = []
+        for tok in tokens:
+            if tok[0] == "wild":
+                parts.append("%")
+            else:
+                ch = tok[1]
+                if ch == "%":
+                    parts.append("\\%")
+                elif ch == "_":
+                    parts.append("\\_")
+                elif ch == "\\":
+                    parts.append("\\\\")
+                else:
+                    parts.append(ch)
+        patterns.append("%" + "".join(parts) + "%")
+    return patterns
+
+
 def _build_where(filters: dict) -> tuple[str, list]:
     """根据筛选条件构建 WHERE 子句和参数列表。"""
     clauses = []
@@ -208,11 +242,17 @@ def _build_where(filters: dict) -> tuple[str, list]:
         params.append(filters["session_user"])
 
     if filters.get("keyword"):
-        kw = f"%{filters['keyword']}%"
-        clauses.append(
-            "(action LIKE ? OR entity_name LIKE ? OR http_path LIKE ? OR session_user LIKE ?)"
-        )
-        params.extend([kw, kw, kw, kw])
+        patterns = _keyword_to_like_patterns(filters["keyword"])
+        if patterns:
+            fields = ("action", "entity_name", "http_path", "session_user")
+            field_expr = " OR ".join(
+                f"{f} LIKE ? ESCAPE '\\'" for f in fields
+            )
+            group = "(" + field_expr + ")"
+            or_group = " OR ".join([group] * len(patterns))
+            for pat in patterns:
+                params.extend([pat] * len(fields))
+            clauses.append("(" + or_group + ")")
 
     where_sql = " AND ".join(clauses) if clauses else "1=1"
     return where_sql, params

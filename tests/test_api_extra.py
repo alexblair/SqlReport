@@ -477,6 +477,45 @@ class TestApiExtra(MockMySQLMixin, unittest.TestCase):
     # 缺口 23：result_mode/result_index 不纳入 config_version（疑似缺陷）
     # ------------------------------------------------------------------
 
+    def test_config_version_includes_filters_change(self):
+        """config_version 随 filters 文本变化（筛选行为变更 → 静态缓存失效重建）。
+
+        filters 原样参与 MD5（ADR-0005 契约）；新匹配表达式语义使旧缓存
+        在 TTL 内自然失效重建，本测试钉住该耦合。
+        """
+        self._create_report()
+        self._create_endpoint()
+        conn = _get_conn()
+        ep = dict(conn.execute(
+            "SELECT * FROM api_endpoints WHERE url_path='/api/cust'").fetchone())
+        rep = dict(conn.execute("SELECT * FROM report_configs").fetchone())
+        conn.close()
+
+        v1 = api_handler._compute_static_config_version(ep, rep)
+        ep2 = dict(ep)
+        ep2["filters"] = '[{"col":"name","op":"contains","val":"张*"}]'
+        v2 = api_handler._compute_static_config_version(ep2, rep)
+        self.assertNotEqual(v1, v2, "filters 变化必须改变 config_version")
+
+    def test_resolve_params_filter_val_normalized(self):
+        """_resolve_params 归一化 filters val：数字→str、None/缺失→空串"""
+        endpoint = {
+            "filters": json.dumps([
+                {"col": "a", "op": "contains", "val": 100},
+                {"col": "b", "op": "eq", "val": None},
+                {"col": "c", "op": "neq"},
+            ]),
+            "sorts": "", "row_limit": 0, "columns": None,
+            "output_format": "json", "allow_fetch_all": 1,
+        }
+        filters, _sorts, _page, _ps, _rl, _fmt, _cols, _bom, _fa = \
+            api_handler._resolve_params(endpoint, "GET", "", {})
+        self.assertEqual(filters[0], ("a", "contains", "100"))
+        self.assertEqual(filters[1], ("b", "eq", ""))
+        self.assertEqual(filters[2], ("c", "neq", ""))
+        for _col, _op, val in filters:
+            self.assertIsInstance(val, str, "filters val 必须恒为 str")
+
     def test_config_version_includes_result_mode_and_index(self):
         """config_version 随 result_mode/result_index 变化（修复缺陷）。
 

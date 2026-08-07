@@ -8,12 +8,16 @@ result_transform.py — 结果集变换模块（纯函数，无 IO）
 
 领域约定（三处调用方一致，勿单边修改）：
 - 筛选操作符：contains / eq / neq / gt / lt / gte / lte / isempty / notempty
+- 筛选值匹配表达式（全系统统一语法，parse_filter_expr）：`*` 通配符（任意位置/多次，非正则）、
+  英文逗号多值（段 strip、空段忽略，多值之间 OR）、`\*` / `\,` / `\\` 转义；
+  仅 contains / eq / neq 生效（contains 不敏感，eq/neq 敏感），无通配符输入保持既有语义
 - 排序：稳定排序，None 值始终在最后，不受升降序影响
 - 列选择：仅保留存在且不重复的列（保序）；空请求或全部无效时回退全部列
 - 总页数：page_size 或 total 非正时返回 1（防除零），否则向上取整
 """
 
 import math
+import re
 
 # ---------------------------------------------------------------------------
 
@@ -40,6 +44,112 @@ def _try_float(val):
         return None
 
 
+def parse_filter_expr(raw) -> list[list[tuple]]:
+    """解析筛选值表达式 → 多值段列表（多值之间 OR 语义，全系统统一语法）。
+
+    语法（报表页 / 导出 / API / 审计页一致）：
+    - `*` 通配符：任意位置、可多次，匹配任意内容（非正则，仅 `*` 为元字符）
+    - 英文逗号：拆分多个值（段级 strip 前后空格，空段忽略）；多值任一命中即匹配
+    - 转义：`\\*` 字面星号、`\\,` 字面逗号（不拆分为多值）、`\\\\` 字面反斜杠
+    - 无裸逗号时按单值处理（不 strip，保持既有行为）
+
+    返回段列表，每段为 token 列表：[("lit", ch), ...] 与 [("wild",), ...] 的混合；
+    全空多值（如 " , "）返回空列表，调用方应视为条件忽略。
+    """
+    if not isinstance(raw, str):
+        raw = str(raw)
+    segments = []
+    parts = _split_filter_value(raw)
+    for seg in parts:
+        tokens = []
+        i = 0
+        n = len(seg)
+        while i < n:
+            ch = seg[i]
+            if ch == "\\":
+                if i + 1 < n and seg[i + 1] in ("*", ",", "\\"):
+                    tokens.append(("lit", seg[i + 1]))
+                    i += 2
+                    continue
+                tokens.append(("lit", "\\"))
+                i += 1
+                continue
+            if ch == "*":
+                tokens.append(("wild",))
+                i += 1
+                continue
+            tokens.append(("lit", ch))
+            i += 1
+        segments.append(tokens)
+    return segments
+
+
+def _split_filter_value(raw: str) -> list[str]:
+    """按裸英文逗号拆分段（`\\,` 为字面逗号不拆分）。
+
+    转义判定：逗号前连续反斜杠为奇数 → 该逗号被转义（字面）；
+    偶数 → 裸逗号（分隔符）。如 `a\\\\,b` = 字面反斜杠 + 分隔 → 两段，
+    `a\\,b` = 字面反斜杠 + 字面逗号 → 单段。
+
+    含裸逗号时逐段 strip 且空段忽略；不含裸逗号时返回原串单段（不 strip）。
+    """
+    has_comma = False
+    parts = []
+    cur = []
+    i = 0
+    n = len(raw)
+    while i < n:
+        ch = raw[i]
+        if ch == "\\":
+            if i + 1 < n and raw[i + 1] == "\\":
+                cur.append("\\")
+                cur.append("\\")
+                i += 2
+                continue
+            if i + 1 < n and raw[i + 1] == ",":
+                cur.append("\\")
+                cur.append(",")
+                i += 2
+                continue
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            has_comma = True
+            parts.append("".join(cur))
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    parts.append("".join(cur))
+    if has_comma:
+        parts = [p.strip() for p in parts if p.strip()]
+    return parts
+
+
+def _segment_regex(tokens: list[tuple]) -> str:
+    """段 token 列表 → 正则模式（`*` → `.*`，字面量 re.escape）。"""
+    parts = []
+    for tok in tokens:
+        if tok[0] == "wild":
+            parts.append(".*")
+        else:
+            parts.append(re.escape(tok[1]))
+    return "".join(parts)
+
+
+def _compile_segments(segments: list[list[tuple]], ignorecase: bool) -> list:
+    """多值段 → 编译后的正则列表（contains 不敏感，eq/neq 敏感）。"""
+    flags = re.IGNORECASE if ignorecase else 0
+    return [re.compile(_segment_regex(seg), flags) for seg in segments]
+
+
+def _cell_str(val) -> str:
+    """行值字符串化（None → 空串，保持既有 contains/eq/neq 语义）。"""
+    return str(val) if val is not None else ""
+
+
 def filter_rows(rows: list[tuple], columns: list[str],
                 filters=None) -> list[tuple]:
     """
@@ -62,22 +172,26 @@ def filter_rows(rows: list[tuple], columns: list[str],
             continue
         col_idx = columns.index(col_name)
 
-        if op == "contains":
-            q_lower = q.lower()
-            result = [
-                r for r in result
-                if q_lower in str(r[col_idx] if r[col_idx] is not None else "").lower()
-            ]
-        elif op == "eq":
-            result = [
-                r for r in result
-                if str(r[col_idx] if r[col_idx] is not None else "") == q
-            ]
-        elif op == "neq":
-            result = [
-                r for r in result
-                if str(r[col_idx] if r[col_idx] is not None else "") != q
-            ]
+        if op in ("contains", "eq", "neq"):
+            segments = parse_filter_expr(q)
+            if not segments:
+                continue
+            regexes = _compile_segments(segments, ignorecase=(op == "contains"))
+            if op == "contains":
+                result = [
+                    r for r in result
+                    if any(rx.search(_cell_str(r[col_idx])) for rx in regexes)
+                ]
+            elif op == "eq":
+                result = [
+                    r for r in result
+                    if any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)
+                ]
+            else:
+                result = [
+                    r for r in result
+                    if not any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)
+                ]
         elif op in ("gt", "lt", "gte", "lte"):
             try:
                 q_num = float(q)
