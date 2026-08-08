@@ -316,12 +316,15 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
                        result_names_val='',
                        is_edit=False, report_id=None,
                        prefer_cache=1, cache_ttl_hours=0,
-                       allow_write=0, sql_has_write=False):
+                       allow_write=0, sql_has_write=False,
+                       allow_all_output=0, max_rows=100000):
     """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）。
 
     allow_write: 「允许执行写操作」当前值（存量 1、新建 0）。
     sql_has_write: SQL 是否含写语句。含写时显示开关 checkbox 与警示；
                    否则仅渲染隐藏 allow_write=0（保底提交，维持新建默认 0）。
+    allow_all_output: 「允许全部输出」当前值（存量 1、新建 0）。
+    max_rows: 全量输出关闭时的截断行数上限（默认 100000，仅关闭全量输出时生效）。
     """
     view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
                 if is_edit and report_id else "")
@@ -344,9 +347,26 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
                                  '⚠️ 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
     else:
         allow_write_html = '<input type="hidden" name="allow_write" value="0">'
+    # PH-07 全量输出护栏：checkbox + max_rows 输入（hidden 0 保底；开启时保存前 confirm）
+    aao_checked = ' checked' if allow_all_output else ''
+    if allow_all_output:
+        aao_confirm = ' onsubmit="return confirm(\'确定开启全部输出？当查询结果超过限制行数时将不截断，可能占用大量内存与网络带宽。\')"'
+    else:
+        aao_confirm = ''
+    allow_all_output_html = (
+        f'<label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">'
+        f'<input type="hidden" name="allow_all_output" value="0">'
+        f'<input type="checkbox" name="allow_all_output" value="1"{aao_checked}>'
+        f'<span style="font-weight:600">允许全部输出</span>'
+        f'<span style="color:#94a3b8;font-weight:400;font-size:13px">（关闭时查询结果超过限制行数将被截断，仅显示前 N 行）</span>'
+        f'</label>'
+        f'<label>全量输出截断上限（行）:'
+        f'<input type="number" name="max_rows" value="{max_rows}" min="1" step="1" style="width:140px">'
+        f'<span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">仅关闭「允许全部输出」时生效</span>'
+        f'</label>')
     return f"""<div class="card">
 <h2>{title}</h2>
-<form method="post" action="{action_url}" class="config-form" data-action="{action_url}">
+<form method="post" action="{action_url}" class="config-form" data-action="{action_url}"{aao_confirm}>
   {hidden_id}
   <label>报表名称: <input type="text" name="name" value="{name}" required></label>
   <label>SQL 查询语句:
@@ -388,6 +408,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
   </label>
   {allow_write_html}
+  {allow_all_output_html}
   <div class="form-actions">
     <button type="submit" name="action" value="save_close" class="btn btn-primary">保存返回上级</button>
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
@@ -451,13 +472,17 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
     raw_sql = report["sql_query"] if report else ""
     allow_write = _tolerant_int(report.get("allow_write"), 1) if report else 0
     sql_has_write = sql_contains_write(raw_sql)
+    # PH-07 全量输出护栏：存量默认 1 保持现状；新建默认 0；max_rows 默认 100000
+    allow_all_output = _tolerant_int(report.get("allow_all_output"), 1) if report else 0
+    max_rows = _tolerant_int(report.get("max_rows"), 100000) if report else 100000
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
                               result_names_val=result_names_val,
                               is_edit=is_edit, report_id=report.get("id") if report else None,
                               prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
-                              allow_write=allow_write, sql_has_write=sql_has_write)
+                              allow_write=allow_write, sql_has_write=sql_has_write,
+                              allow_all_output=allow_all_output, max_rows=max_rows)
 
 
 def _render_pool_section(conn) -> str:
@@ -680,6 +705,10 @@ def _parse_report_form(data: dict) -> dict:
         "cache_ttl_hours": int(data.get("cache_ttl_hours", 0) or 0),
         # 表单始终携带隐藏 allow_write=0（checkbox 勾选时提交 0,1，取最后一个为 1）
         "allow_write": int(data.get("allow_write", 0) or 0),
+        # 全量输出护栏（PH-07）：hidden 0 + checkbox 1，勾选时提交 0,1 取最后为 1；
+        # max_rows 非法/空值时回退默认 100000（仅关闭全量输出时生效）
+        "allow_all_output": int(data.get("allow_all_output", 0) or 0),
+        "max_rows": app_config.safe_int(data.get("max_rows"), 100000),
     }
 
 
@@ -752,6 +781,8 @@ def _report_from_form(data: dict, report_id: int = None) -> dict:
         "prefer_cache": _tolerant_int(data.get("prefer_cache"), 1),
         "cache_ttl_hours": data.get("cache_ttl_hours", "0"),
         "allow_write": _tolerant_int(data.get("allow_write"), 0),
+        "allow_all_output": _tolerant_int(data.get("allow_all_output"), 0),
+        "max_rows": _tolerant_int(data.get("max_rows"), 100000),
     }
     if report_id is not None:
         report["id"] = report_id
@@ -934,6 +965,8 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
                             prefer_cache=rf["prefer_cache"],
                             cache_ttl_hours=rf["cache_ttl_hours"],
                             allow_write=rf["allow_write"],
+                            allow_all_output=rf["allow_all_output"],
+                            max_rows=rf["max_rows"],
                             session_user=session_user)
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
@@ -959,6 +992,8 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
                               prefer_cache=rf["prefer_cache"],
                               cache_ttl_hours=rf["cache_ttl_hours"],
                               allow_write=rf["allow_write"],
+                              allow_all_output=rf["allow_all_output"],
+                              max_rows=rf["max_rows"],
                               session_user=session_user)
         if ok:
             return _save_or_render(
@@ -991,6 +1026,8 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
                             prefer_cache=rf["prefer_cache"],
                             cache_ttl_hours=rf["cache_ttl_hours"],
                             allow_write=rf["allow_write"],
+                            allow_all_output=rf["allow_all_output"],
+                            max_rows=rf["max_rows"],
                             session_user=session_user)
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},

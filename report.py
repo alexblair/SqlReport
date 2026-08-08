@@ -860,7 +860,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     # ---- 尝试从进程内缓存获取 ----
     cached = cache.get(report_id, sql_query)
-    if cached is not None:
+    if cached is not None and _cache_matches_limit_policy(
+            bool(getattr(cached, "truncated", False)), limit_rows):
         all_results = cached.results
         truncated_flag = bool(getattr(cached, "truncated", False))
         # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示
@@ -879,7 +880,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             mgr = redis_cache.get_redis_manager()
             if mgr:
                 snapshot = mgr.get_snapshot(snapshot_key)
-                if snapshot is not None:
+                if snapshot is not None and _cache_matches_limit_policy(
+                        bool(getattr(snapshot, "truncated", False)), limit_rows):
                     all_results = snapshot.results
                     truncated_flag = bool(getattr(snapshot, "truncated", False))
                     cache.set(report_id, all_results, sql_query,
@@ -905,7 +907,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                     if lock_held:
                         # 获取到锁后先检查 Redis 是否已有数据（可能已被其他进程写入）
                         _snap = _mgr.get_snapshot(snapshot_key)
-                        if _snap is not None:
+                        if _snap is not None and _cache_matches_limit_policy(
+                                bool(getattr(_snap, "truncated", False)), limit_rows):
                             all_results = _snap.results
                             truncated_flag = bool(getattr(_snap, "truncated", False))
                             cache.set(report_id, all_results, sql_query,
@@ -930,7 +933,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
                         if _mgr and snapshot_key:
                             _snap = _mgr.get_snapshot(snapshot_key)
-                            if _snap is not None:
+                            if _snap is not None and _cache_matches_limit_policy(
+                                    bool(getattr(_snap, "truncated", False)), limit_rows):
                                 all_results = _snap.results
                                 truncated_flag = bool(getattr(_snap, "truncated", False))
                                 cache_info = {
@@ -1019,6 +1023,18 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     return ReportResult(report_results, active_index, page, page_size,
                         cache_info=cache_info, truncated=truncated_flag)
+
+
+def _cache_matches_limit_policy(truncated: bool, limit_rows: bool) -> bool:
+    """缓存条目/快照的 truncated 标记是否与当前截断策略一致。
+
+    当前策略截断（limit_rows=True）→ 数据要么已截断（truncated=True）要么
+    未截断（读取兜底 _apply_max_rows 会再截断）→ 均可用。
+    当前策略不截断（limit_rows=False）→ 缓存若已截断（truncated=True）则
+    缺行，视为不可用走重建。防止编辑报表开启「允许全部输出」后，SQL 未变
+    导致进程缓存/Redis 快照 key 不变、TTL 内持续命中截断旧数据（PH-07）。
+    """
+    return limit_rows or not truncated
 
 
 def _apply_max_rows(all_results: list[dict], max_rows: int,
@@ -1360,6 +1376,18 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                         + _BANNER_STYLE + '">'
                         f'⚠️ {WRITE_ALLOWED_BANNER}'
                         '</div>')
+    # PH-07 截断提示条：本次执行发生 max_rows 截断时，页面顶部提示
+    # （编辑页「允许全部输出」可关闭截断；提示中的 N 取当前配置的 max_rows）
+    trunc_banner = ''
+    if result.truncated:
+        trunc_banner = ('<div class="flash-warn" style="'
+                        + _BANNER_STYLE + '">'
+                        '⚠️ 结果超过 '
+                        + str(int(report.get("max_rows") or 100000))
+                        + ' 行，已截断显示前 '
+                        + str(int(report.get("max_rows") or 100000))
+                        + ' 行；如需全量输出请在编辑页开启「允许全部输出」'
+                        '</div>')
     # 无库中报表的预览（新建表单预览，report_id=0）不显示编辑入口
     edit_btn = ''
     if report_id > 0:
@@ -1375,6 +1403,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
              '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
              '</div>' if sql_override else '') +
             write_banner +
+            trunc_banner +
             edit_btn +
             flash_html +
             memo_html +

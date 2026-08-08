@@ -51,18 +51,20 @@ def _load_and_transform(sql_query: str, pool_config: dict,
                         filters=None,
                         columns: list[str] = None,
                         result_index: int = 0,
-                        sorts=None) -> tuple:
+                        sorts=None,
+                        max_rows: int = None) -> tuple:
     """
     执行查询并应用内存变换，返回导出所需的数据。
 
     两导出函数（CSV / JSON）共用的头部流程：
-    连接 → 查询 → 多结果集越界回退 → 内存筛选 → 排序 →
+    连接 → 查询 → 多结果集越界回退 → 截断至 max_rows → 内存筛选 → 排序 →
     输出列确定（自定义列回退全部列）→ 列索引映射。
 
-    返回 (output_columns, display_indices, rows)：
+    返回 (output_columns, display_indices, rows, truncated)：
       output_columns — 最终输出列名列表（按用户自定义顺序）
       display_indices — output_columns 在 all_columns 中的索引列表
       rows — 已筛选/排序的行数据列表
+      truncated — 查询结果是否发生过 max_rows 截断（False 表示未截断）
     """
     conn = db.create_mysql_connection(pool_config)
     try:
@@ -74,6 +76,12 @@ def _load_and_transform(sql_query: str, pool_config: dict,
     finally:
         conn.close()
 
+    # PH-07 全量输出护栏：与报表页面/API 一致，原始行截断后再筛选/排序
+    truncated = False
+    if max_rows is not None and max_rows > 0 and len(rows) > max_rows:
+        rows = rows[:max_rows]
+        truncated = True
+
     # 应用内存筛选（与报表页面的筛选逻辑一致）
     filtered = filter_rows(rows, all_columns, filters or [])
     # 应用排序（与报表页面一致）
@@ -83,7 +91,7 @@ def _load_and_transform(sql_query: str, pool_config: dict,
     # 确定输出列（按用户自定义顺序，无效列名回退全部列）
     output_columns = select_columns(all_columns, columns)
     display_indices = column_indices(output_columns, all_columns)
-    return output_columns, display_indices, filtered
+    return output_columns, display_indices, filtered, truncated
 
 
 def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
@@ -121,7 +129,9 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
                          filters=None,
                          columns: list[str] = None,
                          result_index: int = 0,
-                         sorts=None) -> str:
+                         sorts=None,
+                         max_rows: int = None,
+                         _truncated_out: list = None) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
@@ -130,12 +140,17 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
     result_index: 多结果集时选择第几个结果（默认 0）。
     sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
+    max_rows: 全量输出截断上限（None=不截断；>0 时原始行超过即截断，PH-07）。
+    _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
     """
-    output_columns, display_indices, filtered = _load_and_transform(
-        sql_query, pool_config, filters, columns, result_index, sorts)
+    output_columns, display_indices, filtered, truncated = _load_and_transform(
+        sql_query, pool_config, filters, columns, result_index, sorts,
+        max_rows=max_rows)
+    if truncated and _truncated_out is not None:
+        _truncated_out.append(True)
 
     # 序列化为 CSV（QUOTE_ALL 全字段加双引号 + BOM + "\n" 行尾，与既有输出一致）
     rows_out = [[row[i] for i in display_indices] for row in filtered]
@@ -191,7 +206,9 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                           json_no_quotes: bool = False,
                           columns: list[str] = None,
                           result_index: int = 0,
-                          sorts=None) -> str:
+                          sorts=None,
+                          max_rows: int = None,
+                          _truncated_out: list = None) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
@@ -200,6 +217,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     columns: 自定义列列表（顺序 + 可见性），None 表示全部列。
     result_index: 多结果集时选择第几个结果（默认 0）。
     sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
+    max_rows: 全量输出截断上限（None=不截断；>0 时原始行超过即截断，PH-07）。
+    _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
     （不加引号），而非全部转为字符串。
@@ -212,8 +231,11 @@ def export_report_to_json(sql_query: str, pool_config: dict,
       ]
     }
     """
-    output_columns, display_indices, filtered = _load_and_transform(
-        sql_query, pool_config, filters, columns, result_index, sorts)
+    output_columns, display_indices, filtered, truncated = _load_and_transform(
+        sql_query, pool_config, filters, columns, result_index, sorts,
+        max_rows=max_rows)
+    if truncated and _truncated_out is not None:
+        _truncated_out.append(True)
 
     # 构建行对象数组
     rows_data = []
@@ -387,17 +409,28 @@ def handle_export(conn, query: str,
             and sql_contains_write(report_config["sql_query"]):
         return 403, WRITE_DENIED_MESSAGE, {}
 
+    # PH-07 全量输出护栏：allow_all_output=0 且 max_rows>0 → 截断至 max_rows
+    # （与报表页面 execute_report 语义一致；存量报表缺字段按存量语义不截断）
+    export_limit = None
+    if not int(report_config.get("allow_all_output", 1) or 0):
+        m = int(report_config.get("max_rows") or 0)
+        if m > 0:
+            export_limit = m
+    truncated_sink = []
+
     # 执行导出
     try:
         if export_format == "json":
             content = export_report_to_json(
                 report_config["sql_query"], pool_config,
                 report_config["name"], filters, json_no_quotes,
-                custom_columns, result_index, sorts=sorts)
+                custom_columns, result_index, sorts=sorts,
+                max_rows=export_limit, _truncated_out=truncated_sink)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,
-                custom_columns, result_index, sorts=sorts)
+                custom_columns, result_index, sorts=sorts,
+                max_rows=export_limit, _truncated_out=truncated_sink)
     except Exception as e:
         return 500, f"导出失败: {e}", {}
 
@@ -419,6 +452,8 @@ def handle_export(conn, query: str,
                 f"filename*=UTF-8''{encoded_name}"
             ),
         }
+        if truncated_sink:
+            headers["X-Export-Truncated"] = "true"
         return 200, zip_data, headers
 
     # 非 ZIP 模式：根据字符集编码内容
@@ -437,5 +472,7 @@ def handle_export(conn, query: str,
             f"filename*=UTF-8''{encoded_name}"
         ),
     }
+    if truncated_sink:
+        headers["X-Export-Truncated"] = "true"
 
     return 200, content_bytes, headers

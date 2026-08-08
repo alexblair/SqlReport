@@ -1012,16 +1012,21 @@ def add_report(conn, name: str, sql_query: str,
                prefer_cache: int = 1,
                cache_ttl_hours: int = 0,
                allow_write: int = 0,
+               allow_all_output: int = 0,
+               max_rows: int = 100000,
                session_user=None) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。
 
     allow_write: 是否允许执行写语句。新建默认 0（写护栏，PH-05）；
                  存量数据由迁移 14 统一置 1（保持现状）。
+    allow_all_output: 是否允许全量输出。新建默认 0（全量输出护栏，PH-06/07），
+                      关闭时结果超过 max_rows 即截断；存量数据由迁移 14 统一置 1。
+    max_rows: 全量输出关闭时的截断行数上限（默认 100000）。
     """
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,allow_all_output,max_rows,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, max_order + 1),
     )
     conn.commit()
     _write_audit_log(session_user, "create_report", "report", cur.lastrowid, name,
@@ -1030,7 +1035,9 @@ def add_report(conn, name: str, sql_query: str,
                                   "pool_id": pool_id, "category_id": category_id,
                                   "memo": memo, "prefer_cache": prefer_cache,
                                   "cache_ttl_hours": cache_ttl_hours,
-                                  "allow_write": allow_write})
+                                  "allow_write": allow_write,
+                                  "allow_all_output": allow_all_output,
+                                  "max_rows": max_rows})
     return cur.lastrowid
 
 
@@ -1057,15 +1064,19 @@ def update_report(conn, report_id: int, name: str,
                   prefer_cache: int = 1,
                   cache_ttl_hours: int = 0,
                   allow_write: int = 1,
+                  allow_all_output: int = 1,
+                  max_rows: int = 100000,
                   session_user=None) -> bool:
     """更新报表配置，影响行数 >0 返回 True。
 
     allow_write: 编辑表单提交值；缺省 1 兼容历史调用（保持存量语义）。
+    allow_all_output: 编辑表单提交值；缺省 1 兼容历史调用（保持存量语义）。
+    max_rows: 编辑表单提交值；缺省 100000。
     """
     before = get_report(conn, report_id) if session_user else None
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=?,allow_write=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=?,allow_write=?,allow_all_output=?,max_rows=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, report_id),
     )
     conn.commit()
     _write_audit_log(session_user, "update_report", "report", report_id, name,
@@ -1075,7 +1086,9 @@ def update_report(conn, report_id: int, name: str,
                                   "pool_id": pool_id, "category_id": category_id,
                                   "memo": memo, "prefer_cache": prefer_cache,
                                   "cache_ttl_hours": cache_ttl_hours,
-                                  "allow_write": allow_write})
+                                  "allow_write": allow_write,
+                                  "allow_all_output": allow_all_output,
+                                  "max_rows": max_rows})
     return cur.rowcount > 0
 
 

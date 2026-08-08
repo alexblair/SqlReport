@@ -1471,9 +1471,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
             "category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,"
-            "sort_order) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1, 0, 0, 1),
+            "allow_all_output,max_rows,sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1, 0, 0, 0, 100000, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 
@@ -1489,9 +1489,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
             "category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,"
-            "sort_order) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 1, 0, 0, 6),
+            "allow_all_output,max_rows,sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 1, 0, 0, 0, 100000, 6),
         )
 
     def test_get_report_found(self):
@@ -1543,8 +1543,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_called_once_with(
             "UPDATE report_configs SET name=%s,sql_query=%s,default_page_size=%s,"
             "pool_id=%s,category_id=%s,memo=%s,result_names=%s,prefer_cache=%s,"
-            "cache_ttl_hours=%s,allow_write=%s WHERE id=%s",
-            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1, 0, 1, 1),
+            "cache_ttl_hours=%s,allow_write=%s,allow_all_output=%s,max_rows=%s "
+            "WHERE id=%s",
+            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1, 0, 1, 1, 100000, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 

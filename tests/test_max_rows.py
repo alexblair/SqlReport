@@ -210,16 +210,37 @@ class TestMaxRowsCache(unittest.TestCase):
         self.assertIs(r.truncated, True)
         self.assertEqual(len(big[0]["rows"]), 10, "兜底截断不污染缓存条目")
 
-    def test_cache_switch_on_allows_full_from_cache(self):
-        """开关切回开启（allow_all_output=1）：缓存中的截断数据不再截断，按缓存原样展示。"""
+    def test_cache_switch_on_discards_truncated_cache(self):
+        """开关切回开启（allow_all_output=1，PH-07）：丢弃截断缓存，重新查询全量。
+
+        PH-06 时截断缓存直接展示（数据缺失）；PH-07 起截断标记参与缓存策略
+        校验，SQL 未变导致缓存 key 不变时也能避免命中截断旧数据。
+        """
         cache = report.QueryCache()
         cache.set(1, [{"columns": ["c"], "rows": [(i,) for i in range(5)]}],
                   "SELECT 1", truncated=True)
+        with patch("db.create_mysql_connection") as mock_conn, \
+                patch("db.execute_mysql_query") as mock_query:
+            mock_conn.return_value = MagicMock()
+            mock_query.return_value = [{"columns": ["c"], "rows": [(i,) for i in range(10)]}]
+            r = report.execute_report(1, "SELECT 1", {"host": "h"},
+                                      report={"allow_all_output": 1, "max_rows": 5},
+                                      cache=cache)
+        self.assertEqual(r.total, 10, "重新查询取回全量数据")
+        self.assertIsNone(r.truncated, "全量输出无截断标记")
+
+    def test_cache_switch_off_keeps_full_cache_reduced(self):
+        """开关切回关闭（allow_all_output=0）：全量缓存数据按当前 max_rows 截断展示。"""
+        cache = report.QueryCache()
+        cache.set(1, [{"columns": ["c"], "rows": [(i,) for i in range(10)]}],
+                  "SELECT 1")
         r = report.execute_report(1, "SELECT 1", {"host": "h"},
-                                  report={"allow_all_output": 1, "max_rows": 5},
+                                  report={"allow_all_output": 0, "max_rows": 5},
                                   cache=cache)
         self.assertEqual(r.total, 5)
-        self.assertIs(r.truncated, True, "标记来自缓存条目，开关开启不再截断")
+        self.assertIs(r.truncated, True)
+        self.assertEqual(len(cache.get(1, "SELECT 1").results[0]["rows"]), 10,
+                         "读取兜底截断不污染缓存条目")
 
 
 # ===================================================================

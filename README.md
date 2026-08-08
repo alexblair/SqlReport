@@ -88,6 +88,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **API Endpoint Indep. Mgmt** | Standalone page `/config/api-endpoints` with global list & linked report |
 | **Session Sliding Expiry** | 24h TTL, refreshed on each request, persisted via SQLite across restarts |
 | **Export with Sorting** | CSV/JSON exports apply current sort state (consistent with report view) |
+| **Output Limit Guard** | Per-report "allow all output" switch (new reports default off, existing default on); when off, results beyond `max_rows` (default 100,000) are truncated consistently across report page / export / API, with a page banner and `truncated` / `X-Export-Truncated` markers |
 | **Transactional SQL** | Multi-statement execution wrapped in BEGIN/COMMIT/ROLLBACK, full rollback on failure |
 | **Error Log Output** | Configurable separate log file for WARNING+ level messages |
 | **Audit Log Rotation** | Configurable retention days, auto-cleanup on startup and page visits |
@@ -482,6 +483,7 @@ All-in-one config management, switched via the left navigation:
 Report edit form highlights:
 - SQL editor with format button and syntax-highlighted preview toggle
 - Memo field for documenting report purpose
+- Output limit guard: per-report "allow all output" switch plus truncation cap (`max_rows`, default 100,000, only effective when the switch is off); enabling the switch asks for confirmation
 - [View] button: opens the report page in a new window
 - [Preview] button: live-previews the query result using the current form SQL (unsaved), handy for checking SQL correctness
 - [Save] returns to the list page on success
@@ -504,6 +506,7 @@ Report list page highlights:
 - Memo display — collapsible report memo
 - [Edit] button: opens the report's config edit page in a new window
 - Force-refresh cache (re-query the database); the cache badge shows the snapshot age, TTL, and an **"expired (auto-refresh on next request)"** warning when the snapshot has passed its TTL (`cache_ttl_hours=0` = never expires)
+- Truncation notice — when the output limit guard cuts results to `max_rows`, a banner shows the cap and how to enable full output in the edit page
 
 ### Export `/export`
 
@@ -514,6 +517,7 @@ Report list page highlights:
 - JSON numeric no-quotes mode (numbers keep their types)
 - ZIP archive download
 - Applies custom column settings (export only selected columns, in the chosen order)
+- Applies the output limit guard: when full output is disabled and results exceed `max_rows`, the export is truncated with header `X-Export-Truncated: true`
 
 ---
 

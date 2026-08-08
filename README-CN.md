@@ -88,6 +88,7 @@ python server.py
 | **API 接口独立管理** | 独立管理页 `/config/api-endpoints`，展示全局 API 接口列表及关联报表 |
 | **Session 滑动过期** | 24 小时 TTL，每次请求自动刷新，重启后通过 SQLite 持久化恢复 |
 | **导出支持排序** | CSV/JSON 导出时应用当前排序状态（与报表页面行为一致） |
+| **全量输出护栏** | 报表级「允许全部输出」开关（新建默认关闭、存量默认开启）；关闭时结果超过 max_rows（默认 10 万）即截断，报表页/导出/API 行为一致，页面横幅提示 + truncated / X-Export-Truncated 标记 |
 | **事务性 SQL 执行** | 支持 BEGIN/COMMIT/ROLLBACK 包装的多语句事务执行，任一失败整体回滚 |
 | **错误日志独立输出** | WARNING 及以上级别可配置独立日志文件，与普通日志分离 |
 | **审计日志自动轮转** | 可配置保留天数，启动时和每次访问时自动清理过期记录 |
@@ -482,6 +483,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 报表编辑表单特色：
 - SQL 编辑器带格式化按钮和语法高亮预览切换
 - 备注字段用于记录报表用途
+- 全量输出护栏：「允许全部输出」开关 + 截断上限（max_rows，默认 10 万，仅关闭开关时生效）；开启开关时保存前需确认
 - 【查看】按钮：点击新窗口打开该报表的查看页面
 - 【预览】按钮：点击新窗口以当前表单中的 SQL（未保存）实时预览查询结果，方便检查 SQL 编写是否正确
 - 【保存】成功后返回列表页
@@ -504,6 +506,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - 备注显示 — 报表备注可折叠展开
 - 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面
 - 强制刷新缓存（重新查询数据库）；缓存徽标展示快照时间、TTL，快照超过 TTL 时显示**「已过期（下次请求自动刷新）」**警示（`cache_ttl_hours=0` = 永不过期）
+- 截断提示条 — 结果被全量输出护栏截断至 max_rows 时，页面顶部横幅提示截断上限及在编辑页开启全量输出的方法
 
 ### 导出功能 `/export`
 
@@ -514,6 +517,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - JSON 数字无引号模式（数值保持数字类型）
 - ZIP 压缩包打包下载
 - 支持应用自定义字段设置（仅导出选定列并按指定顺序）
+- 应用全量输出护栏：关闭全量输出且结果超过 max_rows 时导出被截断，并带响应头 `X-Export-Truncated: true`
 
 ---
 

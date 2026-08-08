@@ -170,7 +170,8 @@ def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
     status, resp_body, resp_headers = _format_output(
         result.data_rows, result.display_cols, result.total,
         result.page, result.page_size, result.total_pages,
-        result.output_format, result.add_bom, result.full, template=template)
+        result.output_format, result.add_bom, result.full, template=template,
+        truncated=result.truncated)
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
 
@@ -220,11 +221,13 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
 
 
 def _compute_static_config_version(endpoint: dict, report: dict) -> str:
-    """计算静态缓存配置版本（MD5 of sql + pool_id + 端点变换配置）。
+    """计算静态缓存配置版本（MD5 of sql + pool_id + 端点变换配置 + 截断策略）。
 
     静态文件内容是"SQL 结果 + 端点变换规则（字段/筛选/排序/条数/结果集选择/模板）"
     的产物，任一变化都会改变文件内容，必须纳入版本计算；否则编辑端点配置后
     旧文件在 TTL 内持续命中（缓存陈旧）。
+    PH-07：allow_all_output/max_rows 决定结果是否截断，同样影响文件内容
+    （截断是文件生成时固化的事实），纳入版本计算保证开关切换后自动失效重建。
     """
     parts = [report["sql_query"], str(report.get("pool_id") or "")]
     for key in ("columns", "filters", "sorts", "row_limit", "json_template",
@@ -232,6 +235,8 @@ def _compute_static_config_version(endpoint: dict, report: dict) -> str:
         value = endpoint.get(key)
         if value is not None and value != "":
             parts.append(f"{key}={value}")
+    parts.append(f"allow_all_output={int(report.get('allow_all_output', 1) or 0)}")
+    parts.append(f"max_rows={int(report.get('max_rows') or 0)}")
     return _md5_hex("|".join(parts))
 
 
@@ -263,7 +268,7 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
             result.data_rows, result.display_cols, result.total,
             result.page, result.page_size, result.total_pages,
             result.output_format, result.add_bom, result.full,
-            template=template, meta=meta)
+            template=template, meta=meta, truncated=result.truncated)
 
     if status == 200:
         if is_template_enabled(template):
@@ -437,7 +442,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
             "mode": "all",
             "page": page,
             "page_size": total_all_rows if fetch_all else ps,
-        } | ({"full": True} if fetch_all else {}))
+        } | ({"full": True} if fetch_all else {})
+          | ({"truncated": True} if result.truncated else {}))
         return 200, resp_body, {"Content-Type": "application/json; charset=utf-8"}
 
     # 单结果集模式 — 校验索引
@@ -457,7 +463,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     display_ps = result.total if fetch_all else ps
     return ApiQueryResult(
         data_rows, display_cols, result.total, page, display_ps,
-        result.total_pages, output_format, add_bom, fetch_all)
+        result.total_pages, output_format, add_bom, fetch_all,
+        truncated=bool(result.truncated))
 
 
 class ApiQueryResult:
@@ -468,10 +475,12 @@ class ApiQueryResult:
     """
 
     __slots__ = ("data_rows", "display_cols", "total", "page", "page_size",
-                 "total_pages", "output_format", "add_bom", "full")
+                 "total_pages", "output_format", "add_bom", "full",
+                 "truncated")
 
     def __init__(self, data_rows, display_cols, total, page, page_size,
-                 total_pages, output_format, add_bom, full):
+                 total_pages, output_format, add_bom, full,
+                 truncated: bool = False):
         self.data_rows = data_rows
         self.display_cols = display_cols
         self.total = total
@@ -481,16 +490,19 @@ class ApiQueryResult:
         self.output_format = output_format
         self.add_bom = add_bom
         self.full = full
+        self.truncated = truncated
 
 
 def _format_output(data_rows, display_cols, total, page, ps,
                    total_pages, output_format, add_bom, full: bool,
-                   template: str = "", meta: dict | None = None) -> tuple:
+                   template: str = "", meta: dict | None = None,
+                   truncated: bool = False) -> tuple:
     """根据 output_format 构建最终响应（JSON 支持自定义输出模板）。"""
     if output_format == "csv":
         return _format_csv_response(data_rows, display_cols, add_bom)
     return _format_json_response(data_rows, total, page, ps, total_pages, full,
-                                 template=template, meta=meta)
+                                 template=template, meta=meta,
+                                 truncated=truncated)
 
 
 def _build_single_context(data_rows, total, page, ps, total_pages, full,
@@ -799,9 +811,13 @@ def _resolve_params(endpoint: dict, method: str, body: str,
 def _format_json_response(data_rows: list[dict], total: int, page: int,
                           page_size: int, total_pages: int,
                           full: bool = False, template: str = "",
-                          meta: dict | None = None) -> tuple:
+                          meta: dict | None = None,
+                          truncated: bool = False) -> tuple:
     """
     构建 JSON 响应。
+
+    truncated: 本次查询结果是否发生 max_rows 截断（True 时响应体附加
+               "truncated": true，缺省 False 不出现，不破坏现有响应契约）。
 
     返回:
         (HTTP 状态码, JSON 字符串, 响应头字典)
@@ -822,6 +838,8 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
         "page_size": page_size,
         "total_pages": total_pages,
     }
+    if truncated:
+        resp["truncated"] = True
     if full:
         resp["full"] = True
     return 200, app_config.serialize_json(resp), {
