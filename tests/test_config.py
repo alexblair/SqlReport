@@ -4,12 +4,15 @@ test_config.py — config.py 单元测试
 测试策略：
 - 使用 :memory: SQLite，每条测试独立
 - 测试 URL 解析、HTML 渲染、表单提交处理
+
+PH-01 缓存新鲜度批次覆盖：
+- 新建报表表单 cache_ttl_hours 默认 1
+- 编辑存量报表表单回显原值（不重置为默认）
 """
 
 import unittest
 import sqlite3
 import urllib.parse
-import re
 import config
 import db
 import auth
@@ -75,8 +78,6 @@ def _make_conn():
             static_cache    INTEGER NOT NULL DEFAULT 1,
             json_template   TEXT,
             description     TEXT,
-            allow_full_output INTEGER NOT NULL DEFAULT 1,
-            allow_write_sql   INTEGER NOT NULL DEFAULT 0,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -295,6 +296,21 @@ class TestReportFlow(unittest.TestCase):
         self.assertIn("报表池", body)
         self.assertIn('name="pool_id"', body)
 
+    def test_add_report_form_default_ttl_one(self):
+        """PH-01：新建报表表单 cache_ttl_hours 默认 1（避免永不过期）"""
+        code, body, _ = config.handle_request(self.conn, "GET", "/config/reports/add", "")
+        self.assertIn('name="cache_ttl_hours" value="1"', body)
+
+    def test_edit_report_form_keeps_original_ttl(self):
+        """PH-01：编辑存量报表表单回显原值，不重置为默认 1"""
+        rid = db.add_report(self.conn, "TTL报表", "SELECT 1", 20, 1)
+        self.conn.execute(
+            "UPDATE report_configs SET cache_ttl_hours=5 WHERE id=?", (rid,))
+        self.conn.commit()
+        code, body, _ = config.handle_request(
+            self.conn, "GET", f"/config/reports/{rid}/edit", "")
+        self.assertIn('name="cache_ttl_hours" value="5"', body)
+
     def test_submit_add_report(self):
         form = "name=销售报表&sql_query=SELECT * FROM sales&default_page_size=30&pool_id=1"
         code, body, headers = config.handle_request(self.conn, "POST", "/config/reports/add", "", form)
@@ -420,26 +436,6 @@ class TestReportFlow(unittest.TestCase):
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["prefer_cache"], 0)
         self.assertEqual(rpt["cache_ttl_hours"], 0)
-
-    def test_add_report_form_default_ttl_one(self):
-        """新增报表表单默认 TTL=1 小时（避免默认永不过期导致长期看到过期数据）。"""
-        code, body, headers = config.handle_request(
-            self.conn, "GET", "/config/reports/add", "")
-        self.assertEqual(code, 200)
-        m = re.search(r'name="cache_ttl_hours" value="(\d+)"', body)
-        self.assertIsNotNone(m, "表单应含 cache_ttl_hours 输入框")
-        self.assertEqual(m.group(1), "1")
-
-    def test_edit_report_form_keeps_original_ttl(self):
-        """编辑已有报表时 TTL 沿用原值（不重置为默认值）。"""
-        rid = db.add_report(self.conn, "TTL保留报表", "SELECT 1", 20, 1,
-                            prefer_cache=1, cache_ttl_hours=6)
-        code, body, headers = config.handle_request(
-            self.conn, "GET", f"/config/reports/{rid}/edit", "")
-        self.assertEqual(code, 200)
-        m = re.search(r'name="cache_ttl_hours" value="(\d+)"', body)
-        self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), "6")
 
 
 class TestFlashMessage(unittest.TestCase):

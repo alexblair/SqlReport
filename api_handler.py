@@ -198,11 +198,6 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
     ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
     config_version = _compute_static_config_version(endpoint, report)
 
-    # refresh=1：强制绕过缓存命中，走完整重算 + 落盘链路（重建缓存）
-    if query_params.get("refresh") == ["1"]:
-        return _execute_static_miss(
-            conn, endpoint, url_key, file_path, ttl_hours, config_version, headers)
-
     content = static_cache.try_read(file_path, config_version, ttl_hours)
     if content is not None:
         resp_headers = {
@@ -356,6 +351,9 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all = \
         _resolve_params(endpoint, method, body, query_params, headers)
 
+    # API 强制刷新：refresh=1（严格值校验）→ 绕过 L1/L2 缓存直查 MySQL 并回写缓存
+    refresh = _resolve_flag(query_params, method, body, headers, "refresh")
+
     ps = page_size if row_limit == 0 else min(page_size, row_limit)
     if fetch_all or force_full:
         # 全量获取：无视分页与行数限制（静态缓存的全量是文件固有语义，与 allow_fetch_all 开关无关）
@@ -370,23 +368,15 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     result_index = int(endpoint.get("result_index", 0))
     active_index = -1 if result_mode == "all" else result_index
 
-    # allow_write_sql=1 时允许请求携带 sql_query 参数临时覆盖报表 SQL
-    # （与报表页预览参数一致）；默认关闭，防 API 鉴权泄露时执行任意 SQL
-    sql_query = report["sql_query"]
-    if int(endpoint.get("allow_write_sql", 0) or 0) and method == "GET":
-        qp = query_params.get("sql_query", [""])
-        if qp and qp[0].strip():
-            sql_query = qp[0]
-
     result = execute_report(
         report_id=report_id,
-        sql_query=sql_query,
+        sql_query=report["sql_query"],
         pool_config=pool_config,
         page=page,
         page_size=ps,
         sorts=sorts,
         filters=filters,
-        refresh=False,
+        refresh=refresh,
         active_index=active_index,
         report=report,
     )
@@ -694,31 +684,37 @@ def _filter_val_str(val) -> str:
     return str(val)
 
 
+def _resolve_flag(query_params: dict, method: str, body: str,
+                  headers: dict = None, name: str = "fetch_all") -> bool:
+    """
+    解析布尔型请求参数（fetch_all/refresh 共用）。
+
+    GET 从 query string 提取，POST 从请求体（JSON/form-urlencoded）提取。
+    严格值校验：true/1/yes（大小写不敏感），其他值视为未传递。
+    """
+    raw = None
+    if method == "POST" and body:
+        post_data = _parse_post_body(body, headers or {})
+        if post_data:
+            raw = post_data.get(name)
+    elif query_params:
+        qp = query_params.get(name, [""])
+        raw = qp[0] if qp else ""
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in _FETCH_ALL_VALUES
+
+
 def _resolve_fetch_all(endpoint: dict, method: str, body: str,
                        query_params: dict, headers: dict = None) -> bool:
     """
     解析 fetch_all 全量获取参数。
 
-    GET 从 query string 提取，POST 从请求体（JSON/form-urlencoded）提取。
-    严格值校验：true/1/yes（大小写不敏感），其他值视为未传递。
-    双重门禁：allow_fetch_all 与 allow_full_output 任一关闭时参数被忽略，
-    返回 False（按翻页逻辑返回）。
+    端点配置 allow_fetch_all 关闭时参数被忽略，返回 False。
     """
     if not int(endpoint.get("allow_fetch_all", 1) or 0):
         return False
-    if not int(endpoint.get("allow_full_output", 1) or 0):
-        return False
-    raw = None
-    if method == "POST" and body:
-        post_data = _parse_post_body(body, headers or {})
-        if post_data:
-            raw = post_data.get("fetch_all")
-    elif query_params:
-        qp = query_params.get("fetch_all", [""])
-        raw = qp[0] if qp else ""
-    if raw is None:
-        return False
-    return str(raw).strip().lower() in _FETCH_ALL_VALUES
+    return _resolve_flag(query_params, method, body, headers, "fetch_all")
 
 
 def _resolve_params(endpoint: dict, method: str, body: str,

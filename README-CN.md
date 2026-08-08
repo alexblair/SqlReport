@@ -308,6 +308,8 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers.json"
 curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 ```
 
+普通 API 请求支持 `refresh=1`（严格值校验：`true`/`1`/`yes`，大小写不敏感）**绕过 L1/L2 缓存直查 MySQL 并回写缓存**——调用方需要始终拿最新数据时使用；可与 `fetch_all` 叠加。静态 `.json` 变体**忽略 `refresh`**，缓存有效期内始终直出缓存文件。
+
 响应体示例：
 
 ```json
@@ -501,7 +503,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - 字段设置面板 — 拖拽调整列顺序、勾选显示/隐藏列、全选/全不选
 - 备注显示 — 报表备注可折叠展开
 - 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面
-- 强制刷新缓存（重新查询数据库）
+- 强制刷新缓存（重新查询数据库）；缓存徽标展示快照时间、TTL，快照超过 TTL 时显示**「已过期（下次请求自动刷新）」**警示（`cache_ttl_hours=0` = 永不过期）
 
 ### 导出功能 `/export`
 

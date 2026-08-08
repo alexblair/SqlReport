@@ -308,6 +308,8 @@ curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers.json"
 curl -H "Authorization: Bearer sk-XXXX" "https://your-host/api/customers"
 ```
 
+Normal API requests support `refresh=1` (strict value check: `true`/`1`/`yes`, case-insensitive) to **bypass the L1/L2 cache, re-query MySQL and write the result back** into the cache — useful when callers must always get the latest data; combinable with `fetch_all`. The static `.json` variant **ignores `refresh`** and keeps serving the cached file while valid.
+
 Example response body:
 
 ```json
@@ -501,7 +503,7 @@ Report list page highlights:
 - Column settings panel — drag to reorder columns, check to show/hide, select all/none
 - Memo display — collapsible report memo
 - [Edit] button: opens the report's config edit page in a new window
-- Force-refresh cache (re-query the database)
+- Force-refresh cache (re-query the database); the cache badge shows the snapshot age, TTL, and an **"expired (auto-refresh on next request)"** warning when the snapshot has passed its TTL (`cache_ttl_hours=0` = never expires)
 
 ### Export `/export`
 

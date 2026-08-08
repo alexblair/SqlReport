@@ -893,10 +893,13 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
                            cache_ttl_hours: int = 0) -> str:
     """构建缓存状态标签 HTML。
 
-    徽标包含：来源标签、绝对建立时间（YYYY-MM-DD HH:MM:SS）、相对时间、
-    prefer_cache 标记、TTL 与剩余有效期。
+    当 prefer_cache=True 且 cache_ttl_hours>0 时，额外显示 TTL 信息；
+    快照模式（redis/redis_fallback/process）带时间戳时计算过期时刻
+    （ts + ttl*3600），已过期显示警示样式 + 「已过期（下次请求自动刷新）」；
+    TTL=0（永不过期）保持现状。
     """
     extra = ""
+    expired = False
     if prefer_cache:
         extra = " prefer_cache"
         if cache_ttl_hours > 0:
@@ -904,23 +907,27 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
     if cache_info:
         src = cache_info.get("source", "")
         ts = cache_info.get("timestamp")
+        if (src in ("redis", "redis_fallback", "process")
+                and prefer_cache and cache_ttl_hours > 0 and ts
+                and ts + cache_ttl_hours * 3600 < time.time()):
+            expired = True
+            extra += " | 已过期（下次请求自动刷新）"
         if src == "redis":
-            text = _cache_meta_text(ts) + extra
-            text += _cache_remaining_text(ts, cache_ttl_hours)
-            return ('<span class="cache-badge fresh">'
-                    f'Redis 快照 ({text})'
+            age = int(time.time() - ts) if ts else 0
+            css = "flash-warn" if expired else "fresh"
+            return (f'<span class="cache-badge {css}">'
+                    f'Redis 快照 ({age}s 前{extra})'
                     '</span>')
         elif src == "redis_fallback":
-            text = _cache_meta_text(ts) + extra
-            text += _cache_remaining_text(ts, cache_ttl_hours)
+            age = int(time.time() - ts) if ts else 0
             return ('<span class="cache-badge flash-warn">'
-                    f'缓存快照（{text}，MySQL 不可用）'
+                    f'缓存快照（{age}s 前{extra}，MySQL 不可用）'
                     '</span>')
         elif src == "process":
-            text = _cache_meta_text(ts) + extra
-            text += _cache_remaining_text(ts, cache_ttl_hours)
-            return ('<span class="cache-badge fresh">'
-                    f'进程缓存 ({text})'
+            age = int(time.time() - ts) if ts else 0
+            css = "flash-warn" if expired else "fresh"
+            return (f'<span class="cache-badge {css}">'
+                    f'进程缓存 ({age}s 前刷新{extra})'
                     '</span>')
         else:
             badge = '直连 MySQL'
@@ -932,25 +939,6 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
         if extra:
             badge += f' ({extra.strip()})'
         return f'<span class="cache-badge">{badge}</span>'
-
-
-def _cache_meta_text(ts) -> str:
-    """徽标内的时间描述：绝对建立时间（有时间戳时）+ 相对时间。"""
-    if ts:
-        age = int(time.time() - ts)
-        return f"{app_config.format_local_time(ts, with_tz=False)} 建立 · {age}s 前"
-    return ""
-
-
-def _cache_remaining_text(ts, cache_ttl_hours: int) -> str:
-    """剩余有效期描述：TTL 与建立时间都存在时显示剩余小时或已过期。"""
-    if not ts or cache_ttl_hours <= 0:
-        return ""
-    age = int(time.time() - ts)
-    remaining = cache_ttl_hours - age / 3600.0
-    if remaining > 0:
-        return f" | 剩余 {int(remaining)}h"
-    return " | 已过期"
 
 
 def build_sort_bar_html(report_id, page_size, sorts, filters,
@@ -2435,8 +2423,6 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     allowed_origins = _escape((endpoint or {}).get("allowed_origins") or "")
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
-    allow_full_output_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_full_output", 1))) else '')
-    allow_write_sql_checked = (' checked' if (endpoint is not None and int(endpoint.get("allow_write_sql", 0))) else '')
     static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
 
     # 结果集输出模式
@@ -2696,27 +2682,6 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       POST&nbsp; body: {{"fetch_all": true}}
     </div>
     <div style="color:#94a3b8;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
-  </div>
-
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
-    <input type="hidden" name="allow_full_output" value="0">
-    <input type="checkbox" name="allow_full_output" value="1"{allow_full_output_checked}>
-    <span style="font-weight:600">允许全量输出（full 标记）</span>
-  </label>
-  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
-    与「允许全量获取」双重门禁：本开关与 <code>fetch_all</code> 参数门禁均需开启，
-    <code>fetch_all=true</code> 请求才生效并返回 <code>"full": true</code> 标记；
-    任一关闭则该参数被忽略，按翻页逻辑返回。
-  </div>
-
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
-    <input type="hidden" name="allow_write_sql" value="0">
-    <input type="checkbox" name="allow_write_sql" value="1"{allow_write_sql_checked}>
-    <span style="font-weight:600">允许请求覆盖 SQL（sql_query 参数）</span>
-  </label>
-  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
-    开启后，调用方可在请求中携带 <code>sql_query</code> 参数临时覆盖报表 SQL（等价于报表页预览参数）。
-    <strong style="color:#dc2626">默认关闭</strong>：防止 API 鉴权泄露时被用于执行任意 SQL；静态缓存链路不受影响。
   </div>
 
   <label>API Key（留空=无需鉴权）:

@@ -7,6 +7,9 @@ test_static_cache.py — API 静态文件缓存（.json 变体）测试
 - 以 api_handler.handle_api_request 为最高测试 seam（端到端行为断言）
 - 覆盖：miss→重建→hit、meta 字段、TTL 过期、版本失效、自愈、鉴权、
   路径穿越、CSV/POST/非 200 不参与、并发原子写、业务参数忽略
+
+PH-01 缓存新鲜度批次覆盖：
+- 静态 .json 变体忽略 refresh=1（命中仍 hit，不重建；D4 决策）
 """
 
 import json
@@ -87,8 +90,6 @@ def _set_up_db():
             static_cache INTEGER NOT NULL DEFAULT 1,
             json_template TEXT,
             description TEXT,
-            allow_full_output INTEGER NOT NULL DEFAULT 1,
-            allow_write_sql INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -214,41 +215,22 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
                          "application/json; charset=utf-8")
         self.assertEqual(body2, body)
 
-    def test_refresh_param_bypasses_cache_hit(self):
-        """refresh=1 强制绕过缓存命中：已有文件也走 miss 重算链路并重新落盘。"""
+    def test_static_ignores_refresh_param(self):
+        """PH-01：静态 .json 变体忽略 refresh=1（命中仍 hit，不重建，D4）"""
         rid = self._create_report()
-        self._create_endpoint(report_id=rid)
-        # 首次：miss 生成文件
-        status, body, resp_headers = self._request("/api/cust.json")
+        self._create_endpoint(report_id=rid, url_path="/api/refresh-static")
+        status, body, resp_headers = self._request("/api/refresh-static.json")
         self.assertEqual(status, 200)
         self.assertEqual(resp_headers.get("X-Static-Cache"), "miss")
-        # 二次：hit 命中缓存文件
-        status, body2, resp_headers2 = self._request("/api/cust.json")
+        self.assertTrue(os.path.isfile(
+            static_cache.resolve_file_path("api/refresh-static")))
+        # refresh=1 不应触发重建：仍返回 hit 且内容不变
+        status, body2, resp_headers2 = self._request(
+            "/api/refresh-static.json", query={"refresh": ["1"]})
         self.assertEqual(status, 200)
-        self.assertEqual(resp_headers2.get("X-Static-Cache"), "hit")
-        # 三次：refresh=1 → 强制 miss 重算，返回内容与文件一致
-        status, body3, resp_headers3 = self._request(
-            "/api/cust.json", query={"refresh": ["1"]})
-        self.assertEqual(status, 200)
-        self.assertEqual(resp_headers3.get("X-Static-Cache"), "miss")
-        data = json.loads(body3)
-        self.assertTrue(data["full"])
-        self.assertEqual(len(data["data"]), 3)
-        # 后续不带 refresh 的请求应命中刷新后的文件
-        file_path = static_cache.resolve_file_path("api/cust")
-        self.assertIsNotNone(file_path)
-        with open(file_path, "r", encoding="utf-8") as fh:
-            self.assertEqual(fh.read(), body3)
-
-    def test_refresh_ignored_on_static_disabled(self):
-        """refresh=1 不影响非静态分支：端点未命中静态时走普通链路。"""
-        rid = self._create_report()
-        self._create_endpoint(report_id=rid, url_path="/api/refresh-norm")
-        # 普通路径（无 .json 后缀）带 refresh=1：走普通 API 链路，无静态头
-        status, body, resp_headers = self._request(
-            "/api/refresh-norm", query={"refresh": ["1"]})
-        self.assertEqual(status, 200)
-        self.assertNotIn("X-Static-Cache", resp_headers)
+        self.assertEqual(resp_headers2.get("X-Static-Cache"), "hit",
+                         "静态缓存应忽略 refresh，命中直接返回文件")
+        self.assertEqual(body2, body)
 
     def test_static_output_excludes_description(self):
         """静态缓存链路输出不含接口说明（description 只用于页面展示）。"""

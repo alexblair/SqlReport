@@ -4,6 +4,11 @@ test_cache_ui.py — Redis 缓存 UI 显示测试（验证用户报告的两个�
 策略：
 - 缓存 UI 显示测试：直接测试 _build_report_html，传入带有 cache_info 的 ReportResult
 - 重建缓存测试：在 execute_report 层测试，mock 只到 MySQL 层
+
+PH-01 缓存新鲜度批次覆盖：
+- 徽标过期提示四态：未过期保持 fresh、已过期 flash-warn + 文案、
+  TTL=0 永不过期无提示、process 源同样生效
+- 直连 MySQL 分支不附加过期文案
 """
 
 import unittest
@@ -282,8 +287,8 @@ class TestRebuildCacheButton(unittest.TestCase):
         self.assertEqual(cached.source, "redis")
 
 
-class TestCacheBadgeFreshness(unittest.TestCase):
-    """批次1 P0 缓存新鲜度：徽标增强（绝对时间戳 + 剩余有效期）"""
+class TestCacheBadgeExpiry(unittest.TestCase):
+    """PH-01：缓存徽标过期提示（快照 ts + TTL 计算过期时刻）"""
 
     def setUp(self):
         self.conn = _make_conn()
@@ -292,54 +297,55 @@ class TestCacheBadgeFreshness(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def _body(self, cache_info, ttl_hours=24):
-        """构造带 cache_info 的报表页 HTML。"""
+    def _body(self, cache_info, ttl):
         result = ReportResult(
-            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
-            results=[{"columns": ["id"], "rows": [(1,)]}],
-            cache_info=cache_info)
+            columns=["id", "name"],
+            rows=[(1, "test")],
+            total=1,
+            page=1,
+            page_size=10,
+            results=[{"columns": ["id", "name"], "rows": [(1, "test")]}],
+            cache_info=cache_info,
+        )
         return _build_report_html(self.conn,
-            {"id": 1, "name": "新鲜度报表", "sql_query": "SELECT 1", "memo": "",
-             "result_names": "", "prefer_cache": 1, "cache_ttl_hours": ttl_hours},
+            {"id": 1, "name": "TTL报表", "sql_query": "SELECT 1", "memo": "",
+             "result_names": "", "prefer_cache": 1, "cache_ttl_hours": ttl},
             result)
 
-    def _badge(self, body):
-        """提取 cache-badge span 内部文本。"""
-        m = re.search(r'<span class="cache-badge[^"]*">([^<]*)</span>', body)
-        self.assertIsNotNone(m, "页面应含 cache-badge 徽标")
-        return m.group(1)
+    def test_not_expired_keeps_fresh_style(self):
+        """未过期（ts + ttl*3600 >= now）→ 无过期文案，保持 fresh 样式"""
+        body = self._body(
+            {"source": "redis", "timestamp": time.time()}, 24)
+        self.assertNotIn("已过期", body)
+        self.assertIn("cache-badge fresh", body)
+        self.assertIn("TTL=24h", body)
 
-    def test_badge_contains_absolute_timestamp(self):
-        """徽标内应含绝对建立时间 YYYY-MM-DD HH:MM:SS（而非仅相对时间）。"""
-        badge = self._badge(self._body(
-            {"source": "redis", "timestamp": time.time()}))
-        self.assertRegex(badge, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 建立")
+    def test_expired_shows_warning(self):
+        """已过期（ts + ttl*3600 < now）→ flash-warn 样式 + 过期文案"""
+        body = self._body(
+            {"source": "redis", "timestamp": time.time() - 25 * 3600}, 24)
+        self.assertIn("已过期（下次请求自动刷新）", body)
+        self.assertIn("cache-badge flash-warn", body)
 
-    def test_badge_shows_remaining_ttl(self):
-        """TTL>0 且未过期时徽标应显示剩余有效期（剩余 Xh）。"""
-        badge = self._badge(self._body(
-            {"source": "redis", "timestamp": time.time()}, ttl_hours=24))
-        self.assertRegex(badge, r"剩余 \d+h")
+    def test_ttl_zero_never_expires(self):
+        """TTL=0（永不过期）→ 即使快照很旧也无过期文案"""
+        body = self._body(
+            {"source": "redis", "timestamp": time.time() - 100 * 3600}, 0)
+        self.assertNotIn("已过期", body)
+        self.assertIn("cache-badge fresh", body)
 
-    def test_badge_expired_shows_overdue(self):
-        """超过 TTL 的缓存应显示'已过期'。"""
-        old_ts = time.time() - 25 * 3600
-        badge = self._badge(self._body(
-            {"source": "redis", "timestamp": old_ts}, ttl_hours=24))
-        self.assertIn("已过期", badge)
+    def test_process_source_expired(self):
+        """process 快照同样按 TTL 计算过期"""
+        body = self._body(
+            {"source": "process", "timestamp": time.time() - 25 * 3600}, 24)
+        self.assertIn("已过期（下次请求自动刷新）", body)
 
-    def test_badge_no_timestamp_graceful(self):
-        """无时间戳的缓存信息不显示绝对时间与剩余，不报错。"""
-        badge = self._badge(self._body({"source": "redis"}))
-        self.assertIn("Redis 快照", badge)
-        self.assertNotIn("剩余", badge)
-
-    def test_badge_mysql_and_uncached_unchanged(self):
-        """直连 MySQL / 未缓存 分支保持原样式，不含时间戳。"""
-        mysql_badge = self._badge(self._body({"source": "mysql"}))
-        self.assertIn("直连 MySQL", mysql_badge)
-        uncached_badge = self._badge(self._body(None))
-        self.assertIn("未缓存", uncached_badge)
+    def test_direct_mysql_no_expiry_text(self):
+        """直连 MySQL 分支不附加过期文案（直连即最新）"""
+        body = self._body(
+            {"source": "mysql"}, 24)
+        self.assertIn("直连 MySQL", body)
+        self.assertNotIn("已过期", body)
 
 
 if __name__ == "__main__":
