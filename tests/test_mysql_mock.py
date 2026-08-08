@@ -990,6 +990,64 @@ class TestMySQLMigrations(_MySQLCRUDTestBase):
                 and "ADD COLUMN allow_write" in c[0][0]]
         self.assertEqual(adds, [], "列已存在不应重复添加")
 
+    # ---- 迁移 14 续：PH-06 reports.allow_all_output + max_rows ----
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_adds_max_rows_columns_when_missing(self, mock_engine):
+        """report_configs 缺 allow_all_output/max_rows 时，应 ADD COLUMN（存量默认）。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_keys",)
+        # report_configs 列集：含 allow_write、不含两新列
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "UNI", None, ""),
+            ("sql_query", "text", "NO", "", None, ""),
+            ("default_page_size", "int(11)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+            ("result_names", "text", "YES", "", None, ""),
+            ("prefer_cache", "tinyint(4)", "NO", "", None, ""),
+            ("cache_ttl_hours", "int(11)", "NO", "", None, ""),
+            ("sort_order", "int(11)", "NO", "", None, ""),
+            ("allow_write", "int(11)", "NO", "", "1", ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs "
+            "ADD COLUMN allow_all_output INTEGER NOT NULL DEFAULT 1", ())
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs "
+            "ADD COLUMN max_rows INTEGER NOT NULL DEFAULT 100000", ())
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_skips_max_rows_columns_when_exists(self, mock_engine):
+        """report_configs 已有两列 → 不重复 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_keys",)
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "UNI", None, ""),
+            ("sql_query", "text", "NO", "", None, ""),
+            ("default_page_size", "int(11)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+            ("result_names", "text", "YES", "", None, ""),
+            ("prefer_cache", "tinyint(4)", "NO", "", None, ""),
+            ("cache_ttl_hours", "int(11)", "NO", "", None, ""),
+            ("sort_order", "int(11)", "NO", "", None, ""),
+            ("allow_write", "int(11)", "NO", "", "1", ""),
+            ("allow_all_output", "int(11)", "NO", "", "1", ""),
+            ("max_rows", "int(11)", "NO", "", "100000", ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        adds = [c[0][0] for c in self.mock_cursor.execute.call_args_list
+                if isinstance(c[0][0], str)
+                and ("ADD COLUMN allow_all_output" in c[0][0]
+                     or "ADD COLUMN max_rows" in c[0][0])]
+        self.assertEqual(adds, [], "列已存在不应重复添加")
+
     # ---- 缺口 11 补充：迁移 3/4/6/7/8/9/10/11 ----
 
     @patch("db._get_engine", return_value="mysql")

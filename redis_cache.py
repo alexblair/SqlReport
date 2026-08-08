@@ -43,14 +43,17 @@ class ReportSnapshot:
     包含全部结果集、执行时间戳、SQL 原文、配置版本号。
     """
 
-    __slots__ = ("results", "sql_query", "updated_at", "config_version")
+    __slots__ = ("results", "sql_query", "updated_at", "config_version",
+                 "truncated")
 
     def __init__(self, results: list[dict], sql_query: str,
-                 updated_at: float, config_version: str):
+                 updated_at: float, config_version: str,
+                 truncated: bool = False):
         self.results = results
         self.sql_query = sql_query
         self.updated_at = updated_at
         self.config_version = config_version
+        self.truncated = truncated
 
     def to_json(self) -> str:
         """序列化为 JSON 字符串。"""
@@ -59,17 +62,19 @@ class ReportSnapshot:
             "sql_query": self.sql_query,
             "updated_at": self.updated_at,
             "config_version": self.config_version,
+            "truncated": self.truncated,
         })
 
     @classmethod
     def from_json(cls, data: str) -> "ReportSnapshot":
-        """从 JSON 字符串反序列化。"""
+        """从 JSON 字符串反序列化（旧快照无 truncated 字段，缺省 False）。"""
         obj = json.loads(data)
         return cls(
             results=obj["results"],
             sql_query=obj["sql_query"],
             updated_at=obj["updated_at"],
             config_version=obj["config_version"],
+            truncated=bool(obj.get("truncated", False)),
         )
 
 

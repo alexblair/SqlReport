@@ -70,20 +70,24 @@ from render import (
 class CachedResult:
     """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据（支持多结果集）。"""
 
-    __slots__ = ("results", "sql_query", "timestamp", "source", "source_timestamp")
+    __slots__ = ("results", "sql_query", "timestamp", "source",
+                 "source_timestamp", "truncated")
 
     def __init__(self, results: list[dict], sql_query: str,
-                 source: str = None, source_timestamp: float = None):
+                 source: str = None, source_timestamp: float = None,
+                 truncated: bool = False):
         """
         results: [{"columns": [...], "rows": [...]}, ...]
         source: 数据原始来源（redis / mysql），F5 刷新后保留源头信息
         source_timestamp: 原始来源的时间戳（Redis 快照的 updated_at）
+        truncated: 写入时是否发生过 max_rows 截断（PH-06 全量输出护栏）
         """
         self.results = results
         self.sql_query = sql_query
         self.timestamp = time.time()
         self.source = source
         self.source_timestamp = source_timestamp
+        self.truncated = truncated
 
 
 class QueryCache:
@@ -120,10 +124,12 @@ class QueryCache:
 
     def set(self, report_id: int, results: list[dict],
             sql_query: str, source: str = None,
-            source_timestamp: float = None) -> None:
+            source_timestamp: float = None,
+            truncated: bool = False) -> None:
         with self._lock:
             self._cache[report_id] = CachedResult(results, sql_query, source,
-                                                   source_timestamp)
+                                                   source_timestamp,
+                                                   truncated)
 
     def invalidate(self, report_id: int) -> None:
         with self._lock:
@@ -700,7 +706,8 @@ var filterTouchInit = (function () {
 class ReportResult:
     """封装报表查询结果（支持多结果集）"""
 
-    __slots__ = ("results", "active_index", "page", "page_size", "cache_info")
+    __slots__ = ("results", "active_index", "page", "page_size", "cache_info",
+                 "truncated")
 
     def __init__(self, results=None, active_index: int = 0,
                  page: int = 1, page_size: int = 20, **kwargs):
@@ -714,6 +721,7 @@ class ReportResult:
         columns_kw = kwargs.pop("columns", None)
         rows_kw = kwargs.pop("rows", None)
         self.cache_info = kwargs.pop("cache_info", None)
+        self.truncated = kwargs.pop("truncated", None)
         if kwargs:
             raise TypeError(f"不支持的参数: {kwargs}")
 
@@ -808,6 +816,14 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             and sql_contains_write(sql_query):
         raise PermissionError(WRITE_DENIED_MESSAGE)
 
+    # PH-06 全量输出护栏：allow_all_output=0 且 max_rows>0 时结果集截断至 max_rows。
+    # 裸调用（report=None）或存量报表缺字段 → 按存量语义（allow_all_output=1）不截断。
+    max_rows_cfg = int(report.get("max_rows", 0) or 0) if report else 0
+    limit_rows = bool(report is not None
+                      and not int(report.get("allow_all_output", 1) or 0)
+                      and max_rows_cfg > 0)
+    truncated_flag = None  # 本次执行是否发生截断（缓存条目/快照记录的基准值）
+
     prefer_cache = bool(report.get("prefer_cache", 0)) if report else False
     # 预览模式（SQL 来自表单而非数据库）时不写入 Redis
     is_preview = report is not None and sql_query != report.get("sql_query", "")
@@ -846,6 +862,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     cached = cache.get(report_id, sql_query)
     if cached is not None:
         all_results = cached.results
+        truncated_flag = bool(getattr(cached, "truncated", False))
         # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示
         if cached.source == "redis":
             cache_info = {
@@ -864,9 +881,11 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 snapshot = mgr.get_snapshot(snapshot_key)
                 if snapshot is not None:
                     all_results = snapshot.results
+                    truncated_flag = bool(getattr(snapshot, "truncated", False))
                     cache.set(report_id, all_results, sql_query,
                                      source="redis",
-                                     source_timestamp=snapshot.updated_at)
+                                     source_timestamp=snapshot.updated_at,
+                                     truncated=truncated_flag)
                     redis_hit = True
                     cache_info = {
                         "source": "redis",
@@ -888,9 +907,11 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         _snap = _mgr.get_snapshot(snapshot_key)
                         if _snap is not None:
                             all_results = _snap.results
+                            truncated_flag = bool(getattr(_snap, "truncated", False))
                             cache.set(report_id, all_results, sql_query,
                                              source="redis",
-                                             source_timestamp=_snap.updated_at)
+                                             source_timestamp=_snap.updated_at,
+                                             truncated=truncated_flag)
                             redis_hit = True
                             cache_info = {
                                 "source": "redis",
@@ -911,6 +932,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                             _snap = _mgr.get_snapshot(snapshot_key)
                             if _snap is not None:
                                 all_results = _snap.results
+                                truncated_flag = bool(getattr(_snap, "truncated", False))
                                 cache_info = {
                                     "source": "redis_fallback",
                                     "timestamp": _snap.updated_at,
@@ -922,7 +944,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         conn.close()
 
                     if cache_info is None:
-                        # MySQL 查询成功 → 写入各层缓存
+                        # MySQL 查询成功 → 截断至 max_rows 后写入各层缓存
+                        # （缓存即截断快照，省内存；truncated 标记随缓存条目/快照存储）
+                        _cut = False
+                        if limit_rows:
+                            _cut, _ = _apply_max_rows(all_results, max_rows_cfg)
+                            if _cut:
+                                truncated_flag = True
                         _snap_ts = time.time()
                         _redis_written = False
                         if _mgr and prefer_cache and not is_preview:
@@ -931,12 +959,14 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                                 sql_query=sql_query,
                                 updated_at=_snap_ts,
                                 config_version=config_version or "",
+                                truncated=_cut,
                             )
                             _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
                             _redis_written = True
                         cache.set(report_id, all_results, sql_query,
                                          source="redis" if _redis_written else None,
-                                         source_timestamp=_snap_ts if _redis_written else None)
+                                         source_timestamp=_snap_ts if _redis_written else None,
+                                         truncated=_cut)
                         if _redis_written:
                             cache_info = {
                                 "source": "redis",
@@ -957,6 +987,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             active_index = min(max(active_index, 0), len(all_results) - 1)
     elif active_index != -1:
         active_index = 0
+
+    # PH-06 统一兜底：陈旧全量数据（缓存/快照在全量配置下写入，或写缓存前未
+    # 截断的历史数据）按当前配置截断。非就地模式不污染缓存条目/快照。
+    if limit_rows:
+        _cut, all_results = _apply_max_rows(all_results, max_rows_cfg, inplace=False)
+        if _cut:
+            truncated_flag = True
 
     # 对每个结果集独立执行筛选、排序、分页
     report_results = []
@@ -981,7 +1018,37 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         })
 
     return ReportResult(report_results, active_index, page, page_size,
-                        cache_info=cache_info)
+                        cache_info=cache_info, truncated=truncated_flag)
+
+
+def _apply_max_rows(all_results: list[dict], max_rows: int,
+                    inplace: bool = True) -> tuple[bool, list[dict]]:
+    """对每个结果集独立截断至 max_rows 行。
+
+    PH-06 全量输出护栏：allow_all_output=0 时结果集超过 max_rows 即截断。
+    inplace=True 时就地修改结果集（供写缓存前截断，截断快照入缓存）；
+    inplace=False 时返回新列表（供读取兜底，不污染缓存条目/快照）。
+    返回 (是否发生过截断, 处理后的结果集列表)。
+    """
+    truncated = False
+    if inplace:
+        for res in all_results:
+            rows = res.get("rows") or []
+            if len(rows) > max_rows:
+                res["rows"] = rows[:max_rows]
+                truncated = True
+        return truncated, all_results
+    new_results = []
+    for res in all_results:
+        rows = res.get("rows") or []
+        if len(rows) > max_rows:
+            new_res = dict(res)
+            new_res["rows"] = rows[:max_rows]
+            new_results.append(new_res)
+            truncated = True
+        else:
+            new_results.append(res)
+    return truncated, new_results
 
 
 # ===================================================================

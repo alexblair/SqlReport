@@ -545,8 +545,27 @@ def _init_sqlite_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
-    # ---- 预留：PH-06 reports.allow_all_output、max_rows 的 ----
-    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
+    # 迁移 14 续：PH-06 reports.allow_all_output（存量默认 1 = 保持现状；
+    # 新建默认 0 由表单/写入路径控制）+ max_rows（默认 100000，仅关闭全量输出时生效）
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    report_cols = {row[1] for row in cursor.fetchall()}
+    if "allow_all_output" not in report_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN allow_all_output INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "max_rows" not in report_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN max_rows INTEGER NOT NULL DEFAULT 100000")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
 
 
 def _init_mysql_migrations(conn) -> None:
@@ -790,8 +809,24 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
     except Exception:
         conn.rollback()
-    # ---- 预留：PH-06 reports.allow_all_output、max_rows 的 ----
-    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次，MySQL 用 SHOW COLUMNS）----
+    # 迁移 14 续：PH-06 reports.allow_all_output（存量默认 1 = 保持现状；
+    # 新建默认 0 由表单/写入路径控制）+ max_rows（默认 100000，仅关闭全量输出时生效）
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        report_cols = {row[0] for row in cursor.fetchall()}
+        if "allow_all_output" not in report_cols:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN allow_all_output INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        if "max_rows" not in report_cols:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN max_rows INTEGER NOT NULL DEFAULT 100000")
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
 
 
 # ---------------------------------------------------------------------------

@@ -273,7 +273,7 @@ class BaseStateMachineTest(unittest.TestCase):
                 category_id INTEGER,
                 memo TEXT,
                 result_names TEXT DEFAULT '',
-                sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1);
+                sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
         """)
         return conn
 

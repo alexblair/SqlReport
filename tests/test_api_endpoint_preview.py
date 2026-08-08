@@ -35,7 +35,7 @@ def _mk_conn():
             sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20,
             pool_id INTEGER, category_id INTEGER, memo TEXT,
             result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1,
-            cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1);
+            cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
         CREATE TABLE api_endpoints (
             id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL,
             name TEXT NOT NULL, url_path TEXT UNIQUE NOT NULL,

@@ -90,7 +90,7 @@ def _set_up_db():
             sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20,
             pool_id INTEGER, category_id INTEGER, memo TEXT,
             result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1,
-            cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1,
+            cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL);
         CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY, username TEXT NOT NULL, created_at REAL NOT NULL);
