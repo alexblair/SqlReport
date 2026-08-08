@@ -29,6 +29,7 @@ import api_handler
 import app_config
 import html as html_mod
 from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
+from query_executor import sql_contains_write
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
 from render import (
     build_pool_form_html,
@@ -46,6 +47,7 @@ from render import (
     build_api_endpoint_form_html,
     build_api_endpoint_preview_help_html,
     _build_desc_summary_html,
+    _WARN_BOX_STYLE,
 )
 from report import parse_result_names
 
@@ -313,14 +315,35 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
                        required_attr, no_pool_opt, pool_options, category_options, memo_val,
                        result_names_val='',
                        is_edit=False, report_id=None,
-                       prefer_cache=1, cache_ttl_hours=0):
-    """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）"""
+                       prefer_cache=1, cache_ttl_hours=0,
+                       allow_write=0, sql_has_write=False):
+    """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）。
+
+    allow_write: 「允许执行写操作」当前值（存量 1、新建 0）。
+    sql_has_write: SQL 是否含写语句。含写时显示开关 checkbox 与警示；
+                   否则仅渲染隐藏 allow_write=0（保底提交，维持新建默认 0）。
+    """
     view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
                 if is_edit and report_id else "")
-    preview_btn = (f'<button type="button" class="btn btn-outline btn-sm" onclick="previewReport(this.form)">预览</button>'
-                   if is_edit and report_id else "")
+    # PH-05：预览按钮对新建/复制/编辑表单均可用（无 id 时 POST sql_query+pool_id 构造预览）
+    preview_btn = ('<button type="button" class="btn btn-outline btn-sm" onclick="previewReport(this.form)">预览</button>'
+                   if not is_edit or report_id else "")
     hidden_id = f'<input type="hidden" name="id" value="{report_id}">' if is_edit and report_id else ""
     cache_checked = ' checked' if prefer_cache else ''
+    if sql_has_write:
+        aw_checked = ' checked' if allow_write else ''
+        allow_write_html = (f'<label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">'
+                            f'<input type="hidden" name="allow_write" value="0">'
+                            f'<input type="checkbox" name="allow_write" value="1"{aw_checked}>'
+                            f'<span style="font-weight:600">允许执行写操作</span>'
+                            f'<span style="color:#94a3b8;font-weight:400;font-size:13px">（SQL 含写语句；未开启时将拒绝执行）</span>'
+                            f'</label>')
+        if not allow_write:
+            allow_write_html += ('<div class="flash-warn" style="'
+                                 + _WARN_BOX_STYLE + '">'
+                                 '⚠️ 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
+    else:
+        allow_write_html = '<input type="hidden" name="allow_write" value="0">'
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form" data-action="{action_url}">
@@ -364,6 +387,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
            style="width:120px">
     <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
   </label>
+  {allow_write_html}
   <div class="form-actions">
     <button type="submit" name="action" value="save_close" class="btn btn-primary">保存返回上级</button>
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
@@ -423,12 +447,17 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
     prefer_cache = _tolerant_int(report.get("prefer_cache"), 1) if report else 1
     # 新建报表默认 TTL 1 小时（避免永不过期导致长期看到过期数据）；编辑/复制沿用原值
     cache_ttl_hours = _tolerant_int(report.get("cache_ttl_hours"), 1) if report else 1
+    # PH-05 写护栏：SQL 含写 → 显示开关（存量默认 1 保持现状；新建默认 0）
+    raw_sql = report["sql_query"] if report else ""
+    allow_write = _tolerant_int(report.get("allow_write"), 1) if report else 0
+    sql_has_write = sql_contains_write(raw_sql)
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
                               result_names_val=result_names_val,
                               is_edit=is_edit, report_id=report.get("id") if report else None,
-                              prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours)
+                              prefer_cache=prefer_cache, cache_ttl_hours=cache_ttl_hours,
+                              allow_write=allow_write, sql_has_write=sql_has_write)
 
 
 def _render_pool_section(conn) -> str:
@@ -649,6 +678,8 @@ def _parse_report_form(data: dict) -> dict:
         "result_names": data.get("result_names") or "",
         "prefer_cache": int(data.get("prefer_cache", 1) or 0),
         "cache_ttl_hours": int(data.get("cache_ttl_hours", 0) or 0),
+        # 表单始终携带隐藏 allow_write=0（checkbox 勾选时提交 0,1，取最后一个为 1）
+        "allow_write": int(data.get("allow_write", 0) or 0),
     }
 
 
@@ -720,6 +751,7 @@ def _report_from_form(data: dict, report_id: int = None) -> dict:
         "result_names": data.get("result_names", ""),
         "prefer_cache": _tolerant_int(data.get("prefer_cache"), 1),
         "cache_ttl_hours": data.get("cache_ttl_hours", "0"),
+        "allow_write": _tolerant_int(data.get("allow_write"), 0),
     }
     if report_id is not None:
         report["id"] = report_id
@@ -901,6 +933,7 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
                             result_names=rf["result_names"],
                             prefer_cache=rf["prefer_cache"],
                             cache_ttl_hours=rf["cache_ttl_hours"],
+                            allow_write=rf["allow_write"],
                             session_user=session_user)
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
@@ -925,6 +958,7 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
                               result_names=rf["result_names"],
                               prefer_cache=rf["prefer_cache"],
                               cache_ttl_hours=rf["cache_ttl_hours"],
+                              allow_write=rf["allow_write"],
                               session_user=session_user)
         if ok:
             return _save_or_render(
@@ -956,6 +990,7 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
                             result_names=rf["result_names"],
                             prefer_cache=rf["prefer_cache"],
                             cache_ttl_hours=rf["cache_ttl_hours"],
+                            allow_write=rf["allow_write"],
                             session_user=session_user)
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},

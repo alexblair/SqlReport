@@ -44,7 +44,7 @@ def _make_conn():
             result_names TEXT DEFAULT '',
             prefer_cache INTEGER NOT NULL DEFAULT 1,
             cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
-            sort_order INTEGER NOT NULL DEFAULT 0);
+            sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1);
     """)
     return conn
 

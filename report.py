@@ -33,6 +33,13 @@ import static_cache
 import app_config
 import config_db
 from result_transform import filter_rows, sort_rows, select_columns, calc_total_pages
+from query_executor import sql_contains_write
+
+# PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
+WRITE_DENIED_MESSAGE = "该报表包含写操作语句且未开启『允许执行写操作』，请到编辑页开启"
+WRITE_ALLOWED_BANNER = "本报表包含写操作语句，执行会修改数据库数据"
+# 报表页顶部警示条共享样式（预览模式警示条与写操作警示条共用，防样式漂移）
+_BANNER_STYLE = "padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600"
 
 # 从 render.py 导入常量和渲染函数（移走了纯 HTML 生成逻辑）
 from render import (
@@ -793,6 +800,14 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     page = max(page if page is not None else 1, 1)
     page_size = max(page_size if page_size is not None else 20, 1)
 
+    # PH-05 写操作护栏：实际 SQL 含写语句且报表未开启 allow_write → 拒绝执行。
+    # 拦截置于缓存读取之前，防止已缓存结果绕过拦截；裸调用（report=None，测试等）
+    # 不拦截，保持历史契约。
+    if report is not None \
+            and not int(report.get("allow_write", 1) or 0) \
+            and sql_contains_write(sql_query):
+        raise PermissionError(WRITE_DENIED_MESSAGE)
+
     prefer_cache = bool(report.get("prefer_cache", 0)) if report else False
     # 预览模式（SQL 来自表单而非数据库）时不写入 Redis
     is_preview = report is not None and sql_query != report.get("sql_query", "")
@@ -1088,7 +1103,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        sql_override: str = None,
                        active_index: int = 0,
                        result_names_override: str = None,
-                       flash: str = None) -> str:
+                       flash: str = None,
+                       report_override: dict = None) -> str:
     """
     渲染报表数据展示页，支持多字段排序/筛选/自定义列/多结果集。
     cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
@@ -1096,8 +1112,13 @@ def render_report_page(conn, report_id: int, page: int = 1,
     sql_override: 预览模式时替代 report["sql_query"] 的临时 SQL，不保存到数据库。
     active_index: 当前激活的结果集索引。
     flash: 操作结果提示（如 API 快捷开关回跳），None=不显示。
+    report_override: 预览报表配置 dict（新建表单预览等无库中报表的场景），
+                     提供后不再按 report_id 从库中读取。
     """
-    report = db.get_report(conn, report_id)
+    if report_override is not None:
+        report = report_override
+    else:
+        report = db.get_report(conn, report_id)
     if not report:
         return _render_page_header() + '<div class="flash flash-error">错误: 报表不存在</div>' + _FOOTER
 
@@ -1264,16 +1285,30 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     # ---- 组装最终 HTML ----
     flash_html = build_flash_html(flash) if flash else ""
+    # PH-05 写操作警示条：allow_write=1 且实际 SQL 含写语句 → 页面顶部显著警示
+    # （allow_write=0 时执行已被 execute_report 拦截，不会到达渲染）
+    write_banner = ''
+    if int(report.get("allow_write", 1) or 0) and sql_contains_write(actual_sql):
+        write_banner = ('<div class="flash-warn" style="'
+                        + _BANNER_STYLE + '">'
+                        f'⚠️ {WRITE_ALLOWED_BANNER}'
+                        '</div>')
+    # 无库中报表的预览（新建表单预览，report_id=0）不显示编辑入口
+    edit_btn = ''
+    if report_id > 0:
+        edit_btn = (f'<div style="margin-bottom:10px">'
+                    f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
+                    f'</div>')
     body = (_render_page_header() +
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
             f'<h2>{_escape(report["name"])}</h2>' +
-            ('<div class="preview-badge flash-warn" style="padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600">'
+            ('<div class="preview-badge flash-warn" style="'
+             + _BANNER_STYLE + '">'
              '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
              '</div>' if sql_override else '') +
-             f'<div style="margin-bottom:10px">'
-             f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
-             f'</div>' +
+            write_banner +
+            edit_btn +
             flash_html +
             memo_html +
             api_urls_html +
@@ -1316,18 +1351,57 @@ def handle_request(conn, method: str, path: str, query: str,
     解析多字段排序/刷新缓存等参数。
     支持 POST 预览模式（/report/preview），不保存配置，临时查看。
     """
-    # 预览模式：不保存配置，临时以表单中的 SQL 在新窗口中查看
+    # 预览模式：不保存配置，临时以表单中的 SQL 在新窗口中查看。
+    # 支持无 id（新建/复制表单预览）：POST sql_query + pool_id 构造临时报表配置，
+    # allow_write 取表单值（checkbox+hidden 提交顺序为 0,1，取最后一个，与
+    # parse_form_urlencoded 的重复键语义一致）。
     if path == "/report/preview" and method == "POST":
         form_data = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
-        try:
-            preview_id_str = form_data.get("id", [None])[0] or ""
-            preview_id = int(preview_id_str)
-        except (ValueError, TypeError, IndexError):
-            return 200, render_report_selector(conn), {}
-        sql_override = form_data.get("sql_query", [None])[0] or ""
+
+        def _last(key, default=None):
+            return (form_data.get(key) or [default])[-1]
+
+        sql_override = _last("sql_query", "") or ""
         preview_result = parse_result_index(form_data)
-        preview_names = form_data.get("result_names", [None])[0]
-        return 200, render_report_page(conn, preview_id, sql_override=sql_override,
+        preview_names = _last("result_names")
+        try:
+            preview_id = int(_last("id", "") or "")
+        except (ValueError, TypeError):
+            preview_id = None
+        if preview_id is not None and preview_id > 0:
+            # 有 id 预览：报表配置取自库中；若表单提交了 allow_write（编辑表单
+            # 开关 + hidden 保底），以表单值为准——表单开关状态与预览执行联动
+            report_cfg = db.get_report(conn, preview_id)
+            if report_cfg is not None and "allow_write" in form_data:
+                report_cfg = dict(report_cfg)
+                report_cfg["allow_write"] = int(_last("allow_write", "0") or "0")
+            return 200, render_report_page(conn, preview_id, sql_override=sql_override,
+                                             report_override=report_cfg,
+                                             active_index=preview_result,
+                                             result_names_override=preview_names or None), {}
+        # 无 id：新建预览（缺少 pool_id 或 SQL 时回退报表选择页，兼容历史行为）
+        pool_id_raw = _last("pool_id", "") or ""
+        if not pool_id_raw or not sql_override:
+            return 200, render_report_selector(conn), {}
+        try:
+            pool_id = int(pool_id_raw)
+        except (ValueError, TypeError):
+            return 200, render_report_selector(conn), {}
+        preview_report = {
+            "id": 0,
+            "name": "新建报表预览",
+            "pool_id": pool_id,
+            "sql_query": sql_override,
+            "default_page_size": app_config.safe_int(_last("default_page_size", "20"), 20),
+            "category_id": None,
+            "memo": None,
+            "result_names": preview_names or "",
+            "prefer_cache": 0,
+            "cache_ttl_hours": 0,
+            "allow_write": int(_last("allow_write", "0") or "0"),
+        }
+        return 200, render_report_page(conn, 0, sql_override=sql_override,
+                                         report_override=preview_report,
                                          active_index=preview_result,
                                          result_names_override=preview_names or None), {}
 

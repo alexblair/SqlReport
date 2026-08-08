@@ -976,12 +976,17 @@ def add_report(conn, name: str, sql_query: str,
                result_names=None,
                prefer_cache: int = 1,
                cache_ttl_hours: int = 0,
+               allow_write: int = 0,
                session_user=None) -> int:
-    """新增报表配置，返回自增 id。自动分配 sort_order。"""
+    """新增报表配置，返回自增 id。自动分配 sort_order。
+
+    allow_write: 是否允许执行写语句。新建默认 0（写护栏，PH-05）；
+                 存量数据由迁移 14 统一置 1（保持现状）。
+    """
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, max_order + 1),
     )
     conn.commit()
     _write_audit_log(session_user, "create_report", "report", cur.lastrowid, name,
@@ -989,7 +994,8 @@ def add_report(conn, name: str, sql_query: str,
                                   "default_page_size": default_page_size,
                                   "pool_id": pool_id, "category_id": category_id,
                                   "memo": memo, "prefer_cache": prefer_cache,
-                                  "cache_ttl_hours": cache_ttl_hours})
+                                  "cache_ttl_hours": cache_ttl_hours,
+                                  "allow_write": allow_write})
     return cur.lastrowid
 
 
@@ -1015,12 +1021,16 @@ def update_report(conn, report_id: int, name: str,
                   result_names=None,
                   prefer_cache: int = 1,
                   cache_ttl_hours: int = 0,
+                  allow_write: int = 1,
                   session_user=None) -> bool:
-    """更新报表配置，影响行数 >0 返回 True。"""
+    """更新报表配置，影响行数 >0 返回 True。
+
+    allow_write: 编辑表单提交值；缺省 1 兼容历史调用（保持存量语义）。
+    """
     before = get_report(conn, report_id) if session_user else None
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=?,allow_write=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, report_id),
     )
     conn.commit()
     _write_audit_log(session_user, "update_report", "report", report_id, name,
@@ -1029,7 +1039,8 @@ def update_report(conn, report_id: int, name: str,
                                   "default_page_size": default_page_size,
                                   "pool_id": pool_id, "category_id": category_id,
                                   "memo": memo, "prefer_cache": prefer_cache,
-                                  "cache_ttl_hours": cache_ttl_hours})
+                                  "cache_ttl_hours": cache_ttl_hours,
+                                  "allow_write": allow_write})
     return cur.rowcount > 0
 
 

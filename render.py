@@ -148,6 +148,9 @@ _FLASH_WARN_CSS = """
 .flash-warn { background: #fefce8 !important; color: #92400e !important; }
 """
 
+# 黄色警示框内联样式（flash-warn 块级组件：表单警示、结果集名称警示共用，防样式漂移）
+_WARN_BOX_STYLE = "margin:8px 0;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;font-size:13px"
+
 _COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS
 
 # ---------------------------------------------------------------------------
@@ -2132,10 +2135,10 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
 
     warning_html = ""
     if not has_names:
-        warning_html = f'''<div class="flash-warn" style="margin:8px 0;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;font-size:13px">
-  <span>⚠️ 该报表的 SQL 包含 {result_count} 段 SELECT，但未配置结果集名称</span>
-  <span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>
-</div>'''
+        warning_html = (f'<div class="flash-warn" style="{_WARN_BOX_STYLE}">'
+                        f'<span>⚠️ 该报表的 SQL 包含 {result_count} 段 SELECT，但未配置结果集名称</span>'
+                        f'<span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>'
+                        f'</div>')
 
     return f'''<div class="result-mode-section" style="margin-bottom:16px;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
   <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">结果集输出模式</div>

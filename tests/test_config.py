@@ -55,7 +55,7 @@ def _make_conn():
             result_names TEXT DEFAULT '',
             prefer_cache INTEGER NOT NULL DEFAULT 1,
             cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
-            sort_order INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
@@ -537,11 +537,12 @@ class TestReportFormButtons(unittest.TestCase):
         self.assertIn("previewReport(this.form)", body)
         self.assertIn("/report/preview", body)
 
-    def test_add_form_has_no_view_or_preview_button(self):
-        """新增报表表单不应包含【查看】和【预览】按钮"""
+    def test_add_form_has_preview_button_but_no_view(self):
+        """新增报表表单应有【预览】按钮（PH-05 打通新建预览），但无【查看】和隐藏 id"""
         code, body, _ = config.handle_request(self.conn, "GET",
                                                "/config/reports/add", "")
-        self.assertNotIn('onclick="previewReport(this.form)"', body)
+        self.assertIn('onclick="previewReport(this.form)"', body)
+        self.assertIn("/report/preview", body)
         self.assertNotIn('name="id"', body)
         # "查看"链接（target="_blank"）在 JS 高亮预览功能中存在，判断方式改为检查具体按钮
         self.assertNotIn('/report?id=', body)

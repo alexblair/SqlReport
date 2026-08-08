@@ -24,7 +24,8 @@ import hmac
 import db
 import app_config
 import auth
-from report import execute_report, parse_result_names
+from report import execute_report, parse_result_names, WRITE_DENIED_MESSAGE
+from query_executor import sql_contains_write
 import static_cache
 from json_template import is_template_enabled, render_template
 from result_transform import select_columns, column_indices, calc_total_pages
@@ -194,6 +195,12 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
 
     report = db.get_report(conn, endpoint["report_id"])
     if report is None or report.get("pool_id") is None:
+        return _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
+
+    # PH-05 写护栏：allow_write=0 且 SQL 含写 → 回退普通链路（execute_report 统一 403），
+    # 防止历史静态缓存文件绕过护栏直出（普通 API 与 .json 变体行为必须一致）
+    if not int(report.get("allow_write", 1) or 0) \
+            and sql_contains_write(report.get("sql_query") or ""):
         return _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
 
     ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
@@ -369,18 +376,23 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     result_index = int(endpoint.get("result_index", 0))
     active_index = -1 if result_mode == "all" else result_index
 
-    result = execute_report(
-        report_id=report_id,
-        sql_query=report["sql_query"],
-        pool_config=pool_config,
-        page=page,
-        page_size=ps,
-        sorts=sorts,
-        filters=filters,
-        refresh=refresh,
-        active_index=active_index,
-        report=report,
-    )
+    try:
+        result = execute_report(
+            report_id=report_id,
+            sql_query=report["sql_query"],
+            pool_config=pool_config,
+            page=page,
+            page_size=ps,
+            sorts=sorts,
+            filters=filters,
+            refresh=refresh,
+            active_index=active_index,
+            report=report,
+        )
+    except PermissionError as e:
+        # PH-05 写护栏：写语句报表未开启 allow_write → 403 结构化错误
+        body, err_headers = _error_response(str(e), "WRITE_DENIED", headers)
+        return 403, body, err_headers
 
     # 全部输出模式
     if result_mode == "all":

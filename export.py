@@ -42,7 +42,8 @@ from typing import Optional, Union
 import db
 import app_config
 from render import format_cell
-from report import parse_filters, parse_sorts, parse_result_index
+from report import parse_filters, parse_sorts, parse_result_index, WRITE_DENIED_MESSAGE
+from query_executor import sql_contains_write
 from result_transform import filter_rows, sort_rows, select_columns, column_indices
 
 
@@ -379,6 +380,12 @@ def handle_export(conn, query: str,
 
     # 多结果集索引
     result_index = parse_result_index(qs)
+
+    # PH-05 写护栏：导出走独立连接路径，同样按规则拦截
+    # （allow_write=0 且报表 SQL 含写语句 → 拒绝导出，与页面/API 一致）
+    if not int(report_config.get("allow_write", 1) or 0) \
+            and sql_contains_write(report_config["sql_query"]):
+        return 403, WRITE_DENIED_MESSAGE, {}
 
     # 执行导出
     try:

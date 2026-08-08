@@ -273,7 +273,7 @@ class BaseStateMachineTest(unittest.TestCase):
                 category_id INTEGER,
                 memo TEXT,
                 result_names TEXT DEFAULT '',
-                sort_order INTEGER NOT NULL DEFAULT 0);
+                sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1);
         """)
         return conn
 
