@@ -212,6 +212,42 @@ class TestStaticCache(MockMySQLMixin, unittest.TestCase):
                          "application/json; charset=utf-8")
         self.assertEqual(body2, body)
 
+    def test_refresh_param_bypasses_cache_hit(self):
+        """refresh=1 强制绕过缓存命中：已有文件也走 miss 重算链路并重新落盘。"""
+        rid = self._create_report()
+        self._create_endpoint(report_id=rid)
+        # 首次：miss 生成文件
+        status, body, resp_headers = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers.get("X-Static-Cache"), "miss")
+        # 二次：hit 命中缓存文件
+        status, body2, resp_headers2 = self._request("/api/cust.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers2.get("X-Static-Cache"), "hit")
+        # 三次：refresh=1 → 强制 miss 重算，返回内容与文件一致
+        status, body3, resp_headers3 = self._request(
+            "/api/cust.json", query={"refresh": ["1"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(resp_headers3.get("X-Static-Cache"), "miss")
+        data = json.loads(body3)
+        self.assertTrue(data["full"])
+        self.assertEqual(len(data["data"]), 3)
+        # 后续不带 refresh 的请求应命中刷新后的文件
+        file_path = static_cache.resolve_file_path("api/cust")
+        self.assertIsNotNone(file_path)
+        with open(file_path, "r", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), body3)
+
+    def test_refresh_ignored_on_static_disabled(self):
+        """refresh=1 不影响非静态分支：端点未命中静态时走普通链路。"""
+        rid = self._create_report()
+        self._create_endpoint(report_id=rid, url_path="/api/refresh-norm")
+        # 普通路径（无 .json 后缀）带 refresh=1：走普通 API 链路，无静态头
+        status, body, resp_headers = self._request(
+            "/api/refresh-norm", query={"refresh": ["1"]})
+        self.assertEqual(status, 200)
+        self.assertNotIn("X-Static-Cache", resp_headers)
+
     def test_static_output_excludes_description(self):
         """静态缓存链路输出不含接口说明（description 只用于页面展示）。"""
         rid = self._create_report()

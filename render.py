@@ -893,7 +893,8 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
                            cache_ttl_hours: int = 0) -> str:
     """构建缓存状态标签 HTML。
 
-    当 prefer_cache=True 且 cache_ttl_hours>0 时，额外显示 TTL 信息。
+    徽标包含：来源标签、绝对建立时间（YYYY-MM-DD HH:MM:SS）、相对时间、
+    prefer_cache 标记、TTL 与剩余有效期。
     """
     extra = ""
     if prefer_cache:
@@ -904,19 +905,22 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
         src = cache_info.get("source", "")
         ts = cache_info.get("timestamp")
         if src == "redis":
-            age = int(time.time() - ts) if ts else 0
+            text = _cache_meta_text(ts) + extra
+            text += _cache_remaining_text(ts, cache_ttl_hours)
             return ('<span class="cache-badge fresh">'
-                    f'Redis 快照 ({age}s 前{extra})'
+                    f'Redis 快照 ({text})'
                     '</span>')
         elif src == "redis_fallback":
-            age = int(time.time() - ts) if ts else 0
+            text = _cache_meta_text(ts) + extra
+            text += _cache_remaining_text(ts, cache_ttl_hours)
             return ('<span class="cache-badge flash-warn">'
-                    f'缓存快照（{age}s 前{extra}，MySQL 不可用）'
+                    f'缓存快照（{text}，MySQL 不可用）'
                     '</span>')
         elif src == "process":
-            age = int(time.time() - ts) if ts else 0
+            text = _cache_meta_text(ts) + extra
+            text += _cache_remaining_text(ts, cache_ttl_hours)
             return ('<span class="cache-badge fresh">'
-                    f'进程缓存 ({age}s 前刷新{extra})'
+                    f'进程缓存 ({text})'
                     '</span>')
         else:
             badge = '直连 MySQL'
@@ -928,6 +932,25 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
         if extra:
             badge += f' ({extra.strip()})'
         return f'<span class="cache-badge">{badge}</span>'
+
+
+def _cache_meta_text(ts) -> str:
+    """徽标内的时间描述：绝对建立时间（有时间戳时）+ 相对时间。"""
+    if ts:
+        age = int(time.time() - ts)
+        return f"{app_config.format_local_time(ts, with_tz=False)} 建立 · {age}s 前"
+    return ""
+
+
+def _cache_remaining_text(ts, cache_ttl_hours: int) -> str:
+    """剩余有效期描述：TTL 与建立时间都存在时显示剩余小时或已过期。"""
+    if not ts or cache_ttl_hours <= 0:
+        return ""
+    age = int(time.time() - ts)
+    remaining = cache_ttl_hours - age / 3600.0
+    if remaining > 0:
+        return f" | 剩余 {int(remaining)}h"
+    return " | 已过期"
 
 
 def build_sort_bar_html(report_id, page_size, sorts, filters,

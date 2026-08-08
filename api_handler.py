@@ -198,6 +198,11 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
     ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
     config_version = _compute_static_config_version(endpoint, report)
 
+    # refresh=1：强制绕过缓存命中，走完整重算 + 落盘链路（重建缓存）
+    if query_params.get("refresh") == ["1"]:
+        return _execute_static_miss(
+            conn, endpoint, url_key, file_path, ttl_hours, config_version, headers)
+
     content = static_cache.try_read(file_path, config_version, ttl_hours)
     if content is not None:
         resp_headers = {

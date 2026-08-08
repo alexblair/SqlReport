@@ -416,7 +416,8 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
         conn, report.get("category_id") if report else "")
 
     prefer_cache = _tolerant_int(report.get("prefer_cache"), 1) if report else 1
-    cache_ttl_hours = _tolerant_int(report.get("cache_ttl_hours"), 0) if report else 0
+    # 新建报表默认 TTL 1 小时（避免永不过期导致长期看到过期数据）；编辑/复制沿用原值
+    cache_ttl_hours = _tolerant_int(report.get("cache_ttl_hours"), 1) if report else 1
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,

@@ -9,6 +9,7 @@ test_config.py — config.py 单元测试
 import unittest
 import sqlite3
 import urllib.parse
+import re
 import config
 import db
 import auth
@@ -417,6 +418,26 @@ class TestReportFlow(unittest.TestCase):
         rpt = db.get_report(self.conn, rid)
         self.assertEqual(rpt["prefer_cache"], 0)
         self.assertEqual(rpt["cache_ttl_hours"], 0)
+
+    def test_add_report_form_default_ttl_one(self):
+        """新增报表表单默认 TTL=1 小时（避免默认永不过期导致长期看到过期数据）。"""
+        code, body, headers = config.handle_request(
+            self.conn, "GET", "/config/reports/add", "")
+        self.assertEqual(code, 200)
+        m = re.search(r'name="cache_ttl_hours" value="(\d+)"', body)
+        self.assertIsNotNone(m, "表单应含 cache_ttl_hours 输入框")
+        self.assertEqual(m.group(1), "1")
+
+    def test_edit_report_form_keeps_original_ttl(self):
+        """编辑已有报表时 TTL 沿用原值（不重置为默认值）。"""
+        rid = db.add_report(self.conn, "TTL保留报表", "SELECT 1", 20, 1,
+                            prefer_cache=1, cache_ttl_hours=6)
+        code, body, headers = config.handle_request(
+            self.conn, "GET", f"/config/reports/{rid}/edit", "")
+        self.assertEqual(code, 200)
+        m = re.search(r'name="cache_ttl_hours" value="(\d+)"', body)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "6")
 
 
 class TestFlashMessage(unittest.TestCase):
