@@ -190,6 +190,18 @@ _SQLITE_SCHEMA = """
         description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        endpoint_id INTEGER NOT NULL,
+        name        TEXT    NOT NULL,
+        api_key     TEXT    NOT NULL,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_api_keys_endpoint ON api_keys(endpoint_id);
 """
 
 _MYSQL_SCHEMA = """
@@ -262,6 +274,17 @@ _MYSQL_SCHEMA = """
         json_template    TEXT,
         description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id          INTEGER AUTO_INCREMENT PRIMARY KEY,
+        endpoint_id INTEGER NOT NULL,
+        name        VARCHAR(255) NOT NULL,
+        api_key     VARCHAR(255) NOT NULL,
+        enabled     TINYINT NOT NULL DEFAULT 1,
+        created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE,
+        INDEX idx_api_keys_endpoint (endpoint_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
@@ -482,6 +505,37 @@ def _init_sqlite_migrations(conn) -> None:
         except Exception:
             conn.rollback()
 
+    # 迁移 14: API Key 多 key 化（PH-02 建立）——建 api_keys 表 + 旧列数据迁入。
+    # PH-04/PH-06 的新列并入同一迁移批次，不得新建迁移号（预留段见下）。
+    conn.execute("""CREATE TABLE IF NOT EXISTS api_keys (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        endpoint_id INTEGER NOT NULL,
+        name        TEXT    NOT NULL,
+        api_key     TEXT    NOT NULL,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
+    )""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_endpoint ON api_keys(endpoint_id)")
+    # 数据迁移（幂等：已迁入的 key 跳过；旧列置空后无重复源）：
+    # api_endpoints.api_key 非空 → 插入 api_keys（name=端点名），旧列置空作兼容回退
+    rows = conn.execute(
+        "SELECT id, name, api_key FROM api_endpoints "
+        "WHERE api_key IS NOT NULL AND api_key != ''").fetchall()
+    for eid, name, key in rows:
+        exists = conn.execute(
+            "SELECT 1 FROM api_keys WHERE endpoint_id=? AND api_key=?",
+            (eid, key)).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO api_keys (endpoint_id, name, api_key, enabled) "
+                "VALUES (?,?,?,1)", (eid, name, key))
+            conn.execute("UPDATE api_endpoints SET api_key='' WHERE id=?", (eid,))
+    conn.commit()
+    # ---- 预留：PH-04 reports.allow_write / PH-06 reports.allow_all_output、max_rows 的
+    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次，SQLite 用 PRAGMA table_info）----
+
 
 def _init_mysql_migrations(conn) -> None:
     """MySQL 专属迁移逻辑（使用 SHOW COLUMNS 替代 PRAGMA table_info）。"""
@@ -668,6 +722,52 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+
+    # 迁移 14: API Key 多 key 化（PH-02 建立）——建 api_keys 表 + 旧列数据迁入。
+    # PH-04/PH-06 的新列并入同一迁移批次，不得新建迁移号（预留段见下）。
+    try:
+        cursor = conn.execute("SHOW TABLES LIKE 'api_keys'")
+        api_keys_exists = bool(cursor.fetchone())
+    except Exception:
+        api_keys_exists = False
+    if not api_keys_exists:
+        try:
+            conn.execute("""CREATE TABLE api_keys (
+                id          INTEGER AUTO_INCREMENT PRIMARY KEY,
+                endpoint_id INTEGER NOT NULL,
+                name        VARCHAR(255) NOT NULL,
+                api_key     VARCHAR(255) NOT NULL,
+                enabled     TINYINT NOT NULL DEFAULT 1,
+                created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE,
+                INDEX idx_api_keys_endpoint (endpoint_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    # 数据迁移（幂等：已迁入的 key 跳过；旧列置空后无重复源）：
+    # api_endpoints.api_key 非空 → 插入 api_keys（name=端点名），旧列置空作兼容回退
+    try:
+        cursor = conn.execute(
+            "SELECT id, name, api_key FROM api_endpoints "
+            "WHERE api_key IS NOT NULL AND api_key != ''")
+        rows = cursor.fetchall()
+        for row in rows:
+            eid, name, key = row[0], row[1], row[2]
+            cursor2 = conn.execute(
+                "SELECT 1 FROM api_keys WHERE endpoint_id=%s AND api_key=%s",
+                (eid, key))
+            if not cursor2.fetchone():
+                conn.execute(
+                    "INSERT INTO api_keys (endpoint_id, name, api_key, enabled) "
+                    "VALUES (%s,%s,%s,1)", (eid, name, key))
+                conn.execute(
+                    "UPDATE api_endpoints SET api_key='' WHERE id=%s", (eid,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    # ---- 预留：PH-04 reports.allow_write / PH-06 reports.allow_all_output、max_rows 的
+    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次，MySQL 用 SHOW COLUMNS）----
 
 
 # ---------------------------------------------------------------------------
@@ -1453,6 +1553,66 @@ def delete_api_endpoint(conn, endpoint_id: int, session_user=None) -> bool:
     _write_audit_log(session_user, "delete_api_endpoint", "api_endpoint",
                      endpoint_id, before.get("name") if before else None,
                      before_value=before)
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# API Key 多 key 化 CRUD（PH-02）
+# ---------------------------------------------------------------------------
+
+
+def get_api_key(conn, key_id: int) -> dict | None:
+    """根据 id 查询 API Key，不存在返回 None。"""
+    row = conn.execute(
+        "SELECT * FROM api_keys WHERE id=?", (key_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_api_keys(conn, endpoint_id: int) -> list[dict]:
+    """列出某端点的全部 API Key（按创建顺序）。"""
+    rows = conn.execute(
+        "SELECT * FROM api_keys WHERE endpoint_id=? ORDER BY id",
+        (endpoint_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_api_key(conn, endpoint_id: int, name: str, key: str,
+                session_user=None) -> int:
+    """新增 API Key（enabled=1），返回自增 id。"""
+    cur = conn.execute(
+        "INSERT INTO api_keys (endpoint_id, name, api_key, enabled) "
+        "VALUES (?,?,?,1)",
+        (endpoint_id, name, key),
+    )
+    conn.commit()
+    _write_audit_log(session_user, "create_api_key", "api_key", cur.lastrowid, name,
+                     after_value={"endpoint_id": endpoint_id, "name": name})
+    return cur.lastrowid
+
+
+def delete_api_key(conn, key_id: int, session_user=None) -> bool:
+    """删除 API Key，影响行数 >0 返回 True。"""
+    before = get_api_key(conn, key_id)
+    cur = conn.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
+    conn.commit()
+    _write_audit_log(session_user, "delete_api_key", "api_key", key_id,
+                     before.get("name") if before else None,
+                     before_value=before)
+    return cur.rowcount > 0
+
+
+def set_api_key_enabled(conn, key_id: int, enabled: int,
+                        session_user=None) -> bool:
+    """启用/禁用 API Key，影响行数 >0 返回 True。"""
+    before = get_api_key(conn, key_id)
+    cur = conn.execute("UPDATE api_keys SET enabled=? WHERE id=?",
+                       (1 if enabled else 0, key_id))
+    conn.commit()
+    _write_audit_log(session_user, "update_api_key", "api_key", key_id,
+                     before.get("name") if before else None,
+                     before_value=before, after_value=get_api_key(conn, key_id))
     return cur.rowcount > 0
 
 

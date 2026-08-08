@@ -89,6 +89,11 @@ def _set_up_db():
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint_id INTEGER NOT NULL,
+            name TEXT NOT NULL, api_key TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE);
     """)
     conn.execute("INSERT INTO connection_pools (name,host,port,user,password,database,sort_order) "
                  "VALUES (?,?,?,?,?,?,?)",
@@ -785,6 +790,180 @@ class TestApiExtra(MockMySQLMixin, unittest.TestCase):
         written = b"".join(c[0][0] for c in handler.wfile.write.call_args_list
                            if isinstance(c[0][0], bytes))
         self.assertIn("请求体读取失败".encode("utf-8"), written)
+
+
+class TestApiKeyAuth(MockMySQLMixin, unittest.TestCase):
+    """API Key 多 key 化鉴权端到端测试（PH-02）。
+
+    api_keys 表已含于 _set_up_db 建表脚本；复用模块级临时库与
+    db.create_mysql_connection mock 基建（与 TestApiExtra 相同模式）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._mysql_patcher = patch("db.create_mysql_connection")
+        cls._mock_factory = cls._mysql_patcher.start()
+        # TestApiExtra.tearDownClass 会删除共享临时库（_TMP_ROOT），本类
+        # 按定义顺序在其后执行，必须重建（幂等），避免 sqlite 打不开。
+        os.makedirs(_TMP_ROOT, exist_ok=True)
+        _set_up_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._mysql_patcher.stop()
+
+    def setUp(self):
+        """每个测试前注入配置、清空业务表、缓存目录、进程内缓存与失效记录。"""
+        self._cfg_patcher = patch("app_config.get_config", return_value=_test_config())
+        self._cfg_patcher.start()
+        conn = _get_conn()
+        conn.execute("DELETE FROM api_endpoints")
+        conn.execute("DELETE FROM report_configs")
+        conn.commit()
+        conn.close()
+        if os.path.isdir(_CACHE_DIR):
+            shutil.rmtree(_CACHE_DIR)
+        static_cache._last_invalidated.clear()
+        report_mod._query_cache.clear()
+
+        mock_conn, mock_cursor = self.make_mock_connection()
+        mock_cursor.description = [("id",), ("name",), ("age",), ("status",)]
+        mock_cursor.fetchall.return_value = [
+            (1, "张三", 25, "active"),
+            (2, "李四", 30, "inactive"),
+            (3, "王五", 35, "active"),
+        ]
+        type(self)._mock_factory.side_effect = None
+        type(self)._mock_factory.return_value = mock_conn
+        self.mock_cursor = mock_cursor
+
+    def tearDown(self):
+        self._cfg_patcher.stop()
+
+    def _create_report(self, sql="SELECT id, name, age, status FROM users"):
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO report_configs "
+            "(name,sql_query,default_page_size,pool_id,prefer_cache,cache_ttl_hours,sort_order) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("测试报表", sql, 20, 1, 0, 0, 1))
+        conn.commit()
+        rid = conn.execute(
+            "SELECT id FROM report_configs ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
+        conn.close()
+        return rid
+
+    def _create_endpoint(self, url_path="/api/cust", **kwargs):
+        """创建测试端点（report_id 缺省取最新报表）。"""
+        conn = _get_conn()
+        report_id = conn.execute(
+            "SELECT id FROM report_configs ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
+        eid = db.add_api_endpoint(conn, report_id, "测试端点", url_path, **kwargs)
+        conn.close()
+        return eid
+
+    def _request(self, path, method="GET", query=None, headers=None, body=""):
+        """直接调用 handle_api_request（最高测试 seam）。"""
+        return api_handler.handle_api_request(
+            _get_conn(), path, method, headers or {}, body, query or {},
+            client_ip="127.0.0.1")
+
+    def test_any_enabled_key_authenticates(self):
+        """多 key：任一启用 key 均通过；错误 key 与缺失拒绝。"""
+        self._create_report()
+        eid = self._create_endpoint()
+        conn = _get_conn()
+        config_db.add_api_key(conn, eid, "key1", "sk-1")
+        config_db.add_api_key(conn, eid, "key2", "sk-2")
+        conn.close()
+        for key in ("sk-1", "sk-2"):
+            status, _, _ = self._request("/api/cust", query={"api_key": [key]})
+            self.assertEqual(status, 200, f"启用 key {key} 应通过")
+        status, body, _ = self._request("/api/cust", query={"api_key": ["sk-3"]})
+        self.assertEqual(status, 401, "未注册 key 应拒绝")
+        self.assertIn("API Key", body)
+        status, body, _ = self._request("/api/cust")
+        self.assertEqual(status, 401, "未提供 key 应拒绝")
+
+    def test_disabled_key_rejected_others_ok(self):
+        """禁用某 key 后立即失效，其余启用 key 不受影响。"""
+        self._create_report()
+        eid = self._create_endpoint()
+        conn = _get_conn()
+        k1 = config_db.add_api_key(conn, eid, "key1", "sk-1")
+        config_db.add_api_key(conn, eid, "key2", "sk-2")
+        config_db.set_api_key_enabled(conn, k1, 0)
+        conn.close()
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-1"]})
+        self.assertEqual(status, 401, "禁用 key 应拒绝")
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-2"]})
+        self.assertEqual(status, 200, "其他启用 key 不受影响")
+
+    def test_all_disabled_denies_even_legacy_column(self):
+        """表内有记录但全部禁用：旧列 key 也不生效（防旧列绕过）。"""
+        self._create_report()
+        eid = self._create_endpoint(api_key="sk-legacy")
+        conn = _get_conn()
+        k1 = config_db.add_api_key(conn, eid, "key1", "sk-1")
+        config_db.set_api_key_enabled(conn, k1, 0)
+        conn.close()
+        for key in ("sk-legacy", "sk-1"):
+            status, _, _ = self._request("/api/cust", query={"api_key": [key]})
+            self.assertEqual(status, 401, f"全部禁用时 key={key} 应拒绝")
+
+    def test_deleted_key_rejected_immediately(self):
+        """删除某 key 后立即失效，其余 key 不受影响。"""
+        self._create_report()
+        eid = self._create_endpoint()
+        conn = _get_conn()
+        k1 = config_db.add_api_key(conn, eid, "key1", "sk-1")
+        config_db.add_api_key(conn, eid, "key2", "sk-2")
+        conn.close()
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-1"]})
+        self.assertEqual(status, 200, "删除前应通过")
+        conn = _get_conn()
+        config_db.delete_api_key(conn, k1)
+        conn.close()
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-1"]})
+        self.assertEqual(status, 401, "删除后应拒绝")
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-2"]})
+        self.assertEqual(status, 200, "其余 key 不受影响")
+
+    def test_last_key_deleted_returns_to_public(self):
+        """删除最后一个 key 后端点恢复公开（与旧版清空 api_key 行为一致）。"""
+        self._create_report()
+        eid = self._create_endpoint()
+        conn = _get_conn()
+        k1 = config_db.add_api_key(conn, eid, "key1", "sk-1")
+        conn.close()
+        conn = _get_conn()
+        config_db.delete_api_key(conn, k1)
+        conn.close()
+        status, _, _ = self._request("/api/cust")
+        self.assertEqual(status, 200, "无任何 key 配置的端点应公开")
+
+    def test_legacy_column_key_still_works(self):
+        """未迁移场景（api_keys 空表）旧列 key 仍可鉴权（兼容回退）。"""
+        self._create_report()
+        self._create_endpoint(api_key="sk-legacy")
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-legacy"]})
+        self.assertEqual(status, 200, "旧列 key 应通过（回退路径）")
+        status, _, _ = self._request("/api/cust", query={"api_key": ["sk-other"]})
+        self.assertEqual(status, 401, "错误 key 应拒绝")
+
+    def test_migration_then_new_key_takes_effect(self):
+        """模拟存量迁移：旧列 key 迁入 api_keys 后，新增 key 生效、旧 key 仍有效。"""
+        self._create_report()
+        eid = self._create_endpoint(api_key="sk-old")
+        conn = _get_conn()
+        config_db._init_sqlite_migrations(conn)  # 存量迁入（测试库本已含表，幂等）
+        config_db.add_api_key(conn, eid, "新 Key", "sk-new")
+        conn.close()
+        for key in ("sk-old", "sk-new"):
+            status, _, _ = self._request("/api/cust", query={"api_key": [key]})
+            self.assertEqual(status, 200, f"key={key} 应通过")
 
 
 if __name__ == "__main__":

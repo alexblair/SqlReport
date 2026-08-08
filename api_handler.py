@@ -19,6 +19,7 @@ import os
 import time
 import logging
 import secrets
+import hmac
 
 import db
 import app_config
@@ -102,7 +103,7 @@ def handle_api_request(conn, path: str, method: str, headers: dict,
         _log_api_call(norm_path, client_ip, 204, time.time() - start)
         return 204, "", cors_headers
 
-    auth_error = _validate_api_key(endpoint, headers, query_params)
+    auth_error = _validate_api_key(conn, endpoint, headers, query_params)
     if auth_error:
         _log_api_call(norm_path, client_ip, 401, time.time() - start)
         body, err_headers = _error_response(auth_error, "UNAUTHORIZED", headers)
@@ -550,11 +551,17 @@ def _is_invalid_json_body(body: str, headers: dict) -> bool:
     return False
 
 
-def _validate_api_key(endpoint: dict, headers: dict, query_params: dict) -> str | None:
+def _validate_api_key(conn, endpoint: dict, headers: dict, query_params: dict) -> str | None:
     """
     校验 API Key。
 
+    优先按 endpoint_id 查 api_keys 表（enabled=1 且 key 匹配，常数时间比对）；
+    api_keys 表无记录（旧库未迁移）时回退 endpoint.api_key 兼容旧数据。
+    端点无任何 key 配置（表空 + 旧列空）→ 公开，直接通过。
+    表内有记录但全部禁用 → 拒绝一切请求。
+
     参数:
+        conn: 配置数据库连接
         endpoint: API 端点配置
         headers: 请求头字典
         query_params: URL 查询参数
@@ -562,23 +569,48 @@ def _validate_api_key(endpoint: dict, headers: dict, query_params: dict) -> str 
     返回:
         None 表示通过，字符串表示错误消息。
     """
-    expected_key = endpoint.get("api_key", "")
-    if not expected_key:
+    keys, has_records = _endpoint_valid_keys(conn, endpoint)
+    if not keys and not has_records:
         return None
 
-    # 从 Authorization 头获取
+    # 从 Authorization 头获取，未带则从查询参数获取
     auth_header = (headers.get("Authorization", "") or "")
     provided = auth.extract_bearer_token(auth_header)
-    if provided is not None and provided == expected_key:
-        return None
+    if provided is None:
+        qp = query_params or {}
+        api_key_values = qp.get("api_key", [])
+        provided = api_key_values[0] if api_key_values else None
+    if provided is None:
+        return "未提供有效的 API Key"
 
-    # 从查询参数获取
-    qp = query_params or {}
-    api_key_values = qp.get("api_key", [])
-    if api_key_values and api_key_values[0] == expected_key:
-        return None
-
+    for expected in keys:
+        if hmac.compare_digest(provided, expected):
+            return None
     return "未提供有效的 API Key"
+
+
+def _endpoint_valid_keys(conn, endpoint: dict) -> tuple[list[str], bool]:
+    """返回 (有效 key 列表, 表内是否有记录)。
+
+    表内 enabled=1 的记录优先；表内无记录（旧库未迁移）时回退
+    endpoint.api_key 旧列；表内有记录但全部禁用 → (空列表, True)，
+    调用方据此拒绝一切请求（区别于"公开端点"）。
+    """
+    rows = conn.execute(
+        "SELECT api_key FROM api_keys WHERE endpoint_id=? AND enabled=1",
+        (endpoint["id"],),
+    ).fetchall()
+    keys = [r[0] for r in rows if r[0]]
+    if keys:
+        return keys, True
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM api_keys WHERE endpoint_id=?",
+        (endpoint["id"],),
+    ).fetchone()
+    if row and row[0] > 0:
+        return [], True
+    old = endpoint.get("api_key", "") or ""
+    return ([old] if old else []), False
 
 
 def _build_cors_headers(endpoint: dict, headers: dict) -> dict:

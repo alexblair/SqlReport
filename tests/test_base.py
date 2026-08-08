@@ -97,6 +97,17 @@ _SQL_CREATE_API_ENDPOINTS = """CREATE TABLE IF NOT EXISTS api_endpoints (
 )"""
 
 
+_SQL_CREATE_API_KEYS = """CREATE TABLE IF NOT EXISTS api_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint_id INTEGER NOT NULL,
+    name        TEXT    NOT NULL,
+    api_key     TEXT    NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
+)"""
+
+
 # ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
@@ -141,6 +152,7 @@ def init_test_db(conn: sqlite3.Connection) -> None:
     conn.execute(_SQL_CREATE_REPORT_CONFIGS)
     conn.execute(_SQL_CREATE_SESSIONS)
     conn.execute(_SQL_CREATE_API_ENDPOINTS)
+    conn.execute(_SQL_CREATE_API_KEYS)
     conn.commit()
 
 

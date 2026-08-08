@@ -836,6 +836,108 @@ class TestMySQLMigrations(_MySQLCRUDTestBase):
             "ALTER TABLE api_endpoints ADD COLUMN description TEXT", ()
         )
 
+    # ---- 迁移 14：api_keys 建表 + 旧列数据迁入（PH-02） ----
+
+    _EP_COLS = [
+        ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+        ("report_id", "int(11)", "NO", "MUL", None, ""),
+        ("name", "varchar(255)", "NO", "", None, ""),
+        ("url_path", "varchar(512)", "NO", "UNI", None, ""),
+        ("output_format", "varchar(10)", "NO", "", None, ""),
+        ("columns", "text", "YES", "", None, ""),
+        ("filters", "text", "YES", "", None, ""),
+        ("sorts", "text", "YES", "", None, ""),
+        ("row_limit", "int(11)", "YES", "", None, ""),
+        ("api_key", "varchar(255)", "YES", "", None, ""),
+        ("allowed_origins", "text", "YES", "", None, ""),
+        ("enabled", "tinyint(4)", "NO", "", None, ""),
+        ("result_mode", "varchar(10)", "NO", "", None, ""),
+        ("result_index", "int(11)", "NO", "", None, ""),
+        ("allow_fetch_all", "tinyint(4)", "NO", "", None, ""),
+        ("static_cache", "tinyint(4)", "NO", "", None, ""),
+        ("json_template", "text", "YES", "", None, ""),
+        ("description", "text", "YES", "", None, ""),
+    ]
+
+    def _mock_migration_14_env(self, api_keys_exists, legacy_rows):
+        """配置 mock 以模拟迁移 14 场景。
+
+        Args:
+            api_keys_exists: SHOW TABLES LIKE 'api_keys' 是否返回表已存在
+            legacy_rows: 数据迁移 SELECT 返回的旧列行（如 [(1, '端', 'sk-1')]）
+        """
+        self.mock_cursor.reset_mock()
+        fetchone_calls = []
+
+        def fake_fetchone():
+            sql = self.mock_cursor.execute.call_args[0][0] if \
+                self.mock_cursor.execute.call_args else ""
+            fetchone_calls.append(sql)
+            if "LIKE 'api_keys'" in sql:
+                return ("api_keys",) if api_keys_exists else None
+            if "SHOW TABLES" in sql:
+                return ("api_endpoints",)
+            if "SELECT 1 FROM api_keys" in sql:
+                return None  # 不存在 → 应插入
+            return None
+
+        def fake_fetchall():
+            sql = self.mock_cursor.execute.call_args[0][0] if \
+                self.mock_cursor.execute.call_args else ""
+            if "FROM api_endpoints WHERE api_key" in sql:
+                return legacy_rows
+            return self._EP_COLS
+
+        self.mock_cursor.fetchone.side_effect = fake_fetchone
+        self.mock_cursor.fetchall.side_effect = fake_fetchall
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_creates_api_keys_when_missing(self, mock_engine):
+        """api_keys 表缺失时，应执行 CREATE TABLE。"""
+        self._mock_migration_14_env(api_keys_exists=False, legacy_rows=[])
+        db._init_mysql_migrations(self.conn)
+        create_calls = [c[0][0] for c in self.mock_cursor.execute.call_args_list
+                        if "CREATE TABLE api_keys" in str(c[0][0])]
+        self.assertEqual(len(create_calls), 1, "应执行一次建表")
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_skips_create_when_table_exists(self, mock_engine):
+        """api_keys 表已存在时跳过 CREATE TABLE。"""
+        self._mock_migration_14_env(api_keys_exists=True, legacy_rows=[])
+        db._init_mysql_migrations(self.conn)
+        create_calls = [c[0][0] for c in self.mock_cursor.execute.call_args_list
+                        if "CREATE TABLE api_keys" in str(c[0][0])]
+        self.assertEqual(create_calls, [], "表已存在不应重复建表")
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_migrates_legacy_keys(self, mock_engine):
+        """旧列非空 → 插入 api_keys 且旧列置空。"""
+        self._mock_migration_14_env(
+            api_keys_exists=False, legacy_rows=[(1, "端点A", "sk-aaa"),
+                                                (2, "端点B", "sk-bbb")])
+        db._init_mysql_migrations(self.conn)
+        inserts = [c[0][1] for c in self.mock_cursor.execute.call_args_list
+                   if isinstance(c[0][0], str)
+                   and "INSERT INTO api_keys" in c[0][0]]
+        self.assertEqual(inserts, [(1, "端点A", "sk-aaa"), (2, "端点B", "sk-bbb")])
+        updates = [c[0][1] for c in self.mock_cursor.execute.call_args_list
+                   if isinstance(c[0][0], str)
+                   and "UPDATE api_endpoints SET api_key='' " in c[0][0]]
+        self.assertEqual(updates, [(1,), (2,)], "每行迁入后旧列应置空")
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_data_migration_idempotent(self, mock_engine):
+        """幂等：已迁入的 key 再次迁移不重复插入。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.execute.return_value = self.mock_cursor
+        self.mock_cursor.fetchone.return_value = ("api_keys",)
+        self.mock_cursor.fetchall.return_value = []
+        db._init_mysql_migrations(self.conn)
+        inserts = [c for c in self.mock_cursor.execute.call_args_list
+                   if isinstance(c[0][0], str)
+                   and "INSERT INTO api_keys" in c[0][0]]
+        self.assertEqual(inserts, [], "旧列为空时不应插入")
+
     # ---- 缺口 11 补充：迁移 3/4/6/7/8/9/10/11 ----
 
     @patch("db._get_engine", return_value="mysql")

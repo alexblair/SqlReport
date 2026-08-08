@@ -82,6 +82,15 @@ def _make_conn():
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
         );
+        CREATE TABLE api_keys (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            endpoint_id INTEGER NOT NULL,
+            name        TEXT    NOT NULL,
+            api_key     TEXT    NOT NULL,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
+        );
     """)
     return conn
 

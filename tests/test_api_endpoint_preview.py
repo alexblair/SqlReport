@@ -50,6 +50,11 @@ def _mk_conn():
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint_id INTEGER NOT NULL,
+            name TEXT NOT NULL, api_key TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE);
     """)
     conn.execute("INSERT INTO connection_pools (name,host,port,user,password,database,sort_order) "
                  "VALUES ('测试池','127.0.0.1',3306,'root','pass','testdb',1)")
