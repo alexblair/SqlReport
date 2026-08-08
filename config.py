@@ -57,11 +57,12 @@ from report import parse_result_names
 # 匹配 /config/pools/add, /config/pools/{id}/edit, /config/pools/{id}/copy,
 # /config/pools/{id}/move-up, /config/pools/{id}/move-down, /config/reports/batch-pool,
 # /config/reports/{id}/move-category
+# API 端点子动作含 api_keys（API Key 管理 POST 端点）
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
     r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete)"
     r"|/(\d+)/(edit|delete|copy|move-category|move-up|move-down)"
-    r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview)))?$"
+    r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview|api_keys)))?$"
 )
 
 
@@ -71,7 +72,7 @@ def parse_config_path(path: str) -> dict:
 
     返回格式:
       {"section": "pools|users|reports|categories",
-       "action": "list|add|batch-pool|batch-set-category|batch-cache|batch-delete|edit|delete|copy|move-up|move-down|api_new|api_edit|api_delete",
+       "action": "list|add|batch-pool|batch-set-category|batch-cache|batch-delete|edit|delete|copy|move-up|move-down|api_new|api_edit|api_delete|api_preview|api_keys",
        "id": int|None,
        "report_id": int|None,
        "endpoint_id": int|None}
@@ -115,6 +116,10 @@ def parse_config_path(path: str) -> dict:
                     "endpoint_id": api_endpoint_id}
         if api_sub_action == "preview" and api_endpoint_id:
             return {"section": section, "action": "api_preview",
+                    "id": api_report_id, "report_id": api_report_id,
+                    "endpoint_id": api_endpoint_id}
+        if api_sub_action == "api_keys" and api_endpoint_id:
+            return {"section": section, "action": "api_keys",
                     "id": api_report_id, "report_id": api_report_id,
                     "endpoint_id": api_endpoint_id}
         return {"section": section, "action": None, "id": None,
@@ -618,8 +623,9 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
     if report_id and not copy_mode:
         api_endpoints = db.get_api_endpoints_by_report(conn, report_id)
         base_url = app_config.get_server_base_url()
-        body += build_api_endpoints_list_html(api_endpoints, report_id,
-                                              base_url=base_url)
+        body += build_api_endpoints_list_html(
+            api_endpoints, report_id, base_url=base_url,
+            key_counts=config_db.get_api_key_counts(conn))
     body += render_page_footer()
     return body
 
@@ -1224,6 +1230,11 @@ def handle_request(conn, method: str, path: str, query: str,
             # GET 直开预览地址：无表单值可执行，返回指引页
             return 200, build_api_endpoint_preview_help_html(
                 route["report_id"], route["endpoint_id"]), {}
+        if route["action"] == "api_keys" and route["endpoint_id"]:
+            # GET 直开 Key 管理地址：重定向回编辑页
+            return _redirect_or_render(
+                302, (f"/config/reports/{route['report_id']}"
+                      f"/api_endpoints/{route['endpoint_id']}/edit"))
 
     # ---- POST 处理 ----
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
@@ -1243,6 +1254,11 @@ def handle_request(conn, method: str, path: str, query: str,
         elif route["action"] == "api_preview" and route["endpoint_id"]:
             # 真实数据预览：返回 JSON（非 HTML），不重定向
             return handle_api_endpoint_preview(
+                conn, route["report_id"], route["endpoint_id"], form_body or "",
+                session_user=session_user)
+        elif route["action"] == "api_keys" and route["endpoint_id"]:
+            # API Key 管理动作（add/delete/toggle），返回重定向
+            return handle_api_key_actions(
                 conn, route["report_id"], route["endpoint_id"], form_body or "",
                 session_user=session_user)
 
@@ -1360,6 +1376,9 @@ def render_api_endpoint_form_page(conn, report_id: int,
     result_names_list = parse_result_names(result_names_raw)
     result_count = len(result_names_list) if result_names_list else _estimate_result_count(report["sql_query"])
 
+    # 编辑态查询该端点的 API Key 列表（多 key 管理区块）
+    api_keys = config_db.list_api_keys(conn, endpoint_id) if endpoint_id else []
+
     return (render_page_header(title="Web 报表工具 - 配置", active_nav="config",
                                 extra_css=_CONFIG_EXTRA_CSS)
             + build_api_endpoint_form_html(report_id, report["name"],
@@ -1367,7 +1386,8 @@ def render_api_endpoint_form_page(conn, report_id: int,
                                             result_names_list=result_names_list,
                                             result_count=result_count,
                                             endpoint_id=endpoint_id,
-                                            is_edit=is_edit)
+                                            is_edit=is_edit,
+                                            api_keys=api_keys)
             + render_page_footer())
 
 
@@ -1455,6 +1475,60 @@ def _endpoint_unique_error(err_msg: str, url_path: str = "") -> str:
     return err_msg
 
 
+def handle_api_key_actions(conn, report_id: int, endpoint_id: int,
+                           form_body: str = "",
+                           session_user=None) -> tuple[int, str, dict]:
+    """处理 API Key 管理动作（POST：add 生成新 Key / delete / toggle）。
+
+    操作成功后重定向回端点编辑页并携带 flash。
+    """
+    edit_url = f"/config/reports/{report_id}/api_endpoints/{endpoint_id}/edit"
+    endpoint = db.get_api_endpoint(conn, endpoint_id)
+    if not endpoint:
+        flash_msg = "错误: API 接口不存在"
+        return _redirect_or_render(
+            302, f"{edit_url}?flash={urllib.parse.quote(flash_msg)}")
+    if int(endpoint.get("report_id", 0)) != report_id:
+        flash_msg = "错误: API 接口不属于该报表"
+        return _redirect_or_render(
+            302, f"{edit_url}?flash={urllib.parse.quote(flash_msg)}")
+
+    data = _parse_form_data(form_body or "")
+    action = data.get("action", "")
+    key_id_raw = data.get("key_id", "")
+    name = (data.get("name") or "").strip()
+    try:
+        if action == "add":
+            key_name = name or endpoint["name"]
+            config_db.add_api_key(conn, endpoint_id, key_name,
+                                  api_handler.generate_api_key(),
+                                  session_user=session_user)
+            flash_msg = f"API Key 已生成（{key_name}）"
+        elif action in ("delete", "toggle"):
+            # 归属校验：key 必须属于当前端点，否则拒绝（防跨端点越权操作）
+            key_row = config_db.get_api_key(conn, int(key_id_raw))
+            if not key_row:
+                flash_msg = "错误: API Key 不存在"
+            elif int(key_row.get("endpoint_id", 0)) != endpoint_id:
+                flash_msg = "错误: API Key 不属于该接口"
+            elif action == "delete":
+                config_db.delete_api_key(conn, int(key_id_raw),
+                                         session_user=session_user)
+                flash_msg = "API Key 已删除"
+            else:
+                new_enabled = 0 if int(key_row.get("enabled", 1)) else 1
+                config_db.set_api_key_enabled(conn, int(key_id_raw), new_enabled,
+                                              session_user=session_user)
+                flash_msg = (f"API Key {key_row['name']} "
+                             f"已{'启用' if new_enabled else '禁用'}")
+        else:
+            flash_msg = "错误: 未知操作"
+    except (ValueError, TypeError):
+        flash_msg = "错误: 无效的 Key ID"
+    return _redirect_or_render(
+        302, f"{edit_url}?flash={urllib.parse.quote(flash_msg)}")
+
+
 def handle_api_endpoint_add(conn, report_id: int,
                              form_body: str, session_user=None) -> tuple[int, str]:
     """处理新增 API 端点表单提交"""
@@ -1475,7 +1549,6 @@ def handle_api_endpoint_add(conn, report_id: int,
             filters=pf["filters_str"] or None,
             sorts=pf["sorts_str"] or None,
             row_limit=pf["row_limit"],
-            api_key=pf["api_key"],
             allowed_origins=pf["allowed_origins"],
             result_mode=pf["result_mode"],
             result_index=pf["result_index"],
@@ -1485,6 +1558,15 @@ def handle_api_endpoint_add(conn, report_id: int,
             description=pf["description"],
             session_user=session_user,
         )
+        # 多 key 化：表单不再有 api_key 输入框。旧客户端 POST 仍带 api_key
+        # 字段时（兼容路径）写入 api_keys 表（name=端点名）；否则自动生成一条。
+        if pf["api_key"]:
+            config_db.add_api_key(conn, eid, pf["name"], pf["api_key"],
+                                  session_user=session_user)
+        else:
+            config_db.add_api_key(conn, eid, pf["name"],
+                                  api_handler.generate_api_key(),
+                                  session_user=session_user)
         if not pf["enabled"]:
             db.update_api_endpoint(conn, eid, enabled=0, session_user=session_user)
         return _save_or_render(
@@ -1703,7 +1785,8 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
             + flash_html
             + '<h2 style="margin-bottom:0">API 接口管理</h2>'
             + build_api_endpoints_list_html(api_endpoints, show_report_name=True,
-                                            base_url=base_url)
+                                            base_url=base_url,
+                                            key_counts=config_db.get_api_key_counts(conn))
             + render_page_footer())
     return 200, body, {}
 

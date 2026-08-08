@@ -938,6 +938,58 @@ class TestMySQLMigrations(_MySQLCRUDTestBase):
                    and "INSERT INTO api_keys" in c[0][0]]
         self.assertEqual(inserts, [], "旧列为空时不应插入")
 
+    # ---- 迁移 14 续：PH-04 reports.allow_write ----
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_adds_allow_write_when_missing(self, mock_engine):
+        """report_configs 缺 allow_write 时，应 ADD COLUMN（存量默认 1）。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_keys",)
+        # report_configs 列集：不含 allow_write（迁移 1 的 SHOW COLUMNS 用同一 fetchall）
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "UNI", None, ""),
+            ("sql_query", "text", "NO", "", None, ""),
+            ("default_page_size", "int(11)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+            ("result_names", "text", "YES", "", None, ""),
+            ("prefer_cache", "tinyint(4)", "NO", "", None, ""),
+            ("cache_ttl_hours", "int(11)", "NO", "", None, ""),
+            ("sort_order", "int(11)", "NO", "", None, ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        self.mock_cursor.execute.assert_any_call(
+            "ALTER TABLE report_configs "
+            "ADD COLUMN allow_write INTEGER NOT NULL DEFAULT 1", ()
+        )
+
+    @patch("db._get_engine", return_value="mysql")
+    def test_migration_14_skips_allow_write_when_exists(self, mock_engine):
+        """report_configs 已有 allow_write → 不重复 ADD COLUMN。"""
+        self.mock_cursor.reset_mock()
+        self.mock_cursor.fetchone.return_value = ("api_keys",)
+        self.mock_cursor.fetchall.return_value = [
+            ("id", "int(11)", "NO", "PRI", None, "auto_increment"),
+            ("name", "varchar(255)", "NO", "UNI", None, ""),
+            ("sql_query", "text", "NO", "", None, ""),
+            ("default_page_size", "int(11)", "NO", "", None, ""),
+            ("pool_id", "int(11)", "YES", "MUL", None, ""),
+            ("category_id", "int(11)", "YES", "MUL", None, ""),
+            ("memo", "text", "YES", "", None, ""),
+            ("result_names", "text", "YES", "", None, ""),
+            ("prefer_cache", "tinyint(4)", "NO", "", None, ""),
+            ("cache_ttl_hours", "int(11)", "NO", "", None, ""),
+            ("sort_order", "int(11)", "NO", "", None, ""),
+            ("allow_write", "int(11)", "NO", "", "1", ""),
+        ]
+        db._init_mysql_migrations(self.conn)
+        adds = [c[0][0] for c in self.mock_cursor.execute.call_args_list
+                if isinstance(c[0][0], str)
+                and "ADD COLUMN allow_write" in c[0][0]]
+        self.assertEqual(adds, [], "列已存在不应重复添加")
+
     # ---- 缺口 11 补充：迁移 3/4/6/7/8/9/10/11 ----
 
     @patch("db._get_engine", return_value="mysql")

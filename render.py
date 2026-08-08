@@ -1888,7 +1888,8 @@ function updateBatchCount() {{
 def build_api_endpoints_list_html(api_endpoints: list[dict],
                                    report_id: int = None,
                                    show_report_name: bool = False,
-                                   base_url: str = "") -> str:
+                                   base_url: str = "",
+                                   key_counts: dict = None) -> str:
     """
     渲染 API 接口列表区块。
 
@@ -1899,6 +1900,8 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         base_url: 服务器基础 URL（如 http://localhost:8080），仅作服务端兜底
                   渲染值；页面加载后 JS 用 window.location.origin 覆盖
                   （与 API 配置后台/报表查看页一致，显示用户实际访问的地址）
+        key_counts: {endpoint_id: key 数量} 映射（多 key 化后列表显示数量徽标；
+                    None 时回退旧 api_key 列掩码+复制逻辑）
     """
     _sc_cfg = static_cache.get_static_cache_config()
     _sc_enabled = _sc_cfg.get("enable", True)
@@ -1973,8 +1976,18 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                                          disabled_hint=static_hint,
                                          edit_url=ep_edit_url)
                     + '</td>')
-        # API Key：掩码展示 + 复制完整值（复制按钮仅在有 key 时提供）
-        if api_key_raw:
+        # API Key：多 key 化后显示数量徽标（详情在端点配置页「API Key 管理」区块）；
+        # key_counts 未提供时回退旧 api_key 列掩码 + 复制完整值
+        api_key_raw = ep.get("api_key") or ""
+        if key_counts is not None:
+            ep_key_count = key_counts.get(ep_id, 0)
+            if ep_key_count:
+                key_cell = (f'<td style="white-space:nowrap">'
+                            f'<code style="font-size:12px;color:#94a3b8">'
+                            f'{ep_key_count} 个 Key</code></td>')
+            else:
+                key_cell = f'<td><code style="font-size:12px;color:#94a3b8">—</code></td>'
+        elif api_key_raw:
             key_cell = (f'<td style="white-space:nowrap">'
                         f'<code style="font-size:12px;color:#94a3b8">{api_key_display}</code> '
                         f'<code id="api-key-raw-{ep_id}" style="display:none">'
@@ -2385,7 +2398,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
                                  result_names_list: list = None,
                                  result_count: int = 1,
                                  endpoint_id: int = None,
-                                 is_edit: bool = None) -> str:
+                                 is_edit: bool = None,
+                                 api_keys: list = None) -> str:
     """
     渲染 API 端点编辑/新增表单。
 
@@ -2419,7 +2433,6 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     url_path_short = _escape(url_path_short)
     output_format = (endpoint or {}).get("output_format", "json")
     row_limit = str((endpoint or {}).get("row_limit", 0) or 0)
-    api_key_raw = (endpoint or {}).get("api_key") or ""
     allowed_origins = _escape((endpoint or {}).get("allowed_origins") or "")
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
@@ -2469,6 +2482,21 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         )
     else:
         live_preview_html = ""
+
+    # API Key 管理：编辑态渲染管理区块（独立表单，放在主表单之外避免嵌套 form）；
+    # 新增态表单内显示"保存后自动生成"提示
+    if is_edit and endpoint_id:
+        api_key_block_html = build_api_key_manage_html(
+            api_keys or [], report_id, endpoint_id)
+        key_manage_extra = api_key_block_html
+    else:
+        api_key_block_html = (
+            '<div class="flash-warn" style="margin-bottom:16px;padding:10px 14px;'
+            'border-radius:8px;border:1px solid #fde68a;font-size:13px">'
+            '<strong>🔑 API Key：</strong>保存后将自动生成 API Key（名称=接口名称），'
+            '可在编辑页「API Key 管理」区块查看、复制与禁用。</div>'
+        )
+        key_manage_extra = ""
 
     return f"""<div class="card">
 <h2>{title}</h2>
@@ -2684,14 +2712,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <div style="color:#94a3b8;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
   </div>
 
-  <label>API Key（留空=无需鉴权）:
-    <input type="text" name="api_key" value="{_escape(api_key_raw)}"
-      placeholder="留空则不鉴权"
-      pattern="[a-zA-Z0-9_\\-]+" title="仅允许字母、数字、下划线和短横线">
-    <span style="color:#94a3b8;font-weight:400;font-size:13px;display:block;margin-top:4px">
-      调用时通过 Authorization: Bearer &lt;key&gt; 或 ?api_key=xxx 传递
-    </span>
-  </label>
+  {api_key_block_html}
 
   <label>CORS 允许来源（逗号分隔，留空=不设 CORS）:
     <input type="text" name="allowed_origins" value="{allowed_origins}"
@@ -2709,7 +2730,86 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <a href="/config/reports/{report_id}/edit" class="cancel">关闭</a>
   </div>
 </form>
+{key_manage_extra}
 </div>"""
+
+
+# ===================================================================
+# API Key 管理区块（多 key 化 PH-03）
+# ===================================================================
+
+
+def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> str:
+    """构建「API Key 管理」区块 HTML。
+
+    独立于主表单渲染（操作 POST 到
+    /config/reports/{report_id}/api_endpoints/{endpoint_id}/api_keys），
+    避免 HTML 嵌套 form。每行：名称 + 掩码 + 复制 + 启用/禁用 + 删除；
+    底部提供「生成新 Key」（名称留空=端点名）。
+    """
+    action_url = _api_endpoint_url(report_id, endpoint_id, "api_keys")
+    rows = ""
+    for k in keys:
+        kid = k["id"]
+        kname = _escape(k.get("name") or "未命名")
+        kraw = k.get("api_key") or ""
+        kdisp = _mask_api_key(kraw) if kraw else "—"
+        enabled = int(k.get("enabled", 1))
+        state = (build_state_span("启用")
+                 if enabled else build_state_span("禁用", "warn"))
+        toggle_label = "禁用" if enabled else "启用"
+        toggle_confirm = (
+            " onsubmit=\"return confirm('确定禁用该 API Key？禁用后调用方立即失效。')\""
+            if enabled else "")
+        toggle_form = (
+            f'<form method="post" action="{action_url}" style="display:inline"{toggle_confirm}>'
+            f'<input type="hidden" name="action" value="toggle">'
+            f'<input type="hidden" name="key_id" value="{kid}">'
+            f'<button type="submit" class="btn-mini btn-mini-m">{toggle_label}</button>'
+            f'</form>')
+        del_form = (
+            f'<form method="post" action="{action_url}" style="display:inline" '
+            f'onsubmit="return confirm(\'确定删除该 API Key？删除后调用方立即失效。\')">'
+            f'<input type="hidden" name="action" value="delete">'
+            f'<input type="hidden" name="key_id" value="{kid}">'
+            f'<button type="submit" class="btn-mini btn-mini-m" '
+            f'style="color:#dc2626">删除</button>'
+            f'</form>')
+        rows += (
+            f'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;'
+            f'border-bottom:1px dashed #e2e8f0">'
+            f'<span style="min-width:110px;font-size:13px;color:#1e293b;font-weight:600">'
+            f'{kname}</span>'
+            f'<code style="font-size:12px;color:#94a3b8">{kdisp}</code>'
+            f'<code id="api-key-raw-{kid}" style="display:none">{_escape(kraw)}</code>'
+            f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{kid}\')" '
+            f'title="复制完整 API Key" class="btn-mini btn-mini-outline-key">复制</button>'
+            f'{state}{toggle_form}{del_form}'
+            f'</div>')
+    if not rows:
+        rows = (
+            '<div style="padding:10px 0;font-size:13px;color:#94a3b8">'
+            '暂无 API Key——接口为公开访问（无需鉴权）。生成 Key 后立即生效。</div>')
+    return (
+        f'<div style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;'
+        f'border:1px solid #e2e8f0">'
+        f'<div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px">'
+        f'🔑 API Key 管理</div>'
+        f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
+        f'每个调用方可分配独立 Key（名称仅作管理标识）；Key 明文可查看（内控要求），'
+        f'通过 Authorization: Bearer &lt;key&gt; 或 ?api_key=xxx 调用。'
+        f'禁用/删除后立即失效。</div>'
+        f'{rows}'
+        f'<form method="post" action="{action_url}" '
+        f'style="display:flex;align-items:center;gap:8px;margin-top:10px">'
+        f'<input type="text" name="name" placeholder="Key 名称（留空=接口名称）" '
+        f'style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #cbd5e1;'
+        f'border-radius:6px;font-size:13px">'
+        f'<input type="hidden" name="action" value="add">'
+        f'<button type="submit" class="btn-mini btn-mini-solid btn-mini-primary">'
+        f'生成新 Key</button>'
+        f'</form>'
+        f'</div>')
 
 
 # ===================================================================

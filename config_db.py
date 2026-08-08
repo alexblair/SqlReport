@@ -533,8 +533,20 @@ def _init_sqlite_migrations(conn) -> None:
                 "VALUES (?,?,?,1)", (eid, name, key))
             conn.execute("UPDATE api_endpoints SET api_key='' WHERE id=?", (eid,))
     conn.commit()
-    # ---- 预留：PH-04 reports.allow_write / PH-06 reports.allow_all_output、max_rows 的
-    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次，SQLite 用 PRAGMA table_info）----
+    # 迁移 14 续：PH-04 reports.allow_write（存量默认 1 = 保持现状；
+    # 新建默认 0 由表单/写入路径控制）
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    report_cols = {row[1] for row in cursor.fetchall()}
+    if "allow_write" not in report_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN allow_write INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    # ---- 预留：PH-06 reports.allow_all_output、max_rows 的 ----
+    # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
 
 
 def _init_mysql_migrations(conn) -> None:
@@ -766,7 +778,19 @@ def _init_mysql_migrations(conn) -> None:
         conn.commit()
     except Exception:
         conn.rollback()
-    # ---- 预留：PH-04 reports.allow_write / PH-06 reports.allow_all_output、max_rows 的
+    # 迁移 14 续：PH-04 reports.allow_write（存量默认 1 = 保持现状；
+    # 新建默认 0 由表单/写入路径控制）
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        report_cols = {row[0] for row in cursor.fetchall()}
+        if "allow_write" not in report_cols:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN allow_write INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    # ---- 预留：PH-06 reports.allow_all_output、max_rows 的 ----
     # ---- ADD COLUMN 幂等段写于此（同一迁移 14 批次，MySQL 用 SHOW COLUMNS）----
 
 
@@ -1576,6 +1600,14 @@ def list_api_keys(conn, endpoint_id: int) -> list[dict]:
         (endpoint_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_api_key_counts(conn) -> dict[int, int]:
+    """按端点统计 API Key 数量（列表页徽标用）。"""
+    rows = conn.execute(
+        "SELECT endpoint_id, COUNT(*) AS c FROM api_keys GROUP BY endpoint_id"
+    ).fetchall()
+    return {r["endpoint_id"]: r["c"] for r in rows}
 
 
 def add_api_key(conn, endpoint_id: int, name: str, key: str,

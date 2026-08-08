@@ -329,6 +329,103 @@ def _split_sql_statements(sql: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# 写语句检测
+# ---------------------------------------------------------------------------
+
+_READ_STATEMENT_KEYWORDS = frozenset(
+    {"SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"})
+
+_WRITE_STATEMENT_KEYWORDS = frozenset({
+    "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER",
+    "TRUNCATE", "CALL", "GRANT", "REVOKE", "SET",
+})
+
+
+def _iter_sql_keywords(statement: str):
+    """迭代语句中的 SQL 关键词（跳过注释、字符串字面量、括号、空白）。
+
+    字符串字面量（'...' / "..." / `...`）内的内容不产出关键词，
+    注释内含写关键词不影响判定。
+    """
+    i = 0
+    n = len(statement)
+    while i < n:
+        c = statement[i]
+        # 字符串字面量：跳过整个字面量（含转义与双引号转义）
+        if c in ("'", '"', '`'):
+            i += 1
+            while i < n:
+                c2 = statement[i]
+                i += 1
+                if c2 == '\\' and i < n:
+                    i += 1
+                    continue
+                if c2 == c:
+                    if i < n and statement[i] == c:
+                        i += 1
+                        continue
+                    break
+            continue
+        # 行注释 -- / #
+        if c == '-' and i + 1 < n and statement[i + 1] == '-':
+            j = statement.find('\n', i)
+            if j == -1:
+                return
+            i = j + 1
+            continue
+        if c == '#':
+            j = statement.find('\n', i)
+            if j == -1:
+                return
+            i = j + 1
+            continue
+        # 块注释 /* */
+        if c == '/' and i + 1 < n and statement[i + 1] == '*':
+            j = statement.find('*/', i + 2)
+            if j == -1:
+                return
+            i = j + 2
+            continue
+        if c.isalpha() or c == '_':
+            j = i
+            while j < n and (statement[j].isalnum() or statement[j] == '_'):
+                j += 1
+            yield statement[i:j].upper()
+            i = j
+            continue
+        i += 1
+
+
+def sql_contains_write(sql) -> bool:
+    """检测 SQL 是否包含写语句（INSERT/UPDATE/DELETE/DDL 等）。
+
+    复用 _split_sql_statements 逐条分割，逐条取关键词判定：
+    - 首关键词在白名单 SELECT/SHOW/DESCRIBE/DESC/EXPLAIN → 读
+    - 首关键词为 WITH → 扫描该语句全部关键词，命中写关键词即判写
+      （覆盖 MySQL 8 CTE+DML）；否则视为 CTE 读
+    - 其余首关键词 → 写；无任何关键词的语句（纯注释/空）跳过不计
+
+    判定从严：真实写语句必有写关键词，宁可按写处理（用户可开启
+    allow_write 开关），不误放任何实际写操作。
+    """
+    if not sql or not sql.strip():
+        return False
+    for statement in _split_sql_statements(sql):
+        keywords = list(_iter_sql_keywords(statement))
+        if not keywords:
+            continue  # 纯注释/空语句：不构成写操作
+        first = keywords[0]
+        if first in _READ_STATEMENT_KEYWORDS:
+            continue
+        if first == "WITH":
+            if any(kw in _WRITE_STATEMENT_KEYWORDS for kw in keywords[1:]):
+                return True
+            continue
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # MySQL 查询执行
 # ---------------------------------------------------------------------------
 
