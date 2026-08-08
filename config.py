@@ -1410,6 +1410,8 @@ def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
         "allowed_origins": data.get("allowed_origins") or "",
         "enabled": _echo_int(data.get("enabled"), 0),
         "allow_fetch_all": _echo_int(data.get("allow_fetch_all"), 1),
+        "allow_full_output": _echo_int(data.get("allow_full_output"), 1),
+        "allow_write_sql": _echo_int(data.get("allow_write_sql"), 0),
         "static_cache": _echo_int(data.get("static_cache"), 1),
         "result_mode": result_mode,
         "result_index": _echo_int(data.get("result_index"), 0),
@@ -1421,8 +1423,9 @@ def _parse_endpoint_form(data: dict) -> dict:
     """从表单数据解析 API 端点全部字段（add/edit 共用读路径）。
 
     产出字段含 name/url_path/output_format/columns/filters_str/sorts_str/
-    row_limit/enabled/allow_fetch_all/static_cache/result_mode/result_index/
-    template_raw/api_key/allowed_origins/description。
+    row_limit/enabled/allow_fetch_all/allow_full_output/allow_write_sql/
+    static_cache/result_mode/result_index/template_raw/api_key/
+    allowed_origins/description。
     """
     output_format = data.get("output_format", "json")
     result_mode = data.get("result_mode", "single")
@@ -1437,6 +1440,8 @@ def _parse_endpoint_form(data: dict) -> dict:
         "row_limit": int(data.get("row_limit", 0) or 0),
         "enabled": int(data.get("enabled", 0) or 0),
         "allow_fetch_all": int(data.get("allow_fetch_all", 1) or 0),
+        "allow_full_output": int(data.get("allow_full_output", 1) or 0),
+        "allow_write_sql": int(data.get("allow_write_sql", 0) or 0),
         "static_cache": int(data.get("static_cache", 1) or 0),
         "result_mode": result_mode,
         "result_index": int(data.get("result_index", 0) or 0),
@@ -1483,6 +1488,8 @@ def handle_api_endpoint_add(conn, report_id: int,
             static_cache=pf["static_cache"],
             json_template=pf["template_raw"] or None,
             description=pf["description"],
+            allow_full_output=pf["allow_full_output"],
+            allow_write_sql=pf["allow_write_sql"],
             session_user=session_user,
         )
         if not pf["enabled"]:
@@ -1535,6 +1542,8 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             result_index=pf["result_index"],
             static_cache=pf["static_cache"],
             description=pf["description"],
+            allow_full_output=pf["allow_full_output"],
+            allow_write_sql=pf["allow_write_sql"],
             session_user=session_user,
         )
         if pf["output_format"] != "csv":

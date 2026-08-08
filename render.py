@@ -2435,6 +2435,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     allowed_origins = _escape((endpoint or {}).get("allowed_origins") or "")
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
+    allow_full_output_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_full_output", 1))) else '')
+    allow_write_sql_checked = (' checked' if (endpoint is not None and int(endpoint.get("allow_write_sql", 0))) else '')
     static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
 
     # 结果集输出模式
@@ -2694,6 +2696,27 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       POST&nbsp; body: {{"fetch_all": true}}
     </div>
     <div style="color:#94a3b8;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
+  </div>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="allow_full_output" value="0">
+    <input type="checkbox" name="allow_full_output" value="1"{allow_full_output_checked}>
+    <span style="font-weight:600">允许全量输出（full 标记）</span>
+  </label>
+  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    与「允许全量获取」双重门禁：本开关与 <code>fetch_all</code> 参数门禁均需开启，
+    <code>fetch_all=true</code> 请求才生效并返回 <code>"full": true</code> 标记；
+    任一关闭则该参数被忽略，按翻页逻辑返回。
+  </div>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="allow_write_sql" value="0">
+    <input type="checkbox" name="allow_write_sql" value="1"{allow_write_sql_checked}>
+    <span style="font-weight:600">允许请求覆盖 SQL（sql_query 参数）</span>
+  </label>
+  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    开启后，调用方可在请求中携带 <code>sql_query</code> 参数临时覆盖报表 SQL（等价于报表页预览参数）。
+    <strong style="color:#dc2626">默认关闭</strong>：防止 API 鉴权泄露时被用于执行任意 SQL；静态缓存链路不受影响。
   </div>
 
   <label>API Key（留空=无需鉴权）:

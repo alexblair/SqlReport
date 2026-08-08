@@ -370,9 +370,17 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     result_index = int(endpoint.get("result_index", 0))
     active_index = -1 if result_mode == "all" else result_index
 
+    # allow_write_sql=1 时允许请求携带 sql_query 参数临时覆盖报表 SQL
+    # （与报表页预览参数一致）；默认关闭，防 API 鉴权泄露时执行任意 SQL
+    sql_query = report["sql_query"]
+    if int(endpoint.get("allow_write_sql", 0) or 0) and method == "GET":
+        qp = query_params.get("sql_query", [""])
+        if qp and qp[0].strip():
+            sql_query = qp[0]
+
     result = execute_report(
         report_id=report_id,
-        sql_query=report["sql_query"],
+        sql_query=sql_query,
         pool_config=pool_config,
         page=page,
         page_size=ps,
@@ -693,9 +701,12 @@ def _resolve_fetch_all(endpoint: dict, method: str, body: str,
 
     GET 从 query string 提取，POST 从请求体（JSON/form-urlencoded）提取。
     严格值校验：true/1/yes（大小写不敏感），其他值视为未传递。
-    端点配置 allow_fetch_all 关闭时参数被忽略，返回 False。
+    双重门禁：allow_fetch_all 与 allow_full_output 任一关闭时参数被忽略，
+    返回 False（按翻页逻辑返回）。
     """
     if not int(endpoint.get("allow_fetch_all", 1) or 0):
+        return False
+    if not int(endpoint.get("allow_full_output", 1) or 0):
         return False
     raw = None
     if method == "POST" and body:

@@ -15,6 +15,7 @@ test_api_endpoint.py — API 端点功能集成测试
 
 import unittest
 import unittest.mock
+from unittest.mock import patch
 import threading
 import time
 import urllib.request
@@ -100,6 +101,8 @@ def _set_up_db():
             static_cache INTEGER NOT NULL DEFAULT 1,
             json_template TEXT,
             description TEXT,
+            allow_full_output INTEGER NOT NULL DEFAULT 1,
+            allow_write_sql INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
@@ -594,6 +597,33 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(val, 1, "存量端点迁移后默认开启")
         conn.close()
 
+    def test_api_endpoint_migration_full_output_and_write_sql(self):
+        """存量库迁移后 allow_full_output（默认1）/allow_write_sql（默认0）列存在。"""
+        import tests.test_base as tb
+        conn = sqlite3.connect(":memory:")
+        conn.execute(tb._SQL_CREATE_CONNECTION_POOLS)
+        conn.execute(tb._SQL_CREATE_USERS)
+        conn.execute(tb._SQL_CREATE_REPORT_CATEGORIES)
+        conn.execute(tb._SQL_CREATE_REPORT_CONFIGS)
+        conn.execute(tb._SQL_CREATE_SESSIONS)
+        old_schema = tb._SQL_CREATE_API_ENDPOINTS.replace(
+            "    allow_full_output INTEGER NOT NULL DEFAULT 1,\n", "") \
+            .replace("    allow_write_sql   INTEGER NOT NULL DEFAULT 0,\n", "")
+        conn.execute(old_schema)
+        conn.execute("INSERT INTO api_endpoints (report_id, name, url_path) "
+                     "VALUES (1, '存量端点', '/api/legacy2')")
+        conn.commit()
+        from config_db import _init_sqlite_migrations
+        _init_sqlite_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(api_endpoints)")}
+        self.assertIn("allow_full_output", cols)
+        self.assertIn("allow_write_sql", cols)
+        row = conn.execute("SELECT allow_full_output, allow_write_sql "
+                           "FROM api_endpoints").fetchone()
+        self.assertEqual(row[0], 1, "存量端点迁移后 allow_full_output 默认开启")
+        self.assertEqual(row[1], 0, "存量端点迁移后 allow_write_sql 默认关闭")
+        conn.close()
+
     def test_api_fetch_all_get_true(self):
         """GET ?fetch_all=true 返回全部行 + full 标记"""
         self._create_endpoint_in_db(url_path="/api/full-get")
@@ -787,6 +817,60 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(len(body["data"]), 3)
         names = [row["name"] for row in body["data"]]
         self.assertEqual(names, ["王五", "李四", "张三"])
+
+    def test_api_full_output_gate_disables_fetch_all(self):
+        """allow_full_output=0 时即使 allow_fetch_all=1，fetch_all 参数也被忽略。"""
+        self._create_endpoint_in_db(
+            url_path="/api/full-gate", allow_fetch_all=1, allow_full_output=0)
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/full-gate?fetch_all=true")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertNotIn("full", body)
+        self.assertEqual(body["page_size"], 20)
+
+    def test_api_full_output_default_on(self):
+        """新建端点 allow_full_output 默认开启。"""
+        self._create_endpoint_in_db(url_path="/api/full-gate-default")
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT allow_full_output FROM api_endpoints WHERE url_path=?",
+            ("/api/full-gate-default",)).fetchall()
+        conn.close()
+        self.assertEqual(rows[0][0], 1)
+
+    def test_api_write_sql_default_off_ignores_override(self):
+        """allow_write_sql=0（默认）时 sql_query 参数被忽略，仍返回报表 SQL 数据。"""
+        self._create_endpoint_in_db(url_path="/api/sql-off")
+        resp = urllib.request.urlopen(
+            f"{BASE_URL}/api/sql-off?sql_query=" + urllib.parse.quote("SELECT 999 AS hacked"))
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(len(body["data"]), 3)
+        self.assertIn("name", body["data"][0])
+
+    @patch("db.execute_mysql_query")
+    def test_api_write_sql_allows_override(self, mock_exec):
+        """allow_write_sql=1 时 sql_query 参数覆盖报表 SQL 并生效。"""
+        def fake_exec(conn, sql, params=(), transactional=False):
+            if "override_marker" in sql:
+                return [{"columns": ["ov_id"], "rows": [(99,)]}]
+            return [{"columns": ["id", "name", "age", "status"],
+                     "rows": [(1, "张三", 25, "active")]}]
+        mock_exec.side_effect = fake_exec
+        self._create_endpoint_in_db(url_path="/api/sql-on", allow_write_sql=1)
+        resp = urllib.request.urlopen(
+            f"{BASE_URL}/api/sql-on?sql_query="
+            + urllib.parse.quote("SELECT 99 AS ov_id -- override_marker"))
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(len(body["data"]), 1)
+        self.assertEqual(body["data"][0]["ov_id"], 99)
+
+    def test_api_full_output_and_write_sql_columns_defaults(self):
+        """新列默认值：allow_full_output=1、allow_write_sql=0。"""
+        conn = _get_conn()
+        eid = db.add_api_endpoint(conn, _TEST_REPORT_ID, "新列默认", "/api/new-cols")
+        ep = db.get_api_endpoint(conn, eid)
+        conn.close()
+        self.assertEqual(ep["allow_full_output"], 1)
+        self.assertEqual(ep["allow_write_sql"], 0)
 
     # =====================================================================
     # JSON 输出模板测试
