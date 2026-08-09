@@ -55,6 +55,12 @@ body {
 .navbar .nav-active { color: #fff !important; background: rgba(255,255,255,0.12); }
 .navbar .spacer { flex: 1; }
 .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+/* 宽屏利用率：视口越宽容器越宽（1200 → 1440 → 1680 → 1920 → 2400），
+   窄屏保持 1200px 现状；表格类页面在宽屏下避免左右横移 */
+@media (min-width: 1400px) { .container { max-width: 1440px; } }
+@media (min-width: 1700px) { .container { max-width: 1680px; } }
+@media (min-width: 2100px) { .container { max-width: 1920px; } }
+@media (min-width: 2600px) { .container { max-width: 2400px; } }
 .card {
   background: #fff; border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
