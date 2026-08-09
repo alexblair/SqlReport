@@ -1911,9 +1911,7 @@ function updateBatchCount() {{
     tab_html = _render_report_sections(cat_tree)
 
     uncat_rows = _render_report_rows(unclassified_reports)
-    uncat_section = ""
-    if unclassified_reports or all_reports:
-        uncat_section = f"""<div class="section">
+    uncat_section = f"""<div class="section">
 <div class="section-title">
   <span>📋 未分类报表 <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(unclassified_reports)} 个报表)</span></span>
   <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
@@ -2777,8 +2775,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   </label>
 
   <div class="form-actions">
-    <button type="submit" name="action" value="save_close" class="btn btn-primary">保存并关闭</button>
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
+    <button type="submit" name="action" value="save_close" class="btn btn-outline">保存并关闭</button>
     <a href="/config/reports/{report_id}/edit" class="cancel">关闭</a>
   </div>
 </form>

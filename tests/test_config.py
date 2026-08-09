@@ -310,6 +310,17 @@ class TestReportFlow(unittest.TestCase):
         self.assertIn('href="/config/reports/add"', body)
         self.assertIn('class="nav-active"', body)
 
+    def test_reports_page_empty_state(self):
+        """PH-13：/config/reports 无报表时显示「暂无未分类报表」占位"""
+        body = config.render_reports_page(self.conn)
+        self.assertIn("暂无未分类报表", body)
+
+    def test_reports_page_empty_state_hidden_when_reports_exist(self):
+        """PH-13：/config/reports 有报表时不再显示空态占位"""
+        db.add_report(self.conn, "空态测试", "SELECT 1", 20, 1)
+        body = config.render_reports_page(self.conn)
+        self.assertNotIn("暂无未分类报表", body)
+
     def test_add_report_form_contains_pool_select(self):
         """新增报表表单应包含连接池下拉选择"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config/reports/add", "")
@@ -567,13 +578,13 @@ class TestReportFormButtons(unittest.TestCase):
         self.assertIn('type="hidden"', body)
         self.assertIn('name="id"', body)
 
-    def test_save_close_is_primary_button(self):
-        """PH-10 保存返回上级为主按钮（btn-primary）"""
+    def test_save_is_primary_button(self):
+        """PH-10 「保存」为主按钮（btn-primary）、「保存返回上级」为次要（btn-outline）"""
         rid = db.add_report(self.conn, "主次按钮", "SELECT 1", 20, 1)
         code, body, _ = config.handle_request(self.conn, "GET",
                                                f"/config/reports/{rid}/edit", "")
-        self.assertIn('value="save_close" class="btn btn-primary"', body)
-        self.assertIn('value="save" class="btn btn-outline"', body)
+        self.assertIn('value="save" class="btn btn-primary"', body)
+        self.assertIn('value="save_close" class="btn btn-outline"', body)
 
 
 # ===================================================================

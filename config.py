@@ -411,8 +411,8 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   {allow_write_html}
   {allow_all_output_html}
   <div class="form-actions">
-    <button type="submit" name="action" value="save_close" class="btn btn-primary">保存返回上级</button>
-    <button type="submit" name="action" value="save" class="btn btn-outline">保存</button>
+    <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
+    <button type="submit" name="action" value="save_close" class="btn btn-outline">保存返回上级</button>
     {view_btn}
     {preview_btn}
     <a href="/config/reports" class="cancel">取消</a>
