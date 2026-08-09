@@ -556,6 +556,14 @@ class TestReportFormButtons(unittest.TestCase):
         self.assertIn('type="hidden"', body)
         self.assertIn('name="id"', body)
 
+    def test_save_close_is_primary_button(self):
+        """PH-10 保存返回上级为主按钮（btn-primary）"""
+        rid = db.add_report(self.conn, "主次按钮", "SELECT 1", 20, 1)
+        code, body, _ = config.handle_request(self.conn, "GET",
+                                               f"/config/reports/{rid}/edit", "")
+        self.assertIn('value="save_close" class="btn btn-primary"', body)
+        self.assertIn('value="save" class="btn btn-outline"', body)
+
 
 # ===================================================================
 # API 端点规则 JSON 测试
@@ -764,6 +772,23 @@ class TestOverviewApiCard(BaseConfigTest):
         """接口总数提示保留"""
         body = config.render_overview(self.conn)
         self.assertIn("已配置 1 个 API 接口", body)
+
+
+class TestOverviewOnboardingGuide(BaseConfigTest):
+    """PH-09 配置总览空状态引导条"""
+
+    def test_overview_shows_guide_when_no_pools(self):
+        """无连接池时总览顶部显示三步引导条"""
+        body = config.render_overview(self.conn)
+        self.assertIn("三步开始", body)
+        self.assertIn("立即添加连接池", body)
+        self.assertIn('href="/config/pools/add"', body)
+
+    def test_overview_hides_guide_when_pool_exists(self):
+        """有连接池时不显示三步引导条"""
+        db.add_pool(self.conn, "测试池", "h", 3306, "u", "p", "d")
+        body = config.render_overview(self.conn)
+        self.assertNotIn("三步开始", body)
 
 
 class TestApiEndpointToggle(BaseConfigTest):

@@ -452,7 +452,7 @@ class TestSafeLocation(unittest.TestCase):
 
 
 class TestReportRefreshIntegration(unittest.TestCase):
-    """T3 批次：refresh=1 的 HTTP 层 302 全流程（缺口 1/2）
+    """T5 批次（PH-08）：POST action=refresh_cache 的 HTTP 层 302 全流程
 
     隔离策略：本类强制 SQLite 引擎并指向临时库（否则 app_config.json 启用
     的 MySQL 配置库会被真实读写，且 seed 报表会指向生产连接池）。
@@ -515,28 +515,33 @@ class TestReportRefreshIntegration(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_refresh_redirects_without_refresh_param(self):
-        """1. 登录后 GET /report?id=N&refresh=1 → 302 且 Location 剔除 refresh"""
+    def test_refresh_redirects_with_flash(self):
+        """1. 登录后 POST /report（action=refresh_cache）→ 302 且 Location 含 flash"""
         rid = self._seed_report()
         opener, _, _ = _login_opener(self.base_url)
-        req = urllib.request.Request(f"{self.base_url}/report?id={rid}&refresh=1")
+        data = urllib.parse.urlencode({"action": "refresh_cache", "id": rid})
+        req = urllib.request.Request(f"{self.base_url}/report", data=data.encode(),
+                                     method="POST")
         try:
             opener.open(req)
-            self.fail("refresh=1 应返回 302，实际 200")
+            self.fail("refresh_cache 应返回 302，实际 200")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 302)
-            self.assertEqual(e.headers["Location"], f"/report?id={rid}")
-            self.assertNotIn("refresh", e.headers["Location"])
+            loc = e.headers["Location"]
+        self.assertTrue(loc.startswith(f"/report?id={rid}"), loc)
+        self.assertIn("flash=", loc)
 
     def test_refresh_preserves_other_params_in_location(self):
         """1. 302 Location 保留 sort/filters 等业务参数"""
         rid = self._seed_report()
         opener, _, _ = _login_opener(self.base_url)
-        url = f"{self.base_url}/report?id={rid}&refresh=1&sort=name&dir=asc&f_name=ali"
-        req = urllib.request.Request(url)
+        data = urllib.parse.urlencode({"action": "refresh_cache", "id": rid,
+                                       "sort": "name", "dir": "asc", "f_name": "ali"})
+        req = urllib.request.Request(f"{self.base_url}/report", data=data.encode(),
+                                     method="POST")
         try:
             opener.open(req)
-            self.fail("refresh=1 应返回 302，实际 200")
+            self.fail("refresh_cache 应返回 302，实际 200")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 302)
             loc = e.headers["Location"]
@@ -544,12 +549,14 @@ class TestReportRefreshIntegration(unittest.TestCase):
         self.assertIn("sort=name", loc)
         self.assertIn("dir=asc", loc)
         self.assertIn("f_name=ali", loc)
-        self.assertNotIn("refresh", loc)
+        self.assertIn("flash=", loc)
 
     def test_refresh_unauthenticated_redirects_to_login(self):
-        """2. 未认证访问 refresh=1 → 302 到 /login（认证优先于业务重定向）"""
+        """2. 未认证 POST refresh_cache → 302 到 /login（认证优先于业务重定向）"""
         opener = urllib.request.build_opener(_NoRedirect)
-        req = urllib.request.Request(f"{self.base_url}/report?id=1&refresh=1")
+        data = urllib.parse.urlencode({"action": "refresh_cache", "id": "1"})
+        req = urllib.request.Request(f"{self.base_url}/report", data=data.encode(),
+                                     method="POST")
         try:
             opener.open(req)
             self.fail("未认证应 302 到 /login，实际 200")
@@ -561,10 +568,12 @@ class TestReportRefreshIntegration(unittest.TestCase):
         """1. 302 后跟随 Location 的目标页可正常渲染（200，无 MySQL 时降级为错误页）"""
         rid = self._seed_report()
         opener, cj, _ = _login_opener(self.base_url)
-        req = urllib.request.Request(f"{self.base_url}/report?id={rid}&refresh=1")
+        data = urllib.parse.urlencode({"action": "refresh_cache", "id": rid})
+        req = urllib.request.Request(f"{self.base_url}/report", data=data.encode(),
+                                     method="POST")
         try:
             opener.open(req)
-            self.fail("refresh=1 应返回 302，实际 200")
+            self.fail("refresh_cache 应返回 302，实际 200")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 302)
             target = e.headers["Location"]

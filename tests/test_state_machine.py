@@ -837,23 +837,27 @@ class TestStateMachine(BaseStateMachineTest):
 
     @patch("report.execute_report")
     def test_refresh_link_preserves_state(self, mock_exec):
-        """TC17: 重建缓存链接应保留排序、筛选和列设置。"""
+        """TC17: 重建缓存 POST 表单应保留排序、筛选和列设置（PH-08）。"""
         html = self._render(
             "id=1&sort=name&dir=asc&f_age=25&op_age=gt&cols=id,name",
             mock_exec,
         )
-        # 找 refresh=1 的链接
-        refresh_hrefs = [h for h in self._get_hrefs(html) if "refresh=1" in h]
-        self.assertGreater(len(refresh_hrefs), 0, "应有重建缓存链接")
-        for href in refresh_hrefs:
-            self.assertIn("sort=name", href,
-                          f"重建缓存链接 {href[:80]} 应保留 sort=name")
-            self.assertIn("f_age=25", href,
-                          f"重建缓存链接 {href[:80]} 应保留 f_age=25")
-            self.assertIn("op_age=gt", href,
-                          f"重建缓存链接 {href[:80]} 应保留 op_age=gt")
-            self.assertIn("cols=", href,
-                          f"重建缓存链接 {href[:80]} 应保留 cols")
+        # 找重建缓存表单（action=refresh_cache）
+        fc_start = html.find('name="action" value="refresh_cache"')
+        self.assertGreater(fc_start, 0, "应有重建缓存 POST 表单")
+        form_start = html.rfind("<form", 0, fc_start)
+        form_end = html.find("</form>", fc_start)
+        form_seg = html[form_start:form_end]
+        self.assertIn('name="sort" value="name"', form_seg,
+                      "重建缓存表单应保留 sort=name")
+        self.assertIn('name="dir" value="asc"', form_seg,
+                      "重建缓存表单应保留 dir=asc")
+        self.assertIn('name="f_age" value="25"', form_seg,
+                      "重建缓存表单应保留 f_age=25")
+        self.assertIn('name="op_age" value="gt"', form_seg,
+                      "重建缓存表单应保留 op_age=gt")
+        self.assertIn('name="cols" value="id,name"', form_seg,
+                      "重建缓存表单应保留 cols")
 
     # ===============================================================
     # TC18: 清除筛选链接保留排序和列
@@ -1392,12 +1396,12 @@ class TestStateMachine(BaseStateMachineTest):
 
     @patch("report.execute_report")
     def test_sequence_custom_cols_filter_sort_page_refresh(self, mock_exec):
-        """TC31: 全维度参数共存，重建缓存链接保留所有状态。
+        """TC31: 全维度参数共存，重建缓存 POST 表单保留所有状态。
 
         序列模拟：
           1. cols=id,name,age + f_age>30 + sort=name&dir=asc + page=2
           2. 验证链接保留全部参数
-          3. 添加 refresh=1 → 验证 refresh 参数存在且其他参数保留
+          3. 验证重建缓存表单（action=refresh_cache）含全部状态参数
 
         注意：cols 必须包含 \"age\" 才能让 age 列的筛选下拉框渲染。
         """
@@ -1425,23 +1429,22 @@ class TestStateMachine(BaseStateMachineTest):
         self.assertIn('class="active">2<', html,
                       "分页导航应标记第 2 页为当前页")
 
-        # ---- 断言 5: 重建缓存链接（refresh=1）保留所有参数 ----
-        refresh_hrefs = [
-            h for h in hrefs if "refresh=1" in h.replace("&amp;", "&")
-        ]
-        self.assertGreater(len(refresh_hrefs), 0, "应有重建缓存链接")
-        for href in refresh_hrefs:
-            norm = href.replace("&amp;", "&")
-            self.assertIn("sort=name", norm,
-                          f"重建缓存链接 {href[:80]} 应保留 sort=name")
-            self.assertIn("f_age=30", norm,
-                          f"重建缓存链接 {href[:80]} 应保留 f_age=30")
-            self.assertIn("op_age=gt", norm,
-                          f"重建缓存链接 {href[:80]} 应保留 op_age=gt")
-            self.assertIn("cols=", norm,
-                          f"重建缓存链接 {href[:80]} 应保留 cols")
-            self.assertIn("refresh=1", norm,
-                          f"重建缓存链接 {href[:80]} 应包含 refresh=1")
+        # ---- 断言 5: 重建缓存 POST 表单保留所有状态 ----
+        fc_start = html.find('name="action" value="refresh_cache"')
+        self.assertGreater(fc_start, 0, "应有重建缓存 POST 表单")
+        form_start = html.rfind("<form", 0, fc_start)
+        form_end = html.find("</form>", fc_start)
+        form_seg = html[form_start:form_end]
+        self.assertIn('name="sort" value="name"', form_seg,
+                      "重建缓存表单应保留 sort=name")
+        self.assertIn('name="f_age" value="30"', form_seg,
+                      "重建缓存表单应保留 f_age=30")
+        self.assertIn('name="op_age" value="gt"', form_seg,
+                      "重建缓存表单应保留 op_age=gt")
+        self.assertIn('name="cols" value="id,name,age"', form_seg,
+                      "重建缓存表单应保留 cols")
+        self.assertIn('name="page" value="2"', form_seg,
+                      "重建缓存表单应保留 page=2")
 
 
 # ===================================================================

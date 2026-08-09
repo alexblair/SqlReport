@@ -715,6 +715,36 @@ class TestBuildResultSelectorHtml(unittest.TestCase):
         result = build_result_selector_html(1, 20, ["a", "b"], 0, "SELECT *", "tok")
         self.assertIn('data-sql-override="SELECT *"', result)
 
+    def test_state_tip_always_shown_for_multi(self):
+        """PH-11 多结果集下拉旁显示状态独立提示文案"""
+        result = build_result_selector_html(1, 20, ["a", "b"], 0, None, "tok")
+        self.assertIn("每个结果视图独立维护筛选/排序/分页状态", result)
+
+    def test_no_badge_without_filters_sorts(self):
+        """PH-11 无筛选/排序时不显示状态角标"""
+        result = build_result_selector_html(1, 20, ["a", "b"], 0, None, "tok")
+        self.assertNotIn("已筛选", result)
+        self.assertNotIn("已排序", result)
+
+    def test_badges_with_filters_and_sorts(self):
+        """PH-11 有筛选/排序时显示角标（sort-tag 样式）"""
+        result = build_result_selector_html(
+            1, 20, ["a", "b"], 0, None, "tok",
+            filters=[("name", "contains", "x")],
+            sorts=[("id", "desc")])
+        self.assertIn("已筛选 ×1", result)
+        self.assertIn("已排序 ×1", result)
+        self.assertIn('class="sort-tag"', result)
+
+    def test_badge_counts_multiple(self):
+        """PH-11 角标计数与筛选/排序条数一致"""
+        result = build_result_selector_html(
+            1, 20, ["a", "b"], 0, None, "tok",
+            filters=[("a", "eq", "1"), ("b", "contains", "2")],
+            sorts=[("id", "asc"), ("name", "desc"), ("x", "asc")])
+        self.assertIn("已筛选 ×2", result)
+        self.assertIn("已排序 ×3", result)
+
 
 # ===================================================================
 # 缓存标签测试
@@ -990,12 +1020,14 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertIn('name="result"', result)
         self.assertIn('value="0"', result)
 
-    def test_rebuild_cache_link(self):
-        """包含重建缓存链接"""
+    def test_rebuild_cache_form(self):
+        """重建缓存为 POST 表单（PH-08：破坏性操作 POST 化）"""
         result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
                                           "", 100, 5)
         self.assertIn("重建缓存", result)
-        self.assertIn("refresh=1", result)
+        self.assertIn('method="post" action="/report"', result)
+        self.assertIn('name="action" value="refresh_cache"', result)
+        self.assertNotIn("refresh=1", result)
 
     def test_field_settings_button(self):
         """包含字段设置按钮"""
@@ -1010,6 +1042,38 @@ class TestBuildControlsBarHtml(unittest.TestCase):
                                           "", 100, 5)
         self.assertIn("排序设置", result)
         self.assertIn("sortSettingsPanel", result)
+
+    def test_export_more_options_collapsed(self):
+        """PH-12 低频导出选项折叠到「更多选项」details 内"""
+        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
+                                          "", 100, 5)
+        self.assertIn("<details", result)
+        self.assertIn("更多选项", result)
+        # 低频选项位于 details 折叠区内
+        details_start = result.find("<details")
+        details_end = result.find("</details>")
+        self.assertGreater(details_start, 0)
+        self.assertGreater(details_end, details_start)
+        folded = result[details_start:details_end]
+        self.assertIn('name="charset"', folded)
+        self.assertIn('name="json_no_quotes"', folded)
+        self.assertIn('name="zip"', folded)
+        self.assertIn('name="use_custom_cols"', folded)
+        # 格式与导出按钮保留在折叠区外
+        format_pos = result.find('name="format"')
+        self.assertLess(format_pos, details_start)
+
+    def test_export_more_keep_submit_params(self):
+        """PH-12 折叠区字段仍为表单提交字段（参数不丢）"""
+        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
+                                          "", 100, 5)
+        details_start = result.find("<details")
+        details_end = result.find("</details>")
+        folded = result[details_start:details_end]
+        self.assertIn("charset", folded)
+        self.assertIn("gbk", folded)
+        self.assertIn("utf8", folded)
+        self.assertIn('value="1"', folded)
 
 
 # ===================================================================

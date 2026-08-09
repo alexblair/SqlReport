@@ -2,9 +2,9 @@
 test_report_extra.py — 报表执行与预览域补充测试（T3 批次）
 
 覆盖缺口清单（编号对应批次说明）：
-1.  refresh=1 预填 + 302 全流程（URL 参数带入表单 → 执行 → 重定向）
-2.  refresh 预填失败时降级（缺参数、非法参数）
-3.  refresh 与静态缓存联动（URL 参数参与缓存键或失效）
+1.  POST action=refresh_cache 预填 + 302 回跳全流程（视图状态参数带入表单 → 执行 → 回跳保留）
+2.  refresh_cache 预填失败时降级（缺报表、缺连接池、执行异常仍回跳）
+3.  refresh_cache 与静态缓存联动（execute_report refresh=True 失效路径）
 4.  is_preview 时跳过 Redis 写入（预览不应污染缓存）
 5.  预览失败展示（SQL 错误时预览页渲染错误信息而非崩溃）
 6.  预览分页/筛选/排序参数可用性
@@ -52,11 +52,11 @@ from tests import BaseReportTest
 
 
 # ===================================================================
-# 缺口 1/2/3：refresh 预填 + 302 全流程、降级、静态缓存联动
+# 缺口 1/2/3：refresh_cache POST 预填 + 302 回跳全流程、降级、静态缓存联动
 # ===================================================================
 
 class TestRefreshPrefillFlow(BaseReportTest):
-    """refresh=1 预填缓存 + 302 重定向全流程"""
+    """POST action=refresh_cache 预填缓存 + 302 回跳全流程（PH-08）"""
 
     def setUp(self):
         super().setUp()
@@ -69,15 +69,18 @@ class TestRefreshPrefillFlow(BaseReportTest):
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")
     def test_refresh_302_and_prefill(self, mock_conn_f, mock_query):
-        """1. refresh=1 → 302 且 Location 剔除 refresh；预填后无 refresh 请求命中缓存不重查"""
+        """1. POST refresh_cache → 302 回跳带 flash；预填后 GET 命中缓存不重查"""
         mock_query.return_value = [{"columns": ["id"], "rows": [(1,), (2,)]}]
         mock_conn_f.return_value = MagicMock()
 
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=1")
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/report?id=1")
-        self.assertNotIn("refresh", body)
-        self.assertEqual(mock_query.call_count, 1, "refresh 预填应真实执行一次查询")
+        self.assertIn("id=1", body)
+        self.assertIn("flash=%E7%BC%93%E5%AD%98%E5%B7%B2%E9%87%8D%E5%BB%BA", body,
+                      "302 回跳应附带 flash=缓存已重建（URL 编码）")
+        self.assertEqual(mock_query.call_count, 1, "refresh_cache 应真实执行一次查询")
 
         code2, body2, _ = report.handle_request(self.conn, "GET", "/report", "id=1")
         self.assertEqual(code2, 200)
@@ -89,57 +92,88 @@ class TestRefreshPrefillFlow(BaseReportTest):
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")
     def test_refresh_preserves_other_params_in_redirect(self, mock_conn_f, mock_query):
-        """1. 302 Location 保留 sort/filters/cols 等 URL 参数（URL 参数带入预填）"""
+        """1. 302 回跳保留 sort/filters/cols/page_size/result 等视图状态参数"""
         mock_query.return_value = [{"columns": ["id", "name"], "rows": [(1, "Alice")]}]
         mock_conn_f.return_value = MagicMock()
 
         code, body, _ = report.handle_request(
-            self.conn, "GET", "/report",
-            "id=1&refresh=1&sort=name&dir=asc&f_name=ali&cols=id,name")
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1&page=3&page_size=50"
+            "&sort=name&dir=asc&sort=id&dir=desc"
+            "&f_name=ali&op_name=like"
+            "&cols=id,name&result=1")
         self.assertEqual(code, 302)
-        for piece in ("id=1", "sort=name", "dir=asc", "f_name=ali", "cols=id%2Cname"):
-            self.assertIn(piece, body, f"302 Location 应保留参数 {piece}")
-        self.assertNotIn("refresh", body)
+        for piece in ("id=1", "page=3", "page_size=50",
+                      "sort=name", "dir=asc", "sort=id", "dir=desc",
+                      "f_name=ali", "op_name=like", "cols=id%2Cname", "result=1"):
+            self.assertIn(piece, body, f"302 回跳应保留参数 {piece}")
 
     def test_refresh_missing_pool_falls_back_302(self):
-        """2. refresh=1 但关联连接池已删除 → 跳过预填仍 302（不崩溃）"""
+        """2. POST refresh_cache 但关联连接池已删除 → 跳过预填仍 302（不崩溃）"""
         self.conn.execute("DELETE FROM connection_pools")
         self.conn.commit()
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=1")
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/report?id=1")
+        self.assertIn("id=1", body)
 
     def test_refresh_missing_report_falls_back_302(self):
-        """2. refresh=1 但报表不存在 → 不预填仍 302"""
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=999&refresh=1")
+        """2. POST refresh_cache 但报表不存在 → 不预填仍 302"""
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=999")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/report?id=999")
+        self.assertIn("id=999", body)
+
+    def test_refresh_invalid_id_redirects_selector(self):
+        """2. POST refresh_cache 缺 id / id 非法 → 302 到报表选择页（不崩溃）"""
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "", "action=refresh_cache")
+        self.assertEqual(code, 302)
+        self.assertEqual(body, "/report")
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "", "action=refresh_cache&id=abc")
+        self.assertEqual(code, 302)
+        self.assertEqual(body, "/report")
+
+    def test_post_without_refresh_action_renders_normally(self):
+        """2. POST 无 refresh_cache action → 不触发重建，正常渲染"""
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "", "foo=bar")
+        self.assertEqual(code, 200)
+        self.assertIn("测试报表", body)
 
     @patch("report.execute_report")
     def test_refresh_prefill_failure_still_302(self, mock_exec):
         """2. 预填执行失败（MySQL 异常）→ 降级为 warning，仍 302"""
         mock_exec.side_effect = Exception("MySQL 连接超时")
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=1")
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1")
         self.assertEqual(code, 302)
+        self.assertIn("id=1", body)
 
     @patch("report.execute_report")
-    def test_refresh_invalid_value_renders_normally(self, mock_exec):
-        """2. refresh=2（非 TRUTHY 值）→ 不重定向，正常渲染且 refresh=False"""
+    def test_get_refresh_no_longer_prefills(self, mock_exec):
+        """1. GET refresh=1 不再触发重建（PH-08：GET 不产生副作用），正常渲染且 refresh=False"""
         mock_exec.return_value = report.ReportResult(
             columns=["id"], rows=[(1,)], total=1, page=1, page_size=20)
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=2")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=1")
         self.assertEqual(code, 200)
         self.assertIn("测试报表", body)
-        self.assertFalse(mock_exec.call_args[0][7], "refresh=2 应解析为 False")
+        self.assertFalse(mock_exec.call_args[0][7], "GET refresh=1 应解析为 False")
 
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")
     @patch("report.config_db.invalidate_api_static_cache_by_report")
     def test_refresh_invalidates_api_static_cache(self, mock_inv, mock_conn_f, mock_query):
-        """3. refresh=1 预填时联动删除该报表全部 API 端点静态缓存"""
+        """3. refresh_cache 预填时联动删除该报表全部 API 端点静态缓存"""
         mock_query.return_value = [{"columns": ["id"], "rows": [(1,)]}]
         mock_conn_f.return_value = MagicMock()
-        code, body, _ = report.handle_request(self.conn, "GET", "/report", "id=1&refresh=1")
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1")
         self.assertEqual(code, 302)
         mock_inv.assert_called_once_with(self.conn, 1)
 
@@ -794,6 +828,33 @@ class TestCategoryTreeSelector(BaseReportTest):
                                    pool_id=self.pool_id, category_id=None)
         code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
         self.assertIn(f'href="/report?id={rid}"', body)
+
+
+# ===================================================================
+# PH-09：空状态引导（三步开始）
+# ===================================================================
+
+class TestOnboardingGuide(BaseReportTest):
+    """报表选择页空状态引导：无报表时显示三步指引"""
+
+    def test_selector_shows_guide_when_no_reports(self):
+        """无报表时选择页显示三步引导卡与前往配置按钮"""
+        self.conn.execute("DELETE FROM report_configs")
+        self.conn.commit()
+        code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
+        self.assertEqual(code, 200)
+        self.assertIn("三步开始", body)
+        self.assertIn("① 添加连接池", body)
+        self.assertIn("前往配置管理", body)
+        self.assertIn('href="/config"', body)
+        self.assertNotIn("暂无可用报表", body)
+
+    def test_selector_hides_guide_when_reports_exist(self):
+        """有报表时不显示三步引导卡"""
+        code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
+        self.assertEqual(code, 200)
+        self.assertNotIn("三步开始", body)
+        self.assertIn("可用报表列表", body)
 
 
 # ===================================================================

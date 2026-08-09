@@ -1493,16 +1493,19 @@ class TestCombinationScenarios(unittest.TestCase):
 
     @patch("report.execute_report")
     def test_rebuild_cache_preserves_sorts_filters_cols(self, mock_exec):
-        """重建缓存链接应保留排序、筛选和列设置"""
+        """重建缓存 POST 表单应保留排序、筛选和列设置（PH-08）"""
         mock_exec.return_value = report.ReportResult(
             columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
         code, body, _ = report.handle_request(
             self.conn, "GET", "/report",
             "id=1&sort=name&dir=asc&f_name=a&cols=id,name",
             pool_override=self.mock_pool)
-        self.assertIn("refresh=1", body)
-        self.assertIn("sort=name", body)
-        self.assertIn("cols=", body)
+        self.assertIn('name="action" value="refresh_cache"', body)
+        self.assertRegex(body, r'name="sort" value="name"')
+        self.assertRegex(body, r'name="dir" value="asc"')
+        self.assertRegex(body, r'name="f_name" value="a"')
+        self.assertRegex(body, r'name="cols" value="id,name"')
+        self.assertNotIn("refresh=1", body)
 
     @patch("report.execute_report")
     def test_apply_field_settings_preserves_sorts(self, mock_exec):

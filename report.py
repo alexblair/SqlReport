@@ -15,7 +15,7 @@ URL 路由：
   GET /report?id=N&sort=C1&dir=asc&sort=C2&dir=desc → 多列排序
   GET /report?id=N&f_name=alice     → name 列模糊筛选
   GET /report?id=N&f_name=alice&f_age=30 → 多字段同时筛选
-  GET /report?id=N&refresh=1        → 强制刷新缓存
+  POST /report（action=refresh_cache） → 重建缓存后 302 回跳（破坏性操作 POST 化）
   POST /report/preview              → 预览模式：不保存配置，临时以 POST 表单中的 SQL 查看
 
 兼容旧格式：
@@ -1152,8 +1152,19 @@ def render_report_selector(conn) -> str:
     for r in uncategorized:
         report_list += f'<li style="padding:4px 0"><a href="/report?id={r["id"]}">(未分类) {_escape(r["name"])}</a></li>'
 
-    if not report_list:
-        report_list = '<li style="color:#94a3b8;padding:16px;list-style:none">暂无可用报表</li>'
+    # PH-09 空状态引导：无任何报表时整个列表卡片替换为三步指引
+    list_card = ('<div class="card">'
+                 '<h3>可用报表列表</h3>'
+                 f'<ul class="report-list" style="padding-left:0">{report_list}</ul>'
+                 '</div>')
+    if not reports:
+        list_card = ('<div class="card" style="border:1px dashed #c7d2fe;'
+                     'background:#f5f7ff;padding:16px 20px;margin-top:12px">'
+                     '<h3 style="margin:0 0 8px">🚀 开始使用</h3>'
+                     '<p style="margin:0 0 12px;color:#475569;font-size:14px">'
+                     '三步开始：① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</p>'
+                     '<a href="/config" class="btn btn-primary btn-sm">前往配置管理</a>'
+                     '</div>')
 
     body = _render_page_header() + """
 <div class="card">
@@ -1169,10 +1180,7 @@ def render_report_selector(conn) -> str:
     </form>
   </div>
 </div>
-<div class="card">
-  <h3>可用报表列表</h3>
-  <ul class="report-list" style="padding-left:0">""" + report_list + """</ul>
-</div>
+""" + list_card + """
 """ + _FOOTER
     return body
 
@@ -1302,7 +1310,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     result_names = parse_result_names(result_names_raw, num_results)
     swi = ("report" if not sql_override else "report/preview")
     result_selector_html = build_result_selector_html(
-        report_id, qs_page_size, result_names, active_index, sql_override, swi)
+        report_id, qs_page_size, result_names, active_index, sql_override, swi,
+        filters=filters, sorts=sorts)
 
     # ---- Debug 信息、当前规则、备注均委托给 render.py 渲染 ----
     debug_html = build_debug_section_html(
@@ -1357,7 +1366,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     controls = build_controls_bar_html(
         report_id, qs_page_size, sorts, filters, cols_param, display_columns,
         active_index, cache_badge, result.total, result.total_pages,
-        result_param=result_param)
+        result_param=result_param, page=result.page)
 
     filter_action_html, clear_html = build_filter_action_html(
         report_id, qs_page_size, sorts, cols_param, result_param, filters)
@@ -1439,6 +1448,49 @@ def _build_report_switcher(conn, current_id: int = None) -> str:
 # ===================================================================
 
 
+def _handle_refresh_cache(conn, form_data: dict) -> tuple[int, str, dict]:
+    """处理「重建缓存」POST：强制刷新缓存后 302 回跳报表页。
+
+    回跳保留当前视图全部状态参数（page/page_size/sort/dir/filters/cols/result），
+    并附带 flash=缓存已重建 提示（复用 config 表单 POST + 回跳模式）。
+    预填失败不影响回跳（错误在回跳后的页面展示）。
+    """
+    try:
+        report_id = int(_qs_val(form_data, "id", "") or "")
+    except (ValueError, TypeError):
+        return 302, "/report", {}
+    if report_id <= 0:
+        return 302, "/report", {}
+    report = db.get_report(conn, report_id)
+    if report:
+        pool_id = report.get("pool_id")
+        if pool_id:
+            pool_config = db.get_pool(conn, pool_id)
+            if pool_config:
+                page = max(1, app_config.safe_int(_qs_val(form_data, "page"), 1))
+                page_size = None
+                parsed_page_size = app_config.safe_int(_qs_val(form_data, "page_size"), None)
+                if parsed_page_size is not None:
+                    page_size = max(1, parsed_page_size)
+                sorts = parse_sorts(form_data)
+                filters = _parse_filters(form_data)
+                active_index = parse_result_index(form_data)
+                try:
+                    execute_report(report_id, report["sql_query"], pool_config,
+                                   page, page_size, sorts, filters, True,
+                                   active_index, report, conn)
+                except Exception as e:
+                    logging.warning("refresh_cache 预填失败: %s", e)
+    # 回跳：保留视图状态参数 + flash（parse_qs → urlencode 往返保持编码一致）
+    keep = {"id": [str(report_id)], "flash": ["缓存已重建"]}
+    for key, vals in form_data.items():
+        if key in ("page", "page_size", "sort", "dir", "cols", "result"):
+            keep[key] = vals
+        elif key.startswith("f_") or key.startswith("op_"):
+            keep[key] = vals
+    return 302, "/report?" + urllib.parse.urlencode(keep, doseq=True), {}
+
+
 def handle_request(conn, method: str, path: str, query: str,
                    form_body: str = None,
                    pool_override: Optional[dict] = None) -> tuple[int, str, dict]:
@@ -1503,6 +1555,12 @@ def handle_request(conn, method: str, path: str, query: str,
 
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
+    # PH-08 破坏性操作 POST 化：「重建缓存」经 POST 表单触发，GET 不再产生副作用
+    if method == "POST" and path == "/report":
+        form_data = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
+        if _qs_val(form_data, "action") == "refresh_cache":
+            return _handle_refresh_cache(conn, form_data)
+
     if "id" not in qs or not qs["id"][0]:
         return 200, render_report_selector(conn), {}
 
@@ -1529,39 +1587,10 @@ def handle_request(conn, method: str, path: str, query: str,
     # 自定义列顺序/可见性（原始参数字符串，推迟到 render_report_page 中解析）
     cols_raw = _qs_val(qs, "cols")
 
-    # 刷新缓存
-    refresh = _qs_val(qs, "refresh") or ""
-    refresh_flag = refresh in app_config.TRUTHY_VALUES
-
     # 多结果集索引
     active_index = parse_result_index(qs)
 
-    # 刷新缓存：预填缓存后重定向到不带 refresh 参数的 URL，避免 F5 反复清空缓存
-    if refresh_flag:
-        report = db.get_report(conn, report_id)
-        if report:
-            try:
-                if pool_override:
-                    pool_config = pool_override
-                else:
-                    pool_id = report.get("pool_id")
-                    if pool_id:
-                        pool_config = db.get_pool(conn, pool_id)
-                    else:
-                        pool_config = None
-                if pool_config:
-                    actual_sql = report["sql_query"]
-                    execute_report(report_id, actual_sql, pool_config,
-                                   page, page_size, sorts or [], filters or [], True,
-                                   active_index, report, conn)
-            except Exception as e:
-                logging.warning("refresh 预填失败: %s", e)  # 预填失败不影响重定向，错误将在下一页显示
-        qs.pop("refresh", None)
-        new_qs = urllib.parse.urlencode(qs, doseq=True)
-        new_url = f"/report?{new_qs}" if new_qs else f"/report?id={report_id}"
-        return 302, new_url, {}
-
     html = render_report_page(conn, report_id, page, page_size, pool_override,
-                              sorts, filters, refresh_flag, cols_raw,
+                              sorts, filters, False, cols_raw,
                               active_index=active_index, flash=_qs_val(qs, "flash"))
     return 200, html, {}

@@ -188,7 +188,8 @@ class TestRebuildCacheButton(unittest.TestCase):
              "result_names": ""},
             result)
         self.assertIn("重建缓存", body)
-        self.assertIn("refresh=1", body)
+        self.assertIn('name="action" value="refresh_cache"', body)
+        self.assertNotIn("refresh=1", body)
 
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")

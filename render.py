@@ -865,8 +865,12 @@ def build_memo_section_html(memo_raw: str) -> str:
 
 
 def build_result_selector_html(report_id, qs_page_size, result_names,
-                                active_index, sql_override, swi) -> str:
-    """构建多结果集切换下拉框 HTML。"""
+                                active_index, sql_override, swi,
+                                filters=None, sorts=None) -> str:
+    """构建多结果集切换下拉框 HTML。
+
+    filters/sorts: 当前结果视图已应用的筛选/排序（用于状态角标，None 视为无）。
+    """
     num_results = len(result_names)
     if num_results <= 1:
         return ""
@@ -878,8 +882,21 @@ def build_result_selector_html(report_id, qs_page_size, result_names,
     if sql_override:
         qs_parts.append(f"sql_query={urllib.parse.quote(sql_override)}")
     base_qs = "&".join(qs_parts)
+    # PH-11 视图状态角标：复用 sort-tag 样式，当前视图已应用筛选/排序时展示
+    badge_parts = []
+    if filters:
+        badge_parts.append(
+            f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
+            f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
+            f'font-size:12px;border:1px solid #c7d2fe">已筛选 ×{len(filters)}</span>')
+    if sorts:
+        badge_parts.append(
+            f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
+            f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
+            f'font-size:12px;border:1px solid #c7d2fe">已排序 ×{len(sorts)}</span>')
+    badges_html = "".join(badge_parts)
     return (
-        f'<div class="result-selector" style="margin-bottom:12px;display:flex;align-items:center;gap:8px">'
+        f'<div class="result-selector" style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         f'<label style="font-size:13px;color:#475569;font-weight:500">结果视图:</label>'
         f'<select id="resultSwitcher"'
         f' data-report-id="{report_id}" data-active-index="{active_index}"'
@@ -888,6 +905,8 @@ def build_result_selector_html(report_id, qs_page_size, result_names,
         f' onchange="switchResult(this)"'
         f' style="padding:4px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">'
         f'{opts}</select>'
+        f'{badges_html}'
+        f'<span style="font-size:12px;color:#94a3b8">每个结果视图独立维护筛选/排序/分页状态</span>'
         f'</div>'
     )
 
@@ -1095,9 +1114,10 @@ def build_table_body_html(rows, display_indices) -> str:
 def build_controls_bar_html(report_id, page_size, sorts, filters,
                              cols_param, display_columns, active_index,
                              cache_badge, total_rows, total_pages,
-                             result_param='') -> str:
+                             result_param='', page=1) -> str:
     """构建控制栏 HTML（分页控件、导出表单、缓存状态等）。
     result_param: 多结果集时的 URL 参数字符串（如 "result=0"），仅当 num_results > 1 时非空。
+    page: 当前页码（重建缓存 POST 表单随附，回跳保持分页位置）。
     """
     sorts = sorts or []
     filters = filters or []
@@ -1131,27 +1151,42 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
         <option value="json">JSON</option>
       </select>
     </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
-      字符集:
-      <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="gbk">GBK</option>
-        <option value="utf8">UTF8</option>
-      </select>
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="json_no_quotes" value="1"> 数字无引号
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="zip" value="1"> 压缩包
-    </label>
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-      <input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段
-    </label>
+    <details class="export-more" style="position:relative;display:inline-block">
+      <summary style="font-size:12px;color:#475569;cursor:pointer;user-select:none;list-style:none;background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px">更多选项 ▾</summary>
+      <div style="position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:8px;min-width:220px">
+        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
+          字符集:
+          <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
+            <option value="gbk">GBK</option>
+            <option value="utf8">UTF8</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+          <input type="checkbox" name="json_no_quotes" value="1"> 数字无引号
+        </label>
+        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+          <input type="checkbox" name="zip" value="1"> 压缩包
+        </label>
+        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
+          <input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段
+        </label>
+      </div>
+    </details>
     <button type="submit" class="btn btn-success btn-sm btn-mini-m">导出</button>
   </form>
   <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
   <button type="button" onclick="document.getElementById('sortSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⇅ 排序设置</button>
-   <a href="/report?id={report_id}&amp;page_size={page_size}{('&amp;'+build_sort_params(sorts)) if sorts else ''}{('&amp;'+build_filter_params(filters)) if filters else ''}{('&amp;'+cols_param) if cols_param else ''}{'&amp;'+result_param if result_param else ''}&amp;refresh=1" class="btn-refresh">⟳ 重建缓存</a>
+   <form method="post" action="/report" style="display:inline-flex;align-items:center">
+    <input type="hidden" name="action" value="refresh_cache">
+    <input type="hidden" name="id" value="{report_id}">
+    <input type="hidden" name="page" value="{page}">
+    <input type="hidden" name="page_size" value="{page_size}">
+    {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
+    {filter_hidden_inputs(filters) if filters else ''}
+    {cols_hidden}
+    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
+    <button type="submit" class="btn-refresh">⟳ 重建缓存</button>
+   </form>
   {cache_badge}
   <span class="stat">共 {total_rows} 行，{total_pages} 页</span>
 </div>"""

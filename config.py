@@ -411,7 +411,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   {allow_all_output_html}
   <div class="form-actions">
     <button type="submit" name="action" value="save_close" class="btn btn-primary">保存返回上级</button>
-    <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
+    <button type="submit" name="action" value="save" class="btn btn-outline">保存</button>
     {view_btn}
     {preview_btn}
     <a href="/config" class="cancel">取消</a>
@@ -520,6 +520,18 @@ def render_overview(conn, flash: str = None) -> str:
     flash_html = ""
     if flash:
         flash_html = build_flash_html(flash)
+    # PH-09 空状态引导：无连接池时总览顶部显示首次部署三步指引
+    pools = db.get_all_pools(conn)
+    onboarding_html = ""
+    if not pools:
+        onboarding_html = (
+            '<div class="card" style="border:1px dashed #c7d2fe;background:#f5f7ff;'
+            'padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+            '<span style="font-size:14px;color:#475569">🚀 首次使用？三步开始：'
+            '① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</span>'
+            '<span style="flex:1"></span>'
+            f'{_link_btn("/config/pools/add", "立即添加连接池", "btn btn-primary btn-sm")}'
+            '</div>')
     api_endpoints = db.get_all_api_endpoints(conn)
     api_endpoints_count = len(api_endpoints)
     # 气泡内列出接口名称与说明摘要（截断 + title 全文），最多展示 5 个
@@ -543,7 +555,7 @@ def render_overview(conn, flash: str = None) -> str:
 {items_html}
 </div>"""
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + _render_pool_section(conn) + _render_user_section(conn)
+            + flash_html + onboarding_html + _render_pool_section(conn) + _render_user_section(conn)
             + _render_category_section(conn) + api_card + render_page_footer())
     return body
 
