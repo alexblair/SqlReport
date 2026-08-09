@@ -762,5 +762,107 @@ class TestApiEndpointDeleteIntegration(unittest.TestCase):
         self.assertIn("API 接口已删除", html)
 
 
+class TestConfigReportsRoute(unittest.TestCase):
+    """PH-13：/config/reports 报表管理独立页路由端到端"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._engine_patch = patch("db._get_engine", return_value="sqlite3")
+        cls._engine_patch.start()
+        cls._dbcfg_patch = patch("db._get_db_config",
+                                 return_value={"path": _tmp_db.name})
+        cls._dbcfg_patch.start()
+        _set_up_db()
+        conn = db.get_config_db()
+        db.add_report(conn, "路由集成报表", "SELECT 1", 20, None, prefer_cache=0)
+        conn.commit()
+        conn.close()
+        srv.PORT = 0
+        server = http.server.ThreadingHTTPServer((srv.HOST, 0), srv.ReportHandler)
+        cls.port = server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        srv._server_ref = server
+        cls._thread = threading.Thread(target=server.serve_forever, daemon=True)
+        cls._thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        _stop_server()
+        cls._dbcfg_patch.stop()
+        cls._engine_patch.stop()
+
+    def test_reports_route_requires_auth(self):
+        """未登录访问 /config/reports → 302 /login"""
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            opener.open(f"{self.base_url}/config/reports")
+            self.fail("未登录应 302")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            self.assertIn("/login", e.headers.get("Location", ""))
+
+    def test_reports_route_renders_list(self):
+        """登录后 GET /config/reports → 200 含报表列表与批量操作"""
+        opener, _, _ = _login_opener(self.base_url)
+        resp = opener.open(f"{self.base_url}/config/reports")
+        self.assertEqual(resp.status, 200)
+        html = resp.read().decode("utf-8")
+        self.assertIn("报表管理", html)
+        self.assertIn("路由集成报表", html)
+        self.assertIn("批量修改连接池", html)
+
+
+class TestConfigCategoriesRoute(unittest.TestCase):
+    """PH-14：/config/categories 分类管理独立页路由端到端"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._engine_patch = patch("db._get_engine", return_value="sqlite3")
+        cls._engine_patch.start()
+        cls._dbcfg_patch = patch("db._get_db_config",
+                                 return_value={"path": _tmp_db.name})
+        cls._dbcfg_patch.start()
+        _set_up_db()
+        conn = db.get_config_db()
+        db.add_category(conn, "路由集成分类")
+        conn.commit()
+        conn.close()
+        srv.PORT = 0
+        server = http.server.ThreadingHTTPServer((srv.HOST, 0), srv.ReportHandler)
+        cls.port = server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        srv._server_ref = server
+        cls._thread = threading.Thread(target=server.serve_forever, daemon=True)
+        cls._thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        _stop_server()
+        cls._dbcfg_patch.stop()
+        cls._engine_patch.stop()
+
+    def test_categories_route_requires_auth(self):
+        """未登录访问 /config/categories → 302 /login"""
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            opener.open(f"{self.base_url}/config/categories")
+            self.fail("未登录应 302")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            self.assertIn("/login", e.headers.get("Location", ""))
+
+    def test_categories_route_renders_page(self):
+        """登录后 GET /config/categories → 200 含分类管理与分类列表"""
+        opener, _, _ = _login_opener(self.base_url)
+        resp = opener.open(f"{self.base_url}/config/categories")
+        self.assertEqual(resp.status, 200)
+        html = resp.read().decode("utf-8")
+        self.assertIn("分类管理", html)
+        self.assertIn("路由集成分类", html)
+        self.assertIn("新增分类", html)
+
+
 if __name__ == "__main__":
     unittest.main()

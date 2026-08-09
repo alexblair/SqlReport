@@ -501,7 +501,7 @@ class TestSortingConfig(BaseConfigTest):
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/2/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config")
+        self.assertEqual(body, "/config/reports")
         order = [r["id"] for r in db.get_reports(self.conn, 1)]
         self.assertEqual(order, [2, 1])
 
@@ -512,8 +512,20 @@ class TestSortingConfig(BaseConfigTest):
         self.assertEqual(order, [2, 1])
 
     def test_category_move_up_handler(self):
-        """POST /config/categories/{id}/move-up 应交换分类排序"""
-        config.handle_request(self.conn, "POST", "/config/categories/2/move-up", "", "")
+        """POST /config/categories/{id}/move-up 应交换分类排序并 302 到分类页"""
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/categories/2/move-up", "", "")
+        self.assertEqual(code, 302)
+        self.assertEqual(body, "/config/categories")
+        order = [c["id"] for c in db.get_all_categories(self.conn)]
+        self.assertEqual(order, [2, 1])
+
+    def test_category_move_down_handler(self):
+        """POST /config/categories/{id}/move-down 应 302 到分类页"""
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/categories/1/move-down", "", "")
+        self.assertEqual(code, 302)
+        self.assertEqual(body, "/config/categories")
         order = [c["id"] for c in db.get_all_categories(self.conn)]
         self.assertEqual(order, [2, 1])
 
@@ -528,7 +540,7 @@ class TestSortingConfig(BaseConfigTest):
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/999/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config")
+        self.assertEqual(body, "/config/reports")
 
     def test_batch_unknown_action_redirects(self):
         """batch 类未知动作（order 缺字段场景的兜底）回退 302 /config"""
@@ -946,7 +958,8 @@ class TestBatchJsInteraction(BaseConfigTest):
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_category(self.conn, "分类")
         db.add_report(self.conn, "报表", "SELECT 1", 20, 1)
-        self.body = config.render_overview(self.conn)
+        # PH-13：批量操作 JS 随报表管理独立页渲染
+        self.body = config.render_reports_page(self.conn)
 
     def test_checkbox_and_count_present(self):
         """报表行应含复选 checkbox 与选中计数元素"""
@@ -1171,6 +1184,83 @@ class TestReportCopyCloseBoundary(BaseConfigTest):
             self.conn, "GET", "/config/reports/999/copy", "")
         self.assertEqual(code, 200)
         self.assertIn("错误", body)
+
+
+# ---------------------------------------------------------------------------
+# PH-14：分类管理独立页（render_categories_page）与回跳目标
+# ---------------------------------------------------------------------------
+
+
+class TestCategoriesPage(BaseConfigTest):
+    """PH-14：/config/categories 独立页渲染与分类回跳目标"""
+
+    def setUp(self):
+        super().setUp()
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+
+    def test_categories_page_header_and_title(self):
+        """独立页应含分类管理标题与配置菜单高亮"""
+        body = config.render_categories_page(self.conn)
+        self.assertIn("分类管理", body)
+        self.assertIn('href="/config" class="nav-active"', body)
+
+    def test_categories_page_has_add_category_button(self):
+        """独立页应有「新增分类」按钮"""
+        body = config.render_categories_page(self.conn)
+        self.assertIn("/config/categories/add", body)
+        self.assertIn("新增分类", body)
+
+    def test_categories_page_hides_report_add_button(self):
+        """独立页不应显示报表页的「新增报表」快捷按钮（show_report_add=False）"""
+        body = config.render_categories_page(self.conn)
+        self.assertNotIn("新增报表", body)
+
+    def test_categories_page_renders_tree_with_badge(self):
+        """分类树应渲染子分类数量角标"""
+        db.add_category(self.conn, "根")
+        db.add_category(self.conn, "子", parent_id=1)
+        body = config.render_categories_page(self.conn)
+        self.assertIn("根", body)
+        self.assertIn("1 子分类", body)
+
+    def test_categories_page_empty_state(self):
+        """无分类时应显示暂无分类占位"""
+        body = config.render_categories_page(self.conn)
+        self.assertIn("暂无分类", body)
+
+    def test_categories_page_flash_message(self):
+        """flash 消息应渲染在独立页"""
+        body = config.render_categories_page(self.conn, "分类 甲 已创建")
+        self.assertIn("分类 甲 已创建", body)
+
+    def test_category_add_redirects_to_categories_page(self):
+        """新增分类成功应 302 到 /config/categories"""
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/categories/add", "", "name=销售分类&parent_id=")
+        self.assertEqual(code, 302)
+        self.assertTrue(body.startswith("/config/categories"))
+
+    def test_category_edit_redirects_to_categories_page(self):
+        """编辑分类成功应 302 到 /config/categories"""
+        db.add_category(self.conn, "旧名")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/categories/1/edit", "", "name=新名&parent_id=")
+        self.assertEqual(code, 302)
+        self.assertTrue(body.startswith("/config/categories"))
+
+    def test_category_delete_redirects_to_categories_page(self):
+        """删除分类成功应 302 到 /config/categories"""
+        db.add_category(self.conn, "待删")
+        code, body, headers = config.handle_request(
+            self.conn, "POST", "/config/categories/1/delete", "", "")
+        self.assertEqual(code, 302)
+        self.assertTrue(body.startswith("/config/categories"))
+
+    def test_overview_has_categories_card(self):
+        """总览应含分类管理入口卡片"""
+        body = config.render_overview(self.conn)
+        self.assertIn("分类管理", body)
+        self.assertIn("href=\"/config/categories\"", body)
 
 
 if __name__ == "__main__":

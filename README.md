@@ -148,7 +148,7 @@ Open your browser and navigate to `http://localhost:8080`, then log in with the 
 
 > ⚠️ **Please change the password immediately after first login!**
 
-After login, go to `/config` to configure connection pools, users, and reports.
+After login, go to the `/config` portal page and use the entry cards to configure connection pools, users, reports, and categories.
 
 ---
 
@@ -472,12 +472,12 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 
 ### Config page `/config`
 
-All-in-one config management, switched via the left navigation:
+Config overview portal, entry cards leading to each management page:
 
 - **Pools** — add/edit/delete/copy MySQL connection configs, reorder up/down
 - **Users** — add/edit/delete system users
-- **Reports** — configure SQL queries, bound pool, default page size, category, memo
-- **Categories** — unlimited-depth tree management, reorder/add/rename/delete
+- **Reports** — standalone page `/config/reports`: configure SQL queries, bound pool, default page size, category, memo
+- **Categories** — standalone page `/config/categories`: unlimited-depth tree management, reorder/add/rename/delete
 - **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
 
 Report edit form highlights:

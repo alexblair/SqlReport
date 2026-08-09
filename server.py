@@ -171,6 +171,8 @@ ROUTES = [
     RouteEntry(r"^/logout$", "GET", True, False, "_handle_logout"),
     RouteEntry(r"^/config/api-endpoints$", "GET", True, True, "_handle_config_api_endpoints"),
     RouteEntry(r"^/config/api-endpoints$", "POST", True, True, "_handle_config_api_endpoints"),
+    RouteEntry(r"^/config/reports$", "GET", True, True, "_handle_config_reports"),
+    RouteEntry(r"^/config/categories$", "GET", True, True, "_handle_config_categories"),
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
     RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
@@ -415,6 +417,22 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             self._send_redirect(body)
         else:
             self._send_html(code, body, headers)
+
+    def _handle_config_reports(self, method: str, path: str, query: str, conn):
+        """报表管理独立页（/config/reports）"""
+        qs = urllib.parse.parse_qs(query, keep_blank_values=True)
+        flash = qs.get("flash", [None])[0]
+        body = config.render_reports_page(conn, flash)
+        self._log_web_access(path, method, 200)
+        self._send_html(200, body, {})
+
+    def _handle_config_categories(self, method: str, path: str, query: str, conn):
+        """分类管理独立页（/config/categories）"""
+        qs = urllib.parse.parse_qs(query, keep_blank_values=True)
+        flash = qs.get("flash", [None])[0]
+        body = config.render_categories_page(conn, flash)
+        self._log_web_access(path, method, 200)
+        self._send_html(200, body, {})
 
     def _handle_config(self, method: str, path: str, query: str, conn):
         """委托给 config.py，使用 _handle() 传入的共享连接"""

@@ -296,8 +296,19 @@ class TestReportFlow(unittest.TestCase):
         self.conn.close()
 
     def test_overview_contains_report_section(self):
+        """PH-13：总览报表区块收敛为统计卡片（报表数 + 分类数 + 入口）"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
+        self.assertIn("报表管理", body)
+        self.assertIn("个报表", body)
+        self.assertIn('href="/config/reports"', body)
+
+    def test_reports_page_contains_category_section(self):
+        """PH-13：/config/reports 独立页含报表分类区块与新增报表入口"""
+        body = config.render_reports_page(self.conn)
+        self.assertIn("报表管理", body)
         self.assertIn("报表分类", body)
+        self.assertIn('href="/config/reports/add"', body)
+        self.assertIn('class="nav-active"', body)
 
     def test_add_report_form_contains_pool_select(self):
         """新增报表表单应包含连接池下拉选择"""
@@ -496,7 +507,7 @@ class TestChineseRedirect(unittest.TestCase):
         # 中文 "销售报表" 应被编码为 %xx%xx%xx%xx
         self.assertNotIn("销售报表", location)
         self.assertIn("%", location)
-        self.assertTrue(location.startswith("/config?flash="))
+        self.assertTrue(location.startswith("/config/reports?flash="))
 
     def test_ascii_flash_unchanged(self):
         """纯英文 flash 消息不额外编码"""

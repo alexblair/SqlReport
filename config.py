@@ -38,6 +38,7 @@ from render import (
     build_pool_section_html,
     build_user_section_html,
     build_category_section_html,
+    build_category_manage_section_html,
     render_page_header,
     render_page_footer,
     build_flash_html,
@@ -414,7 +415,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     <button type="submit" name="action" value="save" class="btn btn-outline">保存</button>
     {view_btn}
     {preview_btn}
-    <a href="/config" class="cancel">取消</a>
+    <a href="/config/reports" class="cancel">取消</a>
   </div>
 </form>
 <script>
@@ -515,6 +516,30 @@ def _render_category_section(conn) -> str:
                                        api_endpoints_map=api_endpoints_map)
 
 
+def render_reports_page(conn, flash: str = None) -> str:
+    """渲染报表管理独立页（PH-13：分类树 + 报表列表 + 批量操作）"""
+    flash_html = build_flash_html(flash) if flash else ""
+    return (render_page_header(title="Web 报表工具 - 报表管理", active_nav="config-reports",
+                                extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html
+            + '<h2 style="margin-bottom:0">报表管理</h2>'
+            + _render_category_section(conn)
+            + render_page_footer())
+
+
+def render_categories_page(conn, flash: str = None) -> str:
+    """渲染分类管理独立页（PH-14：分类树 + 排序 + CRUD）"""
+    flash_html = build_flash_html(flash) if flash else ""
+    all_cats = db.get_all_categories(conn)
+    cat_tree = db.get_category_tree(conn)
+    return (render_page_header(title="Web 报表工具 - 分类管理", active_nav="config-categories",
+                                extra_css=_CONFIG_EXTRA_CSS)
+            + flash_html
+            + '<h2 style="margin-bottom:0">分类管理</h2>'
+            + build_category_manage_section_html(all_cats, cat_tree, show_report_add=False)
+            + render_page_footer())
+
+
 def render_overview(conn, flash: str = None) -> str:
     """渲染配置总览页，包含三个配置段"""
     flash_html = ""
@@ -554,9 +579,27 @@ def render_overview(conn, flash: str = None) -> str:
 <p style="color:#64748b;margin:0">已配置 {api_endpoints_count} 个 API 接口</p>
 {items_html}
 </div>"""
+    # PH-13 报表区块收敛：报表总数 + 分类数 + 入口按钮（分类树/报表列表/批量操作迁至独立页）
+    reports_count = len(db.get_all_reports(conn))
+    categories_count = len(db.get_all_categories(conn))
+    reports_card = f"""<div class="card" style="margin-top:8px">
+<div class="section-title" style="font-size:16px;margin-bottom:8px">
+  <span>📊 报表管理</span>
+  <span class="actions">{_link_btn("/config/reports", "管理报表", "btn btn-outline btn-sm")}</span>
+</div>
+<p style="color:#64748b;margin:0">共 {reports_count} 个报表，{categories_count} 个分类</p>
+</div>"""
+    # PH-14 分类入口卡片：分类树/排序/CRUD 在独立页
+    categories_card = f"""<div class="card" style="margin-top:8px">
+<div class="section-title" style="font-size:16px;margin-bottom:8px">
+  <span>📁 分类管理</span>
+  <span class="actions">{_link_btn("/config/categories", "管理分类", "btn btn-outline btn-sm")}</span>
+</div>
+<p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
+</div>"""
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + onboarding_html + _render_pool_section(conn) + _render_user_section(conn)
-            + _render_category_section(conn) + api_card + render_page_footer())
+            + reports_card + categories_card + api_card + render_page_footer())
     return body
 
 
@@ -643,7 +686,7 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None, 
   </label>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">保存</button>
-    <a href="/config" class="cancel">取消</a>
+    <a href="/config/categories" class="cancel">取消</a>
   </div>
 </form>
 </div>"""
@@ -983,7 +1026,7 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
             success_flash=f"报表 {data['name']} 已创建 (id={rid})",
-            redirect_url="/config")
+            redirect_url="/config/reports")
     except Exception as e:
         return 200, render_report_form_page(conn, flash=f"错误: {e}",
                                             report=_report_from_form(data))
@@ -994,7 +1037,7 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
     data = _parse_form_data(form_body)
     rpt = db.get_report(conn, report_id)
     if not rpt:
-        return 302, "/config?flash=错误: 报表不存在"
+        return 302, "/config/reports?flash=错误: 报表不存在"
     try:
         rf = _parse_report_form(data)
         ok = db.update_report(conn, report_id, data["name"], data["sql_query"],
@@ -1011,8 +1054,8 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
             return _save_or_render(
                 data, render_report_form_page, (conn, report_id), {},
                 success_flash=f"报表 {data['name']} 已更新",
-                redirect_url="/config")
-        return 302, "/config?flash=错误: 更新失败"
+                redirect_url="/config/reports")
+        return 302, "/config/reports?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}",
                                             report=_report_from_form(data, report_id))
@@ -1044,7 +1087,7 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
             success_flash=f"报表 {data['name']} 已创建（复制自 id={report_id}）",
-            redirect_url="/config")
+            redirect_url="/config/reports")
     except Exception as e:
         return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True,
                                             report=_report_from_form(data, report_id))
@@ -1054,9 +1097,9 @@ def handle_report_delete(conn, report_id: int, session_user=None) -> tuple[int, 
     """处理删除报表"""
     rpt = db.get_report(conn, report_id)
     if not rpt:
-        return 302, "/config?flash=错误: 报表不存在"
+        return 302, "/config/reports?flash=错误: 报表不存在"
     db.delete_report(conn, report_id, session_user=session_user)
-    return 302, f"/config?flash=报表 {rpt['name']} 已删除"
+    return 302, f"/config/reports?flash=报表 {rpt['name']} 已删除"
 
 
 def handle_report_move_category(conn, report_id: int, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1066,22 +1109,22 @@ def handle_report_move_category(conn, report_id: int, form_body: str, session_us
     try:
         category_id = int(cat_str) if cat_str else None
     except (ValueError, TypeError):
-        return 302, "/config?flash=错误: 分类 ID 无效"
+        return 302, "/config/reports?flash=错误: 分类 ID 无效"
     rpt = db.get_report(conn, report_id)
     if not rpt:
-        return 302, "/config?flash=错误: 报表不存在"
+        return 302, "/config/reports?flash=错误: 报表不存在"
     if category_id is not None and not db.get_category(conn, category_id):
-        return 302, "/config?flash=错误: 目标分类不存在"
+        return 302, "/config/reports?flash=错误: 目标分类不存在"
     try:
         db.move_report_to_category(conn, report_id, category_id, session_user=session_user)
     except Exception as e:
-        return 302, f"/config?flash=错误: 移动分类失败: {e}"
+        return 302, f"/config/reports?flash=错误: 移动分类失败: {e}"
     cat_name = "未分类"
     if category_id is not None:
         cat = db.get_category(conn, category_id)
         if cat:
             cat_name = cat["name"]
-    return 302, f"/config?flash=报表 {rpt['name']} 已移至「{cat_name}」"
+    return 302, f"/config/reports?flash=报表 {rpt['name']} 已移至「{cat_name}」"
 
 
 def handle_category_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1090,7 +1133,7 @@ def handle_category_add(conn, form_body: str, session_user=None) -> tuple[int, s
     try:
         parent_id = int(data["parent_id"]) if data.get("parent_id") else None
         cid = db.add_category(conn, data["name"], parent_id, session_user=session_user)
-        return 302, f"/config?flash=分类 {data['name']} 已创建"
+        return 302, f"/config/categories?flash=分类 {data['name']} 已创建"
     except Exception as e:
         return 200, render_category_form_page(conn, flash=f"错误: {e}",
                                               cat=_category_from_form(data))
@@ -1101,11 +1144,11 @@ def handle_category_edit(conn, category_id: int, form_body: str, session_user=No
     data = _parse_form_data(form_body)
     cat = db.get_category(conn, category_id)
     if not cat:
-        return 302, "/config?flash=错误: 分类不存在"
+        return 302, "/config/categories?flash=错误: 分类不存在"
     try:
         parent_id = int(data["parent_id"]) if data.get("parent_id") else None
         db.update_category(conn, category_id, data["name"], parent_id, session_user=session_user)
-        return 302, f"/config?flash=分类 {data['name']} 已更新"
+        return 302, f"/config/categories?flash=分类 {data['name']} 已更新"
     except Exception as e:
         return 200, render_category_form_page(conn, category_id, flash=f"错误: {e}",
                                               cat=_category_from_form(data, category_id))
@@ -1115,9 +1158,9 @@ def handle_category_delete(conn, category_id: int, session_user=None) -> tuple[i
     """处理删除分类"""
     cat = db.get_category(conn, category_id)
     if not cat:
-        return 302, "/config?flash=错误: 分类不存在"
+        return 302, "/config/categories?flash=错误: 分类不存在"
     db.delete_category(conn, category_id, session_user=session_user)
-    return 302, f"/config?flash=分类 {cat['name']} 已删除"
+    return 302, f"/config/categories?flash=分类 {cat['name']} 已删除"
 
 
 def handle_batch_set_category(conn, form_body: str) -> tuple[int, str]:
@@ -1128,21 +1171,21 @@ def handle_batch_set_category(conn, form_body: str) -> tuple[int, str]:
         cat_str = data.get("category_id", [None])[0]
         category_id = int(cat_str) if cat_str else None
     except (ValueError, TypeError):
-        return 302, "/config?flash=错误: 报表 ID 或分类 ID 无效"
+        return 302, "/config/reports?flash=错误: 报表 ID 或分类 ID 无效"
     if not report_ids:
-        return 302, "/config?flash=错误: 未选择任何报表"
+        return 302, "/config/reports?flash=错误: 未选择任何报表"
     if category_id is not None and not db.get_category(conn, category_id):
-        return 302, "/config?flash=错误: 目标分类不存在"
+        return 302, "/config/reports?flash=错误: 目标分类不存在"
     try:
         affected = db.batch_set_report_category(conn, report_ids, category_id)
     except Exception as e:
-        return 302, f"/config?flash=错误: 批量设置分类失败: {e}"
+        return 302, f"/config/reports?flash=错误: 批量设置分类失败: {e}"
     cat_name = "未分类"
     if category_id is not None:
         cat = db.get_category(conn, category_id)
         if cat:
             cat_name = cat["name"]
-    return 302, f"/config?flash=已为 {affected} 个报表设置分类为「{cat_name}」"
+    return 302, f"/config/reports?flash=已为 {affected} 个报表设置分类为「{cat_name}」"
 
 
 def handle_batch_pool(conn, form_body: str) -> tuple[int, str]:
@@ -1153,17 +1196,17 @@ def handle_batch_pool(conn, form_body: str) -> tuple[int, str]:
         pool_id_str = data.get("pool_id", [None])[0]
         pool_id = int(pool_id_str) if pool_id_str else None
     except (ValueError, TypeError):
-        return 302, "/config?flash=错误: 报表 ID 或连接池 ID 无效"
+        return 302, "/config/reports?flash=错误: 报表 ID 或连接池 ID 无效"
     if not report_ids:
-        return 302, "/config?flash=错误: 未选择报表"
+        return 302, "/config/reports?flash=错误: 未选择报表"
     if pool_id is not None and not db.get_pool(conn, pool_id):
-        return 302, "/config?flash=错误: 目标连接池不存在"
+        return 302, "/config/reports?flash=错误: 目标连接池不存在"
     try:
         n = db.batch_update_report_pool(conn, report_ids, pool_id)
     except Exception as e:
-        return 302, f"/config?flash=错误: 批量修改连接池失败: {e}"
+        return 302, f"/config/reports?flash=错误: 批量修改连接池失败: {e}"
     pool_label = pool_id if pool_id else "无"
-    return 302, f"/config?flash=已更新 {n} 个报表的连接池为 (id={pool_label})"
+    return 302, f"/config/reports?flash=已更新 {n} 个报表的连接池为 (id={pool_label})"
 
 
 def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
@@ -1178,9 +1221,9 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
             ttl_val = data.get("cache_ttl_hours", ["0"])[0]
             cache_ttl_hours = int(ttl_val) if ttl_val else 0
     except (ValueError, TypeError):
-        return 302, "/config?flash=错误: 报表 ID 或缓存 TTL 无效"
+        return 302, "/config/reports?flash=错误: 报表 ID 或缓存 TTL 无效"
     if not report_ids:
-        return 302, "/config?flash=错误: 未选择报表"
+        return 302, "/config/reports?flash=错误: 未选择报表"
 
     prefer_cache = None
     if cache_switch == "1":
@@ -1191,7 +1234,7 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
     try:
         affected = db.batch_update_report_cache(conn, report_ids, prefer_cache, cache_ttl_hours)
     except Exception as e:
-        return 302, f"/config?flash=错误: 批量更新缓存配置失败: {e}"
+        return 302, f"/config/reports?flash=错误: 批量更新缓存配置失败: {e}"
 
     redis_updated = 0
     redis_failed = 0
@@ -1228,7 +1271,7 @@ def handle_batch_cache(conn, form_body: str) -> tuple[int, str]:
         parts.append(f"Redis 成功 {redis_updated}")
     if redis_failed > 0:
         parts.append(f"Redis 失败 {redis_failed}")
-    return 302, f"/config?flash={'，'.join(parts)}"
+    return 302, f"/config/reports?flash={'，'.join(parts)}"
 
 
 def handle_batch_delete(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1237,14 +1280,14 @@ def handle_batch_delete(conn, form_body: str, session_user=None) -> tuple[int, s
         data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
         report_ids = [int(v) for v in data.get("report_ids", []) if v]
     except (ValueError, TypeError):
-        return 302, "/config?flash=错误: 报表 ID 无效"
+        return 302, "/config/reports?flash=错误: 报表 ID 无效"
     if not report_ids:
-        return 302, "/config?flash=错误: 未选择报表"
+        return 302, "/config/reports?flash=错误: 未选择报表"
     try:
         affected = db.batch_delete_reports(conn, report_ids, session_user=session_user)
     except Exception as e:
-        return 302, f"/config?flash=错误: 批量删除报表失败: {e}"
-    return 302, f"/config?flash=已删除 {affected} 个报表"
+        return 302, f"/config/reports?flash=错误: 批量删除报表失败: {e}"
+    return 302, f"/config/reports?flash=已删除 {affected} 个报表"
 
 
 # ---------------------------------------------------------------------------
@@ -1402,9 +1445,9 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] in ("move-up", "move-down") and route["id"]:
                 direction = "up" if route["action"] == "move-up" else "down"
                 db.move_report(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config", {}
+                return 302, "/config/reports", {}
             else:
-                return 302, "/config", {}
+                return 302, "/config/reports", {}
             return _redirect_or_render(code, result)
 
         elif route["section"] == "categories":
@@ -1417,9 +1460,9 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] in ("move-up", "move-down") and route["id"]:
                 direction = "up" if route["action"] == "move-up" else "down"
                 db.move_category(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config", {}
+                return 302, "/config/categories", {}
             else:
-                return 302, "/config", {}
+                return 302, "/config/categories", {}
             return _redirect_or_render(code, result)
 
     return 302, "/config", {}

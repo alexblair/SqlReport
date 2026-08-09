@@ -440,8 +440,11 @@ def _build_navbar_html(active: str = "") -> str:
         导航栏 HTML 字符串。
     """
     links_html = ""
+    active = active or ""
     for key, href, label in _NAV_ITEMS:
-        cls = ' class="nav-active"' if key == active else ""
+        # 子页面（如 config-reports）高亮所属主菜单项
+        is_active = key == active or (key == "config" and active.startswith("config-"))
+        cls = ' class="nav-active"' if is_active else ""
         links_html += f'<a href="{href}"{cls}>{html_mod.escape(label)}</a>\n  '
     return (
         '<div class="navbar">\n'
@@ -1622,6 +1625,61 @@ def build_user_section_html(users: list) -> str:
 </div>"""
 
 
+def build_category_manage_section_html(all_cats, cat_tree,
+                                       show_report_add: bool = True) -> str:
+    """渲染分类管理区块（分类树 + 排序 + CRUD，纯数据 → HTML，无 DB 调用）
+
+    PH-14：/config/categories 独立页与报表页共用该区块；
+    show_report_add=False 时隐藏「新增报表」快捷按钮（分类页）。
+    """
+    def _render_cat_item(cat, depth=0):
+        children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
+        has_children = len(children) > 0
+        siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
+        idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
+        n = len(siblings)
+        move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
+        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>' if has_children else ""
+        return f"""<div style="padding:8px {8 + depth * 24}px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9">
+  <span style="font-size:14px;font-weight:500">{_escape(cat["name"])}{badge}</span>
+  <span style="flex:1"></span>
+  {move_btns}
+  {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
+  {build_delete_form_html(f"/config/categories/{cat['id']}/delete",
+                          f"确定删除分类 {_escape(cat['name'])}？分类下的报表和子分类将变为未分类。",
+                          button_cls=" btn-mini-s",
+                          indent=2)}
+</div>"""
+
+    def _render_tree(nodes, depth=0):
+        html = ""
+        for node in nodes:
+            html += _render_cat_item(node, depth)
+            if node["children"]:
+                html += _render_tree(node["children"], depth + 1)
+        return html
+
+    cat_list_html = _render_tree(cat_tree)
+
+    if not cat_list_html:
+        cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
+
+    report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")
+                      if show_report_add else "")
+    return f"""<div class="section">
+<div class="section-title">
+  <span>📁 报表分类</span>
+  <span class="actions">
+    {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
+    {report_add_btn}
+  </span>
+</div>
+<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+  {cat_list_html}
+</div>
+</div>"""
+
+
 def build_category_section_html(cat_reports, unclassified_reports, all_cats,
                                  all_reports, pools, cat_tree,
                                  api_endpoints_map: dict[int, list[dict]] = None) -> str:
@@ -1820,52 +1878,8 @@ function updateBatchCount() {{
 </tr>"""
         return rows
 
-    cat_areas = ""
-
-    def _render_cat_item(cat, depth=0):
-        children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
-        has_children = len(children) > 0
-        siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
-        idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
-        n = len(siblings)
-        move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
-        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>' if has_children else ""
-        return f"""<div style="padding:8px {8 + depth * 24}px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9">
-  <span style="font-size:14px;font-weight:500">{_escape(cat["name"])}{badge}</span>
-  <span style="flex:1"></span>
-  {move_btns}
-  {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
-  {build_delete_form_html(f"/config/categories/{cat['id']}/delete",
-                          f"确定删除分类 {_escape(cat['name'])}？分类下的报表和子分类将变为未分类。",
-                          button_cls=" btn-mini-s",
-                          indent=2)}
-</div>"""
-
-    def _render_tree(nodes, depth=0):
-        html = ""
-        for node in nodes:
-            html += _render_cat_item(node, depth)
-            if node["children"]:
-                html += _render_tree(node["children"], depth + 1)
-        return html
-
-    cat_list_html = _render_tree(cat_tree)
-
-    if not cat_list_html and not all_reports:
-        cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
-
-    cat_areas += f"""<div class="section">
-<div class="section-title">
-  <span>📁 报表分类</span>
-  <span class="actions">
-    {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
-    {_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")}
-  </span>
-</div>
-<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
-  {cat_list_html}
-</div>
-</div>"""
+    cat_areas = build_category_manage_section_html(all_cats, cat_tree,
+                                                   show_report_add=True)
 
     report_lookup: dict[int, list] = {entry["id"]: entry.get("reports", []) for entry in cat_reports}
     tab_html = ""
