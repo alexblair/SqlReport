@@ -9,6 +9,20 @@
 #   4. 清理残留引用并回收磁盘空间
 #   5. 可选：强制推送到远程覆盖历史（支持 Token + 代理）
 #
+# 使用场景（事故/清理工具，非常规操作，不可逆）：
+#   某个文件/目录"不该存在于仓库历史中"时使用——例如：
+#     - 误提交了密钥/密码/Token/.env 等敏感文件
+#     - 误提交了 config.db 等运行时数据文件
+#     - 大文件/日志误入库，导致仓库体积膨胀
+#   操作会把该文件从"所有提交历史"中抹除，相当于它从未存在过。
+#
+#   何时用：仅当需要抹除历史记录时（普通删除文件用 rm + git-commit.sh 即可）。
+#   何时不用：
+#     - 只是不想再跟踪某文件 → 加入 .gitignore 即可，不必 purge
+#     - 提交前发现误加了文件 → 直接 git rm --cached，不必重写历史
+#     - 不熟悉 git 历史重写 → 先备份仓库再操作
+#   加 --push 会强制覆盖远程历史，所有协作者必须重新 clone，务必谨慎！
+#
 # 用法：
 #   ./git-purge.sh <路径> [--push] [--token <TOKEN>] [--proxy <PROXY>]
 #
@@ -208,7 +222,15 @@ if git diff --cached --quiet; then
     info "无变更需要提交，跳过"
 else
     git add .gitignore
-    git commit -m "把 $TARGET 加入 .gitignore 并取消跟踪"
+    LOCAL_SUMMARY=$(git status --short 2>/dev/null | grep -v '\.gitignore$' || true)
+    if [ -n "$LOCAL_SUMMARY" ]; then
+        git commit -m "把 $TARGET 加入 .gitignore 并取消跟踪
+
+本地未提交变更摘要：
+$LOCAL_SUMMARY"
+    else
+        git commit -m "把 $TARGET 加入 .gitignore 并取消跟踪"
+    fi
     ok "已提交"
 fi
 
@@ -219,11 +241,31 @@ echo ""
 info "Step 4/5 — 从全部提交历史中抹除 '$TARGET'"
 info "此步骤可能需要较长时间，取决于历史长度..."
 
+# filter-branch 需要干净工作区，自动暂存未提交变更
+STASHED=0
+if ! git diff --quiet HEAD 2>/dev/null || [ -n "$(git status --short 2>/dev/null)" ]; then
+    warn "工作区有未提交变更，filter-branch 需要干净工作区，自动暂存..."
+    if git stash push -u -m "git-purge.sh 自动备份 $(date +%F_%H%M%S)"; then
+        STASHED=1
+        ok "已暂存未提交变更: $(git stash list | head -1 | cut -d: -f1)"
+    else
+        err "自动暂存失败，请手动 git stash 后重试"
+        exit 1
+    fi
+fi
+
 export FILTER_BRANCH_SQUELCH_WARNING=1
+
+# 重写全部引用（排除 stash 与 refs/original，避免破坏暂存结构）
+REFS_TO_REWRITE=$(git for-each-ref --format='%(refname)' | grep -Ev '^refs/stash$|^refs/original/' || true)
+if [ -z "$REFS_TO_REWRITE" ]; then
+    err "没有可重写的引用"
+    exit 1
+fi
 
 git filter-branch --force --index-filter \
     "git rm --cached --ignore-unmatch -r \"$TARGET\"" \
-    --prune-empty -- --all
+    --prune-empty -- $REFS_TO_REWRITE
 
 ok "历史重写完成"
 
@@ -240,6 +282,17 @@ git reflog expire --expire=now --all
 git gc --prune=now --aggressive 2>/dev/null || git gc --prune=now
 
 ok "清理完成"
+
+# 恢复暂存的未提交变更
+if [ "$STASHED" -eq 1 ]; then
+    echo ""
+    info "恢复暂存的未提交变更..."
+    if git stash pop; then
+        ok "已恢复未提交变更"
+    else
+        warn "恢复失败（可能有冲突），请手动执行: git stash pop"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # 完成
