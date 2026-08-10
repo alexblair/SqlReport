@@ -6,7 +6,7 @@ export.py — CSV / JSON 导出功能
 - 将结果导出为 CSV（字段带双引号，逗号分隔）或 JSON（行对象数组）
 - 设置正确的 HTTP Content-Type 和 Content-Disposition 头
 - 支持导出字符集选择（GBK / UTF8）
-- 支持 JSON 导出时数值不加引号（保持原始数字类型）
+- 支持 JSON 值无引号模式（所有值输出不带引号，含字符串）
 - 支持导出文件压缩为 ZIP 包（临时目录 -> ZIP -> 输出 -> 清理）
 
 导出格式控制：
@@ -15,7 +15,7 @@ export.py — CSV / JSON 导出功能
 
 导出选项：
   charset=gbk|utf8          字符集（默认 gbk）
-  json_no_quotes=1          JSON 数值不加引号
+  json_no_quotes=1          JSON 值无引号（所有值不加引号）
   zip=1                     输出为 ZIP 压缩包
 
 CSV 格式规范：
@@ -177,9 +177,10 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     max_rows: 全量输出截断上限（None=不截断；>0 时原始行超过即截断，PH-07）。
     _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
 
-    当 json_no_quotes=True 时，数值类型的字段将保持数字格式
-    （不加引号），而非全部转为字符串（复用 app_config.no_quote_value /
-    JsonNoQuoteEncoder，与 API 端点「数字无引号」选项同一实现）。
+    当 json_no_quotes=True 时，输出的值一律不带引号（含字符串，如 "123" 输出
+    为 123、文本输出为裸文本），结构保留 JSON 语法（键带引号）；输出不保证是
+    合法 JSON。与 API 端点「值无引号」选项共用 app_config.serialize_no_quote
+    单一实现。关闭时全部值转为字符串。
 
     JSON 格式：
     {
@@ -201,8 +202,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
         obj = {}
         for col, idx in zip(output_columns, display_indices):
             if json_no_quotes:
-                # 保留原始数值类型
-                obj[col] = app_config.no_quote_value(row[idx])
+                # 值无引号模式：保留原始值，序列化时统一裸输出
+                obj[col] = row[idx]
             else:
                 # 全部转为字符串（原有行为）
                 obj[col] = format_cell(row[idx])
@@ -212,12 +213,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     safe_name = report_name.strip().replace(" ", "_").replace("-", "_")
 
     if json_no_quotes:
-        output = json.dumps(
-            {safe_name: rows_data},
-            ensure_ascii=False,
-            indent=2,
-            cls=app_config.JsonNoQuoteEncoder,
-        )
+        output = app_config.serialize_no_quote(
+            {safe_name: rows_data}, indent=2)
     else:
         output = json.dumps(
             {safe_name: rows_data},
@@ -225,12 +222,6 @@ def export_report_to_json(sql_query: str, pool_config: dict,
             indent=2,
         )
     return output
-
-
-# 历史兼容别名：数字无引号核心实现统一收敛到 app_config（与 API 端点共用），
-# 旧测试/外部调用仍可通过 export._no_quote_value / _JsonNoQuoteEncoder 访问。
-_no_quote_value = app_config.no_quote_value
-_JsonNoQuoteEncoder = app_config.JsonNoQuoteEncoder
 
 
 def _encode_content(content: str, charset: str) -> bytes:
@@ -303,7 +294,7 @@ def handle_export(conn, query: str,
       id             — 报表 ID（必需）
       format         — csv 或 json（默认 csv）
       charset        — gbk 或 utf8（默认 utf8）
-      json_no_quotes — 为 1 时 JSON 数值不加引号
+      json_no_quotes — 为 1 时 JSON 值不带引号（所有值裸输出）
       zip            — 为 1 时输出 ZIP 压缩包
       f_COL          — 筛选值（多字段）
       op_COL         — 筛选操作符（缺省为 contains）

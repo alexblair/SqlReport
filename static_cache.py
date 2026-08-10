@@ -159,7 +159,12 @@ def try_read(file_path: str, config_version: str, ttl_hours: int) -> str | None:
             return None
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        meta = json.loads(content).get("meta") if content else None
+        try:
+            meta = json.loads(content).get("meta") if content else None
+        except (json.JSONDecodeError, TypeError):
+            # 内容非合法 JSON（「值无引号」模式裸值输出）→ 视为无 meta，
+            # 走版本化文件名判定（该模式写入时版本嵌入文件名）
+            meta = None
         if isinstance(meta, dict) and meta.get("config_version") is not None:
             if meta.get("config_version") != config_version:
                 return None

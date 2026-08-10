@@ -29,8 +29,8 @@ from app_config import get_redis_config
 # ---------------------------------------------------------------------------
 #
 # 快照经 JSON 往返（写 Redis → 读回），若用默认 default=str 序列化，
-# Decimal 会变成字符串，读回后类型丢失：API「数字无引号」/JSON 导出的
-# 数值还原逻辑依赖 Decimal 类型，会退化为带引号字符串。
+# Decimal 会变成字符串，读回后类型丢失：API「值无引号」/JSON 导出的
+# Decimal 数值化逻辑依赖 Decimal 类型，会退化为裸文本字符串。
 # 因此在序列化时把 Decimal 包装成标记对象（精度用字符串无损保留），
 # 反序列化时还原为 Decimal；其余类型沿用 default=str 的既有契约。
 

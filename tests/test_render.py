@@ -1059,6 +1059,9 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertIn('name="json_no_quotes"', folded)
         self.assertIn('name="zip"', folded)
         self.assertIn('name="use_custom_cols"', folded)
+        # 名称统一：「值无引号」，无旧名残留
+        self.assertIn("值无引号", result)
+        self.assertNotIn("数字无引号", result)
         # 格式与导出按钮保留在折叠区外
         format_pos = result.find('name="format"')
         self.assertLess(format_pos, details_start)

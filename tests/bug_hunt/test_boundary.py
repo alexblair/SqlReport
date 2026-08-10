@@ -16,6 +16,7 @@ import unittest.mock
 from unittest.mock import patch, MagicMock
 from decimal import Decimal
 import importlib
+import app_config
 
 
 # ===================================================================
@@ -232,13 +233,13 @@ class TestExportBoundary(unittest.TestCase):
         self.assertEqual(result, b"")
 
     def test_no_quote_value_none(self):
-        """_no_quote_value(None) → 返回 None"""
-        result = self.export._no_quote_value(None)
-        self.assertIsNone(result)
+        """serialize_no_quote(None) → 输出 null"""
+        result = app_config.serialize_no_quote(None)
+        self.assertEqual(result, "null")
 
     def test_no_quote_value_bytes(self):
-        """_no_quote_value(bytes) → 解码为字符串"""
-        result = self.export._no_quote_value(b"hello world")
+        """serialize_no_quote(bytes) → 解码为裸文本"""
+        result = app_config.serialize_no_quote(b"hello world")
         self.assertEqual(result, "hello world")
 
     def test_build_export_filename_empty_name(self):

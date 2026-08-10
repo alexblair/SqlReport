@@ -567,7 +567,7 @@ def _init_sqlite_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
-    # 迁移 14 续：api_endpoints.json_no_quotes（API「数字无引号」选项，
+    # 迁移 14 续：api_endpoints.json_no_quotes（API「值无引号」选项，
     # 默认 0 = 关闭，与报表导出 json_no_quotes 同语义）
     cursor = conn.execute("PRAGMA table_info(api_endpoints)")
     api_cols = {row[1] for row in cursor.fetchall()}
@@ -840,7 +840,7 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
     except Exception:
         conn.rollback()
-    # 迁移 14 续：api_endpoints.json_no_quotes（API「数字无引号」选项，
+    # 迁移 14 续：api_endpoints.json_no_quotes（API「值无引号」选项，
     # 默认 0 = 关闭，与报表导出 json_no_quotes 同语义）
     try:
         cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
@@ -1438,7 +1438,7 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
         result_index: 结果集索引（0-based），仅 result_mode='single' 时有效
         allow_fetch_all: 是否接受 fetch_all 全量获取参数，1=接受（默认），0=忽略
         static_cache: 是否启用静态文件缓存（.json 变体），1=开启（默认），0=关闭
-        json_no_quotes: 数字无引号（JSON 数值不加引号），1=开启，0=关闭（默认）；
+        json_no_quotes: 值无引号（JSON 所有值不加引号），1=开启，0=关闭（默认）；
                         仅 JSON 格式生效，与报表导出 json_no_quotes 同语义
         json_template: JSON 输出模板文本（占位符语法），None/空=未启用
         description: 接口说明（多行文本，纯展示字段，不进入 API 输出），None=无说明

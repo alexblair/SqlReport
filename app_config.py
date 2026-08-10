@@ -205,55 +205,94 @@ def serialize_json(obj, **kwargs) -> str:
     """序列化 JSON 字符串（ensure_ascii=False，与全项目序列化约定一致）。
 
     未显式传 cls 时注入 default=str（默认约定：不可 JSON 序列化类型转为
-    字符串）；显式传 cls（如 JsonNoQuoteEncoder）时不注入 default，
-    避免 default=str 遮蔽编码器自定义的 default 方法（json.dumps 的
-    default 参数会覆盖 cls 实例的 default）。
+    字符串）；显式传自定义 cls 时不注入 default，避免 default=str 遮蔽
+    编码器自定义的 default 方法（json.dumps 的 default 参数会覆盖 cls
+    实例的 default）。
     """
     if "cls" in kwargs:
         return json.dumps(obj, ensure_ascii=False, **kwargs)
     return json.dumps(obj, ensure_ascii=False, default=str, **kwargs)
 
 
-def no_quote_value(val):
-    """「数字无引号」模式的值转换：返回适合 JSON 序列化的值。
+def serialize_no_quote(obj, indent=None) -> str:
+    """「值无引号」模式序列化：结构保留 JSON 语法，所有标量值不带引号裸输出。
 
-    保留原始数字类型（int / float / Decimal），字符串保持字符串
-    （数字字符串仍是字符串，如 "123" 带引号），None 保持 None，
-    bytes 解码为字符串，其余转 str。
-    Decimal 由 JsonNoQuoteEncoder 处理。
+    新语义（无「数字 vs 字符串」类型判断，唯一规则=值不带引号）：
+    - None → null；True/False → true/false
+    - int/float → 裸数字
+    - Decimal → 数值化（format(f) 去尾零；-0/0 → 0；有小数点 → float 文本，
+      否则 int 文本）
+    - bytes → UTF-8 decode（errors=replace）→ 裸文本
+    - str（含数字字符串）、date/datetime、其余类型 → str() 原样裸文本
+      （不加引号、不转义）
+    - dict 键保留标准 JSON 引号（json.dumps 序列化，含转义）
+
+    注意：输出不保证是合法 JSON（字符串含引号/换行/逗号/花括号等特殊字符时
+    结构可能被破坏）——面向宽松下游解析器。
+
+    indent: None=紧凑输出（{"k": v, ...}）；整数 N=每层缩进 N 空格
+    （与 json.dumps(indent=N) 形状一致，值裸输出）。
     """
+    return "".join(_no_quote_parts(obj, indent, 0))
+
+
+def _no_quote_parts(obj, indent, level):
+    """递归拼装输出片段；dict/list 结构 + 标量裸输出。"""
+    if isinstance(obj, dict):
+        if not obj:
+            return ["{}"]
+        parts = ["{"]
+        for i, (k, v) in enumerate(obj.items()):
+            if i:
+                parts.append(", " if indent is None else ",")
+            if indent is not None:
+                parts.append("\n")
+                parts.append(" " * (indent * (level + 1)))
+            parts.append(json.dumps(k, ensure_ascii=False))
+            parts.append(": ")
+            parts.extend(_no_quote_parts(v, indent, level + 1))
+        if indent is not None:
+            parts.append("\n")
+            parts.append(" " * (indent * level))
+        parts.append("}")
+        return parts
+    if isinstance(obj, (list, tuple)):
+        if not obj:
+            return ["[]"]
+        parts = ["["]
+        for i, v in enumerate(obj):
+            if i:
+                parts.append(", " if indent is None else ",")
+            if indent is not None:
+                parts.append("\n")
+                parts.append(" " * (indent * (level + 1)))
+            parts.extend(_no_quote_parts(v, indent, level + 1))
+        if indent is not None:
+            parts.append("\n")
+            parts.append(" " * (indent * level))
+        parts.append("]")
+        return parts
+    return [_no_quote_scalar(obj)]
+
+
+def _no_quote_scalar(val) -> str:
+    """标量值 → 不带引号的最终文本。"""
     if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        return val
+        return "null"
+    if val is True:
+        return "true"
+    if val is False:
+        return "false"
     if isinstance(val, Decimal):
-        return val
+        if val == 0:
+            return "0"
+        s = format(val, "f").rstrip("0").rstrip(".")
+        return s
     if isinstance(val, bytes):
         return val.decode("utf-8", errors="replace")
+    if isinstance(val, (int, float)):
+        return repr(val)
     return str(val)
-
-
-class JsonNoQuoteEncoder(json.JSONEncoder):
-    """自定义 JSON 编码器，用于「数字无引号」模式。
-
-    将 Decimal 转换为数值（float / int），
-    处理 date/datetime 为 ISO 字符串，
-    处理 bytes 为 UTF-8 解码字符串。
-    """
-
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            # 与 format_cell 保持一致的数值格式化，但返回数值类型
-            if obj == 0:
-                return 0
-            s = format(obj, "f").rstrip("0").rstrip(".")
-            if s in ("", "-0"):
-                return 0
-            return int(s) if "." not in s else float(s)
-        if isinstance(obj, bytes):
-            return obj.decode("utf-8", errors="replace")
-        # date / datetime treated as string via str()
-        return str(obj)
 
 
 def get_active_db_config() -> dict[str, Any]:

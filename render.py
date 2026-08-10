@@ -1171,7 +1171,7 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
           </select>
         </label>
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-          <input type="checkbox" name="json_no_quotes" value="1"> 数字无引号
+          <input type="checkbox" name="json_no_quotes" value="1"> 值无引号
         </label>
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
           <input type="checkbox" name="zip" value="1"> 压缩包
@@ -2310,10 +2310,19 @@ _API_TEMPLATE_JS = r'''
         return;
       }
     }
+    var nqCb = document.getElementById('json-no-quotes-checkbox');
+    var noQuotes = nqCb ? nqCb.checked : false;
     var replaced = tpl.replace(re, function(mm, key) {
       var v = TPL_SAMPLE[mode][key];
-      return v === undefined ? 'null' : JSON.stringify(v);
+      if (v === undefined) return 'null';
+      if (noQuotes && typeof v === 'string') return v;  // 值无引号：字符串裸输出
+      return JSON.stringify(v);
     });
+    if (noQuotes) {
+      // 「值无引号」模式：裸值输出不保证合法 JSON，跳过合法性校验直接显示
+      pre.textContent = replaced;
+      return;
+    }
     try {
       var parsed = JSON.parse(replaced);
       pre.textContent = JSON.stringify(parsed, null, 2);
@@ -2493,7 +2502,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
     static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
-    # 数字无引号默认关闭（与报表导出 json_no_quotes 默认一致），新增态不勾选
+    # 值无引号默认关闭（与报表导出 json_no_quotes 默认一致），新增态不勾选
     json_no_quotes_checked = (' checked' if (endpoint is not None and int(endpoint.get("json_no_quotes", 0))) else '')
 
     # 结果集输出模式
@@ -2676,13 +2685,15 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
     <input type="hidden" name="json_no_quotes" value="0">
-    <input type="checkbox" name="json_no_quotes" value="1"{json_no_quotes_checked} id="json-no-quotes-checkbox">
-    <span style="font-weight:600">数字无引号（JSON 数值不加引号）</span>
+    <input type="checkbox" name="json_no_quotes" value="1"{json_no_quotes_checked} id="json-no-quotes-checkbox"
+      onchange="renderTemplatePreview()">
+    <span style="font-weight:600">值无引号</span>
     <span id="json-no-quotes-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
   </label>
   <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
-    开启后，JSON 输出中的数值（int/float/Decimal）保持数字类型不加引号；
-    字符串（含数字字符串，如 <code>"123"</code>）仍为字符串。与报表导出「数字无引号」选项行为一致；
+    开启后，JSON 输出中的<strong>所有值均不加引号</strong>（含字符串，如 <code>张三</code>、
+    数字字符串 <code>007</code>），仅键保留引号；输出不再保证是严格合法 JSON，
+    面向宽松下游解析器。与报表导出「值无引号」选项行为一致；
     普通请求与 <code>.json</code> 静态缓存文件全部生效。
   </div>
 

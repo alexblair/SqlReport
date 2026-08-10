@@ -242,5 +242,66 @@ class TestValidate(unittest.TestCase):
             validate_template('{"data": {{data}}}', None)
 
 
+class TestRenderNoQuotes(unittest.TestCase):
+    """「值无引号」模式：占位符替换为裸值文本，跳过合法性校验。"""
+
+    def _ctx(self):
+        return {"data": [{"name": "张三", "amount": 500, "code": "007"}]}
+
+    def test_values_rendered_bare(self):
+        ok, output, error = render_template(
+            '{"rows": {{data}}}', self._ctx(),
+            json_no_quotes=True)
+        self.assertTrue(ok, error)
+        self.assertIn('"name": 张三', output)
+        self.assertIn('"code": 007', output)
+        self.assertIn('"amount": 500', output)
+
+    def test_invalid_structure_not_rejected(self):
+        """裸值输出不保证合法 JSON：尾逗号等结构不再触发校验失败。"""
+        ok, output, error = render_template(
+            '{"a": {{data}},}', self._ctx(), json_no_quotes=True)
+        self.assertTrue(ok, error)
+        self.assertEqual(output, '{"a": [{"name": 张三, "amount": 500, "code": 007}],}')
+
+    def test_unknown_placeholder_still_rejected(self):
+        ok, _output, error = render_template(
+            '{"x": {{foo}}}', self._ctx(),
+            keys=SINGLE_KEYS, json_no_quotes=True)
+        self.assertFalse(ok)
+        self.assertIn("foo", error)
+
+    def test_off_mode_still_validates(self):
+        """关闭（默认）：合法性校验行为不变。"""
+        ok, _output, error = render_template(
+            '{"a": {{data}},}', self._ctx())
+        self.assertFalse(ok)
+        self.assertIn("JSON", error)
+
+
+class TestValidateNoQuotes(unittest.TestCase):
+    """validate_template 的 json_no_quotes 参数。"""
+
+    def test_skips_validity_check_when_enabled(self):
+        ok, error = validate_template(
+            '{"a": {{data}},}', SINGLE_KEYS, json_no_quotes=True)
+        self.assertTrue(ok, error)
+
+    def test_unknown_key_still_rejected_when_enabled(self):
+        ok, error = validate_template(
+            '{"x": {{foo}}}', SINGLE_KEYS, json_no_quotes=True)
+        self.assertFalse(ok)
+        self.assertIn("foo", error)
+
+    def test_off_mode_still_rejects_invalid_json(self):
+        ok, error = validate_template('{"a": {{data}},}', SINGLE_KEYS)
+        self.assertFalse(ok)
+        self.assertIn("JSON", error)
+
+    def test_blank_template_ok_when_enabled(self):
+        ok, error = validate_template("", SINGLE_KEYS, json_no_quotes=True)
+        self.assertTrue(ok, error)
+
+
 if __name__ == "__main__":
     unittest.main()

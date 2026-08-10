@@ -27,7 +27,7 @@ json_template.py — API JSON 输出模板引擎（纯标准库，零依赖）
 import json
 import re
 
-from app_config import serialize_json, JsonNoQuoteEncoder
+from app_config import serialize_json, serialize_no_quote
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -81,11 +81,11 @@ def is_template_enabled(template: str | None) -> bool:
 def _value_to_json(value, json_no_quotes: bool = False) -> str:
     """值序列化为 JSON 片段（与响应序列化约定一致）。
 
-    json_no_quotes=True 时数值保持数字类型不加引号（Decimal 转数值），
-    与 API 端点「数字无引号」选项共用 JsonNoQuoteEncoder。
+    json_no_quotes=True 时值不带引号裸输出（所有值，含字符串），
+    与 API 端点「值无引号」选项共用 serialize_no_quote。
     """
     if json_no_quotes:
-        return serialize_json(value, cls=JsonNoQuoteEncoder)
+        return serialize_no_quote(value)
     return serialize_json(value)
 
 
@@ -160,8 +160,9 @@ def render_template(template: str, context: dict, keys: tuple = None,
         keys: 可选；占位符严格键集（SINGLE_KEYS/ALL_KEYS）。提供时跨模式
               键（如 single 模板含 {{results}}）报未知占位符；None 时按
               全部合法键宽松判定。校验/保存场景必须传 keys。
-        json_no_quotes: 可选；True 时占位符替换的数值保持数字类型不加引号
-                        （API 端点「数字无引号」选项），默认 False
+        json_no_quotes: 可选；True 时占位符替换的值一律不带引号裸输出
+                        （API 端点「值无引号」选项，含字符串；输出不保证
+                        合法 JSON，故跳过替换后的合法性校验），默认 False
 
     返回 (ok, output, error)：
     - ok=True：output 为渲染后的 JSON 字符串，error 为空
@@ -182,32 +183,38 @@ def render_template(template: str, context: dict, keys: tuple = None,
             return False, "", f"未知占位符 {display} 位于第 {line} 行第 {col} 列"
 
     output, lengths = _render_to_output(segments, context, json_no_quotes)
-    try:
-        json.loads(output)
-    except json.JSONDecodeError as e:
-        tpos = _output_pos_to_template_pos(segments, lengths, e.pos, len(template))
-        line, col = _pos_to_line_col(template, tpos)
-        return False, "", f"替换后的 JSON 非法（第 {line} 行第 {col} 列附近）：{e.msg}"
+    if not json_no_quotes:
+        try:
+            json.loads(output)
+        except json.JSONDecodeError as e:
+            tpos = _output_pos_to_template_pos(segments, lengths, e.pos, len(template))
+            line, col = _pos_to_line_col(template, tpos)
+            return False, "", f"替换后的 JSON 非法（第 {line} 行第 {col} 列附近）：{e.msg}"
     return True, output, ""
 
 
-def validate_template(template: str, keys: tuple) -> tuple[bool, str]:
+def validate_template(template: str, keys: tuple,
+                      json_no_quotes: bool = False) -> tuple[bool, str]:
     """校验模板是否可用（保存前把关）。
 
     参数:
         template: 模板文本
         keys: 该模式允许的占位符键集（SINGLE_KEYS 或 ALL_KEYS），
               决定未知占位符判定与样例上下文
+        json_no_quotes: 可选；True（端点「值无引号」选项开启）时跳过
+                        替换后的 JSON 合法性校验（裸值输出本就不保证
+                        合法），未知占位符校验仍保留，默认 False
 
     返回 (ok, error)：
     - 模板为空/空白 → (True, "")（未启用，无需校验）
     - 未知占位符 → (False, "未知占位符 {{x}} 位于第 L 行第 C 列")
-    - 替换后非法 JSON → (False, "替换后的 JSON 非法（第 L 行第 C 列附近）：msg"）
+    - 替换后非法 JSON（仅 json_no_quotes=False）→ (False, "替换后的 JSON 非法（第 L 行第 C 列附近）：msg"）
     - 合法 → (True, "")
     """
     if not is_template_enabled(template):
         return True, ""
     if keys not in _SAMPLES:
         raise ValueError(f"不支持的键集: {keys!r}，仅支持 SINGLE_KEYS / ALL_KEYS")
-    ok, _output, error = render_template(template, _SAMPLES[keys], keys=keys)
+    ok, _output, error = render_template(
+        template, _SAMPLES[keys], keys=keys, json_no_quotes=json_no_quotes)
     return ok, error

@@ -684,7 +684,7 @@ class TestExportBoundaries(unittest.TestCase):
         self.assertTrue(lines[1].endswith('""') or ",," in lines[1])
 
     def test_json_decimal_no_quotes(self):
-        """✅ Positive: JSON 导出时 json_no_quotes=True, Decimal→数字"""
+        """✅ Positive: JSON 导出时 json_no_quotes=True, 所有值裸输出"""
         self.mock_query.return_value = [{
             "columns": ["amount", "name"],
             "rows": [(Decimal("123.45"), "test")],
@@ -695,15 +695,12 @@ class TestExportBoundaries(unittest.TestCase):
             "test_report",
             json_no_quotes=True,
         )
-        data = json.loads(json_output)
-        # 验证 amount 是数字而非字符串
-        self.assertIsInstance(data["test_report"][0]["amount"], (int, float))
-        self.assertEqual(data["test_report"][0]["amount"], 123.45)
-        # name 还是字符串
-        self.assertIsInstance(data["test_report"][0]["name"], str)
+        # 值无引号模式：Decimal→数值、字符串也裸输出（文本断言）
+        self.assertIn('"amount": 123.45', json_output)
+        self.assertIn('"name": test', json_output)
 
     def test_json_decimal_zero_no_quotes(self):
-        """✅ Positive: JSON 导出时 Decimal(0) → 数字 0"""
+        """✅ Positive: JSON 导出时 Decimal(0) → 裸数字 0"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("0"),)],
@@ -712,12 +709,10 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t", {"host": "localhost"},
             "rpt", json_no_quotes=True,
         )
-        data = json.loads(json_output)
-        self.assertEqual(data["rpt"][0]["val"], 0)
-        self.assertIsInstance(data["rpt"][0]["val"], int)
+        self.assertIn('"val": 0', json_output)
 
     def test_json_decimal_large_no_quotes(self):
-        """✅ Positive: JSON 导出时大 Decimal → 数字"""
+        """✅ Positive: JSON 导出时大 Decimal → 裸数字"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("999999999999.99"),)],
@@ -726,9 +721,7 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t", {"host": "localhost"},
             "rpt", json_no_quotes=True,
         )
-        data = json.loads(json_output)
-        self.assertEqual(data["rpt"][0]["val"], 999999999999.99)
-        self.assertIsInstance(data["rpt"][0]["val"], float)
+        self.assertIn('"val": 999999999999.99', json_output)
 
     def test_json_with_quotes_decimal_as_string(self):
         """✅ Positive: JSON 导出时 json_no_quotes=False, Decimal→字符串"""
@@ -783,10 +776,9 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t", {"host": "localhost"},
             "test", json_no_quotes=True,
         )
-        data = json.loads(json_output)
-        self.assertEqual(len(data["test"]), 3)
-        self.assertEqual(data["test"][0]["x"], 1)
-        self.assertEqual(data["test"][2]["x"], 3)
+        # 值无引号模式：x 裸数字输出（文本断言）
+        self.assertIn('"x": 1', json_output)
+        self.assertIn('"x": 3', json_output)
 
 
 # ===================================================================

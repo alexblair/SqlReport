@@ -1524,15 +1524,18 @@ def _template_raw_for_format(output_format: str, data: dict) -> str:
     return "" if output_format == "csv" else data.get("json_template", "")
 
 
-def _validate_json_template(raw: str, result_mode: str) -> str | None:
+def _validate_json_template(raw: str, result_mode: str,
+                            json_no_quotes: bool = False) -> str | None:
     """校验 JSON 输出模板文本；返回错误消息（None=合法或未启用）。
 
     键集随表单 result_mode 判定（single/all），与渲染链路保持一致。
+    json_no_quotes（端点「值无引号」选项开启）时跳过替换后的 JSON 合法性
+    校验（裸值输出本就不保证合法），未知占位符校验仍保留。
     """
     if not raw or not raw.strip():
         return None
     keys = SINGLE_KEYS if result_mode == "single" else ALL_KEYS
-    ok, err = validate_template(raw, keys)
+    ok, err = validate_template(raw, keys, json_no_quotes=json_no_quotes)
     return None if ok else err
 
 
@@ -1664,7 +1667,8 @@ def handle_api_endpoint_add(conn, report_id: int,
     data = _parse_form_data(form_body)
     try:
         pf = _parse_endpoint_form(data)
-        tpl_err = _validate_json_template(pf["template_raw"], pf["result_mode"])
+        tpl_err = _validate_json_template(
+            pf["template_raw"], pf["result_mode"], json_no_quotes=pf["json_no_quotes"])
         if tpl_err:
             return 200, render_api_endpoint_form_page(
                 conn, report_id,
@@ -1724,7 +1728,8 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
         if not endpoint:
             return 302, "/config?flash=错误: API 接口不存在"
         pf = _parse_endpoint_form(data)
-        tpl_err = _validate_json_template(pf["template_raw"], pf["result_mode"])
+        tpl_err = _validate_json_template(
+            pf["template_raw"], pf["result_mode"], json_no_quotes=pf["json_no_quotes"])
         if tpl_err:
             tmp = _endpoint_from_form(data, pf["url_path"], pf["result_mode"])
             tmp["id"] = endpoint_id
@@ -1822,7 +1827,9 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
     data = _parse_form_data(form_body or "")
     result_mode = data.get("result_mode", "single")
     template_raw = data.get("json_template", "") or ""
-    tpl_err = _validate_json_template(template_raw, result_mode)
+    json_no_quotes = int(data.get("json_no_quotes", 0) or 0)
+    tpl_err = _validate_json_template(
+        template_raw, result_mode, json_no_quotes=json_no_quotes)
     if tpl_err:
         return fail(tpl_err)
 
@@ -1831,7 +1838,7 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
     tmp["json_template"] = template_raw or None
     tmp["result_mode"] = result_mode
     tmp["result_index"] = int(data.get("result_index", 0) or 0)
-    tmp["json_no_quotes"] = int(data.get("json_no_quotes", 0) or 0)
+    tmp["json_no_quotes"] = json_no_quotes
     columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
     tmp["columns"] = columns or None
     tmp["filters"] = filters_str or None

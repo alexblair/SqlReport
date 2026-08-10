@@ -4,7 +4,7 @@ test_export.py — export.py 单元测试
 测试策略：
 - 使用 mock 模拟 MySQL 查询
 - 验证 CSV 格式正确（BOM、引号、分隔符）
-- 验证新导出选项（字符集、JSON数字无引号、ZIP压缩包）
+- 验证新导出选项（字符集、JSON 值无引号、ZIP压缩包）
 - 覆盖错误路径（缺少参数、报表不存在、查询失败）
 """
 
@@ -597,18 +597,13 @@ class TestExportJSONNoQuotes(unittest.TestCase):
 
         self.assertEqual(code, 200)
         text = content.decode("utf-8") if isinstance(content, bytes) else content
-        # id 应为数字 1 而不是字符串 "1"
+        # 值无引号模式：数字与字符串全部裸输出
         self.assertIn('"id": 1', text)
         # price 应为数字
         self.assertIn('"price": 29.99', text)
-        # name 仍为字符串
-        self.assertIn('"name": "商品A"', text)
-
-        data = json.loads(text)
-        row = data["订单报表"][0]
-        self.assertIsInstance(row["id"], int)
-        self.assertIsInstance(row["price"], float)
-        self.assertIsInstance(row["name"], str)
+        # name 也裸输出（不再带引号）
+        self.assertIn('"name": 商品A', text)
+        self.assertIn('"name": 商品B', text)
 
     @patch("db.create_mysql_connection")
     def test_json_no_quotes_with_charset(self, mock_create_conn):
@@ -628,9 +623,9 @@ class TestExportJSONNoQuotes(unittest.TestCase):
 
         self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
-        data = json.loads(content.decode("utf-8"))
-        self.assertIsInstance(data["订单报表"][0]["id"], int)
-        self.assertEqual(data["订单报表"][0]["id"], 100)
+        text = content.decode("utf-8")
+        self.assertIn('"id": 100', text)
+        self.assertIn('"val": 3.14', text)
 
     @patch("db.create_mysql_connection")
     def test_json_no_quotes_none_values(self, mock_create_conn):
@@ -651,8 +646,6 @@ class TestExportJSONNoQuotes(unittest.TestCase):
         self.assertEqual(code, 200)
         text = content.decode("utf-8")
         self.assertIn('"remark": null', text)
-        data = json.loads(text)
-        self.assertIsNone(data["订单报表"][0]["remark"])
 
     @patch("db.create_mysql_connection")
     def test_default_values_all_strings(self, mock_create_conn):
@@ -764,11 +757,10 @@ class TestExportZip(unittest.TestCase):
         import io as io_mod
         with zipfile.ZipFile(io_mod.BytesIO(content)) as zf:
             json_file = [n for n in zf.namelist() if n.endswith(".json")][0]
-            data = json.loads(zf.read(json_file).decode("utf-8"))
-            self.assertIsInstance(data["订单报表"][0]["id"], int)
-            self.assertEqual(data["订单报表"][0]["id"], 1)
-            self.assertIsInstance(data["订单报表"][0]["count"], int)
-            self.assertEqual(data["订单报表"][0]["count"], 100)
+            text = zf.read(json_file).decode("utf-8")
+            # 值无引号模式：id/count 裸数字输出
+            self.assertIn('"id": 1', text)
+            self.assertIn('"count": 100', text)
 
 
 # ===================================================================
@@ -842,11 +834,9 @@ class TestExportReportToJSON(unittest.TestCase):
             "测试报表",
             json_no_quotes=True,
         )
-        data = json.loads(result)
-        row = data["测试报表"][0]
-        self.assertIsInstance(row["id"], int)
-        self.assertEqual(row["id"], 1)
-        self.assertIsInstance(row["price"], float)
+        # 值无引号模式：id/price 裸输出（文本断言，输出不可 JSON.parse）
+        self.assertIn('"id": 1', result)
+        self.assertIn('"price": 99.5', result)
 
     @patch("db.create_mysql_connection")
     def test_export_json_with_sort(self, mock_create_conn):
@@ -1261,12 +1251,12 @@ class TestExportParameterCombinations(unittest.TestCase):
         self.assertEqual(len(rows), 3)
 
     # ------------------------------------------------------------------
-    # 用例 12: JSON + json_no_quotes (数字不加引号)
+    # 用例 12: JSON + json_no_quotes (值无引号)
     # ------------------------------------------------------------------
 
     @patch("db.create_mysql_connection")
     def test_12_json_no_quotes_numbers(self, mock_create_conn):
-        """JSON + json_no_quotes — 数字类型不加引号"""
+        """JSON + json_no_quotes — 所有值裸输出不带引号"""
         self._setup_mock(mock_create_conn)
         code, content, headers = export.handle_export(
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
@@ -1282,16 +1272,9 @@ class TestExportParameterCombinations(unittest.TestCase):
         # age 应为数字不加引号
         self.assertIn('"age": 30', text)
         self.assertIn('"age": 25', text)
-        # name 仍为字符串
-        self.assertIn('"name": "Alice"', text)
-        self.assertIn('"name": "Bob"', text)
-        # 验证 JSON 解析后类型正确
-        data = json.loads(text)
-        row = data["订单报表"][0]
-        self.assertIsInstance(row["id"], int)
-        self.assertIsInstance(row["age"], int)
-        self.assertIsInstance(row["name"], str)
-        self.assertIsInstance(row["city"], str)
+        # name 值无引号模式：字符串也裸输出
+        self.assertIn('"name": Alice', text)
+        self.assertIn('"name": Bob', text)
 
     # ------------------------------------------------------------------
     # 用例 13: CSV + ZIP

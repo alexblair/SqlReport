@@ -75,7 +75,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **Multi-field Filtering** | 9 operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty); values support `*` wildcard, comma multi-value (OR), `\` escaping — one shared syntax across report/export/API/audit pages |
 | **Column Settings** | Drag-and-drop column reorder, show/hide fields |
 | **CSV Export** | Full dataset export with UTF-8 BOM for Excel compatibility |
-| **JSON Export** | JSON format export with optional numeric no-quotes mode |
+| **JSON Export** | JSON format export with optional value no-quotes mode |
 | **Charset Selection** | GBK or UTF-8 encoding for exports |
 | **ZIP Compression** | Package export results as ZIP archive |
 | **Multi Result Sets** | One multi-statement SQL returns several result sets, each in its own tab with independent filter/sort state |
@@ -285,9 +285,9 @@ Rules:
 
 On the endpoint edit page (for already-saved endpoints), the "Live preview with real data" button executes a real query using the **unsaved** template and rules (filter/sort/column selection) from the current form (at most 3 rows, not persisted, no impact on the live endpoint) and shows the rendered result in the preview area; an invalid template shows a structured error with line/column position, a failed query shows a structured error message. New (unsaved) endpoints do not have this button.
 
-### Numeric no-quotes
+### Value no-quotes
 
-The API endpoint form offers a "numeric no-quotes" checkbox (off by default, sharing the same implementation as the identically named option of report JSON export). When enabled, numeric fields in the JSON output keep their numeric types (e.g. `123.45`, `25`) instead of the default stringification (e.g. `"123.45"`); numeric strings (e.g. `"007"`) still keep their quotes. It applies to both the default output structure and custom JSON templates; CSV output is unaffected; the static cache `.json` variant is automatically invalidated and rebuilt when the switch changes (invalidated on config change, rebuilt on the next request).
+The API endpoint form offers a "value no-quotes" checkbox (off by default, sharing the same implementation as the identically named option of report JSON export). When enabled, **all values** in the JSON output are emitted without quotes (including strings like `张三` and numeric strings like `007`); only keys keep their quotes — no distinction is made between numbers and strings. The output is no longer guaranteed to be strict JSON, targeting lenient downstream parsers. It applies to both the default output structure and custom JSON templates; CSV output is unaffected; the static cache `.json` variant is automatically invalidated and rebuilt when the switch changes (invalidated on config change, rebuilt on the next request).
 
 ---
 
@@ -518,7 +518,7 @@ Report list page highlights:
 - **CSV** and **JSON** formats
 - UTF-8 BOM encoding (CSV) for correct Chinese text in Excel
 - Charset selectable: GBK / UTF-8
-- JSON numeric no-quotes mode (numbers keep their types)
+- JSON value no-quotes mode (all values without quotes)
 - ZIP archive download
 - Applies custom column settings (export only selected columns, in the chosen order)
 - Applies the output limit guard: when full output is disabled and results exceed `max_rows`, the export is truncated with header `X-Export-Truncated: true`

@@ -57,7 +57,7 @@ class TestReportSnapshot(unittest.TestCase):
         self.assertEqual(restored.results[0]["rows"][0][0], "张三")
 
     def test_decimal_roundtrip_preserves_type(self):
-        """Decimal 经快照 JSON 往返保持类型与精度（API 数字无引号依赖）"""
+        """Decimal 经快照 JSON 往返保持类型与精度（API 值无引号依赖）"""
         from decimal import Decimal
         results = [{"columns": ["amount"], "rows": [(Decimal("149589346.01"),)]}]
         snap = ReportSnapshot(results, "SELECT 1", 100.0, "v1")
