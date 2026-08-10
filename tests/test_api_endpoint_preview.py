@@ -284,6 +284,20 @@ class TestApiEndpointPreview(MockMySQLMixin, unittest.TestCase):
         self.assertIn("new URLSearchParams()", html)
         self.assertNotIn("new FormData()", html)
 
+    def test_live_preview_js_submits_smart_quote_flags(self):
+        """预览 fetch 必须提交 smart_quote_flags（hidden input 当前值）。
+
+        bug 场景：previewWithRealData 只提交 json_template/rule_json/
+        result_mode/result_index/row_limit，后端 handle_api_endpoint_preview
+        读不到 smart_quote_flags 默认 0 → 勾选「智能去引号」后真实数据预览
+        不去引号，与保存后的 API 实际输出不一致（spec：真实数据预览输出
+        面板生效文本）。
+        """
+        html = config.build_api_endpoint_form_html(1, "测试报表", {}, None,
+                                                   ["结果"], 1, self.eid, True)
+        self.assertIn("fd.append('smart_quote_flags',", html)
+        self.assertIn("smart-quote-flags-input", html)
+
     def test_preview_error_page_renders(self):
         """直接 GET 打开预览地址（无表单）：返回可交互指引页。"""
         code, body, headers = config.handle_api_endpoint_preview(self.conn, 1, self.eid, "")

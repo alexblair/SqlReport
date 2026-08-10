@@ -2408,6 +2408,8 @@ _API_TEMPLATE_JS = r'''
     fd.append('result_index', idxSel ? idxSel.value : '0');
     var rlInput = document.getElementsByName('row_limit')[0];
     fd.append('row_limit', rlInput ? rlInput.value : '0');
+    var sqHidden = document.getElementById('smart-quote-flags-input');
+    fd.append('smart_quote_flags', sqHidden ? sqHidden.value : '0');
     fetch(urlPath, {method: 'POST', body: fd})
       .then(function(r) {
         return r.json().catch(function() {
