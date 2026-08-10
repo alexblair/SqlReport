@@ -17,6 +17,7 @@ import config
 import config_db
 import db
 import render
+from tests import htmlcheck
 from tests.test_config import _make_conn
 
 
@@ -305,6 +306,34 @@ class TestEndpointFormKeyBlock(_Base):
         self.assertIn("保存后将自动生成 API Key", html)
         self.assertNotIn("🔑 API Key 管理", html)
         self.assertNotIn('name="api_key"', html)
+
+    def test_edit_save_button_inside_main_form_only(self):
+        """回归（嵌套 form 破坏保存）：编辑态保存按钮必须位于主表单内。
+
+        API Key 管理区块含独立 <form>（toggle/删除/生成），若被插入主表单
+        内部，HTML5 解析会提前闭合主表单，保存按钮脱离表单，点击无反应。
+        """
+        eid = self._add_endpoint()
+        config_db.add_api_key(self.conn, eid, "Key1", "sk-abcdefgh1234")
+        html = render.build_api_endpoint_form_html(
+            1, "测试报表", db.get_api_endpoint(self.conn, eid),
+            result_names_list=[], result_count=1,
+            endpoint_id=eid, is_edit=True,
+            api_keys=config_db.list_api_keys(self.conn, eid))
+        # HTML5 语义：嵌套 <form> 开始标签被忽略，第一个 </form> 闭合主表单。
+        # 主 form 是页面第一个 <form>；其内部若含嵌套 form，第一个 </form> 会
+        # 提前闭合主表单，导致保存按钮脱离表单。
+        main_start, main_end = htmlcheck.main_form_span(
+            html, action_hint=f"/config/reports/1/api_endpoints/{eid}/edit")
+        main_span = html[main_start:main_end]
+        self.assertIn('name="action" value="save"', main_span,
+                      "保存按钮必须位于主表单内")
+        self.assertIn('name="action" value="save_close"', main_span,
+                      "保存并关闭按钮必须位于主表单内")
+        self.assertNotIn("🔑 API Key 管理", main_span,
+                         "API Key 管理区块不得嵌套在主表单内")
+        self.assertEqual(html.count("🔑 API Key 管理"), 1,
+                         "API Key 管理区块只能渲染一次")
 
 
 class TestEndpointsListKeyCounts(_Base):

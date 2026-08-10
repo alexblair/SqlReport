@@ -2539,12 +2539,13 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     else:
         live_preview_html = ""
 
-    # API Key 管理：编辑态渲染管理区块（独立表单，放在主表单之外避免嵌套 form）；
+    # API Key 管理：编辑态渲染管理区块（独立表单，放在主表单之外
+    # 避免 HTML 嵌套 form——嵌套 form 会提前闭合主表单导致保存按钮失效）；
     # 新增态表单内显示"保存后自动生成"提示
     if is_edit and endpoint_id:
-        api_key_block_html = build_api_key_manage_html(
+        api_key_block_html = ""
+        key_manage_extra = build_api_key_manage_html(
             api_keys or [], report_id, endpoint_id)
-        key_manage_extra = api_key_block_html
     else:
         api_key_block_html = (
             '<div class="flash-warn" style="margin-bottom:16px;padding:10px 14px;'
