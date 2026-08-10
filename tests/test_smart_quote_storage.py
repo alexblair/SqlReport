@@ -222,18 +222,22 @@ class TestMigration(_SmartStorageBase):
             "ADD COLUMN smart_quote_flags TINYINT NOT NULL DEFAULT 0", ())
 
     def test_sqlite_migration_data_migrates_json_no_quotes(self):
-        """存量 json_no_quotes=1 → 面板全开（0b111）；=0 保持不变。"""
+        """存量 json_no_quotes=1 → 面板全开（0b111）且旧列重置为 0；=0 保持 0。
+
+        旧列重置是 KPI 案例缺陷的修复：若不重置，运行期兼容逻辑会把端点
+        永久钉死在面板全开，用户后续取消勾选无效。
+        """
         conn = self._legacy_conn()
         conn.execute("INSERT INTO api_endpoints (report_id, name, url_path, json_no_quotes) "
                      "VALUES (1, '开', '/api/on', 1), (1, '关', '/api/off', 0)")
         conn.commit()
         with patch("db._get_engine", return_value="sqlite3"):
             config_db._init_sqlite_migrations(conn)
-        rows = {r["name"]: r["smart_quote_flags"]
+        rows = {r["name"]: (r["smart_quote_flags"], r["json_no_quotes"])
                 for r in conn.execute(
-                    "SELECT name, smart_quote_flags FROM api_endpoints")}
-        self.assertEqual(rows["开"], 7, "json_no_quotes=1 → 0b111")
-        self.assertEqual(rows["关"], 0, "json_no_quotes=0 保持 0")
+                    "SELECT name, smart_quote_flags, json_no_quotes FROM api_endpoints")}
+        self.assertEqual(rows["开"], (7, 0), "json_no_quotes=1 → 0b111 且旧列重置 0")
+        self.assertEqual(rows["关"], (0, 0), "json_no_quotes=0 保持 0")
         conn.close()
 
     def test_sqlite_migration_idempotent(self):
@@ -276,6 +280,9 @@ class TestMigration(_SmartStorageBase):
         self.mock_cursor.execute.assert_any_call(
             "UPDATE api_endpoints SET smart_quote_flags=7 "
             "WHERE json_no_quotes=1 AND smart_quote_flags=0", ())
+        self.mock_cursor.execute.assert_any_call(
+            "UPDATE api_endpoints SET json_no_quotes=0 "
+            "WHERE json_no_quotes=1 AND smart_quote_flags>0", ())
 
     def test_mysql_migration_skips_add_when_present_but_updates(self):
         """MySQL 已有列：不重复 ADD，数据迁移 UPDATE 仍执行（幂等）。"""
@@ -304,6 +311,9 @@ class TestMigration(_SmartStorageBase):
         self.mock_cursor.execute.assert_any_call(
             "UPDATE api_endpoints SET smart_quote_flags=7 "
             "WHERE json_no_quotes=1 AND smart_quote_flags=0", ())
+        self.mock_cursor.execute.assert_any_call(
+            "UPDATE api_endpoints SET json_no_quotes=0 "
+            "WHERE json_no_quotes=1 AND smart_quote_flags>0", ())
 
 
 # ---------------------------------------------------------------------------

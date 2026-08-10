@@ -583,8 +583,10 @@ def _init_sqlite_migrations(conn) -> None:
             conn.rollback()
     # 迁移 15：api_endpoints.smart_quote_flags（「智能去引号」复选面板位图，
     # 1=十进制数字、2=科学计数法、4=千分位数字，默认 0 = 标准 JSON）。
-    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）；
-    # json_no_quotes 列保留（弃用，兼容映射与回滚需要）。重复执行幂等。
+    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）后
+    # **重置旧列 json_no_quotes=0**——一次性转换完成即消费旧标记。若不重置，
+    # 运行期兼容逻辑（json_no_quotes=1 → flags=max(flags,7)）会把端点永久钉死
+    # 在面板全开，用户后续取消勾选无效（KPI 案例缺陷根因）。重复执行幂等。
     if "smart_quote_flags" not in api_cols:
         try:
             conn.execute(
@@ -601,6 +603,13 @@ def _init_sqlite_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+    try:
+        conn.execute(
+            "UPDATE api_endpoints SET json_no_quotes=0 "
+            "WHERE json_no_quotes=1 AND smart_quote_flags>0")
+        conn.commit()
+    except Exception:
+        conn.rollback()
     # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移批次）----
 
 
@@ -876,8 +885,9 @@ def _init_mysql_migrations(conn) -> None:
         conn.rollback()
     # 迁移 15：api_endpoints.smart_quote_flags（「智能去引号」复选面板位图，
     # 1=十进制数字、2=科学计数法、4=千分位数字，默认 0 = 标准 JSON）。
-    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）。
-    # 重复执行幂等（数据迁移限定 smart_quote_flags=0，已迁移行不重复更新）。
+    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）后
+    # **重置旧列 json_no_quotes=0**——一次性转换完成即消费旧标记，防止运行期
+    # 兼容逻辑把端点永久钉死在面板全开（KPI 案例缺陷根因）。重复执行幂等。
     try:
         cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
         api_cols = {row[0] for row in cursor.fetchall()}
@@ -889,6 +899,10 @@ def _init_mysql_migrations(conn) -> None:
         conn.execute(
             "UPDATE api_endpoints SET smart_quote_flags=7 "
             "WHERE json_no_quotes=1 AND smart_quote_flags=0")
+        conn.commit()
+        conn.execute(
+            "UPDATE api_endpoints SET json_no_quotes=0 "
+            "WHERE json_no_quotes=1 AND smart_quote_flags>0")
         conn.commit()
     except Exception:
         conn.rollback()

@@ -240,12 +240,10 @@ def _compute_static_config_version(endpoint: dict, report: dict) -> str:
         value = endpoint.get(key)
         if value is not None and value != "":
             parts.append(f"{key}={value}")
-    # 「智能去引号」有效位：旧列 json_no_quotes=1（迁移 15 前存量，极端防御）
-    # 等价面板全开（0b111），与 smart_quote_flags 取大值后纳入版本计算——
-    # 两者任一变化都会改变文件内容，必须参与版本判定（防 TTL 内陈旧命中）。
+    # 「智能去引号」位图纳入版本计算——flags 任一变化都会改变文件内容，
+    # 必须参与版本判定（防 TTL 内陈旧命中）。旧列 json_no_quotes 已由迁移 15
+    # 一次性转换并重置为 0（转换即消费），不参与版本计算。
     flags = int(endpoint.get("smart_quote_flags", 0) or 0)
-    if int(endpoint.get("json_no_quotes", 0) or 0):
-        flags = max(flags, 7)
     parts.append(f"smart_quote_flags={flags}")
     parts.append(f"allow_all_output={int(report.get('allow_all_output', 1) or 0)}")
     parts.append(f"max_rows={int(report.get('max_rows') or 0)}")
@@ -265,8 +263,8 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
         static_cache.record_invalidated(url_key)
     last_invalidated = static_cache.get_last_invalidated(url_key)
     template = _endpoint_template(endpoint)
-    # smart_quote_flags 的旧列兼容归一化在 _execute_api_query 内完成
-    # （json_no_quotes=1 极端防御等价面板全开）
+    # smart_quote_flags 归一化在 _execute_api_query 内完成（面板是唯一控制，
+    # 旧列 json_no_quotes 已由迁移 15 转换并重置）
     meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
     result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
                                 force_full=True, meta=meta)
@@ -377,12 +375,10 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     # 端点「智能去引号」位图：1=十进制数字（含正负号）、2=科学计数法、
     # 4=千分位数字，默认 0 = 标准 JSON（与报表导出共用
     # app_config.serialize_smart_quotes 单一实现）。
-    # 旧列 json_no_quotes 兼容：存量数据转换已由迁移 15 承载（=1 → 面板全开
-    # 0b111）；此分支为极端防御——未迁移/直接落库数据 json_no_quotes=1 时
-    # 等价面板全开（取大值），保证既有端点与调用方不失效。
+    # 旧列 json_no_quotes 已由迁移 15 一次性转换（=1 → 面板全开 0b111）并
+    # 重置为 0（转换即消费）——此处不再做运行期强制，面板是引号的唯一控制；
+    # 否则 json_no_quotes 残留 1 会把端点永久钉死在面板全开（KPI 案例缺陷根因）。
     smart_quote_flags = int(endpoint.get("smart_quote_flags", 0) or 0)
-    if int(endpoint.get("json_no_quotes", 0) or 0):
-        smart_quote_flags = max(smart_quote_flags, 7)
 
     # API 强制刷新：refresh=1（严格值校验）→ 绕过 L1/L2 缓存直查 MySQL 并回写缓存
     refresh = _resolve_flag(query_params, method, body, headers, "refresh")

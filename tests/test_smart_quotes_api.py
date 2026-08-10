@@ -396,20 +396,26 @@ class TestCompatMapping(_SmartQuotesApiBase):
         self.assertIn('"code": 7', body_mig)
         self.assertNotIn('"name": 张三', body_mig)
 
-    def test_compat_unmigrated_equals_full_open(self):
-        """未迁移（json_no_quotes=1 + smart_quote_flags=0）等价面板全开（flags=7）。"""
+    def test_legacy_column_no_longer_forces_full_open(self):
+        """回归（KPI 案例）：json_no_quotes=1 残留端点取消勾选（flags=0）后
+        输出恢复标准 JSON——面板是引号的唯一控制，旧列不再运行期强制全开。
+
+        缺陷根因：迁移 15 转换后未重置旧列 + 运行期 max(flags,7) 强制逻辑，
+        导致用户永远无法取消勾选（数字恒全裸）；修复后旧列不参与行为。
+        """
         self._create_report()
-        self._create_endpoint(json_no_quotes=1)
-        self._create_endpoint(url_path="/api/full2", smart_quote_flags=7)
+        self._create_endpoint(json_no_quotes=1)  # 残留旧列，flags=0
+        self._create_endpoint(url_path="/api/plain", smart_quote_flags=0)
         status, body, _ = self._request("/api/sq")
         self.assertEqual(status, 200)
-        status, body_full, _ = self._request("/api/full2")
+        status, body_plain, _ = self._request("/api/plain")
         self.assertEqual(status, 200)
-        self.assertEqual(body, body_full,
-                         "未迁移旧列须经极端防御等价为面板全开")
-        # 面板全开语义：文本带引号、数字裸（与旧全裸相反）
-        self.assertIn('"name": "张三"', body)
-        self.assertIn('"code": 7', body)
+        self.assertEqual(body, body_plain,
+                         "json_no_quotes 残留不得再驱动输出（与 flags=0 逐字节一致）")
+        # 标准 JSON：数字字符串带引号（不再全裸）、原生数字裸
+        self.assertIn('"code": "007"', body)
+        self.assertNotIn('"code": 7', body)
+        self.assertIn('"amount": "123.45"', body)
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +480,26 @@ class TestStaticCache(_SmartQuotesApiBase):
                          "面板变更必须使缓存失效重建")
         self.assertIn('"code": 7', body)
         self.assertIn('"name": "张三"', body)
+
+    def test_static_legacy_uncancel_rebuilds(self):
+        """回归（KPI 案例）：json_no_quotes=1 历史端点取消勾选（flags 7→0）
+        后 .json 静态缓存失效重建为标准 JSON 输出。"""
+        self._create_report()
+        eid = self._create_endpoint(json_no_quotes=1, smart_quote_flags=7,
+                                    static_cache=1)
+        status, body, headers = self._request("/api/sq.json")
+        self.assertEqual(headers.get("X-Static-Cache"), "miss")
+        self.assertIn('"code": 7', body)  # 全开态
+
+        conn = _get_conn()
+        config_db.update_api_endpoint(conn, eid, smart_quote_flags=0)
+        conn.close()
+
+        status, body, headers = self._request("/api/sq.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("X-Static-Cache"), "miss",
+                         "取消勾选必须使缓存失效重建（config_version 只跟 flags）")
+        self.assertIn('"code": "007"', body)  # 恢复标准 JSON
 
 
 # ---------------------------------------------------------------------------
