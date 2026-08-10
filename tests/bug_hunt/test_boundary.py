@@ -232,15 +232,17 @@ class TestExportBoundary(unittest.TestCase):
         result = self.export._encode_content("", "utf8")
         self.assertEqual(result, b"")
 
-    def test_no_quote_value_none(self):
-        """serialize_no_quote(None) → 输出 null"""
-        result = app_config.serialize_no_quote(None)
+    def test_smart_quotes_value_none(self):
+        """serialize_smart_quotes(None, flags=7) → 输出 null"""
+        result = app_config.serialize_smart_quotes(None, flags=7)
         self.assertEqual(result, "null")
 
-    def test_no_quote_value_bytes(self):
-        """serialize_no_quote(bytes) → 解码为裸文本"""
-        result = app_config.serialize_no_quote(b"hello world")
-        self.assertEqual(result, "hello world")
+    def test_smart_quotes_value_bytes(self):
+        """serialize_smart_quotes(bytes, flags=7) → 面板开启 decode 后按字符串判定"""
+        result = app_config.serialize_smart_quotes(b"hello world", flags=7)
+        self.assertEqual(result, '"hello world"')
+        result = app_config.serialize_smart_quotes(b"123", flags=7)
+        self.assertEqual(result, "123")
 
     def test_build_export_filename_empty_name(self):
         """_build_export_filename('', ...) → 不崩溃"""

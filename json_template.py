@@ -27,7 +27,7 @@ json_template.py — API JSON 输出模板引擎（纯标准库，零依赖）
 import json
 import re
 
-from app_config import serialize_json, serialize_no_quote
+from app_config import serialize_json, serialize_smart_quotes
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -78,14 +78,15 @@ def is_template_enabled(template: str | None) -> bool:
     return bool(template and template.strip())
 
 
-def _value_to_json(value, json_no_quotes: bool = False) -> str:
+def _value_to_json(value, smart_quote_flags: int = 0) -> str:
     """值序列化为 JSON 片段（与响应序列化约定一致）。
 
-    json_no_quotes=True 时值不带引号裸输出（所有值，含字符串），
-    与 API 端点「值无引号」选项共用 serialize_no_quote。
+    smart_quote_flags>0（「智能去引号」位图：1=十进制数字、2=科学计数法、
+    4=千分位数字）时按勾选形态判定裸输出（app_config.serialize_smart_quotes，
+    输出永远合法 JSON）；未勾选形态的值保持带引号。
     """
-    if json_no_quotes:
-        return serialize_no_quote(value)
+    if smart_quote_flags > 0:
+        return serialize_smart_quotes(value, smart_quote_flags)
     return serialize_json(value)
 
 
@@ -116,7 +117,7 @@ def _split_segments(template: str) -> list[tuple]:
 
 
 def _render_to_output(segments: list[tuple], context: dict,
-                      json_no_quotes: bool = False) -> tuple[str, list[int]]:
+                      smart_quote_flags: int = 0) -> tuple[str, list[int]]:
     """渲染各段，返回 (输出字符串, 各段输出长度列表)。"""
     parts = []
     lengths = []
@@ -126,7 +127,7 @@ def _render_to_output(segments: list[tuple], context: dict,
             lengths.append(len(text))
         else:
             # 键集内键缺失 → null（可选键语义）
-            rendered = _value_to_json(context.get(text), json_no_quotes)
+            rendered = _value_to_json(context.get(text), smart_quote_flags)
             parts.append(rendered)
             lengths.append(len(rendered))
     return "".join(parts), lengths
@@ -150,7 +151,7 @@ def _output_pos_to_template_pos(segments: list[tuple], lengths: list[int],
 
 
 def render_template(template: str, context: dict, keys: tuple = None,
-                    json_no_quotes: bool = False) -> tuple[bool, str, str]:
+                    smart_quote_flags: int = 0) -> tuple[bool, str, str]:
     """渲染模板。
 
     参数:
@@ -160,9 +161,10 @@ def render_template(template: str, context: dict, keys: tuple = None,
         keys: 可选；占位符严格键集（SINGLE_KEYS/ALL_KEYS）。提供时跨模式
               键（如 single 模板含 {{results}}）报未知占位符；None 时按
               全部合法键宽松判定。校验/保存场景必须传 keys。
-        json_no_quotes: 可选；True 时占位符替换的值一律不带引号裸输出
-                        （API 端点「值无引号」选项，含字符串；输出不保证
-                        合法 JSON，故跳过替换后的合法性校验），默认 False
+        smart_quote_flags: 可选；「智能去引号」位图（1=十进制数字、2=科学
+                           计数法、4=千分位数字），>0 时字符串值按勾选形态
+                           判定裸输出（输出永远合法 JSON），替换后的合法性
+                           校验恒执行（升级点：与旧全裸模式跳过相反）
 
     返回 (ok, output, error)：
     - ok=True：output 为渲染后的 JSON 字符串，error 为空
@@ -182,33 +184,35 @@ def render_template(template: str, context: dict, keys: tuple = None,
             display = "{{" + name + "}}"
             return False, "", f"未知占位符 {display} 位于第 {line} 行第 {col} 列"
 
-    output, lengths = _render_to_output(segments, context, json_no_quotes)
-    if not json_no_quotes:
-        try:
-            json.loads(output)
-        except json.JSONDecodeError as e:
-            tpos = _output_pos_to_template_pos(segments, lengths, e.pos, len(template))
-            line, col = _pos_to_line_col(template, tpos)
-            return False, "", f"替换后的 JSON 非法（第 {line} 行第 {col} 列附近）：{e.msg}"
+    output, lengths = _render_to_output(segments, context, smart_quote_flags)
+    # 合法性校验：标准模式与智能模式（smart_quote_flags>0）恒执行——智能
+    # 模式输出永远合法，校验是产品承诺的一部分。
+    try:
+        json.loads(output)
+    except json.JSONDecodeError as e:
+        tpos = _output_pos_to_template_pos(segments, lengths, e.pos, len(template))
+        line, col = _pos_to_line_col(template, tpos)
+        return False, "", f"替换后的 JSON 非法（第 {line} 行第 {col} 列附近）：{e.msg}"
     return True, output, ""
 
 
 def validate_template(template: str, keys: tuple,
-                      json_no_quotes: bool = False) -> tuple[bool, str]:
+                      smart_quote_flags: int = 0) -> tuple[bool, str]:
     """校验模板是否可用（保存前把关）。
 
     参数:
         template: 模板文本
         keys: 该模式允许的占位符键集（SINGLE_KEYS 或 ALL_KEYS），
               决定未知占位符判定与样例上下文
-        json_no_quotes: 可选；True（端点「值无引号」选项开启）时跳过
-                        替换后的 JSON 合法性校验（裸值输出本就不保证
-                        合法），未知占位符校验仍保留，默认 False
+        smart_quote_flags: 可选；「智能去引号」位图（1=十进制数字、2=科学
+                           计数法、4=千分位数字），>0 时字符串值按勾选形态
+                           判定裸输出（输出永远合法 JSON），替换后的合法性
+                           校验恒执行（升级点：与旧全裸模式跳过相反）
 
     返回 (ok, error)：
     - 模板为空/空白 → (True, "")（未启用，无需校验）
     - 未知占位符 → (False, "未知占位符 {{x}} 位于第 L 行第 C 列")
-    - 替换后非法 JSON（仅 json_no_quotes=False）→ (False, "替换后的 JSON 非法（第 L 行第 C 列附近）：msg"）
+    - 替换后非法 JSON → (False, "替换后的 JSON 非法（第 L 行第 C 列附近）：msg"）
     - 合法 → (True, "")
     """
     if not is_template_enabled(template):
@@ -216,5 +220,5 @@ def validate_template(template: str, keys: tuple,
     if keys not in _SAMPLES:
         raise ValueError(f"不支持的键集: {keys!r}，仅支持 SINGLE_KEYS / ALL_KEYS")
     ok, _output, error = render_template(
-        template, _SAMPLES[keys], keys=keys, json_no_quotes=json_no_quotes)
+        template, _SAMPLES[keys], keys=keys, smart_quote_flags=smart_quote_flags)
     return ok, error

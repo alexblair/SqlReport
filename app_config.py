@@ -27,6 +27,7 @@ config_db 支持多配置列表，通过 enable 字段切换当前使用的引�
 
 import json
 import os
+import re
 import time
 import urllib.parse
 from decimal import Decimal
@@ -214,30 +215,58 @@ def serialize_json(obj, **kwargs) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str, **kwargs)
 
 
-def serialize_no_quote(obj, indent=None) -> str:
-    """「值无引号」模式序列化：结构保留 JSON 语法，所有标量值不带引号裸输出。
+# ---------------------------------------------------------------------------
+# 「智能去引号」序列化（smart_quote_flags 位图）
+# ---------------------------------------------------------------------------
+# 位图：1=十进制数字（含正负号）、2=科学计数法、4=千分位数字。
+# 语义：仅字符串载体按勾选特征判定裸输出；原生 int/float/Decimal/bool/None 恒按
+# 标准 JSON；面板全部不勾选（flags=0）时输出与 serialize_json 逐字节等价。
+# 产品承诺：勾选任一特征时输出永远合法 JSON（RFC 8259 number 语法）。
+SMART_FLAG_DECIMAL = 1
+SMART_FLAG_SCIENTIFIC = 2
+SMART_FLAG_THOUSAND = 4
+_SMART_FLAG_ALL = SMART_FLAG_DECIMAL | SMART_FLAG_SCIENTIFIC | SMART_FLAG_THOUSAND
 
-    新语义（无「数字 vs 字符串」类型判断，唯一规则=值不带引号）：
-    - None → null；True/False → true/false
-    - int/float → 裸数字
-    - Decimal → 数值化（format(f) 去尾零；-0/0 → 0；有小数点 → float 文本，
-      否则 int 文本）
-    - bytes → UTF-8 decode（errors=replace）→ 裸文本
-    - str（含数字字符串）、date/datetime、其余类型 → str() 原样裸文本
-      （不加引号、不转义）
-    - dict 键保留标准 JSON 引号（json.dumps 序列化，含转义）
+# 判定正则（互斥设计：每个文本形态至多命中一项；符号/指数/逗号为区分特征）
+_SMART_DECIMAL_RE = re.compile(r"^[+-]?[0-9]+(\.[0-9]+)?$")
+_SMART_SCIENTIFIC_RE = re.compile(r"^[+-]?[0-9]+(\.[0-9]+)?[eE][+-]?[0-9]+$")
+_SMART_THOUSAND_RE = re.compile(r"^[+-]?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?$")
 
-    注意：输出不保证是合法 JSON（字符串含引号/换行/逗号/花括号等特殊字符时
-    结构可能被破坏）——面向宽松下游解析器。
+# 兜底校验：RFC 8259 §6 number ABNF 直译（仅 minus、禁止前导零、
+# frac/exp 各至少 1 位数字）。不得用 json.loads——Python 放行 Infinity/NaN
+# （RFC 明确禁止），此处必须严格拒绝。
+_SMART_NUMBER_RE = re.compile(
+    r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$")
 
-    indent: None=紧凑输出（{"k": v, ...}）；整数 N=每层缩进 N 空格
-    （与 json.dumps(indent=N) 形状一致，值裸输出）。
+
+def serialize_smart_quotes(obj, flags: int = 0, indent=None) -> str:
+    """「智能去引号」模式序列化：结构保留 JSON 语法，字符串标量按勾选特征裸输出。
+
+    flags（位图）：1=十进制数字（含正负号）、2=科学计数法、4=千分位数字；
+    未勾选特征的值一律保持标准 JSON 字符串（带引号）。flags=0 时与
+    serialize_json 输出逐字节等价（纯增量，零破坏）。
+
+    字符串命中勾选特征时执行合法化转换（去逗号 → 去前导 + → 去前导零，
+    文本级操作，不过 float/int 防精度丢失），转换后经 RFC 8259 number
+    语法兜底校验，失败回退带引号——**输出永远合法 JSON**。
+
+    恒定输出（不参与判定）：原生 int/float/Decimal/bool/None 按标准 JSON
+    （Decimal 跟随 default=str 带引号，与现状语义一致）；bytes 在面板开启时
+    UTF-8 decode（errors=replace）后按字符串判定。
+
+    indent: None=紧凑输出；整数 N=每层缩进 N 空格（与 json.dumps(indent=N)
+    形状一致，值按判定裸出）。
     """
-    return "".join(_no_quote_parts(obj, indent, 0))
+    if not isinstance(flags, int) or flags & ~_SMART_FLAG_ALL:
+        raise ValueError(
+            f"非法 smart_quote_flags: {flags!r}（仅支持位 1/2/4）")
+    if flags == 0:
+        return serialize_json(obj, indent=indent)
+    return "".join(_smart_parts(obj, flags, indent, 0))
 
 
-def _no_quote_parts(obj, indent, level):
-    """递归拼装输出片段；dict/list 结构 + 标量裸输出。"""
+def _smart_parts(obj, flags, indent, level):
+    """递归拼装输出片段；dict/list 结构 + 标量按判定输出。"""
     if isinstance(obj, dict):
         if not obj:
             return ["{}"]
@@ -250,7 +279,7 @@ def _no_quote_parts(obj, indent, level):
                 parts.append(" " * (indent * (level + 1)))
             parts.append(json.dumps(k, ensure_ascii=False))
             parts.append(": ")
-            parts.extend(_no_quote_parts(v, indent, level + 1))
+            parts.extend(_smart_parts(v, flags, indent, level + 1))
         if indent is not None:
             parts.append("\n")
             parts.append(" " * (indent * level))
@@ -266,33 +295,65 @@ def _no_quote_parts(obj, indent, level):
             if indent is not None:
                 parts.append("\n")
                 parts.append(" " * (indent * (level + 1)))
-            parts.extend(_no_quote_parts(v, indent, level + 1))
+            parts.extend(_smart_parts(v, flags, indent, level + 1))
         if indent is not None:
             parts.append("\n")
             parts.append(" " * (indent * level))
         parts.append("]")
         return parts
-    return [_no_quote_scalar(obj)]
+    return [_smart_scalar(obj, flags)]
 
 
-def _no_quote_scalar(val) -> str:
-    """标量值 → 不带引号的最终文本。"""
-    if val is None:
-        return "null"
-    if val is True:
-        return "true"
-    if val is False:
-        return "false"
-    if isinstance(val, Decimal):
-        if val == 0:
-            return "0"
-        s = format(val, "f").rstrip("0").rstrip(".")
-        return s
+def _smart_scalar(val, flags) -> str:
+    """标量 → 输出片段：字符串按特征判定；其余按标准 JSON。"""
     if isinstance(val, bytes):
-        return val.decode("utf-8", errors="replace")
-    if isinstance(val, (int, float)):
-        return repr(val)
-    return str(val)
+        return _smart_quote_or_strip(
+            val.decode("utf-8", errors="replace"), flags)
+    if isinstance(val, str):
+        return _smart_quote_or_strip(val, flags)
+    # 原生类型（int/float/Decimal/bool/None/date 等）：标准 JSON 序列化
+    return json.dumps(val, ensure_ascii=False, default=str)
+
+
+def _smart_quote_or_strip(s: str, flags: int) -> str:
+    """字符串值：命中勾选特征 → 合法化转换后裸输出；否则标准 JSON 字符串。"""
+    if flags & SMART_FLAG_DECIMAL and _SMART_DECIMAL_RE.match(s):
+        return _smart_validated(_smart_normalize(s))
+    if flags & SMART_FLAG_SCIENTIFIC and _SMART_SCIENTIFIC_RE.match(s):
+        return _smart_validated(_smart_normalize(s))
+    if flags & SMART_FLAG_THOUSAND and _SMART_THOUSAND_RE.match(s):
+        return _smart_validated(_smart_normalize(s))
+    return json.dumps(s, ensure_ascii=False)
+
+
+def _smart_normalize(s: str) -> str:
+    """合法化转换链（文本级）：去逗号 → 去前导 + → 去前导零。"""
+    s = s.replace(",", "")
+    if s.startswith("+"):
+        s = s[1:]
+    if s.startswith("-"):
+        body = s[1:]
+        sign = "-"
+    else:
+        body = s
+        sign = ""
+    # 去前导零：0 单独保留、0.5 保留（0 后为小数点）；007 → 7
+    i = 0
+    while i < len(body) - 1 and body[i] == "0" and body[i + 1].isdigit():
+        i += 1
+    return sign + body[i:]
+
+
+def _smart_valid_number(s: str) -> bool:
+    """RFC 8259 number 语法兜底校验（严格，拒绝 Infinity/NaN/前导零等）。"""
+    return bool(_SMART_NUMBER_RE.match(s))
+
+
+def _smart_validated(s: str) -> str:
+    """转换结果经兜底校验；不满足 number 语法 → 回退标准 JSON 字符串。"""
+    if _smart_valid_number(s):
+        return s
+    return json.dumps(s, ensure_ascii=False)
 
 
 def get_active_db_config() -> dict[str, Any]:

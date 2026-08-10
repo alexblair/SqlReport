@@ -580,7 +580,7 @@ class TestExportJSONNoQuotes(unittest.TestCase):
 
     @patch("db.create_mysql_connection")
     def test_json_no_quotes_numbers(self, mock_create_conn):
-        """json_no_quotes 启用时，数值类型不加引号"""
+        """json_no_quotes 启用时，数值类型不加引号（兼容映射：等价面板全开）"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -597,13 +597,13 @@ class TestExportJSONNoQuotes(unittest.TestCase):
 
         self.assertEqual(code, 200)
         text = content.decode("utf-8") if isinstance(content, bytes) else content
-        # 值无引号模式：数字与字符串全部裸输出
+        # 兼容映射（json_no_quotes=1 → 面板全开）：数字与数字形态字符串裸输出
         self.assertIn('"id": 1', text)
         # price 应为数字
         self.assertIn('"price": 29.99', text)
-        # name 也裸输出（不再带引号）
-        self.assertIn('"name": 商品A', text)
-        self.assertIn('"name": 商品B', text)
+        # 文本值保持带引号（智能去引号语义，不再全裸）
+        self.assertIn('"name": "商品A"', text)
+        self.assertIn('"name": "商品B"', text)
 
     @patch("db.create_mysql_connection")
     def test_json_no_quotes_with_charset(self, mock_create_conn):
@@ -667,6 +667,214 @@ class TestExportJSONNoQuotes(unittest.TestCase):
         data = json.loads(content.decode("utf-8"))
         self.assertIsInstance(data["订单报表"][0]["id"], str)
         self.assertEqual(data["订单报表"][0]["id"], "1")
+
+
+# ===================================================================
+# 「智能去引号」导出（smart_quotes / json_no_quotes 兼容映射）
+# 覆盖矩阵（对应 .scratch/smart-quotes-json/issues/03）：
+# - smart_quotes=1,4 URL 参数 → 十进制+千分位裸出（文本级断言 + json.loads 合法性）
+# - json_no_quotes=1 → 等价面板全开（与 smart_quotes=1,2,4 输出逐字节一致）
+# - 无参数/无勾选 → 标准 JSON 逐字节不变（增量零破坏）
+# - format=csv + 任意勾选 → 与不勾选逐字节相同（CSV 天然不受影响）
+# - 非法 smart_quotes 值 → 回退 0（标准输出）
+# - 导出页面板 HTML 断言见 test_render.py TestBuildControlsBarHtml
+# ===================================================================
+
+
+class TestExportSmartQuotes(unittest.TestCase):
+    """报表 JSON 导出「智能去引号」测试（smart_quotes 参数 + json_no_quotes 兼容映射）"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
+        self.mock_pool = {"host": "h", "port": 3306,
+                          "user": "u", "password": "p", "database": "d"}
+
+    def tearDown(self):
+        self.conn.close()
+
+    @patch("db.create_mysql_connection")
+    def test_smart_quotes_decimal_thousand_url_param(self, mock_create_conn):
+        """smart_quotes=1,4：十进制+千分位勾选生效（数字裸出、去逗号、文本带引号）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [
+            ("id",), ("amount",), ("thousand",), ("sci",), ("name",), ("remark",),
+        ]
+        mock_cursor.fetchall.return_value = [
+            (1, "9.999", "1,000", "1e5", "abc", None),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        code, content, headers = export.handle_export(
+            self.conn, "id=1&format=json&smart_quotes=1,4&charset=utf8",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code, 200)
+        text = content.decode("utf-8")
+        # 十进制：9.999 裸出；千分位：1,000 去逗号 → 1000
+        self.assertIn('"amount": 9.999', text)
+        self.assertIn('"thousand": 1000', text)
+        self.assertNotIn("1,000", text)
+        # 科学计数法未勾选（位图 1|4=5，不含位 2）→ 保持带引号
+        self.assertIn('"sci": "1e5"', text)
+        # 非数字文本带引号；原生 int/None 恒标准输出
+        self.assertIn('"name": "abc"', text)
+        self.assertIn('"id": 1', text)
+        self.assertIn('"remark": null', text)
+        # 输出永远合法 JSON
+        data = json.loads(text)
+        row = data["订单报表"][0]
+        self.assertEqual(row["amount"], 9.999)
+        self.assertEqual(row["thousand"], 1000)
+        self.assertEqual(row["sci"], "1e5")
+
+    @patch("db.create_mysql_connection")
+    def test_smart_quotes_scientific_url_param(self, mock_create_conn):
+        """smart_quotes=2：科学计数法勾选生效（1e5 原样裸出）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("sci",), ("amount",)]
+        mock_cursor.fetchall.return_value = [("1e5", "9.999")]
+        mock_create_conn.return_value = mock_conn
+
+        code, content, headers = export.handle_export(
+            self.conn, "id=1&format=json&smart_quotes=2&charset=utf8",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code, 200)
+        text = content.decode("utf-8")
+        self.assertIn('"sci": 1e5', text)
+        # 十进制未勾选 → 保持带引号
+        self.assertIn('"amount": "9.999"', text)
+        json.loads(text)
+
+    @patch("db.create_mysql_connection")
+    def test_json_no_quotes_compat_equals_full_open(self, mock_create_conn):
+        """json_no_quotes=1 兼容映射：输出与 smart_quotes=1,2,4（面板全开）逐字节一致"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("amount",), ("name",)]
+        mock_cursor.fetchall.return_value = [
+            (1, "9.999", "abc"),
+            (2, "1e5", "商品B"),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        code1, content1, _ = export.handle_export(
+            self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
+            pool_override=self.mock_pool)
+        code2, content2, _ = export.handle_export(
+            self.conn, "id=1&format=json&smart_quotes=1,2,4&charset=utf8",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code1, 200)
+        self.assertEqual(code2, 200)
+        self.assertEqual(content1, content2, "兼容映射必须等价面板全开输出")
+        text = content1.decode("utf-8")
+        self.assertIn('"amount": 9.999', text)
+        self.assertIn('"amount": 1e5', text)
+        self.assertIn('"name": "abc"', text)
+        json.loads(text)
+
+    @patch("db.create_mysql_connection")
+    def test_no_params_byte_identical_standard(self, mock_create_conn):
+        """无参数/无勾选：输出与现状标准 JSON 逐字节不变（增量零破坏）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("amount",)]
+        mock_cursor.fetchall.return_value = [(1, "9.999")]
+        mock_create_conn.return_value = mock_conn
+
+        code, content, _ = export.handle_export(
+            self.conn, "id=1&format=json&charset=utf8",
+            pool_override=self.mock_pool)
+        self.assertEqual(code, 200)
+        expected = json.dumps(
+            {"订单报表": [{"id": "1", "amount": "9.999"}]},
+            ensure_ascii=False, indent=2)
+        self.assertEqual(content.decode("utf-8"), expected, "无参数输出必须逐字节不变")
+
+        # smart_quotes=0 与 无参数 等价
+        code2, content2, _ = export.handle_export(
+            self.conn, "id=1&format=json&smart_quotes=0&charset=utf8",
+            pool_override=self.mock_pool)
+        self.assertEqual(content2, content)
+
+    @patch("db.create_mysql_connection")
+    def test_invalid_smart_quotes_param_falls_back_zero(self, mock_create_conn):
+        """非法 smart_quotes 值（非整数 / 超出位 1/2/4 范围）→ 回退 0（标准输出）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("amount",)]
+        mock_cursor.fetchall.return_value = [(1, "9.999")]
+        mock_create_conn.return_value = mock_conn
+
+        for raw in ("abc", "8", "1,abc", ""):
+            with self.subTest(raw=raw):
+                code, content, _ = export.handle_export(
+                    self.conn, f"id=1&format=json&smart_quotes={raw}&charset=utf8",
+                    pool_override=self.mock_pool)
+                self.assertEqual(code, 200)
+                text = content.decode("utf-8")
+                self.assertIn('"amount": "9.999"', text)
+                json.loads(text)
+
+    @patch("db.create_mysql_connection")
+    def test_csv_unaffected_by_smart_quotes(self, mock_create_conn):
+        """format=csv + 任意勾选 → CSV 输出与不勾选逐字节相同（CSV 天然不受影响）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("amount",), ("name",)]
+        mock_cursor.fetchall.return_value = [
+            (1, "9.999", "abc"),
+            (2, "1,000", "商品B"),
+        ]
+        mock_create_conn.return_value = mock_conn
+
+        code1, content1, _ = export.handle_export(
+            self.conn, "id=1&format=csv&charset=utf8",
+            pool_override=self.mock_pool)
+        code2, content2, _ = export.handle_export(
+            self.conn, "id=1&format=csv&charset=utf8"
+                       "&smart_quotes=1,2,4&json_no_quotes=1",
+            pool_override=self.mock_pool)
+
+        self.assertEqual(code1, 200)
+        self.assertEqual(code2, 200)
+        self.assertEqual(content1, content2, "CSV 输出不得受 smart_quotes 影响")
+        text = content1.decode("utf-8")
+        self.assertIn('"9.999"', text)
+        self.assertIn('"1,000"', text)
+
+    @patch("db.create_mysql_connection")
+    def test_smart_quote_flags_direct_call(self, mock_create_conn):
+        """export_report_to_json 直接调用 smart_quote_flags=5（十进制+千分位）"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.description = [("amount",), ("thousand",), ("name",)]
+        mock_cursor.fetchall.return_value = [("9.999", "1,000", "abc")]
+        mock_create_conn.return_value = mock_conn
+
+        result = export.export_report_to_json(
+            "SELECT * FROM t",
+            {"host": "h", "port": 3306, "user": "u", "password": "p",
+             "database": "d"},
+            "测试报表",
+            smart_quote_flags=5,
+        )
+        self.assertIn('"amount": 9.999', result)
+        self.assertIn('"thousand": 1000', result)
+        self.assertIn('"name": "abc"', result)
+        json.loads(result)
 
 
 class TestExportZip(unittest.TestCase):
@@ -818,8 +1026,8 @@ class TestExportReportToJSON(unittest.TestCase):
         self.assertIn("Bidding_List_V2", data)
 
     @patch("db.create_mysql_connection")
-    def test_json_no_quotes_param(self, mock_create_conn):
-        """export_report_to_json 支持 json_no_quotes 参数"""
+    def test_smart_quote_flags_param(self, mock_create_conn):
+        """export_report_to_json 支持 smart_quote_flags 参数（面板开启原生数字裸出）"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -832,9 +1040,9 @@ class TestExportReportToJSON(unittest.TestCase):
             {"host": "h", "port": 3306, "user": "u", "password": "p",
              "database": "d"},
             "测试报表",
-            json_no_quotes=True,
+            smart_quote_flags=7,
         )
-        # 值无引号模式：id/price 裸输出（文本断言，输出不可 JSON.parse）
+        # 智能去引号模式：原生 id/price 恒按标准 JSON 数字裸出
         self.assertIn('"id": 1', result)
         self.assertIn('"price": 99.5', result)
 
@@ -856,8 +1064,7 @@ class TestExportReportToJSON(unittest.TestCase):
             {"host": "h", "port": 3306, "user": "u", "password": "p",
              "database": "d"},
             "测试报表",
-            filters=[], json_no_quotes=False,
-            columns=["id", "name"], result_index=0, sorts=sorts)
+            filters=[], columns=["id", "name"], result_index=0, sorts=sorts)
 
         data = json.loads(result)
         rows = data["测试报表"]
@@ -1256,7 +1463,7 @@ class TestExportParameterCombinations(unittest.TestCase):
 
     @patch("db.create_mysql_connection")
     def test_12_json_no_quotes_numbers(self, mock_create_conn):
-        """JSON + json_no_quotes — 所有值裸输出不带引号"""
+        """JSON + json_no_quotes — 兼容映射为面板全开：数字裸输出、文本带引号"""
         self._setup_mock(mock_create_conn)
         code, content, headers = export.handle_export(
             self.conn, "id=1&format=json&json_no_quotes=1&charset=utf8",
@@ -1272,9 +1479,9 @@ class TestExportParameterCombinations(unittest.TestCase):
         # age 应为数字不加引号
         self.assertIn('"age": 30', text)
         self.assertIn('"age": 25', text)
-        # name 值无引号模式：字符串也裸输出
-        self.assertIn('"name": Alice', text)
-        self.assertIn('"name": Bob', text)
+        # name 文本值保持带引号（智能去引号语义，不再全裸）
+        self.assertIn('"name": "Alice"', text)
+        self.assertIn('"name": "Bob"', text)
 
     # ------------------------------------------------------------------
     # 用例 13: CSV + ZIP

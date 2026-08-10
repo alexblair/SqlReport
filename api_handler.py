@@ -157,8 +157,8 @@ def _static_base_path(norm_path: str) -> str | None:
 def _rows_to_dicts(rows, display_cols, col_indices) -> list:
     """将行元组列表按列索引映射为 [{列名: 值}] 字典列表。
 
-    值保持原始类型（含 Decimal）：端点「值无引号」模式在序列化阶段统一
-    裸输出（app_config.serialize_no_quote），关闭时沿用默认序列化约定。
+    值保持原始类型（含 Decimal）：「智能去引号」在序列化阶段统一处理
+    （serialize_smart_quotes），本函数不在此处做任何转换。
     """
     return [{display_cols[i]: row[idx] for i, idx in enumerate(col_indices)}
             for row in rows]
@@ -175,7 +175,8 @@ def _run_normal_api_request(conn, endpoint: dict, method: str, body: str,
         result.data_rows, result.display_cols, result.total,
         result.page, result.page_size, result.total_pages,
         result.output_format, result.add_bom, result.full, template=template,
-        truncated=result.truncated, json_no_quotes=result.json_no_quotes)
+        truncated=result.truncated,
+        smart_quote_flags=result.smart_quote_flags)
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers
 
@@ -235,10 +236,17 @@ def _compute_static_config_version(endpoint: dict, report: dict) -> str:
     """
     parts = [report["sql_query"], str(report.get("pool_id") or "")]
     for key in ("columns", "filters", "sorts", "row_limit", "json_template",
-                "result_mode", "result_index", "json_no_quotes"):
+                "result_mode", "result_index"):
         value = endpoint.get(key)
         if value is not None and value != "":
             parts.append(f"{key}={value}")
+    # 「智能去引号」有效位：旧列 json_no_quotes=1（迁移 15 前存量，极端防御）
+    # 等价面板全开（0b111），与 smart_quote_flags 取大值后纳入版本计算——
+    # 两者任一变化都会改变文件内容，必须参与版本判定（防 TTL 内陈旧命中）。
+    flags = int(endpoint.get("smart_quote_flags", 0) or 0)
+    if int(endpoint.get("json_no_quotes", 0) or 0):
+        flags = max(flags, 7)
+    parts.append(f"smart_quote_flags={flags}")
     parts.append(f"allow_all_output={int(report.get('allow_all_output', 1) or 0)}")
     parts.append(f"max_rows={int(report.get('max_rows') or 0)}")
     return _md5_hex("|".join(parts))
@@ -257,7 +265,8 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
         static_cache.record_invalidated(url_key)
     last_invalidated = static_cache.get_last_invalidated(url_key)
     template = _endpoint_template(endpoint)
-    json_no_quotes = bool(int(endpoint.get("json_no_quotes", 0) or 0))
+    # smart_quote_flags 的旧列兼容归一化在 _execute_api_query 内完成
+    # （json_no_quotes=1 极端防御等价面板全开）
     meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
     result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
                                 force_full=True, meta=meta)
@@ -274,7 +283,7 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
             result.page, result.page_size, result.total_pages,
             result.output_format, result.add_bom, result.full,
             template=template, meta=meta, truncated=result.truncated,
-            json_no_quotes=result.json_no_quotes)
+            smart_quote_flags=result.smart_quote_flags)
 
     if status == 200:
         # 默认结构与模板：meta 均已在序列化前注入（模板内嵌 {{meta}}，
@@ -282,10 +291,9 @@ def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
         # 模板不含 {{meta}} 占位符则自然不带 meta）
         file_content = resp_body
         # 写入方式选择：内容可解析且含对象 meta → 稳定文件 + 内容判定；
-        # 否则（模板无 meta / 值无引号模式内容不可 JSON 解析）→ 版本化文件
-        # 双写（版本嵌入文件名，try_read 靠版本路径判定，不依赖内容解析）
-        has_object_meta = (not json_no_quotes
-                           and static_cache.content_has_object_meta(file_content))
+        # 否则（模板无 meta）→ 版本化文件双写（版本嵌入文件名，try_read
+        # 靠版本路径判定，不依赖内容解析）
+        has_object_meta = static_cache.content_has_object_meta(file_content)
         if has_object_meta:
             written = static_cache.write_file(file_path, file_content)
         else:
@@ -366,8 +374,15 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all = \
         _resolve_params(endpoint, method, body, query_params, headers)
 
-    # 端点「值无引号」选项：JSON 输出所有值不加引号（默认关闭，与报表导出同语义）
-    json_no_quotes = int(endpoint.get("json_no_quotes", 0) or 0)
+    # 端点「智能去引号」位图：1=十进制数字（含正负号）、2=科学计数法、
+    # 4=千分位数字，默认 0 = 标准 JSON（与报表导出共用
+    # app_config.serialize_smart_quotes 单一实现）。
+    # 旧列 json_no_quotes 兼容：存量数据转换已由迁移 15 承载（=1 → 面板全开
+    # 0b111）；此分支为极端防御——未迁移/直接落库数据 json_no_quotes=1 时
+    # 等价面板全开（取大值），保证既有端点与调用方不失效。
+    smart_quote_flags = int(endpoint.get("smart_quote_flags", 0) or 0)
+    if int(endpoint.get("json_no_quotes", 0) or 0):
+        smart_quote_flags = max(smart_quote_flags, 7)
 
     # API 强制刷新：refresh=1（严格值校验）→ 绕过 L1/L2 缓存直查 MySQL 并回写缓存
     refresh = _resolve_flag(query_params, method, body, headers, "refresh")
@@ -381,7 +396,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     elif row_limit > 0 and ps * (page - 1) >= row_limit:
         return ApiQueryResult(
             [], [], 0, page, ps, 1, output_format, add_bom, False,
-            json_no_quotes=json_no_quotes)
+            smart_quote_flags=smart_quote_flags)
 
     result_mode = endpoint.get("result_mode", "single")
     result_index = int(endpoint.get("result_index", 0))
@@ -440,7 +455,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
                 results_list, page,
                 total_all_rows if fetch_all else ps, fetch_all, meta)
             rendered = _apply_json_template(
-                template, context, json_no_quotes=json_no_quotes)
+                template, context, smart_quote_flags=smart_quote_flags)
             if rendered is not None:
                 return 200, rendered, {"Content-Type": "application/json; charset=utf-8"}
 
@@ -452,7 +467,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         } | ({"full": True} if fetch_all else {})
           | ({"truncated": True} if result.truncated else {})
           | ({"meta": meta} if meta is not None else {}),
-            json_no_quotes=json_no_quotes)
+            smart_quote_flags=smart_quote_flags)
         return 200, resp_body, {"Content-Type": "application/json; charset=utf-8"}
 
     # 单结果集模式 — 校验索引
@@ -473,7 +488,8 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
     return ApiQueryResult(
         data_rows, display_cols, result.total, page, display_ps,
         result.total_pages, output_format, add_bom, fetch_all,
-        truncated=bool(result.truncated), json_no_quotes=json_no_quotes)
+        truncated=bool(result.truncated),
+        smart_quote_flags=smart_quote_flags)
 
 
 class ApiQueryResult:
@@ -485,11 +501,11 @@ class ApiQueryResult:
 
     __slots__ = ("data_rows", "display_cols", "total", "page", "page_size",
                  "total_pages", "output_format", "add_bom", "full",
-                 "truncated", "json_no_quotes")
+                 "truncated", "smart_quote_flags")
 
     def __init__(self, data_rows, display_cols, total, page, page_size,
                  total_pages, output_format, add_bom, full,
-                 truncated: bool = False, json_no_quotes: bool = False):
+                 truncated: bool = False, smart_quote_flags: int = 0):
         self.data_rows = data_rows
         self.display_cols = display_cols
         self.total = total
@@ -500,21 +516,21 @@ class ApiQueryResult:
         self.add_bom = add_bom
         self.full = full
         self.truncated = truncated
-        self.json_no_quotes = json_no_quotes
+        self.smart_quote_flags = smart_quote_flags
 
 
 def _format_output(data_rows, display_cols, total, page, ps,
                    total_pages, output_format, add_bom, full: bool,
                    template: str = "", meta: dict | None = None,
                    truncated: bool = False,
-                   json_no_quotes: bool = False) -> tuple:
+                   smart_quote_flags: int = 0) -> tuple:
     """根据 output_format 构建最终响应（JSON 支持自定义输出模板）。"""
     if output_format == "csv":
         return _format_csv_response(data_rows, display_cols, add_bom)
     return _format_json_response(data_rows, total, page, ps, total_pages, full,
                                  template=template, meta=meta,
                                  truncated=truncated,
-                                 json_no_quotes=json_no_quotes)
+                                 smart_quote_flags=smart_quote_flags)
 
 
 def _build_single_context(data_rows, total, page, ps, total_pages, full,
@@ -545,26 +561,31 @@ def _build_all_context(results_list, page, ps, full,
 
 
 def _apply_json_template(template: str, context: dict,
-                         json_no_quotes: bool = False) -> str | None:
-    """渲染 JSON 输出模板；失败时记录警告并返回 None（调用方回退默认结构）。"""
+                         smart_quote_flags: int = 0) -> str | None:
+    """渲染 JSON 输出模板；失败时记录警告并返回 None（调用方回退默认结构）。
+
+    smart_quote_flags>0（智能模式）时渲染结果合法性校验恒执行（输出永远
+    合法 JSON）。
+    """
     ok, output, error = render_template(
-        template, context, json_no_quotes=json_no_quotes)
+        template, context, smart_quote_flags=smart_quote_flags)
     if not ok:
         logging.warning("API JSON 输出模板渲染失败，回退默认结构: %s", error)
         return None
     return output
 
 
-def _serialize_api_payload(obj: dict, json_no_quotes: bool = False) -> str:
+def _serialize_api_payload(obj: dict, smart_quote_flags: int = 0) -> str:
     """序列化 API JSON 响应体。
 
-    端点「值无引号」选项开启时所有值（含字符串）不带引号裸输出
-    （app_config.serialize_no_quote，与报表导出 json_no_quotes 共用实现，
-    输出不保证是合法 JSON）；关闭时沿用全项目序列化约定
-    （ensure_ascii=False、default=str）。
+    smart_quote_flags>0（「智能去引号」位图：1=十进制数字、2=科学计数法、
+    4=千分位数字）时字符串值按勾选形态判定裸输出（app_config.
+    serialize_smart_quotes，与报表导出共用单一实现，输出永远合法 JSON）；
+    未勾选形态的值保持带引号，原生数字恒按标准 JSON。
+    均关闭（flags=0）时沿用全项目序列化约定（ensure_ascii=False、default=str）。
     """
-    if json_no_quotes:
-        return app_config.serialize_no_quote(obj)
+    if smart_quote_flags > 0:
+        return app_config.serialize_smart_quotes(obj, smart_quote_flags)
     return app_config.serialize_json(obj)
 
 
@@ -840,14 +861,15 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
                           full: bool = False, template: str = "",
                           meta: dict | None = None,
                           truncated: bool = False,
-                          json_no_quotes: bool = False) -> tuple:
+                          smart_quote_flags: int = 0) -> tuple:
     """
     构建 JSON 响应。
 
     truncated: 本次查询结果是否发生 max_rows 截断（True 时响应体附加
                "truncated": true，缺省 False 不出现，不破坏现有响应契约）。
-    json_no_quotes: 端点「值无引号」选项（所有值不加引号，含字符串），
-                    默认 False。
+    smart_quote_flags: 端点「智能去引号」位图（1=十进制数字、2=科学计数法、
+                       4=千分位数字），>0 时字符串值按勾选形态判定裸输出，
+                       默认 0 = 标准 JSON。
 
     返回:
         (HTTP 状态码, JSON 字符串, 响应头字典)
@@ -856,7 +878,7 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
         context = _build_single_context(
             data_rows, total, page, page_size, total_pages, full, meta)
         rendered = _apply_json_template(
-            template, context, json_no_quotes=json_no_quotes)
+            template, context, smart_quote_flags=smart_quote_flags)
         if rendered is not None:
             return 200, rendered, {
                 "Content-Type": "application/json; charset=utf-8",
@@ -875,7 +897,8 @@ def _format_json_response(data_rows: list[dict], total: int, page: int,
         resp["full"] = True
     if meta is not None:
         resp["meta"] = meta
-    return 200, _serialize_api_payload(resp, json_no_quotes=json_no_quotes), {
+    return 200, _serialize_api_payload(
+        resp, smart_quote_flags=smart_quote_flags), {
         "Content-Type": "application/json; charset=utf-8",
     }
 

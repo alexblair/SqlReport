@@ -1056,12 +1056,12 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertGreater(details_end, details_start)
         folded = result[details_start:details_end]
         self.assertIn('name="charset"', folded)
-        self.assertIn('name="json_no_quotes"', folded)
+        self.assertIn('name="smart_quotes"', folded)
         self.assertIn('name="zip"', folded)
         self.assertIn('name="use_custom_cols"', folded)
-        # 名称统一：「值无引号」，无旧名残留
-        self.assertIn("值无引号", result)
-        self.assertNotIn("数字无引号", result)
+        # 名称统一：「智能去引号」，无旧「值无引号」残留
+        self.assertIn("智能去引号", result)
+        self.assertNotIn("值无引号", result)
         # 格式与导出按钮保留在折叠区外
         format_pos = result.find('name="format"')
         self.assertLess(format_pos, details_start)
@@ -1077,6 +1077,29 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertIn("gbk", folded)
         self.assertIn("utf8", folded)
         self.assertIn('value="1"', folded)
+
+    def test_export_smart_quote_panel(self):
+        """智能去引号面板：3 项勾选 + hidden 位图 + CSV 禁用 JS"""
+        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
+                                          "", 100, 5)
+        # 3 个勾选项（1=十进制 / 2=科学计数法 / 4=千分位）
+        self.assertIn('class="smart-quote-cb" value="1"', result)
+        self.assertIn('class="smart-quote-cb" value="2"', result)
+        self.assertIn('class="smart-quote-cb" value="4"', result)
+        # 位图随勾选状态即时写入隐藏 input（导出 URL 参数 smart_quotes）
+        self.assertIn('name="smart_quotes" id="export-smart-quotes-input" value="0"',
+                      result)
+        self.assertIn("updateExportSmartFlags", result)
+        # 说明文案：原生数字恒裸 / 千分位去逗号 / 输出永远合法 JSON（RFC 8259）
+        self.assertIn("原生数字恒裸输出", result)
+        self.assertIn("千分位输出去逗号", result)
+        self.assertIn("输出永远合法 JSON（RFC 8259）", result)
+        # CSV 格式时面板禁用：格式 select 联动 + 仅 JSON 提示
+        self.assertIn('id="export-format-select" onchange="updateExportSmartState()"',
+                      result)
+        self.assertIn("export-smart-csv-hint", result)
+        self.assertIn("仅 JSON 格式支持", result)
+        self.assertIn("cb.disabled = isCsv", result)
 
 
 # ===================================================================

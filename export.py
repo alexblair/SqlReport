@@ -6,7 +6,8 @@ export.py — CSV / JSON 导出功能
 - 将结果导出为 CSV（字段带双引号，逗号分隔）或 JSON（行对象数组）
 - 设置正确的 HTTP Content-Type 和 Content-Disposition 头
 - 支持导出字符集选择（GBK / UTF8）
-- 支持 JSON 值无引号模式（所有值输出不带引号，含字符串）
+- 支持 JSON 智能去引号模式（smart_quotes 位图，字符串值按勾选形态去引号）
+- 支持旧 json_no_quotes=1 URL 参数（兼容等价 smart_quotes=1,2,4 面板全开）
 - 支持导出文件压缩为 ZIP 包（临时目录 -> ZIP -> 输出 -> 清理）
 
 导出格式控制：
@@ -15,7 +16,8 @@ export.py — CSV / JSON 导出功能
 
 导出选项：
   charset=gbk|utf8          字符集（默认 gbk）
-  json_no_quotes=1          JSON 值无引号（所有值不加引号）
+  smart_quotes=1,2,4        JSON 智能去引号（逗号分隔位图：1=十进制、2=科学计数法、4=千分位）
+  json_no_quotes=1          旧「值无引号」参数，兼容等价 smart_quotes=1,2,4（面板全开）
   zip=1                     输出为 ZIP 压缩包
 
 CSV 格式规范：
@@ -160,7 +162,7 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
 def export_report_to_json(sql_query: str, pool_config: dict,
                           report_name: str,
                           filters=None,
-                          json_no_quotes: bool = False,
+                          smart_quote_flags: int = 0,
                           columns: list[str] = None,
                           result_index: int = 0,
                           sorts=None,
@@ -177,10 +179,12 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     max_rows: 全量输出截断上限（None=不截断；>0 时原始行超过即截断，PH-07）。
     _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
 
-    当 json_no_quotes=True 时，输出的值一律不带引号（含字符串，如 "123" 输出
-    为 123、文本输出为裸文本），结构保留 JSON 语法（键带引号）；输出不保证是
-    合法 JSON。与 API 端点「值无引号」选项共用 app_config.serialize_no_quote
-    单一实现。关闭时全部值转为字符串。
+    当 smart_quote_flags>0 时，启用「智能去引号」模式：字符串值按位图勾选形态
+    （1=十进制数字、2=科学计数法、4=千分位数字）判定裸输出，命中形态执行合法化
+    转换（去逗号/去前导 +/去前导零）并经 RFC 8259 校验，失败回退带引号；未勾选
+    形态与含非数字内容的值保持带引号。输出永远合法 JSON。原生数字（int/float/
+    Decimal）恒按标准 JSON 输出数字。与 API 端点共用
+    app_config.serialize_smart_quotes 单一实现。
 
     JSON 格式：
     {
@@ -201,8 +205,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     for row in filtered:
         obj = {}
         for col, idx in zip(output_columns, display_indices):
-            if json_no_quotes:
-                # 值无引号模式：保留原始值，序列化时统一裸输出
+            if smart_quote_flags > 0:
+                # 智能去引号模式：保留原始值，序列化时统一判定
                 obj[col] = row[idx]
             else:
                 # 全部转为字符串（原有行为）
@@ -212,9 +216,9 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     # 顶层结构：以报表名（清理后）作为数据键
     safe_name = report_name.strip().replace(" ", "_").replace("-", "_")
 
-    if json_no_quotes:
-        output = app_config.serialize_no_quote(
-            {safe_name: rows_data}, indent=2)
+    if smart_quote_flags > 0:
+        output = app_config.serialize_smart_quotes(
+            {safe_name: rows_data}, flags=smart_quote_flags, indent=2)
     else:
         output = json.dumps(
             {safe_name: rows_data},
@@ -294,7 +298,9 @@ def handle_export(conn, query: str,
       id             — 报表 ID（必需）
       format         — csv 或 json（默认 csv）
       charset        — gbk 或 utf8（默认 utf8）
-      json_no_quotes — 为 1 时 JSON 值不带引号（所有值裸输出）
+      smart_quotes   — 智能去引号位图（逗号分隔整数列表，如 1,4 → 十进制+千分位；仅 JSON 格式解析）
+      json_no_quotes — 旧「值无引号」参数；=1 时兼容等价 smart_quotes=1,2,4（面板全开，
+                       与 smart_quotes 同传时以本参数为全开）
       zip            — 为 1 时输出 ZIP 压缩包
       f_COL          — 筛选值（多字段）
       op_COL         — 筛选操作符（缺省为 contains）
@@ -376,11 +382,34 @@ def handle_export(conn, query: str,
     # 执行导出
     try:
         if export_format == "json":
+            # 智能去引号位图：仅 JSON 分支解析（CSV 天然不受影响，不解析不传递）。
+            # 兼容映射：旧「值无引号」json_no_quotes=1 等价面板全开（0b111）；
+            # 两者同传时以 json_no_quotes=1 为全开，否则使用 smart_quotes 参数。
+            smart_quote_flags = 0
+            if json_no_quotes:
+                smart_quote_flags = (app_config.SMART_FLAG_DECIMAL
+                                     | app_config.SMART_FLAG_SCIENTIFIC
+                                     | app_config.SMART_FLAG_THOUSAND)
+            else:
+                sq_vals = qs.get("smart_quotes", [])
+                if sq_vals and sq_vals[0]:
+                    try:
+                        smart_quote_flags = 0
+                        for tok in sq_vals[0].split(","):
+                            v = int(tok)
+                            if not 1 <= v <= 7:
+                                raise ValueError(tok)
+                            smart_quote_flags |= v
+                    except ValueError:
+                        # 任一元素非法（非整数或超出位 1/2/4 范围）→ 整体视为 0
+                        smart_quote_flags = 0
             content = export_report_to_json(
                 report_config["sql_query"], pool_config,
-                report_config["name"], filters, json_no_quotes,
-                custom_columns, result_index, sorts=sorts,
-                max_rows=export_limit, _truncated_out=truncated_sink)
+                report_config["name"], filters,
+                smart_quote_flags=smart_quote_flags,
+                columns=custom_columns, result_index=result_index,
+                sorts=sorts, max_rows=export_limit,
+                _truncated_out=truncated_sink)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,

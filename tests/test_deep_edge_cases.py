@@ -683,8 +683,8 @@ class TestExportBoundaries(unittest.TestCase):
         # None 在 score 列应输出 ""
         self.assertTrue(lines[1].endswith('""') or ",," in lines[1])
 
-    def test_json_decimal_no_quotes(self):
-        """✅ Positive: JSON 导出时 json_no_quotes=True, 所有值裸输出"""
+    def test_json_decimal_smart_quotes(self):
+        """✅ Positive: JSON 导出 smart_quote_flags=7（面板全开）Decimal→字符串、文本带引号"""
         self.mock_query.return_value = [{
             "columns": ["amount", "name"],
             "rows": [(Decimal("123.45"), "test")],
@@ -693,45 +693,46 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t",
             {"host": "localhost"},
             "test_report",
-            json_no_quotes=True,
+            smart_quote_flags=7,
         )
-        # 值无引号模式：Decimal→数值、字符串也裸输出（文本断言）
-        self.assertIn('"amount": 123.45', json_output)
-        self.assertIn('"name": test', json_output)
+        # 智能去引号模式：Decimal 恒按标准 JSON 字符串、非数字文本带引号
+        self.assertIn('"amount": "123.45"', json_output)
+        self.assertIn('"name": "test"', json_output)
+        json.loads(json_output)
 
-    def test_json_decimal_zero_no_quotes(self):
-        """✅ Positive: JSON 导出时 Decimal(0) → 裸数字 0"""
+    def test_json_decimal_zero_smart_quotes(self):
+        """✅ Positive: JSON 导出 Decimal(0) → 字符串 "0"（面板开启不改变 Decimal）"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("0"),)],
         }]
         json_output = export.export_report_to_json(
             "SELECT * FROM t", {"host": "localhost"},
-            "rpt", json_no_quotes=True,
+            "rpt", smart_quote_flags=7,
         )
-        self.assertIn('"val": 0', json_output)
+        self.assertIn('"val": "0"', json_output)
 
-    def test_json_decimal_large_no_quotes(self):
-        """✅ Positive: JSON 导出时大 Decimal → 裸数字"""
+    def test_json_decimal_large_smart_quotes(self):
+        """✅ Positive: JSON 导出大 Decimal → 字符串（不随面板裸出）"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("999999999999.99"),)],
         }]
         json_output = export.export_report_to_json(
             "SELECT * FROM t", {"host": "localhost"},
-            "rpt", json_no_quotes=True,
+            "rpt", smart_quote_flags=7,
         )
-        self.assertIn('"val": 999999999999.99', json_output)
+        self.assertIn('"val": "999999999999.99"', json_output)
 
     def test_json_with_quotes_decimal_as_string(self):
-        """✅ Positive: JSON 导出时 json_no_quotes=False, Decimal→字符串"""
+        """✅ Positive: JSON 导出默认（flags=0）Decimal→字符串"""
         self.mock_query.return_value = [{
             "columns": ["amount"],
             "rows": [(Decimal("123.45"),)],
         }]
         json_output = export.export_report_to_json(
             "SELECT * FROM t", {"host": "localhost"},
-            "test_report", json_no_quotes=False,
+            "test_report",
         )
         data = json.loads(json_output)
         self.assertIsInstance(data["test_report"][0]["amount"], str)
@@ -767,16 +768,15 @@ class TestExportBoundaries(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_export_report_to_json_multiple_rows(self):
-        """✅ Positive: JSON 导出多行数据"""
+        """✅ Positive: JSON 导出多行数据（面板开启原生 int 恒裸数字）"""
         self.mock_query.return_value = [{
             "columns": ["x"],
             "rows": [(1,), (2,), (3,)],
         }]
         json_output = export.export_report_to_json(
             "SELECT * FROM t", {"host": "localhost"},
-            "test", json_no_quotes=True,
+            "test", smart_quote_flags=7,
         )
-        # 值无引号模式：x 裸数字输出（文本断言）
         self.assertIn('"x": 1', json_output)
         self.assertIn('"x": 3', json_output)
 

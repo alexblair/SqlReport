@@ -187,6 +187,7 @@ _SQLITE_SCHEMA = """
         allow_fetch_all  INTEGER NOT NULL DEFAULT 1,
         static_cache     INTEGER NOT NULL DEFAULT 1,
         json_no_quotes   INTEGER NOT NULL DEFAULT 0,
+        smart_quote_flags INTEGER NOT NULL DEFAULT 0,
         json_template    TEXT,
         description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -273,6 +274,7 @@ _MYSQL_SCHEMA = """
         allow_fetch_all  TINYINT NOT NULL DEFAULT 1,
         static_cache     TINYINT NOT NULL DEFAULT 1,
         json_no_quotes   TINYINT NOT NULL DEFAULT 0,
+        smart_quote_flags TINYINT NOT NULL DEFAULT 0,
         json_template    TEXT,
         description      TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
@@ -579,7 +581,27 @@ def _init_sqlite_migrations(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
-    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
+    # 迁移 15：api_endpoints.smart_quote_flags（「智能去引号」复选面板位图，
+    # 1=十进制数字、2=科学计数法、4=千分位数字，默认 0 = 标准 JSON）。
+    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）；
+    # json_no_quotes 列保留（弃用，兼容映射与回滚需要）。重复执行幂等。
+    if "smart_quote_flags" not in api_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE api_endpoints "
+                "ADD COLUMN smart_quote_flags INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "smart_quote_flags" not in api_cols:
+        try:
+            conn.execute(
+                "UPDATE api_endpoints SET smart_quote_flags=7 "
+                "WHERE json_no_quotes=1 AND smart_quote_flags=0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移批次）----
 
 
 def _init_mysql_migrations(conn) -> None:
@@ -852,7 +874,25 @@ def _init_mysql_migrations(conn) -> None:
             conn.commit()
     except Exception:
         conn.rollback()
-    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移 14 批次）----
+    # 迁移 15：api_endpoints.smart_quote_flags（「智能去引号」复选面板位图，
+    # 1=十进制数字、2=科学计数法、4=千分位数字，默认 0 = 标准 JSON）。
+    # 存量 json_no_quotes=1（旧「值无引号」开启）迁移为面板全开（0b111）。
+    # 重复执行幂等（数据迁移限定 smart_quote_flags=0，已迁移行不重复更新）。
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
+        api_cols = {row[0] for row in cursor.fetchall()}
+        if "smart_quote_flags" not in api_cols:
+            conn.execute(
+                "ALTER TABLE api_endpoints "
+                "ADD COLUMN smart_quote_flags TINYINT NOT NULL DEFAULT 0")
+            conn.commit()
+        conn.execute(
+            "UPDATE api_endpoints SET smart_quote_flags=7 "
+            "WHERE json_no_quotes=1 AND smart_quote_flags=0")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移批次）----
 
 
 # ---------------------------------------------------------------------------
@@ -1417,6 +1457,7 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      allow_fetch_all: int = 1,
                      static_cache: int = 1,
                      json_no_quotes: int = 0,
+                     smart_quote_flags: int = 0,
                      json_template: str = None,
                      description: str = None,
                      session_user=None) -> int:
@@ -1439,7 +1480,10 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
         allow_fetch_all: 是否接受 fetch_all 全量获取参数，1=接受（默认），0=忽略
         static_cache: 是否启用静态文件缓存（.json 变体），1=开启（默认），0=关闭
         json_no_quotes: 值无引号（JSON 所有值不加引号），1=开启，0=关闭（默认）；
-                        仅 JSON 格式生效，与报表导出 json_no_quotes 同语义
+                        仅 JSON 格式生效，与报表导出 json_no_quotes 同语义；
+                        弃用（被 smart_quote_flags 取代），保留兼容
+        smart_quote_flags: 「智能去引号」复选面板位图：1=十进制数字（含正负号）、
+                        2=科学计数法、4=千分位数字，0=标准 JSON（默认）；仅 JSON 格式生效
         json_template: JSON 输出模板文本（占位符语法），None/空=未启用
         description: 接口说明（多行文本，纯展示字段，不进入 API 输出），None=无说明
     """
@@ -1448,12 +1492,12 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
            (report_id, name, url_path, output_format, columns, filters,
             sorts, row_limit, api_key, allowed_origins, enabled,
             result_mode, result_index, allow_fetch_all, static_cache,
-            json_no_quotes, json_template, description)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            json_no_quotes, smart_quote_flags, json_template, description)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (report_id, name, url_path, output_format, columns, filters,
          sorts, row_limit, api_key, allowed_origins, enabled,
          result_mode, result_index, allow_fetch_all, static_cache,
-         json_no_quotes, json_template, description),
+         json_no_quotes, smart_quote_flags, json_template, description),
     )
     conn.commit()
     _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
@@ -1464,6 +1508,7 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                                   "allow_fetch_all": allow_fetch_all,
                                   "static_cache": static_cache,
                                   "json_no_quotes": json_no_quotes,
+                                  "smart_quote_flags": smart_quote_flags,
                                   "json_template": json_template})
     return cur.lastrowid
 
@@ -1556,7 +1601,7 @@ def _CACHE_AFFECTING_ENDPOINT_FIELDS() -> frozenset:
         "name", "url_path", "output_format", "columns", "filters", "sorts",
         "row_limit", "api_key", "allowed_origins", "enabled",
         "result_mode", "result_index", "allow_fetch_all", "static_cache",
-        "json_no_quotes", "json_template",
+        "json_no_quotes", "smart_quote_flags", "json_template",
     ))
 
 
@@ -1573,6 +1618,7 @@ def update_api_endpoint(conn, endpoint_id: int,
                         allow_fetch_all: int = _UNSET,
                         static_cache: int = _UNSET,
                         json_no_quotes: int = _UNSET,
+                        smart_quote_flags: int = _UNSET,
                         json_template: str = _UNSET,
                         description: str = _UNSET,
                         session_user=None) -> bool:
@@ -1630,6 +1676,9 @@ def update_api_endpoint(conn, endpoint_id: int,
     if json_no_quotes is not _UNSET:
         sets.append("json_no_quotes=?")
         params.append(json_no_quotes)
+    if smart_quote_flags is not _UNSET:
+        sets.append("smart_quote_flags=?")
+        params.append(smart_quote_flags)
     if json_template is not _UNSET:
         sets.append("json_template=?")
         params.append(json_template)

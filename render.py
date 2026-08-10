@@ -1155,14 +1155,14 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {cols_hidden}
     <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
       格式:
-      <select name="format" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
+      <select name="format" id="export-format-select" onchange="updateExportSmartState()" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
         <option value="csv">CSV</option>
         <option value="json">JSON</option>
       </select>
     </label>
     <details class="export-more" style="position:relative;display:inline-block">
       <summary style="font-size:12px;color:#475569;cursor:pointer;user-select:none;list-style:none;background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px">更多选项 ▾</summary>
-      <div style="position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:8px;min-width:220px">
+      <div style="position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:8px;min-width:240px">
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
           字符集:
           <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
@@ -1170,9 +1170,25 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
             <option value="utf8">UTF8</option>
           </select>
         </label>
-        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-          <input type="checkbox" name="json_no_quotes" value="1"> 值无引号
-        </label>
+        <div id="export-smart-panel" style="border-top:1px dashed #e2e8f0;padding-top:6px;font-size:12px;color:#475569;line-height:1.7">
+          <input type="hidden" name="smart_quotes" id="export-smart-quotes-input" value="0">
+          <div style="font-weight:600;color:#334155">智能去引号
+            <span id="export-smart-csv-hint" style="display:none;color:#dc2626;font-weight:400">（仅 JSON 格式支持）</span>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:2px;margin-top:2px">
+            <input type="checkbox" class="smart-quote-cb" value="1" onchange="updateExportSmartFlags()"> 十进制数字（含正负号）
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:2px">
+            <input type="checkbox" class="smart-quote-cb" value="2" onchange="updateExportSmartFlags()"> 科学计数法
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:2px">
+            <input type="checkbox" class="smart-quote-cb" value="4" onchange="updateExportSmartFlags()"> 千分位数字
+          </label>
+          <div style="font-size:11px;color:#64748b;line-height:1.6;margin-top:2px">
+            原生数字恒裸输出；勾选形态的值去引号，未勾选保持带引号；千分位输出去逗号；
+            输出永远合法 JSON（RFC 8259）。
+          </div>
+        </div>
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
           <input type="checkbox" name="zip" value="1"> 压缩包
         </label>
@@ -1198,6 +1214,34 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
    </form>
   {cache_badge}
   <span class="stat">共 {total_rows} 行，{total_pages} 页</span>
+  <script>
+  function updateExportSmartFlags() {{
+    var input = document.getElementById('export-smart-quotes-input');
+    if (!input) return;
+    var flags = 0;
+    var cbs = document.querySelectorAll('#export-smart-panel .smart-quote-cb');
+    cbs.forEach(function(cb) {{
+      if (cb.checked) flags |= parseInt(cb.value, 10) || 0;
+    }});
+    input.value = flags;
+  }}
+  function updateExportSmartState() {{
+    var fmtSel = document.getElementById('export-format-select');
+    if (!fmtSel) return;
+    var isCsv = fmtSel.value === 'csv';
+    var cbs = document.querySelectorAll('#export-smart-panel .smart-quote-cb');
+    cbs.forEach(function(cb) {{
+      cb.disabled = isCsv;
+      if (isCsv) cb.checked = false;
+    }});
+    if (isCsv) updateExportSmartFlags();
+    var hint = document.getElementById('export-smart-csv-hint');
+    if (hint) hint.style.display = isCsv ? 'inline' : 'none';
+  }}
+  document.addEventListener('DOMContentLoaded', function() {{
+    updateExportSmartState();
+  }});
+  </script>
 </div>"""
 
 
@@ -2310,17 +2354,18 @@ _API_TEMPLATE_JS = r'''
         return;
       }
     }
-    var nqCb = document.getElementById('json-no-quotes-checkbox');
-    var noQuotes = nqCb ? nqCb.checked : false;
+    var sqCbs = document.querySelectorAll('.smart-quote-cb');
+    var smartMode = sqCbs.length > 0 && Array.prototype.some.call(sqCbs, function(cb) {
+      return cb.checked;
+    });
     var replaced = tpl.replace(re, function(mm, key) {
       var v = TPL_SAMPLE[mode][key];
       if (v === undefined) return 'null';
-      if (noQuotes && typeof v === 'string') return v;  // 值无引号：字符串裸输出
       return JSON.stringify(v);
     });
-    if (noQuotes) {
-      // 「值无引号」模式：裸值输出不保证合法 JSON，跳过合法性校验直接显示
-      pre.textContent = replaced;
+    if (smartMode) {
+      // 智能去引号：判定逻辑单一来源在后端（复用约定），占位预览不做第二套实现
+      pre.textContent = replaced + '\n（智能去引号模式：字符串值按勾选形态去引号，以真实数据预览为准）';
       return;
     }
     try {
@@ -2502,8 +2547,12 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
     static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
-    # 值无引号默认关闭（与报表导出 json_no_quotes 默认一致），新增态不勾选
-    json_no_quotes_checked = (' checked' if (endpoint is not None and int(endpoint.get("json_no_quotes", 0))) else '')
+    # 智能去引号面板默认全不勾（= 标准 JSON，零破坏）；「数字（原生类型）」恒裸
+    # 不占位，仅说明文案；存量 json_no_quotes=1 由迁移映射为面板全开（0b111）
+    smart_flags = int((endpoint or {}).get("smart_quote_flags", 0) or 0)
+    sq_decimal_checked = ' checked' if (smart_flags & 1) else ''
+    sq_scientific_checked = ' checked' if (smart_flags & 2) else ''
+    sq_thousand_checked = ' checked' if (smart_flags & 4) else ''
 
     # 结果集输出模式
     result_mode = (endpoint or {}).get("result_mode", "single")
@@ -2635,6 +2684,16 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       text.textContent = buildApiUrl('/api/' + path, 'static');
     }}
   }}
+  function updateSmartFlags() {{
+    var cbs = document.querySelectorAll('.smart-quote-cb');
+    var hidden = document.getElementById('smart-quote-flags-input');
+    if (!hidden) return;
+    var flags = 0;
+    cbs.forEach(function(cb) {{
+      if (cb.checked) flags |= parseInt(cb.value, 10) || 0;
+    }});
+    hidden.value = flags;
+  }}
   function updateStaticCacheState() {{
     var fmtSel = document.querySelector('select[name="output_format"]');
     if (!fmtSel) return;
@@ -2646,11 +2705,14 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       if (isCsv) cb.checked = false;
     }}
     if (hint) hint.style.display = isCsv ? 'inline' : 'none';
-    var cbNoQuotes = document.getElementById('json-no-quotes-checkbox');
     var hintNoQuotes = document.getElementById('json-no-quotes-csv-hint');
-    if (cbNoQuotes) {{
-      cbNoQuotes.disabled = isCsv;
-      if (isCsv) cbNoQuotes.checked = false;
+    var sqCbs = document.querySelectorAll('.smart-quote-cb');
+    if (sqCbs.length) {{
+      sqCbs.forEach(function(cb) {{
+        cb.disabled = isCsv;
+        if (isCsv) cb.checked = false;
+      }});
+      if (isCsv) updateSmartFlags();
     }}
     if (hintNoQuotes) hintNoQuotes.style.display = isCsv ? 'inline' : 'none';
     updateStaticUrl();
@@ -2684,17 +2746,32 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   </div>
 
   <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
-    <input type="hidden" name="json_no_quotes" value="0">
-    <input type="checkbox" name="json_no_quotes" value="1"{json_no_quotes_checked} id="json-no-quotes-checkbox"
-      onchange="renderTemplatePreview()">
-    <span style="font-weight:600">值无引号</span>
+    <span style="font-weight:600">智能去引号</span>
     <span id="json-no-quotes-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
   </label>
-  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
-    开启后，JSON 输出中的<strong>所有值均不加引号</strong>（含字符串，如 <code>张三</code>、
-    数字字符串 <code>007</code>），仅键保留引号；输出不再保证是严格合法 JSON，
-    面向宽松下游解析器。与报表导出「值无引号」选项行为一致；
-    普通请求与 <code>.json</code> 静态缓存文件全部生效。
+  <div style="margin:6px 0 0 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    <input type="hidden" name="smart_quote_flags" id="smart-quote-flags-input" value="{smart_flags}">
+    勾选以下形态时，JSON 输出中对应字符串值<strong>去掉引号</strong>（未勾选形态保持带引号）：
+    <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:400">
+      <input type="checkbox" class="smart-quote-cb" value="1"{sq_decimal_checked}
+        onchange="updateSmartFlags();renderTemplatePreview()">
+      十进制数字（含正负号），如 <code>-1.5</code>；前导零数值化（<code>007</code> → <code>7</code>）
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-weight:400">
+      <input type="checkbox" class="smart-quote-cb" value="2"{sq_scientific_checked}
+        onchange="updateSmartFlags();renderTemplatePreview()">
+      科学计数法，如 <code>1e5</code>（符合 JSON 数字语法，原样输出）
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-weight:400">
+      <input type="checkbox" class="smart-quote-cb" value="4"{sq_thousand_checked}
+        onchange="updateSmartFlags();renderTemplatePreview()">
+      千分位数字，如 <code>1,000</code>（输出去逗号数值化：<code>1,000</code> → <code>1000</code>）
+    </label>
+    <div style="margin-top:6px">
+      开启任一形态时，输出<strong>永远合法 JSON</strong>（RFC 8259）：原生数字（int/float/Decimal）
+      始终输出为数字，无需勾选；含非数字内容的文本（如日期、空串、<code>true</code>/<code>false</code>）
+      永远带引号。模板占位预览在勾选时以真实数据预览为准。
+    </div>
   </div>
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}

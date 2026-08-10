@@ -1525,17 +1525,17 @@ def _template_raw_for_format(output_format: str, data: dict) -> str:
 
 
 def _validate_json_template(raw: str, result_mode: str,
-                            json_no_quotes: bool = False) -> str | None:
+                            smart_quote_flags: int = 0) -> str | None:
     """校验 JSON 输出模板文本；返回错误消息（None=合法或未启用）。
 
     键集随表单 result_mode 判定（single/all），与渲染链路保持一致。
-    json_no_quotes（端点「值无引号」选项开启）时跳过替换后的 JSON 合法性
-    校验（裸值输出本就不保证合法），未知占位符校验仍保留。
+    smart_quote_flags>0（「智能去引号」面板勾选）时替换后的 JSON 合法性
+    校验恒执行（智能模式输出永远合法，升级点）。
     """
     if not raw or not raw.strip():
         return None
     keys = SINGLE_KEYS if result_mode == "single" else ALL_KEYS
-    ok, err = validate_template(raw, keys, json_no_quotes=json_no_quotes)
+    ok, err = validate_template(raw, keys, smart_quote_flags=smart_quote_flags)
     return None if ok else err
 
 
@@ -1561,7 +1561,7 @@ def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
         "enabled": _echo_int(data.get("enabled"), 0),
         "allow_fetch_all": _echo_int(data.get("allow_fetch_all"), 1),
         "static_cache": _echo_int(data.get("static_cache"), 1),
-        "json_no_quotes": _echo_int(data.get("json_no_quotes"), 0),
+        "smart_quote_flags": _echo_int(data.get("smart_quote_flags"), 0),
         "result_mode": result_mode,
         "result_index": _echo_int(data.get("result_index"), 0),
         "json_template": data.get("json_template", "") or "",
@@ -1572,7 +1572,7 @@ def _parse_endpoint_form(data: dict) -> dict:
     """从表单数据解析 API 端点全部字段（add/edit 共用读路径）。
 
     产出字段含 name/url_path/output_format/columns/filters_str/sorts_str/
-    row_limit/enabled/allow_fetch_all/static_cache/json_no_quotes/result_mode/
+    row_limit/enabled/allow_fetch_all/static_cache/result_mode/
     result_index/template_raw/api_key/allowed_origins/description。
     """
     output_format = data.get("output_format", "json")
@@ -1589,7 +1589,7 @@ def _parse_endpoint_form(data: dict) -> dict:
         "enabled": int(data.get("enabled", 0) or 0),
         "allow_fetch_all": int(data.get("allow_fetch_all", 1) or 0),
         "static_cache": int(data.get("static_cache", 1) or 0),
-        "json_no_quotes": int(data.get("json_no_quotes", 0) or 0),
+        "smart_quote_flags": int(data.get("smart_quote_flags", 0) or 0),
         "result_mode": result_mode,
         "result_index": int(data.get("result_index", 0) or 0),
         # CSV 模式忽略模板字段（模板仅 JSON 有效）：不校验、不落库
@@ -1668,7 +1668,8 @@ def handle_api_endpoint_add(conn, report_id: int,
     try:
         pf = _parse_endpoint_form(data)
         tpl_err = _validate_json_template(
-            pf["template_raw"], pf["result_mode"], json_no_quotes=pf["json_no_quotes"])
+            pf["template_raw"], pf["result_mode"],
+            smart_quote_flags=pf["smart_quote_flags"])
         if tpl_err:
             return 200, render_api_endpoint_form_page(
                 conn, report_id,
@@ -1687,7 +1688,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             result_index=pf["result_index"],
             allow_fetch_all=pf["allow_fetch_all"],
             static_cache=pf["static_cache"],
-            json_no_quotes=pf["json_no_quotes"],
+            smart_quote_flags=pf["smart_quote_flags"],
             json_template=pf["template_raw"] or None,
             description=pf["description"],
             session_user=session_user,
@@ -1729,7 +1730,8 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             return 302, "/config?flash=错误: API 接口不存在"
         pf = _parse_endpoint_form(data)
         tpl_err = _validate_json_template(
-            pf["template_raw"], pf["result_mode"], json_no_quotes=pf["json_no_quotes"])
+            pf["template_raw"], pf["result_mode"],
+            smart_quote_flags=pf["smart_quote_flags"])
         if tpl_err:
             tmp = _endpoint_from_form(data, pf["url_path"], pf["result_mode"])
             tmp["id"] = endpoint_id
@@ -1751,7 +1753,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             result_mode=pf["result_mode"],
             result_index=pf["result_index"],
             static_cache=pf["static_cache"],
-            json_no_quotes=pf["json_no_quotes"],
+            smart_quote_flags=pf["smart_quote_flags"],
             description=pf["description"],
             session_user=session_user,
         )
@@ -1827,9 +1829,9 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
     data = _parse_form_data(form_body or "")
     result_mode = data.get("result_mode", "single")
     template_raw = data.get("json_template", "") or ""
-    json_no_quotes = int(data.get("json_no_quotes", 0) or 0)
+    smart_quote_flags = int(data.get("smart_quote_flags", 0) or 0)
     tpl_err = _validate_json_template(
-        template_raw, result_mode, json_no_quotes=json_no_quotes)
+        template_raw, result_mode, smart_quote_flags=smart_quote_flags)
     if tpl_err:
         return fail(tpl_err)
 
@@ -1838,7 +1840,7 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
     tmp["json_template"] = template_raw or None
     tmp["result_mode"] = result_mode
     tmp["result_index"] = int(data.get("result_index", 0) or 0)
-    tmp["json_no_quotes"] = json_no_quotes
+    tmp["smart_quote_flags"] = smart_quote_flags
     columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
     tmp["columns"] = columns or None
     tmp["filters"] = filters_str or None
@@ -1868,7 +1870,7 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
         result.data_rows, result.display_cols, result.total, result.page,
         result.page_size, result.total_pages, result.output_format,
         result.add_bom, result.full, template=tmp["json_template"] or "", meta=None,
-        truncated=result.truncated, json_no_quotes=tmp["json_no_quotes"])
+        truncated=result.truncated, smart_quote_flags=result.smart_quote_flags)
     if status != 200:
         return fail("预览输出构建失败")
     return 200, json.dumps({"ok": True, "output": out_body},
