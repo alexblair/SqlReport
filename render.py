@@ -2493,6 +2493,8 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     enabled_checked = ' checked' if (endpoint is None or int(endpoint.get("enabled", 1))) else ''
     allow_fetch_all_checked = (' checked' if (endpoint is None or int(endpoint.get("allow_fetch_all", 1))) else '')
     static_cache_checked = (' checked' if (endpoint is None or int(endpoint.get("static_cache", 1))) else '')
+    # 数字无引号默认关闭（与报表导出 json_no_quotes 默认一致），新增态不勾选
+    json_no_quotes_checked = (' checked' if (endpoint is not None and int(endpoint.get("json_no_quotes", 0))) else '')
 
     # 结果集输出模式
     result_mode = (endpoint or {}).get("result_mode", "single")
@@ -2627,14 +2629,21 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   function updateStaticCacheState() {{
     var fmtSel = document.querySelector('select[name="output_format"]');
     if (!fmtSel) return;
+    var isCsv = fmtSel.value === 'csv';
     var cb = document.getElementById('static-cache-checkbox');
     var hint = document.getElementById('static-cache-csv-hint');
-    var isCsv = fmtSel.value === 'csv';
     if (cb) {{
       cb.disabled = isCsv;
       if (isCsv) cb.checked = false;
     }}
     if (hint) hint.style.display = isCsv ? 'inline' : 'none';
+    var cbNoQuotes = document.getElementById('json-no-quotes-checkbox');
+    var hintNoQuotes = document.getElementById('json-no-quotes-csv-hint');
+    if (cbNoQuotes) {{
+      cbNoQuotes.disabled = isCsv;
+      if (isCsv) cbNoQuotes.checked = false;
+    }}
+    if (hintNoQuotes) hintNoQuotes.style.display = isCsv ? 'inline' : 'none';
     updateStaticUrl();
   }}
   document.addEventListener('DOMContentLoaded', function() {{
@@ -2663,6 +2672,18 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <span style="font-weight:500;color:#64748b">静态 URL:</span>
     <code id="static-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('static-url-text')" class="btn-mini btn-mini-outline">复制</button>
+  </div>
+
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="json_no_quotes" value="0">
+    <input type="checkbox" name="json_no_quotes" value="1"{json_no_quotes_checked} id="json-no-quotes-checkbox">
+    <span style="font-weight:600">数字无引号（JSON 数值不加引号）</span>
+    <span id="json-no-quotes-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
+  </label>
+  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    开启后，JSON 输出中的数值（int/float/Decimal）保持数字类型不加引号；
+    字符串（含数字字符串，如 <code>"123"</code>）仍为字符串。与报表导出「数字无引号」选项行为一致；
+    普通请求与 <code>.json</code> 静态缓存文件全部生效。
   </div>
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}

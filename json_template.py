@@ -27,7 +27,7 @@ json_template.py — API JSON 输出模板引擎（纯标准库，零依赖）
 import json
 import re
 
-from app_config import serialize_json
+from app_config import serialize_json, JsonNoQuoteEncoder
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
@@ -78,8 +78,14 @@ def is_template_enabled(template: str | None) -> bool:
     return bool(template and template.strip())
 
 
-def _value_to_json(value) -> str:
-    """值序列化为 JSON 片段（与响应序列化约定一致）。"""
+def _value_to_json(value, json_no_quotes: bool = False) -> str:
+    """值序列化为 JSON 片段（与响应序列化约定一致）。
+
+    json_no_quotes=True 时数值保持数字类型不加引号（Decimal 转数值），
+    与 API 端点「数字无引号」选项共用 JsonNoQuoteEncoder。
+    """
+    if json_no_quotes:
+        return serialize_json(value, cls=JsonNoQuoteEncoder)
     return serialize_json(value)
 
 
@@ -109,7 +115,8 @@ def _split_segments(template: str) -> list[tuple]:
     return segments
 
 
-def _render_to_output(segments: list[tuple], context: dict) -> tuple[str, list[int]]:
+def _render_to_output(segments: list[tuple], context: dict,
+                      json_no_quotes: bool = False) -> tuple[str, list[int]]:
     """渲染各段，返回 (输出字符串, 各段输出长度列表)。"""
     parts = []
     lengths = []
@@ -119,7 +126,7 @@ def _render_to_output(segments: list[tuple], context: dict) -> tuple[str, list[i
             lengths.append(len(text))
         else:
             # 键集内键缺失 → null（可选键语义）
-            rendered = _value_to_json(context.get(text))
+            rendered = _value_to_json(context.get(text), json_no_quotes)
             parts.append(rendered)
             lengths.append(len(rendered))
     return "".join(parts), lengths
@@ -142,7 +149,8 @@ def _output_pos_to_template_pos(segments: list[tuple], lengths: list[int],
     return template_len
 
 
-def render_template(template: str, context: dict, keys: tuple = None) -> tuple[bool, str, str]:
+def render_template(template: str, context: dict, keys: tuple = None,
+                    json_no_quotes: bool = False) -> tuple[bool, str, str]:
     """渲染模板。
 
     参数:
@@ -152,6 +160,8 @@ def render_template(template: str, context: dict, keys: tuple = None) -> tuple[b
         keys: 可选；占位符严格键集（SINGLE_KEYS/ALL_KEYS）。提供时跨模式
               键（如 single 模板含 {{results}}）报未知占位符；None 时按
               全部合法键宽松判定。校验/保存场景必须传 keys。
+        json_no_quotes: 可选；True 时占位符替换的数值保持数字类型不加引号
+                        （API 端点「数字无引号」选项），默认 False
 
     返回 (ok, output, error)：
     - ok=True：output 为渲染后的 JSON 字符串，error 为空
@@ -171,7 +181,7 @@ def render_template(template: str, context: dict, keys: tuple = None) -> tuple[b
             display = "{{" + name + "}}"
             return False, "", f"未知占位符 {display} 位于第 {line} 行第 {col} 列"
 
-    output, lengths = _render_to_output(segments, context)
+    output, lengths = _render_to_output(segments, context, json_no_quotes)
     try:
         json.loads(output)
     except json.JSONDecodeError as e:

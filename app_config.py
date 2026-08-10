@@ -29,6 +29,7 @@ import json
 import os
 import time
 import urllib.parse
+from decimal import Decimal
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -201,11 +202,58 @@ def format_local_time(ts, with_tz: bool = True) -> str:
 
 
 def serialize_json(obj, **kwargs) -> str:
-    """序列化 JSON 字符串（ensure_ascii=False、default=str，与全项目序列化约定一致）。
+    """序列化 JSON 字符串（ensure_ascii=False，与全项目序列化约定一致）。
 
-    额外参数（如 indent）通过 kwargs 透传给 json.dumps。
+    未显式传 cls 时注入 default=str（默认约定：不可 JSON 序列化类型转为
+    字符串）；显式传 cls（如 JsonNoQuoteEncoder）时不注入 default，
+    避免 default=str 遮蔽编码器自定义的 default 方法（json.dumps 的
+    default 参数会覆盖 cls 实例的 default）。
     """
+    if "cls" in kwargs:
+        return json.dumps(obj, ensure_ascii=False, **kwargs)
     return json.dumps(obj, ensure_ascii=False, default=str, **kwargs)
+
+
+def no_quote_value(val):
+    """「数字无引号」模式的值转换：返回适合 JSON 序列化的值。
+
+    保留原始数字类型（int / float / Decimal），字符串保持字符串
+    （数字字符串仍是字符串，如 "123" 带引号），None 保持 None，
+    bytes 解码为字符串，其余转 str。
+    Decimal 由 JsonNoQuoteEncoder 处理。
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return val
+    if isinstance(val, Decimal):
+        return val
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    return str(val)
+
+
+class JsonNoQuoteEncoder(json.JSONEncoder):
+    """自定义 JSON 编码器，用于「数字无引号」模式。
+
+    将 Decimal 转换为数值（float / int），
+    处理 date/datetime 为 ISO 字符串，
+    处理 bytes 为 UTF-8 解码字符串。
+    """
+
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            # 与 format_cell 保持一致的数值格式化，但返回数值类型
+            if obj == 0:
+                return 0
+            s = format(obj, "f").rstrip("0").rstrip(".")
+            if s in ("", "-0"):
+                return 0
+            return int(s) if "." not in s else float(s)
+        if isinstance(obj, bytes):
+            return obj.decode("utf-8", errors="replace")
+        # date / datetime treated as string via str()
+        return str(obj)
 
 
 def get_active_db_config() -> dict[str, Any]:

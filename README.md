@@ -285,6 +285,10 @@ Rules:
 
 On the endpoint edit page (for already-saved endpoints), the "Live preview with real data" button executes a real query using the **unsaved** template and rules (filter/sort/column selection) from the current form (at most 3 rows, not persisted, no impact on the live endpoint) and shows the rendered result in the preview area; an invalid template shows a structured error with line/column position, a failed query shows a structured error message. New (unsaved) endpoints do not have this button.
 
+### Numeric no-quotes
+
+The API endpoint form offers a "numeric no-quotes" checkbox (off by default, sharing the same implementation as the identically named option of report JSON export). When enabled, numeric fields in the JSON output keep their numeric types (e.g. `123.45`, `25`) instead of the default stringification (e.g. `"123.45"`); numeric strings (e.g. `"007"`) still keep their quotes. It applies to both the default output structure and custom JSON templates; CSV output is unaffected; the static cache `.json` variant is automatically invalidated and rebuilt when the switch changes (invalidated on config change, rebuilt on the next request).
+
 ---
 
 ## 📄 API Static File Cache

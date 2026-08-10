@@ -84,6 +84,7 @@ def _make_conn():
             result_index INTEGER NOT NULL DEFAULT 0,
             allow_fetch_all INTEGER NOT NULL DEFAULT 1,
             static_cache INTEGER NOT NULL DEFAULT 1,
+            json_no_quotes  INTEGER NOT NULL DEFAULT 0,
             json_template TEXT,
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',

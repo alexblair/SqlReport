@@ -19,9 +19,69 @@ import json
 import logging
 import threading
 import time
+from decimal import Decimal
 from typing import Any, Optional
 
-from app_config import get_redis_config, serialize_json as _serialize_json
+from app_config import get_redis_config
+
+# ---------------------------------------------------------------------------
+# 快照序列化（Decimal 保真）
+# ---------------------------------------------------------------------------
+#
+# 快照经 JSON 往返（写 Redis → 读回），若用默认 default=str 序列化，
+# Decimal 会变成字符串，读回后类型丢失：API「数字无引号」/JSON 导出的
+# 数值还原逻辑依赖 Decimal 类型，会退化为带引号字符串。
+# 因此在序列化时把 Decimal 包装成标记对象（精度用字符串无损保留），
+# 反序列化时还原为 Decimal；其余类型沿用 default=str 的既有契约。
+
+_DECIMAL_KEY = "__sr_decimal__"
+# 快照格式版本：v1（历史）Decimal 经 default=str 退化为字符串不可还原；
+# v2（当前）Decimal 标记保真。get_snapshot 读到旧版本快照时淘汰重建。
+_SNAPSHOT_VERSION = 2
+
+
+def _snapshot_default(obj: Any):
+    """report 快照专用 default：Decimal 包装为标记，其余转字符串。"""
+    if isinstance(obj, Decimal):
+        return {_DECIMAL_KEY: str(obj)}
+    return str(obj)
+
+
+def _snapshot_hook(obj: dict):
+    """report 快照专用 object_hook：还原 Decimal 标记。"""
+    if isinstance(obj, dict) and len(obj) == 1 and _DECIMAL_KEY in obj:
+        return Decimal(obj[_DECIMAL_KEY])
+    return obj
+
+
+def _snapshot_to_json(snapshot: "ReportSnapshot") -> str:
+    """把快照实体序列化为 JSON（Decimal 保持数值语义往返）。"""
+    return json.dumps(
+        {
+            "results": snapshot.results,
+            "sql_query": snapshot.sql_query,
+            "updated_at": snapshot.updated_at,
+            "config_version": snapshot.config_version,
+            "truncated": snapshot.truncated,
+            "snapshot_version": _SNAPSHOT_VERSION,
+        },
+        ensure_ascii=False,
+        default=_snapshot_default,
+    )
+
+
+def _snapshot_is_stale(data: str) -> bool:
+    """判定快照是否为旧格式（无 snapshot_version 字段 → v1，需淘汰）。"""
+    try:
+        obj = json.loads(data)
+        return int(obj.get("snapshot_version", 1)) < _SNAPSHOT_VERSION
+    except (ValueError, TypeError, AttributeError):
+        return True
+
+
+def _snapshot_from_json(data: str) -> dict:
+    """解析快照 JSON 字典（还原 Decimal 标记）。"""
+    return json.loads(data, object_hook=_snapshot_hook)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -56,19 +116,13 @@ class ReportSnapshot:
         self.truncated = truncated
 
     def to_json(self) -> str:
-        """序列化为 JSON 字符串。"""
-        return _serialize_json({
-            "results": self.results,
-            "sql_query": self.sql_query,
-            "updated_at": self.updated_at,
-            "config_version": self.config_version,
-            "truncated": self.truncated,
-        })
+        """序列化为 JSON 字符串（Decimal 保持数值类型往返）。"""
+        return _snapshot_to_json(self)
 
     @classmethod
     def from_json(cls, data: str) -> "ReportSnapshot":
         """从 JSON 字符串反序列化（旧快照无 truncated 字段，缺省 False）。"""
-        obj = json.loads(data)
+        obj = _snapshot_from_json(data)
         return cls(
             results=obj["results"],
             sql_query=obj["sql_query"],
@@ -254,6 +308,14 @@ class RedisConnectionManager:
         try:
             data = self._client.get(key)
             if data is None:
+                return None
+            # 旧格式快照（Decimal 已退化为字符串，类型不可还原）→ 淘汰，
+            # 下次请求走完整链路重建为 v2 快照。
+            if _snapshot_is_stale(data):
+                try:
+                    self._client.delete(key)
+                except Exception:
+                    pass
                 return None
             return ReportSnapshot.from_json(data)
         except Exception as e:

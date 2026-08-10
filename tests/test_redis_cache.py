@@ -56,6 +56,16 @@ class TestReportSnapshot(unittest.TestCase):
         restored = ReportSnapshot.from_json(snap.to_json())
         self.assertEqual(restored.results[0]["rows"][0][0], "张三")
 
+    def test_decimal_roundtrip_preserves_type(self):
+        """Decimal 经快照 JSON 往返保持类型与精度（API 数字无引号依赖）"""
+        from decimal import Decimal
+        results = [{"columns": ["amount"], "rows": [(Decimal("149589346.01"),)]}]
+        snap = ReportSnapshot(results, "SELECT 1", 100.0, "v1")
+        restored = ReportSnapshot.from_json(snap.to_json())
+        val = restored.results[0]["rows"][0][0]
+        self.assertIsInstance(val, Decimal)
+        self.assertEqual(val, Decimal("149589346.01"))
+
 
 class TestKeyFunctions(unittest.TestCase):
     """工具函数测试"""
@@ -133,7 +143,8 @@ class TestRedisConnectionManager(unittest.TestCase):
         """set_snapshot 后再 get_snapshot 应还原"""
         mock_client = MagicMock()
         mock_create.return_value = mock_client
-        snap_data = '{"results": [], "sql_query": "SELECT 1", "updated_at": 100.0, "config_version": "v1"}'
+        snap_data = ('{"results": [], "sql_query": "SELECT 1", "updated_at": 100.0, '
+                     '"config_version": "v1", "snapshot_version": 2}')
         # get 返回模拟数据
         type(mock_client).decode_responses = PropertyMock(return_value=True)
         mock_client.get.return_value = snap_data
@@ -151,6 +162,22 @@ class TestRedisConnectionManager(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.sql_query, "SELECT 1")
         mock_client.get.assert_called_with("sr:snapshot:1:v1")
+
+    @patch("redis_cache.RedisConnectionManager._create_client")
+    def test_get_snapshot_stale_v1_evicted(self, mock_create):
+        """旧格式（v1）快照：Decimal 类型已退化不可还原，读取时淘汰重建"""
+        mock_client = MagicMock()
+        mock_create.return_value = mock_client
+        type(mock_client).decode_responses = PropertyMock(return_value=True)
+        mock_client.get.return_value = ('{"results": [], "sql_query": "SELECT 1", '
+                                        '"updated_at": 100.0, "config_version": "v1"}')
+
+        mgr = RedisConnectionManager(self.config)
+        mgr.connect()
+
+        result = mgr.get_snapshot("sr:snapshot:1:v1")
+        self.assertIsNone(result)
+        mock_client.delete.assert_called_once()
 
     @patch("redis_cache.RedisConnectionManager._create_client")
     def test_set_snapshot_with_ttl(self, mock_create):

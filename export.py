@@ -37,7 +37,6 @@ import shutil
 import tempfile
 import urllib.parse
 import zipfile
-from decimal import Decimal
 from typing import Optional, Union
 import db
 import app_config
@@ -158,48 +157,6 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
                        quoting=csv.QUOTE_ALL, lineterminator="\n")
 
 
-class _JsonNoQuoteEncoder(json.JSONEncoder):
-    """
-    自定义 JSON 编码器，用于 json_no_quotes 模式。
-
-    将 Decimal 转换为数值（float / int），
-    处理 date/datetime 为 ISO 字符串，
-    处理 bytes 为 UTF-8 解码字符串。
-    """
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            # 与 format_cell 保持一致的数值格式化，但返回数值类型
-            if obj == 0:
-                return 0
-            s = format(obj, "f").rstrip("0").rstrip(".")
-            if s in ("", "-0"):
-                return 0
-            return int(s) if "." not in s else float(s)
-        if isinstance(obj, bytes):
-            return obj.decode("utf-8", errors="replace")
-        # date / datetime treated as string via str()
-        return str(obj)
-
-
-def _no_quote_value(val):
-    """
-    当 json_no_quotes 启用时，返回适合 JSON 序列化的值。
-
-    保留原始数字类型（int / float / Decimal），
-    字符串保持字符串，None 保持 None。
-    Decimal 由 _JsonNoQuoteEncoder 处理。
-    """
-    if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        return val
-    if isinstance(val, Decimal):
-        return val
-    if isinstance(val, bytes):
-        return val.decode("utf-8", errors="replace")
-    return str(val)
-
-
 def export_report_to_json(sql_query: str, pool_config: dict,
                           report_name: str,
                           filters=None,
@@ -221,7 +178,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
 
     当 json_no_quotes=True 时，数值类型的字段将保持数字格式
-    （不加引号），而非全部转为字符串。
+    （不加引号），而非全部转为字符串（复用 app_config.no_quote_value /
+    JsonNoQuoteEncoder，与 API 端点「数字无引号」选项同一实现）。
 
     JSON 格式：
     {
@@ -244,7 +202,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
         for col, idx in zip(output_columns, display_indices):
             if json_no_quotes:
                 # 保留原始数值类型
-                obj[col] = _no_quote_value(row[idx])
+                obj[col] = app_config.no_quote_value(row[idx])
             else:
                 # 全部转为字符串（原有行为）
                 obj[col] = format_cell(row[idx])
@@ -258,7 +216,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
             {safe_name: rows_data},
             ensure_ascii=False,
             indent=2,
-            cls=_JsonNoQuoteEncoder,
+            cls=app_config.JsonNoQuoteEncoder,
         )
     else:
         output = json.dumps(
@@ -267,6 +225,12 @@ def export_report_to_json(sql_query: str, pool_config: dict,
             indent=2,
         )
     return output
+
+
+# 历史兼容别名：数字无引号核心实现统一收敛到 app_config（与 API 端点共用），
+# 旧测试/外部调用仍可通过 export._no_quote_value / _JsonNoQuoteEncoder 访问。
+_no_quote_value = app_config.no_quote_value
+_JsonNoQuoteEncoder = app_config.JsonNoQuoteEncoder
 
 
 def _encode_content(content: str, charset: str) -> bytes:
