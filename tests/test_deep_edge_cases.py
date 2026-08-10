@@ -684,7 +684,7 @@ class TestExportBoundaries(unittest.TestCase):
         self.assertTrue(lines[1].endswith('""') or ",," in lines[1])
 
     def test_json_decimal_smart_quotes(self):
-        """✅ Positive: JSON 导出 smart_quote_flags=7（面板全开）Decimal→字符串、文本带引号"""
+        """✅ Positive: JSON 导出 smart_quote_flags=7（面板全开）Decimal 数值化裸出、文本带引号"""
         self.mock_query.return_value = [{
             "columns": ["amount", "name"],
             "rows": [(Decimal("123.45"), "test")],
@@ -695,13 +695,13 @@ class TestExportBoundaries(unittest.TestCase):
             "test_report",
             smart_quote_flags=7,
         )
-        # 智能去引号模式：Decimal 恒按标准 JSON 字符串、非数字文本带引号
-        self.assertIn('"amount": "123.45"', json_output)
+        # 智能去引号模式：Decimal（DECIMAL 列）数值化裸输出、非数字文本带引号
+        self.assertIn('"amount": 123.45', json_output)
         self.assertIn('"name": "test"', json_output)
         json.loads(json_output)
 
     def test_json_decimal_zero_smart_quotes(self):
-        """✅ Positive: JSON 导出 Decimal(0) → 字符串 "0"（面板开启不改变 Decimal）"""
+        """✅ Positive: JSON 导出 Decimal(0) → 数值 0（勾选数字特征后裸出）"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("0"),)],
@@ -710,10 +710,10 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t", {"host": "localhost"},
             "rpt", smart_quote_flags=7,
         )
-        self.assertIn('"val": "0"', json_output)
+        self.assertIn('"val": 0', json_output)
 
     def test_json_decimal_large_smart_quotes(self):
-        """✅ Positive: JSON 导出大 Decimal → 字符串（不随面板裸出）"""
+        """✅ Positive: JSON 导出大 Decimal → 数值化裸出（文本级无精度丢失）"""
         self.mock_query.return_value = [{
             "columns": ["val"],
             "rows": [(Decimal("999999999999.99"),)],
@@ -722,7 +722,7 @@ class TestExportBoundaries(unittest.TestCase):
             "SELECT * FROM t", {"host": "localhost"},
             "rpt", smart_quote_flags=7,
         )
-        self.assertIn('"val": "999999999999.99"', json_output)
+        self.assertIn('"val": 999999999999.99', json_output)
 
     def test_json_with_quotes_decimal_as_string(self):
         """✅ Positive: JSON 导出默认（flags=0）Decimal→字符串"""

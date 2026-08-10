@@ -422,12 +422,13 @@ class TestForm(_SmartStorageBase):
         self.assertIn("仅 JSON 格式支持", html)
 
     def test_form_html_panel_copy(self):
-        """说明文案：合法 JSON 承诺、原生数字恒裸、千分位去逗号、无旧「值无引号」名。"""
+        """说明文案：合法 JSON 承诺、原生 int/float 恒裸、Decimal 行为、无旧「值无引号」名。"""
         html = render.build_api_endpoint_form_html(
             1, "报表", endpoint=None)
         self.assertIn("智能去引号", html)
         self.assertIn("永远合法 JSON", html)
-        self.assertIn("原生数字", html)
+        self.assertIn("原生 int/float 始终输出为数字", html)
+        self.assertIn("Decimal 数值列在勾选", html)
         self.assertIn("1,000", html)
         self.assertNotIn("值无引号", html)
         self.assertNotIn("json-no-quotes-checkbox", html)

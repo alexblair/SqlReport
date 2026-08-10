@@ -1090,8 +1090,9 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertIn('name="smart_quotes" id="export-smart-quotes-input" value="0"',
                       result)
         self.assertIn("updateExportSmartFlags", result)
-        # 说明文案：原生数字恒裸 / 千分位去逗号 / 输出永远合法 JSON（RFC 8259）
-        self.assertIn("原生数字恒裸输出", result)
+        # 说明文案：原生 int/float 恒裸 / Decimal 勾选数字特征裸出 / 千分位去逗号
+        self.assertIn("原生 int/float 恒裸输出", result)
+        self.assertIn("Decimal 数值列勾选十进制/科学时输出数字", result)
         self.assertIn("千分位输出去逗号", result)
         self.assertIn("输出永远合法 JSON（RFC 8259）", result)
         # CSV 格式时面板禁用：格式 select 联动 + 仅 JSON 提示

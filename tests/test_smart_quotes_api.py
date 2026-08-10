@@ -3,7 +3,7 @@ test_smart_quotes_api.py — API 端点「智能去引号」链路测试（T4）
 
 覆盖矩阵（conv-test-full-coverage，功能点 → 测试方法）：
 - 默认输出单结果集：flags 生效（"007"→7、"1e5"→1e5、"1,000"→1000、文本带引号、
-  Decimal 保持字符串）→ test_default_output_flags_effective
+  Decimal 数值化裸出）→ test_default_output_flags_effective
 - flags=0 输出与现状逐字节一致（json_no_quotes=0 基线）→ test_flags_zero_byte_identical
 - result_mode=all 模式生效 → test_all_mode_flags_effective
 - 模板模式：flags>0 渲染成功且输出可 json.loads（智能模式保留校验）→
@@ -217,12 +217,14 @@ class TestDefaultOutput(_SmartQuotesApiBase):
         # 千分位去逗号数值化：1,000 → 1000、-1,234.50 → -1234.50
         self.assertIn('"thou": 1000', body)
         self.assertIn('"thou": -1234.5', body)
-        # Decimal 保持字符串（现状契约，不随面板变化）
-        self.assertIn('"amount": "123.45"', body)
+        # Decimal（DECIMAL 列）勾选数字特征后数值化裸输出
+        self.assertIn('"amount": 123.45', body)
+        self.assertIn('"amount": 0.5', body)
         # 输出永远合法 JSON
         parsed = json.loads(body)
         self.assertEqual(parsed["data"][0]["code"], 7)
         self.assertEqual(parsed["data"][1]["thou"], -1234.5)
+        self.assertEqual(parsed["data"][0]["amount"], 123.45)
 
     def test_flags_zero_byte_identical(self):
         """flags=0 输出与 json_no_quotes=0（标准 JSON）逐字节一致。"""
@@ -245,6 +247,25 @@ class TestDefaultOutput(_SmartQuotesApiBase):
         self.assertIn('"code": 7', body)
         self.assertIn('"sci": "1e5"', body)
         self.assertIn('"thou": "1,000"', body)
+
+    def test_decimal_bare_when_only_scientific(self):
+        """回归（用户报告）：仅勾选科学计数法（flags=2）时 DECIMAL 列数值化裸出。"""
+        self._create_report()
+        self._create_endpoint(smart_quote_flags=2)
+        status, body, _ = self._request("/api/sq")
+        self.assertEqual(status, 200)
+        self.assertIn('"amount": 123.45', body)
+        self.assertIn('"amount": 0.5', body)
+        self.assertIn('"sci": 1e5', body)
+
+    def test_decimal_bare_when_only_thousand(self):
+        """回归（用户报告）：仅勾选千分位（flags=4）时 DECIMAL 列数值化裸出。"""
+        self._create_report()
+        self._create_endpoint(smart_quote_flags=4)
+        status, body, _ = self._request("/api/sq")
+        self.assertEqual(status, 200)
+        self.assertIn('"amount": 123.45', body)
+        self.assertIn('"thou": 1000', body)
 
 
 # ---------------------------------------------------------------------------

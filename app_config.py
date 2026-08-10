@@ -219,8 +219,9 @@ def serialize_json(obj, **kwargs) -> str:
 # 「智能去引号」序列化（smart_quote_flags 位图）
 # ---------------------------------------------------------------------------
 # 位图：1=十进制数字（含正负号）、2=科学计数法、4=千分位数字。
-# 语义：仅字符串载体按勾选特征判定裸输出；原生 int/float/Decimal/bool/None 恒按
-# 标准 JSON；面板全部不勾选（flags=0）时输出与 serialize_json 逐字节等价。
+# 语义：仅字符串载体按勾选特征判定裸输出；原生 int/float/bool/None 恒按
+# 标准 JSON；Decimal 任一勾选（flags>0）数值化裸出；面板全部不勾选（flags=0）
+# 时输出与 serialize_json 逐字节等价。
 # 产品承诺：勾选任一特征时输出永远合法 JSON（RFC 8259 number 语法）。
 SMART_FLAG_DECIMAL = 1
 SMART_FLAG_SCIENTIFIC = 2
@@ -250,9 +251,10 @@ def serialize_smart_quotes(obj, flags: int = 0, indent=None) -> str:
     文本级操作，不过 float/int 防精度丢失），转换后经 RFC 8259 number
     语法兜底校验，失败回退带引号——**输出永远合法 JSON**。
 
-    恒定输出（不参与判定）：原生 int/float/Decimal/bool/None 按标准 JSON
-    （Decimal 跟随 default=str 带引号，与现状语义一致）；bytes 在面板开启时
-    UTF-8 decode（errors=replace）后按字符串判定。
+    恒定输出（不参与判定）：原生 int/float/bool/None 按标准 JSON；Decimal（MySQL
+    DECIMAL 列）在面板任一数字形态勾选（flags>0）时数值化裸输出，未勾选时按标准
+    JSON（default=str 带引号）；bytes 在面板开启时 UTF-8 decode（errors=replace）
+    后按字符串判定。
 
     indent: None=紧凑输出；整数 N=每层缩进 N 空格（与 json.dumps(indent=N)
     形状一致，值按判定裸出）。
@@ -311,8 +313,25 @@ def _smart_scalar(val, flags) -> str:
             val.decode("utf-8", errors="replace"), flags)
     if isinstance(val, str):
         return _smart_quote_or_strip(val, flags)
-    # 原生类型（int/float/Decimal/bool/None/date 等）：标准 JSON 序列化
+    if isinstance(val, Decimal):
+        # Decimal（MySQL DECIMAL 列）是数值：面板任一数字形态勾选（flags>0）即
+        # 数值化裸输出（format(f) 去尾零，文本级防精度丢失）——用户心智「勾了
+        # 数字选项，数字就裸出」；无勾选时保持标准 JSON（default=str 带引号）。
+        if flags > 0:
+            return _smart_decimal_text(val)
+        return json.dumps(val, ensure_ascii=False, default=str)
+    # 原生类型（int/float/bool/None/date 等）：标准 JSON 序列化
     return json.dumps(val, ensure_ascii=False, default=str)
+
+
+def _smart_decimal_text(val: Decimal) -> str:
+    """Decimal → 不带引号的数值文本（format(f) 全小数形式，无科学计数法）。"""
+    if val == 0:
+        return "0"
+    s = format(val, "f").rstrip("0").rstrip(".")
+    if s == "-0" or s == "":
+        return "0"
+    return s
 
 
 def _smart_quote_or_strip(s: str, flags: int) -> str:

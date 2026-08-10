@@ -79,11 +79,38 @@ class TestSmartScalarNativeTypes(unittest.TestCase):
                 app_config.serialize_smart_quotes(None, flags=flags), "null")
 
     def test_decimal_follows_standard_json(self):
-        """Decimal 在标准 JSON（default=str）下带引号，跟随现状语义。"""
-        for flags in (0, F_DECIMAL, 7):
+        """契约矩阵：Decimal 未勾选（flags=0）时跟随标准 JSON（default=str 带引号）。"""
+        self.assertEqual(
+            app_config.serialize_smart_quotes(Decimal("123.45"), flags=0),
+            json.dumps(Decimal("123.45"), ensure_ascii=False, default=str))
+
+    def test_decimal_bare_when_any_shape_checked(self):
+        """契约矩阵：Decimal（MySQL DECIMAL 列）在面板任一数字形态勾选（flags>0，
+        含仅千分位）时数值化裸输出——用户心智「勾了数字选项，数字就裸出」。
+        断言来源：docs/conv/dev/smart-quotes-json.md 契约矩阵（禁止从实现反推）。"""
+        for flags in (F_DECIMAL, F_SCIENTIFIC, F_THOUSAND, 7):
             self.assertEqual(
                 app_config.serialize_smart_quotes(Decimal("123.45"), flags=flags),
-                json.dumps(Decimal("123.45"), ensure_ascii=False, default=str))
+                "123.45")
+            self.assertEqual(
+                app_config.serialize_smart_quotes(Decimal("0.50"), flags=flags),
+                "0.5")
+            self.assertEqual(
+                app_config.serialize_smart_quotes(Decimal("0"), flags=flags),
+                "0")
+            self.assertEqual(
+                app_config.serialize_smart_quotes(Decimal("-0.00"), flags=flags),
+                "0")
+            self.assertEqual(
+                app_config.serialize_smart_quotes(
+                    Decimal("999999999999.99"), flags=flags),
+                "999999999999.99")
+            self.assertEqual(
+                app_config.serialize_smart_quotes(Decimal("-1.5"), flags=flags),
+                "-1.5")
+            out = app_config.serialize_smart_quotes(
+                Decimal("123.45"), flags=flags)
+            json.loads(out)
 
     def test_date_datetime_follows_standard_json(self):
         self.assertEqual(
@@ -410,6 +437,64 @@ class TestSmartIndent(unittest.TestCase):
         self.assertEqual(
             app_config.serialize_smart_quotes({"a": "1,000"}, flags=7, indent=None),
             '{"a": 1000}')
+
+
+class TestSmartTypeMatrix(unittest.TestCase):
+    """类型矩阵（契约矩阵抄写，断言来源 docs/conv/dev/smart-quotes-json.md）。
+
+    一行覆盖真实 MySQL 报表的全部列形态（复刻 KPI 场景：DECIMAL 指标列 +
+    INT/DOUBLE + 数字串/科学串/千分位串 + 日期 + 文本 + 空串 + true 串），
+    对 flags 0/1/2/4/7 全组合断言期望输出文本。任何一格的断言错误都代表
+    需求不生效——此测试存在意义是防止「测试钉死实现现状、需求却未生效」。
+    """
+
+    ROW = {
+        "dec": Decimal("123.45"),       # DECIMAL 指标列（用户核心场景）
+        "i": 25,                        # INT
+        "f": 9.99,                      # DOUBLE
+        "nz": "007",                    # 数字字符串（前导零）
+        "sci": "1e5",                   # 科学计数法字符串
+        "thou": "1,000",                # 千分位字符串
+        "d": date(2026, 1, 2),          # 日期
+        "txt": "abc",                   # 文本
+        "empty": "",                    # 空串
+        "t": "true",                    # true 字符串（不得裸出变布尔）
+        "none": None,
+        "b": True,
+    }
+
+    # 契约矩阵：列 × flags → 期望输出文本（与 conv 文档逐字一致）
+    EXPECTED = {
+        0:   {"dec": '"123.45"', "i": "25", "f": "9.99", "nz": '"007"',
+              "sci": '"1e5"', "thou": '"1,000"', "d": '"2026-01-02"',
+              "txt": '"abc"', "empty": '""', "t": '"true"',
+              "none": "null", "b": "true"},
+        1:   {"dec": "123.45", "i": "25", "f": "9.99", "nz": "7",
+              "sci": '"1e5"', "thou": '"1,000"', "d": '"2026-01-02"',
+              "txt": '"abc"', "empty": '""', "t": '"true"',
+              "none": "null", "b": "true"},
+        2:   {"dec": "123.45", "i": "25", "f": "9.99", "nz": '"007"',
+              "sci": "1e5", "thou": '"1,000"', "d": '"2026-01-02"',
+              "txt": '"abc"', "empty": '""', "t": '"true"',
+              "none": "null", "b": "true"},
+        4:   {"dec": "123.45", "i": "25", "f": "9.99", "nz": '"007"',
+              "sci": '"1e5"', "thou": "1000", "d": '"2026-01-02"',
+              "txt": '"abc"', "empty": '""', "t": '"true"',
+              "none": "null", "b": "true"},
+        7:   {"dec": "123.45", "i": "25", "f": "9.99", "nz": "7",
+              "sci": "1e5", "thou": "1000", "d": '"2026-01-02"',
+              "txt": '"abc"', "empty": '""', "t": '"true"',
+              "none": "null", "b": "true"},
+    }
+
+    def test_full_matrix(self):
+        for flags, expected in self.EXPECTED.items():
+            obj = dict(self.ROW)
+            out = app_config.serialize_smart_quotes(obj, flags=flags)
+            for col, exp in expected.items():
+                self.assertIn(f'"{col}": {exp}', out,
+                              f"flags={flags} 列 {col} 期望 {exp} 未命中")
+            json.loads(out)  # 输出永远合法 JSON
 
 
 if __name__ == "__main__":

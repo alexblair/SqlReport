@@ -1185,8 +1185,8 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
             <input type="checkbox" class="smart-quote-cb" value="4" onchange="updateExportSmartFlags()"> 千分位数字
           </label>
           <div style="font-size:11px;color:#64748b;line-height:1.6;margin-top:2px">
-            原生数字恒裸输出；勾选形态的值去引号，未勾选保持带引号；千分位输出去逗号；
-            输出永远合法 JSON（RFC 8259）。
+            原生 int/float 恒裸输出；Decimal 数值列勾选十进制/科学时输出数字；勾选形态的字符串值
+            去引号，未勾选保持带引号；千分位输出去逗号；输出永远合法 JSON（RFC 8259）。
           </div>
         </div>
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
@@ -2768,9 +2768,10 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       千分位数字，如 <code>1,000</code>（输出去逗号数值化：<code>1,000</code> → <code>1000</code>）
     </label>
     <div style="margin-top:6px">
-      开启任一形态时，输出<strong>永远合法 JSON</strong>（RFC 8259）：原生数字（int/float/Decimal）
-      始终输出为数字，无需勾选；含非数字内容的文本（如日期、空串、<code>true</code>/<code>false</code>）
-      永远带引号。模板占位预览在勾选时以真实数据预览为准。
+      开启任一形态时，输出<strong>永远合法 JSON</strong>（RFC 8259）：原生 int/float 始终输出为数字，
+      无需勾选；Decimal 数值列在勾选「十进制数字」或「科学计数法」时输出为数字，未勾选时带引号；
+      含非数字内容的文本（如日期、空串、<code>true</code>/<code>false</code>）永远带引号。
+      模板占位预览在勾选时以真实数据预览为准。
     </div>
   </div>
 
