@@ -1,18 +1,27 @@
 """
-htmlcheck.py — 渲染层 HTML 结构校验工具（纯标准库）。
+htmlcheck.py — 渲染层 HTML 结构校验工具（纯标准库，零外部依赖）。
 
-设计动机（2026-08-10，dianostic-bugs 会话捕获）：
-render.py 编辑态 API Key 管理区块嵌套进主表单，HTML5 解析时内层 form 的开始
-标签被忽略、第一个 </form> 提前闭合主表单，保存按钮被挤出表单外，点击无反应。
-此前所有渲染测试均为字符串级断言（assertIn/正则），无法发现结构类 bug。
+标准化模板（diagnosing-bugs skill 自带，见 templates/README.md）：
+- skill 库是主副本；项目内 tests/htmlcheck.py 是本模板的安装实例
+- 新增/修改技能模板后，项目副本应同步（或直接从 skill 复制）
 
-本模块提供三个纯函数（均为「报告问题」而非「断言」，由调用方决定如何失败）：
+设计动机（2026-08-10，diagnosing-bugs 会话捕获）：
+服务端渲染的编辑表单里，某管理区块（含独立 <form>）被渲染进主表单内部，
+HTML5 解析时内层 form 的开始标签被忽略、第一个 </form> 提前闭合主表单，
+保存按钮被挤出表单外——点击无任何反应。此前所有渲染测试均为字符串级断言
+（assertIn/正则），无法发现这类结构 bug。
+
+本模块提供四个纯函数（均为「报告问题」而非「断言」，由调用方决定如何失败）：
 - form_ranges(html)          : 所有 <form>..</form> 配对区间（栈式）
 - find_nested_forms(html)    : HTML5 语义下嵌套 form（会提前闭合外层主表单）
 - check_tag_balance(html)    : 标签配对/自闭合/合法空标签校验（html.parser）
+- main_form_span(html)       : 以 HTML5 语义定位主表单范围（用于断言按钮归属）
 
-使用方式：tests/test_html_structure.py 对全部 form 渲染函数逐一遍历断言；
-单个渲染函数测试（如 test_api_key_ui）也可直接 import 复用。
+典型接线（测试文件示例见 test-html-structure-template.py）：
+    对项目全部 form 渲染函数逐一遍历，断言：
+    1) find_nested_forms 为空（无嵌套 form）
+    2) check_tag_balance 为空（标签平衡）
+    3) 含保存按钮的表单：保存按钮位于 main_form_span 区间内
 """
 
 import re
@@ -51,7 +60,7 @@ def find_nested_forms(html: str) -> list[dict]:
 
     HTML5 规范禁止 form 嵌套：解析器遇到已在 form 内的 <form> 开始标签时
     忽略之，因此内层 form 的 </form> 会提前闭合外层主表单，其后所有控件
-    （保存按钮等）脱离表单。
+    （保存按钮等）脱离表单、点击无反应。
 
     返回问题列表：[{outer_start, outer_end, nested_start}]
     """
@@ -74,8 +83,8 @@ def check_tag_balance(html: str) -> list[str]:
     - 非空元素缺 </tag>（未闭合）
     - 孤儿 </tag>（无配对开始标签）
     - 空元素（void）携带结束标签（浏览器会忽略，属冗余）
-    自闭合 </> 形式同样处理。属性解析错误（如引号不闭合导致属性吞并）
-    通过 HTMLParser 内部语法容忍——本函数只做配对级校验。
+    属性解析错误（如引号不闭合导致属性吞并）HTMLParser 内部宽容，
+    本函数只做配对级校验。
     """
     problems = []
 
@@ -120,7 +129,6 @@ def check_tag_balance(html: str) -> list[str]:
     checker = _Checker(problems)
     checker.feed(html)
     checker.close()
-    # feed 后 getpos 已到末尾；未闭合的栈
     for tag, pos in checker.stack:
         problems.append(f"标签 <{tag}> 未闭合（位置 {pos}）——可能导致后续内容被吞入")
     return problems
