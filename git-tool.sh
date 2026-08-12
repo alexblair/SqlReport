@@ -25,6 +25,12 @@
 #   --branch <分支>   目标分支（默认当前分支的 upstream）
 #   --token <TOKEN>   GitHub Personal Access Token（私有仓库；优先级 > 环境变量）
 #   --proxy <URL>     HTTP 代理地址，如 http://127.0.0.1:6012
+#   --no-ai           禁用 AI 生成提交信息（改用本地规则归纳）
+#
+# 提交信息自动生成（场景 A）：
+#   1) AI 智能生成：收集暂存区 diff -> 调用 opencode CLI 语义化归纳（需已安装 opencode）
+#   2) 本地规则归纳：文件/函数级统计摘要（零依赖，离线可用，AI 失败自动回退到此）
+#   3) 手动输入：交互式多行录入
 #
 # 认证（优先级：--token > GITHUB_TOKEN > GH_TOKEN）
 # 代理（优先级：--proxy > ALL_PROXY > HTTPS_PROXY > HTTP_PROXY）
@@ -83,6 +89,9 @@ confirm_default() {
 REMOTE="" BRANCH="" TOKEN="" PROXY="" UPSTREAM="" COMMIT_MSG="" TARGET="" ACTION=""
 BEHIND=0 AHEAD=0 DIRTY=0 UNTRACKED=0 UNPUSHED=0
 INJECTED=0 ORIG_REMOTE_URL=""
+AI_MODE=${AI_MODE:-1}
+AI_TIMEOUT=${AI_TIMEOUT:-150}
+AI_DIFF_LIMIT=${AI_DIFF_LIMIT:-400000}
 
 # ---------------------------------------------------------------------------
 # 参数解析
@@ -124,6 +133,9 @@ parse_args() {
             --proxy)
                 [ $# -lt 2 ] && { err "--proxy 需要参数"; exit 1; }
                 PROXY="$2"; shift 2 ;;
+            --no-ai)
+                AI_MODE=0
+                shift ;;
             --help|-h)
                 usage; exit 0 ;;
             -*)
@@ -155,6 +167,7 @@ usage() {
     echo "  --branch <分支>  目标分支（默认当前分支 upstream）"
     echo "  --token <TOKEN>  GitHub Personal Access Token"
     echo "  --proxy <URL>    HTTP 代理地址"
+    echo "  --no-ai          禁用 AI 生成提交信息（改用本地规则归纳）"
     echo ""
     echo "认证环境变量: GITHUB_TOKEN, GH_TOKEN"
     echo "代理环境变量: ALL_PROXY, HTTPS_PROXY, HTTP_PROXY"
@@ -347,14 +360,27 @@ stage_files() {
     git diff --cached --stat 2>/dev/null || true
 }
 
+state_label() {
+    case "${1:0:1}" in
+        M) echo "修改" ;;
+        A) echo "新增" ;;
+        D) echo "删除" ;;
+        R) echo "重命名" ;;
+        C) echo "复制" ;;
+        *) echo "$1" ;;
+    esac
+}
+
 generate_auto_summary() {
     local status_lines total mods adds dels renames untracked
-    local title detail body parts
+    local title detail parts body fstate fpath ofile line
+    local add_lines=0 del_lines=0 a b n
+    local summary=$(git status --short 2>/dev/null || true)
 
-    status_lines=$(git status --short 2>/dev/null || true)
-    if [ -z "$status_lines" ]; then
+    if [ -z "$summary" ]; then
         return 1
     fi
+    status_lines="$summary"
 
     total=$(printf '%s\n' "$status_lines" | grep -c . || true)
     mods=$(printf '%s\n' "$status_lines" | awk '{c=substr($1,1,1); if (c=="M") n++} END {print n+0}')
@@ -363,18 +389,134 @@ generate_auto_summary() {
     renames=$(printf '%s\n' "$status_lines" | awk '{c=substr($1,1,1); if (c=="R") n++} END {print n+0}')
     untracked=$(printf '%s\n' "$status_lines" | awk '{c=substr($1,1,1); if (c=="?") n++} END {print n+0}')
 
+    # 行数统计（暂存区 vs HEAD，staged + unstaged）
+    while IFS=$'\t' read -r a b _; do
+        [[ "$a" =~ ^[0-9]+$ ]] && add_lines=$((add_lines + a))
+        [[ "$b" =~ ^[0-9]+$ ]] && del_lines=$((del_lines + b))
+    done < <(git diff --cached --numstat 2>/dev/null || true)
+
     parts=()
     [ "$mods" -gt 0 ] && parts+=("${mods} 修改")
     [ "$adds" -gt 0 ] && parts+=("${adds} 新增")
     [ "$dels" -gt 0 ] && parts+=("${dels} 删除")
     [ "$renames" -gt 0 ] && parts+=("${renames} 重命名")
     detail=$(IFS=' / '; echo "${parts[*]}")
-    title="更新 ${total} 个文件（${detail}）"
+    if [ "$total" -eq 1 ]; then
+        title="更新 1 个文件（${detail}）"
+    else
+        title="更新 ${total} 个文件（${detail}）"
+    fi
+    [ "$((add_lines + del_lines))" -gt 0 ] && title="${title}，+${add_lines}/-${del_lines} 行"
     [ "$untracked" -gt 0 ] && title="${title}；${untracked} 个未跟踪"
 
-    body=$(printf '%s\n' "$status_lines")
+    body="$title"$'\n\n变更明细：'
+    while IFS=$'\t' read -r fstate fpath ofile _; do
+        [ -z "$fpath" ] && continue
+        case "$fstate" in
+            R*) fpath="$ofile" ;;
+        esac
+        a=0 b=0
+        read -r a b _ < <(git diff --cached --numstat -- "$fpath" 2>/dev/null || true)
+        [[ "$a" =~ ^[0-9]+$ ]] || a="-"
+        [[ "$b" =~ ^[0-9]+$ ]] || b="-"
+        body+=$'\n  '
+        body+="$fpath（$(state_label "$fstate")，+${a}/-${b} 行）"
+        n=0
+        while IFS= read -r line; do
+            [ "$n" -ge 4 ] && break
+            body+=$'\n    · '
+            body+="$line"
+            n=$((n + 1))
+        done < <(git diff --cached -- "$fpath" 2>/dev/null | sed -n 's/^@@.*@@ *//p' | grep -v '^$' | sort -u)
+    done < <(git diff --cached --name-status -M 2>/dev/null || true)
 
-    printf '%s\n\n%s\n' "$title" "$body"
+    if [ "$untracked" -gt 0 ]; then
+        body+=$'\n\n未跟踪文件：'
+        while IFS= read -r line; do
+            body+=$'\n  '
+            body+="${line#\?\? }"
+        done < <(printf '%s\n' "$status_lines" | grep '^??')
+    fi
+
+    printf '%s\n' "$body"
+}
+
+generate_ai_summary() {
+    local prompt_file out_file status_data style_data diff_data rc truncated=0
+
+    if ! command -v opencode >/dev/null 2>&1; then
+        warn "未找到 opencode CLI，AI 生成不可用" >&2
+        return 1
+    fi
+
+    status_data=$(git status --short 2>/dev/null || true)
+    style_data=$(git log --oneline -8 2>/dev/null || true)
+    diff_data=$(git diff --cached 2>/dev/null || true)
+    if [ -z "$diff_data" ]; then
+        warn "暂存区为空，无需生成提交信息" >&2
+        return 1
+    fi
+    if [ "$(printf '%s' "$diff_data" | wc -c)" -gt "$AI_DIFF_LIMIT" ]; then
+        truncated=1
+        diff_data=$(printf '%s' "$diff_data" | head -c "$AI_DIFF_LIMIT")
+    fi
+
+    prompt_file=$(mktemp)
+    out_file=$(mktemp)
+
+    cat > "$prompt_file" <<'PROMPT_HEAD'
+你是资深开发者，为 git 提交撰写简洁准确的简体中文提交信息。
+要求：
+1. 只输出提交信息本体，禁止输出解释、总结、代码块标记或引号
+2. 第一行为标题，不超过 50 字，概括本次变更主题；可采用 feat/fix/refactor/docs/test/chore 前缀，风格对齐下方"最近提交"
+3. 若变更涉及多个方面，空一行后列 2~6 条要点，每条一行，写明具体改动（涉及的模块/函数/行为变化）
+4. 未跟踪文件（??）不在暂存区，不是本次提交内容，正文不要提及
+5. 严禁虚构 diff 中不存在的内容
+PROMPT_HEAD
+
+    {
+        echo ""
+        echo "===== 最近提交（风格参考） ====="
+        printf '%s\n' "$style_data"
+        echo ""
+        echo "===== 变更状态 ====="
+        printf '%s\n' "$status_data"
+        echo ""
+        echo "===== 暂存区 Diff ====="
+        printf '%s\n' "$diff_data"
+        if [ "$truncated" -eq 1 ]; then
+            echo ""
+            echo "[注意：diff 过长已截断，仅分析截断部分]"
+        fi
+    } >> "$prompt_file"
+
+    info "正在调用 opencode 生成提交信息（最长等待 ${AI_TIMEOUT} 秒）..." >&2
+    if timeout "$AI_TIMEOUT" opencode run --pure "$(cat "$prompt_file")" > "$out_file" 2>/dev/null; then
+        :   # AI 生成成功
+    else
+        rc=$?
+        rm -f "$prompt_file" "$out_file"
+        if [ "$rc" -eq 124 ]; then
+            err "AI 生成超时（${AI_TIMEOUT} 秒）"
+        else
+            err "AI 生成失败（exit $rc）"
+        fi
+        return 1
+    fi
+    rm -f "$prompt_file"
+
+    sed -i 's/^```.*$//' "$out_file"
+    COMMIT_MSG=$(cat "$out_file")
+    rm -f "$out_file"
+    COMMIT_MSG=${COMMIT_MSG#"${COMMIT_MSG%%[![:space:]]*}"}
+    COMMIT_MSG=${COMMIT_MSG%"${COMMIT_MSG##*[![:space:]]}"}
+
+    if [ -z "$COMMIT_MSG" ]; then
+        err "AI 生成结果为空"
+        return 1
+    fi
+    COMMIT_MSG=${COMMIT_MSG:0:2000}   # 限制长度，防止异常输出
+    printf '%s\n' "$COMMIT_MSG"
 }
 
 input_message_manual() {
@@ -409,33 +551,75 @@ input_message_manual() {
 }
 
 input_message() {
-    local auto_summary
+    local choice ai_summary local_summary use_msg
 
     separator
-    info "正在自动生成未提交变更摘要..."
-    if auto_summary=$(generate_auto_summary); then
-        separator
-        info "已生成变更摘要（可作提交备注）："
-        echo "$auto_summary" | sed 's/^/  /'
-        echo ""
-        warn "使用此摘要作为提交备注？(y=使用 / n=手动输入 / q=取消)"
-        read -r -p "  选择 [Y/n/q]: " use_auto
-        case "$use_auto" in
-            [Qq]*)
-                info "已取消"
-                exit 0
-                ;;
-            [Nn]*)
-                input_message_manual
-                ;;
-            *)
-                COMMIT_MSG="$auto_summary"
-                ;;
-        esac
+    if [ "$AI_MODE" -eq 1 ]; then
+        info "如何生成提交信息？（回车 = 1）"
+        echo "  1) AI 智能生成（opencode 分析 diff，语义化摘要）"
+        echo "  2) 本地规则归纳（文件/函数级统计，离线快速）"
     else
-        warn "工作区无已暂存变更，请手动输入备注"
-        input_message_manual
+        info "如何生成提交信息？（--no-ai 已禁用 AI，回车 = 2）"
+        echo "  2) 本地规则归纳（文件/函数级统计，离线快速）"
     fi
+    echo "  n) 手动输入"
+    echo "  q) 取消"
+    read -r -p "  选择 [1/2/n/q]: " choice
+
+    case "${choice:-1}" in
+        [Qq]*)
+            info "已取消"
+            exit 0
+            ;;
+        [Nn]*)
+            input_message_manual
+            return
+            ;;
+        2|[Ll]*)
+            if ! local_summary=$(generate_auto_summary); then
+                warn "暂存区为空，请手动输入备注"
+                input_message_manual
+                return
+            fi
+            COMMIT_MSG="$local_summary"
+            ;;
+        *)
+            if [ "$AI_MODE" -eq 0 ]; then
+                if ! local_summary=$(generate_auto_summary); then
+                    warn "暂存区为空，请手动输入备注"
+                    input_message_manual
+                    return
+                fi
+                COMMIT_MSG="$local_summary"
+            elif ! ai_summary=$(generate_ai_summary); then
+                warn "AI 生成失败，自动回退到本地规则归纳"
+                if ! local_summary=$(generate_auto_summary); then
+                    warn "暂存区为空，请手动输入备注"
+                    input_message_manual
+                    return
+                fi
+                COMMIT_MSG="$local_summary"
+            else
+                COMMIT_MSG="$ai_summary"
+            fi
+            ;;
+    esac
+
+    separator
+    info "生成的提交信息："
+    echo "$COMMIT_MSG" | sed 's/^/  /'
+    echo ""
+    warn "使用此提交信息？(y=使用 / n=手动输入 / q=取消)"
+    read -r -p "  选择 [Y/n/q]: " use_msg
+    case "$use_msg" in
+        [Qq]*)
+            info "已取消"
+            exit 0
+            ;;
+        [Nn]*)
+            input_message_manual
+            ;;
+    esac
 }
 
 cmd_commit() {
