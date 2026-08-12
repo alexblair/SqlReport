@@ -372,6 +372,41 @@ class TestExecuteReportRedisDegradation(unittest.TestCase):
         self.assertEqual(result.results[0]["rows"], [(6,)])
 
 
+class TestProcessCacheTtlSemantics(unittest.TestCase):
+    """L1 进程缓存 TTL 语义：固定 300s、与报表 cache_ttl_hours 配置无关（盘问契约）"""
+
+    POOL = {"host": "h", "port": 3306, "user": "u",
+            "password": "p", "database": "d"}
+
+    def setUp(self):
+        report._query_cache.clear()
+
+    @patch("report.redis_cache.redis_available", return_value=True)
+    def test_l1_hit_independent_of_report_ttl(self, mock_avail):
+        """报表 cache_ttl_hours=0/24/168 均不影响 L1 命中判定（L1 TTL 固定 300s）"""
+        report._query_cache.set(1, [{"columns": ["id"], "rows": [(7,)]}],
+                                "SELECT 1", source="mysql")
+        for ttl in (0, 24, 168):
+            cfg = dict(REDIS_REPORT_CFG, cache_ttl_hours=ttl)
+            with patch("report.db.create_mysql_connection") as m_conn, \
+                    patch("report.db.execute_mysql_query") as m_exec:
+                result = report.execute_report(1, "SELECT 1", self.POOL, report=cfg)
+            m_conn.assert_not_called()
+            m_exec.assert_not_called()
+            self.assertEqual(result.results[0]["rows"], [(7,)],
+                             f"cache_ttl_hours={ttl} 不应影响 L1 命中")
+
+    def test_l1_single_slot_latest_sql_wins(self):
+        """单槽语义：同报表最新 SQL 覆盖旧条目，旧 SQL 请求 miss（物理逐出）"""
+        cache = QueryCache()
+        cache.set(1, [{"columns": ["id"], "rows": [(1,)]}], "SELECT A")
+        cache.set(1, [{"columns": ["id"], "rows": [(2,)]}], "SELECT B")
+        fresh = cache.get(1, "SELECT B")
+        self.assertIsNotNone(fresh, "最新 SQL 应命中")
+        self.assertEqual(fresh.results[0]["rows"][0], (2,))
+        self.assertIsNone(cache.get(1, "SELECT A"), "旧 SQL 已被单槽替换逐出")
+
+
 # ---------------------------------------------------------------------------
 # 缺口14：并发 miss 重建（多线程同时 miss 同一报表，结果一致）
 # ---------------------------------------------------------------------------

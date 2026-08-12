@@ -429,6 +429,24 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"),
                          "https://example.com")
 
+    def test_api_preflight_skips_auth(self):
+        """契约：OPTIONS preflight 在鉴权之前返回 204——即使端点配置了 Key 也不要求凭证"""
+        self._create_endpoint_in_db(url_path="/api/preflight-auth",
+                                    api_key="sk-secret",
+                                    allowed_origins="https://example.com")
+        req = urllib.request.Request(f"{BASE_URL}/api/preflight-auth", method="OPTIONS")
+        req.add_header("Origin", "https://example.com")
+        try:
+            resp = urllib.request.urlopen(req)
+        except urllib.error.HTTPError as e:
+            if e.code == 204:
+                resp = e
+            else:
+                raise
+        self.assertEqual(resp.status, 204)
+        self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"),
+                         "https://example.com")
+
     def test_api_cors_wildcard(self):
         """allowed_origins 包含 * 时返回 *"""
         self._create_endpoint_in_db(url_path="/api/cors-star",
@@ -719,6 +737,36 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["data"][0]["name"], "张三")
 
+    def test_api_post_ignores_get_pagination_params(self):
+        """契约：POST 存在时 GET 的 page/page_size/limit 整体被忽略（elif 排他）"""
+        self._create_endpoint_in_db(url_path="/api/post-ignore-get")
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/post-ignore-get?page=1&page_size=5&limit=1",
+            data=json.dumps({"page": 2}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(req)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["page"], 2, "POST page 应生效")
+        self.assertEqual(body["page_size"], 20, "GET page_size=5 应被忽略（默认 20）")
+        self.assertEqual(body["data"], [], "page=2 且默认 20/页 → 第 2 页无数据")
+
+    def test_api_post_limit_overrides_row_limit(self):
+        """契约：POST body limit 键覆盖端点 row_limit（page_size 取 min(默认, limit)）"""
+        self._create_endpoint_in_db(url_path="/api/post-limit", row_limit=0)
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/post-limit",
+            data=json.dumps({"limit": 1}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(req)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["page_size"], 1, "limit=1 应覆盖 row_limit=0 生效")
+        self.assertEqual(len(body["data"]), 1)
+        self.assertEqual(body["total"], 3)
+
     def test_api_fetch_all_post_form(self):
         """POST form-urlencoded fetch_all=1 返回全量"""
         self._create_endpoint_in_db(url_path="/api/full-post-form")
@@ -737,6 +785,14 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
             body = json.loads(resp.read().decode("utf-8"))
             self.assertNotIn("full", body, f"fetch_all={qs} 不应生效")
             self.assertEqual(body["page_size"], 20)
+
+    def test_api_negative_result_index_clamped(self):
+        """契约：result_index 负数（非 -1 哨兵）被 clamp 到 0——200 而非 400（report.py:210）"""
+        self._create_endpoint_in_db(url_path="/api/neg-idx", result_index=-2)
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/neg-idx")
+        self.assertEqual(resp.status, 200)
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 3, "clamp 到 0 后应等同第一个结果集")
 
     def test_api_fetch_all_ignores_row_limit(self):
         """端点配置 row_limit 时 fetch_all 仍返回全量"""

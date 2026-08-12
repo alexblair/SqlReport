@@ -191,6 +191,32 @@ class TestRebuildCacheButton(unittest.TestCase):
         self.assertIn('name="action" value="refresh_cache"', body)
         self.assertNotIn("refresh=1", body)
 
+    def test_get_refresh_query_no_side_effect(self):
+        """PH-08 契约：网页 GET ?refresh=1 静默无效——不清缓存、不绕缓存重建、正常 200
+
+        刷新仅经 POST action=refresh_cache 触发：report.py handle_request 的 GET 分支
+        只解析 page/page_size/sort/dir/filters/cols/result，refresh 参数完全不被读取。
+        """
+        report._query_cache.clear()
+        self.conn.execute(
+            "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
+            "prefer_cache,cache_ttl_hours) VALUES (?,?,?,?,?,?)",
+            ("报表G", "SELECT 1", 20, 1, 1, 24))
+        self.conn.commit()
+        report._query_cache.set(1, [{"columns": ["id"], "rows": [(1,)]}],
+                                "SELECT 1", source="mysql")
+
+        with patch("report.db.execute_mysql_query") as m_exec, \
+                patch("report.db.create_mysql_connection") as m_conn:
+            code, html, _ = report.handle_request(self.conn, "GET",
+                                                  "/report", "id=1&refresh=1")
+        self.assertEqual(code, 200)
+        self.assertIn("报表G", html)
+        cached = report._query_cache.get(1, "SELECT 1")
+        self.assertIsNotNone(cached, "GET refresh=1 不应清除 L1 缓存")
+        m_exec.assert_not_called()
+        m_conn.assert_not_called()
+
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")
     @patch("report.redis_cache.get_redis_manager")

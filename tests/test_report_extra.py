@@ -307,6 +307,34 @@ class TestExecuteReportRedisPaths(unittest.TestCase):
     @patch("report.db.create_mysql_connection")
     @patch("report.redis_cache.get_redis_manager")
     @patch("report.redis_cache.redis_available", return_value=True)
+    def test_preview_writes_process_cache(self, mock_avail, mock_mgr_f,
+                                          mock_conn_f, mock_query):
+        """A1 勘误契约：is_preview 跳过 Redis 写入，但仍写 L1 进程缓存——
+        第二次同 SQL 预览请求直接命中 L1（不再查 MySQL/Redis）"""
+        mock_query.return_value = [{"columns": ["id"], "rows": [(1,)]}]
+        mock_conn_f.return_value = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.key_prefix = "sr"
+        mock_mgr.get_snapshot.return_value = None
+        mock_mgr.acquire_lock.return_value = True
+        mock_mgr_f.return_value = mock_mgr
+
+        report.execute_report(1, "SELECT preview", self.pool, report=self.report_cfg)
+        mock_mgr.set_snapshot.assert_not_called()
+        cached = report._query_cache.get(1, "SELECT preview")
+        self.assertIsNotNone(cached, "预览 SQL 应写入 L1 进程缓存")
+        self.assertEqual(cached.sql_query, "SELECT preview")
+
+        mock_mgr.reset_mock()
+        mock_query.reset_mock()
+        report.execute_report(1, "SELECT preview", self.pool, report=self.report_cfg)
+        self.assertEqual(mock_query.call_count, 0, "第二次同 SQL 预览应命中 L1 不重查 MySQL")
+        self.assertEqual(mock_mgr.get_snapshot.call_count, 0, "L1 命中不应触碰 Redis")
+
+    @patch("report.db.execute_mysql_query")
+    @patch("report.db.create_mysql_connection")
+    @patch("report.redis_cache.get_redis_manager")
+    @patch("report.redis_cache.redis_available", return_value=True)
     def test_saved_sql_writes_redis_snapshot(self, mock_avail, mock_mgr_f,
                                              mock_conn_f, mock_query):
         """4. 非预览（SQL 与保存一致）→ 写 Redis 快照"""

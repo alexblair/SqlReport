@@ -120,6 +120,37 @@ class TestAuditDB(unittest.TestCase):
         )
         self.assertGreater(rid, 0)
 
+    def test_operation_type_no_ip_address(self):
+        """契约：operation 类事件不记录 IP（ip_address 为 NULL）；web_access/api 才记录"""
+        rid = insert_audit_log(
+            self.conn,
+            type="operation",
+            session_user="admin",
+            action="create_pool",
+            entity_type="pool",
+            entity_name="p1",
+            entity_id=1,
+        )
+        ip = self.conn.execute(
+            "SELECT ip_address FROM audit_logs WHERE id=?", (rid,)).fetchone()[0]
+        self.assertIsNone(ip, "operation 事件不应记录 IP")
+
+        rid2 = insert_audit_log(
+            self.conn,
+            type="web_access",
+            session_user="admin",
+            action="page_view",
+            entity_type="page",
+            entity_name="/config",
+            http_method="GET",
+            http_path="/config",
+            http_status=200,
+            ip_address="127.0.0.1",
+        )
+        ip2 = self.conn.execute(
+            "SELECT ip_address FROM audit_logs WHERE id=?", (rid2,)).fetchone()[0]
+        self.assertEqual(ip2, "127.0.0.1", "web_access 事件应记录 IP")
+
     def test_count_all(self):
         """无筛选条件时 count 应返回总行数。"""
         self._insert_sample()
