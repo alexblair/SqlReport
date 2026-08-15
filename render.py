@@ -524,6 +524,7 @@ def render_page_footer() -> str:
 FILTER_OPS = [
     ("nofilter", "不筛选", "不筛选"),
     ("contains", "包含", "包含"),
+    ("notcontains", "不包含", "不包含"),
     ("eq",       "等于",   "="),
     ("neq",      "不等于", "≠"),
     ("gt",       "大于",   ">"),

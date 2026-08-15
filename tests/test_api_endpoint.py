@@ -679,6 +679,27 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["data"][0]["name"], "张三")
 
+    def test_api_filter_notcontains(self):
+        """预设筛选 notcontains 子串取反（name 不含"张" → 李四、王五）"""
+        self._create_endpoint_in_db(
+            url_path="/api/notcontains-ep",
+            filters='[{"col":"name","op":"notcontains","val":"张"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/notcontains-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 2)
+        names = sorted(row["name"] for row in body["data"])
+        self.assertEqual(names, ["李四", "王五"])
+
+    def test_api_filter_notcontains_multivalue(self):
+        """预设筛选 notcontains 多值（name 不含"张三"且不含"李四" → 王五）"""
+        self._create_endpoint_in_db(
+            url_path="/api/notcontains-mv-ep",
+            filters='[{"col":"name","op":"notcontains","val":"张三,李四"}]')
+        resp = urllib.request.urlopen(f"{BASE_URL}/api/notcontains-mv-ep")
+        body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["data"][0]["name"], "王五")
+
     def test_api_filter_multivalue_eq_in(self):
         """预设筛选 val 多值 eq = IN 语义（active,inactive → 全部）"""
         self._create_endpoint_in_db(

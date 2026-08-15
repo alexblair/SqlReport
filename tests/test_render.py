@@ -223,6 +223,14 @@ class TestFilterOpsConstants(unittest.TestCase):
         for code, _, _ in FILTER_OPS:
             self.assertIn(code, _OP_MAP)
 
+    def test_notcontains_in_ops_and_map(self):
+        """notcontains 操作符存在于 FILTER_OPS 且 _OP_MAP 派生对应 label/short"""
+        codes = [code for code, _, _ in FILTER_OPS]
+        self.assertIn("notcontains", codes)
+        self.assertEqual(_OP_MAP["notcontains"], ("不包含", "不包含"))
+        # notcontains 紧邻 contains（语义取反，交互就近）
+        self.assertEqual(codes.index("notcontains"), codes.index("contains") + 1)
+
 
 # ===================================================================
 # URL 参数工具测试
@@ -276,6 +284,20 @@ class TestBuildFilterParams(unittest.TestCase):
         result = build_filter_params([("name", "contains", "foo")])
         self.assertIn("f_name=foo", result)
         self.assertNotIn("op_name", result)
+
+    def test_notcontains_roundtrip(self):
+        """notcontains 非默认操作符 → 编码 op_ 参数（URL 往返可还原）"""
+        result = build_filter_params([("name", "notcontains", "临时")])
+        self.assertIn("f_name=", result)
+        self.assertIn(urllib.parse.quote("临时"), result)
+        self.assertIn("op_name=notcontains", result)
+
+    def test_notcontains_hidden_input(self):
+        """notcontains 非默认 → 生成 op_ 隐藏 input"""
+        result = filter_hidden_inputs([("name", "notcontains", "临时")])
+        self.assertIn('name="f_name"', result)
+        self.assertIn('name="op_name"', result)
+        self.assertIn('value="notcontains"', result)
 
     def test_skip_col(self):
         """skip_col 跳过指定列"""
@@ -860,6 +882,22 @@ class TestBuildTableHeaderHtml(unittest.TestCase):
         self.assertIn("filter-op", result)
         self.assertIn("contains", result)
         self.assertIn("不筛选", result)
+
+    def test_filter_dropdown_has_notcontains(self):
+        """下拉框包含不包含操作符选项（值=notcontains，标签=不包含）"""
+        cols = ["name"]
+        result = build_table_header_html(cols, cols, [], [], 1, 20, "", "")
+        self.assertIn('value="notcontains"', result)
+        self.assertIn(">不包含<", result)
+
+    def test_filter_notcontains_selected(self):
+        """当前 notcontains 筛选在下拉中为选中态且输入框可见"""
+        cols = ["name"]
+        result = build_table_header_html(cols, cols, [], [("name", "notcontains", "临时")], 1, 20, "", "")
+        self.assertIn('<option value="notcontains" selected', result)
+        self.assertIn('value="临时"', result)
+        # notcontains 非无值操作符 → 输入框不禁用
+        self.assertNotIn('name="f_name" disabled', result)
 
     def test_filter_input_present(self):
         """每列包含筛选输入框"""

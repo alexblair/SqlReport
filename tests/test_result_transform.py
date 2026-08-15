@@ -397,6 +397,62 @@ class TestFilterRowsWildcardMultivalue(unittest.TestCase):
         )
         self.assertEqual([r[0] for r in result], [1, 2])
 
+    def test_notcontains_plain_substring(self):
+        """✅ Positive: notcontains 子串取反（排除含"北京"的行，保留含"北京市"）"""
+        rows = [(1, "北京"), (2, "北京市"), (3, "上海")]
+        columns = ["id", "city"]
+        result = filter_rows(rows, columns, [("city", "notcontains", "北京")])
+        self.assertEqual([r[0] for r in result], [3])
+
+    def test_notcontains_wildcard(self):
+        """✅ Positive: notcontains 通配（张* → 排除含"张开头子串"的行）"""
+        rows = [(1, "张飞"), (2, "刘备"), (3, "小张"), (4, "张")]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", "张*")])
+        self.assertEqual([r[0] for r in result], [2])
+
+    def test_notcontains_multivalue_not_or(self):
+        """✅ Positive: notcontains 多值 NOT OR（排除含北京或上海任一的行）"""
+        rows = [(1, "北京"), (2, "上海"), (3, "广州"), (4, "北京上海")]
+        columns = ["id", "city"]
+        result = filter_rows(rows, columns, [("city", "notcontains", "北京,上海")])
+        self.assertEqual([r[0] for r in result], [3])
+
+    def test_notcontains_case_insensitive(self):
+        """✅ Positive: notcontains 大小写不敏感（排除含 abc 大小写变体）"""
+        rows = [(1, "xxabcxx"), (2, "xxABCxx"), (3, "xxabxx")]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", "abc")])
+        self.assertEqual([r[0] for r in result], [3])
+
+    def test_notcontains_none_row_value(self):
+        """✅ Positive: None 行值视为空串 → 不含任何非空模式 → 保留"""
+        rows = [(1, None), (2, "张三")]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", "张*")])
+        self.assertEqual([r[0] for r in result], [1])
+
+    def test_notcontains_empty_value_matches_none(self):
+        """✅ Positive: notcontains 空串 → 不含空串 = 排除所有行（与 contains 对称）"""
+        rows = [(1, "a"), (2, "b"), (3, None)]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", "")])
+        self.assertEqual(len(result), 0)
+
+    def test_notcontains_escaped_star_literal(self):
+        """✅ Positive: notcontains 转义 \\* 字面星号取反（排除含 a*b 的行）"""
+        rows = [(1, "a*b"), (2, "axb"), (3, "ab")]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", r"a\*b")])
+        self.assertEqual([r[0] for r in result], [2, 3])
+
+    def test_notcontains_all_empty_multivalue_ignored(self):
+        """✅ Positive: 全空多值（" , "）→ 条件忽略，全部保留"""
+        rows = [(1, "a"), (2, "b")]
+        columns = ["id", "name"]
+        result = filter_rows(rows, columns, [("name", "notcontains", " , ")])
+        self.assertEqual(len(result), 2)
+
 
 # ===================================================================
 # 2.5 匹配表达式解析（通配符 + 多值 + 转义）

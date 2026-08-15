@@ -73,7 +73,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **Paginated Tables** | In-memory pagination with total pages and page jump |
 | **Sticky Table Header** | Column header stays fixed at the top of the table container while scrolling long result sets, so column names remain visible |
 | **Multi-column Sorting** | Click column headers, multi-column combo sort with management panel |
-| **Multi-field Filtering** | 9 operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty); values support `*` wildcard, comma multi-value (OR), `\` escaping — one shared syntax across report/export/API/audit pages |
+| **Multi-field Filtering** | 10 operators (contains/not-contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty); values support `*` wildcard, comma multi-value (OR), `\` escaping — one shared syntax across report/export/API/audit pages |
 | **Column Settings** | Drag-and-drop column reorder, show/hide fields |
 | **CSV Export** | Full dataset export with UTF-8 BOM for Excel compatibility |
 | **JSON Export** | JSON format export with optional smart no-quotes panel (decimal numbers / scientific notation / thousands-separated numbers) — output always stays valid JSON |
@@ -514,7 +514,7 @@ Report list page highlights:
 - Auto-runs the SQL and caches the result (with cache timestamp and rebuild button)
 - Paginated browsing (10/20/50/100/200 rows per page)
 - Multi-column sorting — click column headers ▲▼ arrows, combo sort with a management panel (drag/add/remove)
-- Multi-field filtering — per-column operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty), multiple columns at once; filter values support a **unified match expression**: `*` wildcard (any position/repetition), comma multi-value (OR between segments), `\` escaping (`\*`/`\,`/`\\` match literally, for data containing those characters); only contains/eq/neq participate in parsing, multiple column conditions combine with AND; the report page, export, API presets and audit-page keyword share the same syntax (help popup `?` for examples); in the audit page keyword, `%`/`_` match literally
+- Multi-field filtering — per-column operators (contains/not-contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty), multiple columns at once; filter values support a **unified match expression**: `*` wildcard (any position/repetition), comma multi-value (OR between segments), `\` escaping (`\*`/`\,`/`\\` match literally, for data containing those characters); only contains/not-contains/eq/neq participate in parsing, multiple column conditions combine with AND; the report page, export, API presets and audit-page keyword share the same syntax (help popup `?` for examples); in the audit page keyword, `%`/`_` match literally
 - Column settings panel — drag to reorder columns, check to show/hide, select all/none
 - Memo display — collapsible report memo
 - [Edit] button: opens the report's config edit page in a new window

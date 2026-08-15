@@ -18,9 +18,9 @@ class TestFilterHelpContent(unittest.TestCase):
     """帮助内容单一来源与语义一致性"""
 
     def test_content_structure(self):
-        """结构化内容：4 分区（标题/说明/案例表）+ 要点列表"""
+        """结构化内容：5 分区（标题/说明/案例表）+ 要点列表"""
         content = filter_help_content()
-        self.assertEqual(len(content["sections"]), 4)
+        self.assertEqual(len(content["sections"]), 5)
         for sec in content["sections"]:
             self.assertTrue(sec["title"])
             self.assertTrue(sec["desc"])
@@ -50,7 +50,7 @@ class TestFilterHelpContent(unittest.TestCase):
         src = open(src_path, encoding="utf-8").read()
         html = render_filter_help()
         self.assertEqual(src.count("想筛选"), 1)   # 仅渲染代码里的统一表头
-        self.assertEqual(html.count("想筛选"), 4)  # 四个分区表头各一次
+        self.assertEqual(html.count("想筛选"), 5)  # 五个分区表头各一次
         self.assertEqual(html.count("筛选语法说明"), 2)  # 按钮 title + 弹窗标题
 
     def test_copy_matches_implementation_semantics(self):
@@ -64,6 +64,7 @@ class TestFilterHelpContent(unittest.TestCase):
         self.assertIn("或", html)
         self.assertIn("且", html)
         self.assertIn("包含", html)
+        self.assertIn("不包含", html)
 
 
 class TestFilterHelpRender(unittest.TestCase):

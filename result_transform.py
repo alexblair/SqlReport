@@ -158,6 +158,7 @@ def filter_rows(rows: list[tuple], columns: list[str],
     filters: list[(col, op, val), ...]
     操作符说明：
       contains  — 不区分大小写的 LIKE '%val%'
+      notcontains — contains 的取反：不区分大小写的 NOT LIKE '%val%'
       eq        — 字符串精确相等
       neq       — 字符串不相等
       gt / lt / gte / lte — 数值比较（尝试转 float）
@@ -172,15 +173,21 @@ def filter_rows(rows: list[tuple], columns: list[str],
             continue
         col_idx = columns.index(col_name)
 
-        if op in ("contains", "eq", "neq"):
+        if op in ("contains", "notcontains", "eq", "neq"):
             segments = parse_filter_expr(q)
             if not segments:
                 continue
-            regexes = _compile_segments(segments, ignorecase=(op == "contains"))
+            regexes = _compile_segments(
+                segments, ignorecase=(op in ("contains", "notcontains")))
             if op == "contains":
                 result = [
                     r for r in result
                     if any(rx.search(_cell_str(r[col_idx])) for rx in regexes)
+                ]
+            elif op == "notcontains":
+                result = [
+                    r for r in result
+                    if not any(rx.search(_cell_str(r[col_idx])) for rx in regexes)
                 ]
             elif op == "eq":
                 result = [
