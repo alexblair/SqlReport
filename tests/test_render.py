@@ -67,6 +67,8 @@ from render import (
     build_api_endpoints_list_html,
     # API URL 折叠区
     build_api_urls_section_html,
+    # 公共 CSS 常量
+    _COMMON_CSS,
 )
 
 
@@ -2164,3 +2166,43 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
     def test_empty_returns_empty(self):
         """无 API 端点返回空字符串。"""
         self.assertEqual(build_api_urls_section_html([], "http://x"), "")
+
+
+class TestStickyTableHeaderCss(unittest.TestCase):
+    """报表表头悬浮（sticky thead）CSS 契约测试。
+
+    需求：报表数据超过一屏时表头吸附在容器顶部，向下滚动仍可见列名。
+    实现位置：_COMMON_CSS 的 th（position: sticky）与
+    .table-wrap（overflow-y + max-height 限高触发滚动容器）。
+    """
+
+    def test_th_is_sticky(self):
+        """th 启用 position:sticky 且 top:0（吸附容器顶部）。"""
+        css = _COMMON_CSS
+        self.assertIn("position: sticky", css)
+        self.assertIn("top: 0", css)
+        self.assertIn("z-index: 5", css)
+
+    def test_th_sticky_inside_th_rule(self):
+        """sticky 规则位于 th 选择器块内（非全局裸规则）。"""
+        css = _COMMON_CSS
+        th_rule = css[css.index("th {"):]
+        th_block_end = th_rule.index("}")
+        th_block = th_rule[:th_block_end]
+        self.assertIn("position: sticky", th_block)
+
+    def test_table_wrap_scrollable(self):
+        """table-wrap 垂直可滚 + max-height 限高（触发容器内滚动）。"""
+        css = _COMMON_CSS
+        self.assertIn("overflow-y: auto", css)
+        self.assertIn("max-height: calc(100vh - 130px)", css)
+
+    def test_table_wrap_rule_combined(self):
+        """table-wrap 单规则内同时具备横向/垂直滚动与限高。"""
+        css = _COMMON_CSS
+        tw_rule = css[css.index(".table-wrap {"):]
+        tw_block_end = tw_rule.index("}")
+        tw_block = tw_rule[:tw_block_end]
+        self.assertIn("overflow-x: auto", tw_block)
+        self.assertIn("overflow-y: auto", tw_block)
+        self.assertIn("max-height", tw_block)

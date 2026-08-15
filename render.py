@@ -89,11 +89,12 @@ th {
   background: #f8fafc; color: #475569; font-weight: 600; font-size: 13px;
   text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 14px;
   border-bottom: 2px solid #e2e8f0; text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 5;
 }
 td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; text-align: left; }
 tbody tr:hover { background: #f8fafc; }
 tbody tr:last-child td { border-bottom: none; }
-.table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid #e2e8f0; border-radius: 8px; }
 .flash {
   padding: 14px 18px; border-radius: 8px; margin-bottom: 16px;
   font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
@@ -364,7 +365,9 @@ function highlight(txt) {
 _SQL_FORMATTER_JS = r"""
 function fmt(t) {
   if (!t || !t.trim()) return t;
-  var s = t.replace(/\s*;\s*$/,""), lines = [], indent = 0, clauseCount = 0;
+  var s = t.replace(/\s*;\s*$/,""), toks = [], lines = [], indent = 0, clauseCount = 0;
+  s = s.replace(/(--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"|`(?:[^`\\]|\\.|``)*`)/g,
+    function(m) { toks.push(m); return "\u0001" + (toks.length - 1) + "\u0001"; });
   var parts = s.split(/\b(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|CROSS\s+JOIN|FULL\s+JOIN|NATURAL\s+JOIN|INSERT\s+INTO|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|GROUP\s+BY|ORDER\s+BY|UNION\s+ALL|SELECT|FROM|WHERE|JOIN|ON|AND|OR|GROUP|BY|HAVING|ORDER|LIMIT|OFFSET|UNION|VALUES|SET|CASE|WHEN|THEN|ELSE|END|INTO)\b/i);
   for (var i = 0; i < (parts ? parts.length : 0); i++) {
     var p = parts[i];
@@ -396,7 +399,9 @@ function fmt(t) {
     else if (u === "INTO") { lines.push(pad() + "INTO"); indent = 1; }
     else { lines.push(pad() + w); }
   }
-  return lines.join("\n") + ";";
+  return lines.map(function(l) {
+    return l.replace(/\u0001(\d+)\u0001/g, function(m, n) { return toks[+n]; });
+  }).join("\n") + ";";
 }
 """
 

@@ -71,6 +71,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **Batch Operations** | Batch delete reports, batch update cache/pool/category, select all/deselect per category |
 | **SQL Formatter & Preview** | One-click SQL formatting, toggle syntax-highlighted preview, live-preview unsaved SQL |
 | **Paginated Tables** | In-memory pagination with total pages and page jump |
+| **Sticky Table Header** | Column header stays fixed at the top of the table container while scrolling long result sets, so column names remain visible |
 | **Multi-column Sorting** | Click column headers, multi-column combo sort with management panel |
 | **Multi-field Filtering** | 9 operators (contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty); values support `*` wildcard, comma multi-value (OR), `\` escaping — one shared syntax across report/export/API/audit pages |
 | **Column Settings** | Drag-and-drop column reorder, show/hide fields |
