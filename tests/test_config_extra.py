@@ -34,6 +34,7 @@ from unittest.mock import patch, MagicMock
 import config
 import db
 import auth
+import render
 from tests.test_base import BaseConfigTest
 
 
@@ -1261,6 +1262,136 @@ class TestCategoriesPage(BaseConfigTest):
         body = config.render_overview(self.conn)
         self.assertIn("分类管理", body)
         self.assertIn("href=\"/config/categories\"", body)
+
+
+class TestConfigFormWideLayoutCSS(unittest.TestCase):
+    """配置表单宽屏布局（ui-form-wide-layout）CSS 规则契约
+
+    断言真源：spec .scratch/archive/ui-form-wide-layout/spec.md 行为契约矩阵 A。
+    """
+
+    def test_form_max_width_raised_to_1200(self):
+        """config-form 560px 窄宽约束应解除为 max-width 1200px"""
+        self.assertIn("form.config-form { max-width: 1200px; }", config._CONFIG_EXTRA_CSS)
+
+    def test_no_560px_pin_on_config_form(self):
+        """560px 钉死不得残留"""
+        self.assertNotIn("max-width: 560px", config._CONFIG_EXTRA_CSS)
+
+    def test_wide_screen_grid_media_query(self):
+        """宽屏（>=1100px）应启用 2 列网格"""
+        css = config._CONFIG_EXTRA_CSS
+        self.assertIn("@media (min-width: 1100px)", css)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", css)
+
+    def test_span_full_rule(self):
+        """span-full 应跨 2 列整行"""
+        self.assertIn(".span-full { grid-column: 1 / -1; }", config._CONFIG_EXTRA_CSS)
+
+
+class TestReportFormSpanFull(unittest.TestCase):
+    """报表表单 span-full 分配（spec 矩阵 B 报表行）
+
+    断言真源：spec .scratch/archive/ui-form-wide-layout/spec.md 行为契约矩阵 B。
+    """
+
+    def _form_html(self, sql_has_write=True, allow_write=0):
+        return config._report_form_html(
+            "新增报表", "/config/reports/add", "", "SELECT 1", "50",
+            "", "", "", "", "", result_names_val="",
+            is_edit=False, prefer_cache=1, cache_ttl_hours=0,
+            allow_write=allow_write, sql_has_write=sql_has_write,
+            allow_all_output=0, max_rows=100000)
+
+    def test_long_fields_span_full(self):
+        """SQL/备注/结果名称应跨整行"""
+        html = self._form_html()
+        self.assertIn('<label class="span-full">SQL 查询语句:', html)
+        self.assertIn('<label class="span-full">备注（非必填）:', html)
+        self.assertIn('<label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:', html)
+
+    def test_write_switch_span_full_with_warning(self):
+        """允许执行写操作 label 与警示框均应跨整行"""
+        html = self._form_html(sql_has_write=True, allow_write=0)
+        self.assertIn('<label class="span-full" style="display:flex', html)
+        self.assertIn('class="flash-warn span-full"', html)
+
+    def test_form_actions_span_full(self):
+        """操作按钮行应跨整行"""
+        html = self._form_html()
+        self.assertIn('<div class="form-actions span-full">', html)
+
+    def test_short_fields_have_no_span_full(self):
+        """报表名称/分页大小等短字段不应跨整行"""
+        html = self._form_html()
+        self.assertNotIn('<label class="span-full">报表名称', html)
+        self.assertNotIn('<label class="span-full">默认分页大小', html)
+        self.assertNotIn('<label class="span-full">使用的连接池', html)
+        self.assertNotIn('<label class="span-full">报表分类', html)
+        self.assertNotIn('<label class="span-full">启用 Redis 缓存', html)
+        self.assertNotIn('<label class="span-full">缓存 TTL（小时）', html)
+        self.assertNotIn('<label class="span-full">全量输出截断上限（行）', html)
+        self.assertNotIn('<label class="span-full">允许全部输出', html)
+
+
+class TestSimpleFormsSpanFull(BaseConfigTest):
+    """连接池/用户/分类表单 span-full 分配（spec 矩阵 B 对应行）
+
+    断言真源：spec .scratch/archive/ui-form-wide-layout/spec.md 行为契约矩阵 B。
+    """
+
+    def test_pool_form_actions_span_full(self):
+        html = render.build_pool_form_html(None)
+        self.assertIn('<div class="form-actions span-full">', html)
+
+    def test_pool_form_fields_no_span_full(self):
+        html = render.build_pool_form_html(None)
+        for name in ("主机地址", "端口", "用户名", "密码", "数据库"):
+            self.assertNotIn(f'<label class="span-full">{name}', html)
+
+    def test_user_form_actions_span_full(self):
+        html = render.build_user_form_html(None)
+        self.assertIn('<div class="form-actions span-full">', html)
+
+    def test_category_form_actions_span_full(self):
+        html = config.render_category_form_page(self.conn)
+        self.assertIn('<div class="form-actions span-full">', html)
+
+    def test_category_form_fields_no_span_full(self):
+        html = config.render_category_form_page(self.conn)
+        self.assertNotIn('<label class="span-full">分类名称', html)
+        self.assertNotIn('<label class="span-full">父分类', html)
+
+
+class TestEndpointFormSpanFull(unittest.TestCase):
+    """API 端点表单 span-full 分配（ui-form-wide-layout 矩阵 B）"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = render.build_api_endpoint_form_html(
+            1, "测试报表", endpoint=None, flash=None,
+            result_names_list=[], result_count=1,
+            endpoint_id=None, is_edit=False, api_keys=[])
+
+    def test_short_fields_have_no_span_full(self):
+        """接口名称/输出格式/最大行数为短字段，不得 span-full"""
+        for pat in ["接口名称", "输出格式", "最大行数"]:
+            idx = self.html.find(pat)
+            self.assertNotIn("span-full", self.html[max(0, idx - 80):idx], pat)
+
+    def test_long_fields_span_full(self):
+        """说明/URL 路径/规则 JSON/CORS 应跨整行"""
+        for pat in ["接口说明", "URL 路径", "规则 JSON", "CORS 允许来源"]:
+            idx = self.html.find(pat)
+            self.assertIn("span-full", self.html[max(0, idx - 80):idx], pat)
+
+    def test_block_sections_span_full(self):
+        """完整/全量/静态 URL 行、静态缓存提示、智能去引号面板、结果模式、模板区块、form-actions 均 span-full"""
+        for token in ["id=\"fetch-all-url-row\" class=\"span-full\"",
+                      "id=\"static-url-row\" class=\"span-full\"",
+                      "id=\"template-section\" class=\"span-full\"",
+                      "class=\"form-actions span-full\""]:
+            self.assertIn(token, self.html, token)
 
 
 if __name__ == "__main__":

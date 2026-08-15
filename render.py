@@ -1284,7 +1284,7 @@ def build_field_settings_panel_html(all_columns, display_columns) -> str:
         '<button type="button" onclick="document.getElementById(\'fieldSettingsPanel\').style.display=\'none\'" '
         'class="btn-mini btn-mini-outline-light">收起</button>'
         '</div>'
-        '<div id="fieldList" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">'
+        '<div id="fieldList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px;max-height:400px;overflow-y:auto">'
         + "".join(field_settings_items) +
         '</div>'
         '<div style="display:flex;gap:8px;margin-top:12px">'
@@ -1558,7 +1558,7 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
   <label>用户名: <input type="text" name="user" value="{user}" required></label>
   <label>密码: <input type="password" name="password" value="{password}" required></label>
   <label>数据库: <input type="text" name="database" value="{database}" required></label>
-  <div class="form-actions">
+  <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
     <a href="/config" class="cancel">取消</a>
   </div>
@@ -1583,7 +1583,7 @@ def build_user_form_html(user: dict = None, is_edit: bool = None) -> str:
 <form method="post" action="{action_url}" class="config-form">
   <label>用户名: <input type="text" name="username" value="{username}" required></label>
   <label>密码: <input type="password" name="password" value="" {pw_required}>{pw_hint}</label>
-  <div class="form-actions">
+  <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
     <a href="/config" class="cancel">取消</a>
   </div>
@@ -2242,7 +2242,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
                         f'<span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>'
                         f'</div>')
 
-    return f'''<div class="result-mode-section" style="margin-bottom:16px;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+    return f'''<div class="result-mode-section span-full" style="margin-bottom:16px;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
   <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">结果集输出模式</div>
   <div style="margin-bottom:8px;font-size:13px;color:#475569">
     该报表的 SQL 包含 <strong>{result_count}</strong> 段 SELECT，返回 <strong>{result_count}</strong> 个结果集
@@ -2615,7 +2615,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
             api_keys or [], report_id, endpoint_id)
     else:
         api_key_block_html = (
-            '<div class="flash-warn" style="margin-bottom:16px;padding:10px 14px;'
+            '<div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;'
             'border-radius:8px;border:1px solid #fde68a;font-size:13px">'
             '<strong>🔑 API Key：</strong>保存后将自动生成 API Key（名称=接口名称），'
             '可在编辑页「API Key 管理」区块查看、复制与禁用。</div>'
@@ -2632,11 +2632,11 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <label>接口名称: <input type="text" name="name" value="{name}" required
     placeholder="例如: 客户数据 API"></label>
 
-  <label>接口说明（可选，仅页面展示，不进入 API 输出）:
+  <label class="span-full">接口说明（可选，仅页面展示，不进入 API 输出）:
     <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持换行…" rows="4" style="min-height:80px;font-family:inherit">{description}</textarea>
   </label>
 
-  <label>URL 路径:
+  <label class="span-full">URL 路径:
     <div style="display:flex;align-items:center;gap:0;margin-top:4px">
       <span style="padding:6px 12px;background:#e2e8f0;border:1px solid #cbd5e1;border-right:none;border-radius:6px 0 0 6px;font-family:monospace;font-size:14px;color:#475569;white-space:nowrap;line-height:1.5">/api/</span>
       <input type="text" name="url_path" value="{url_path_short}" required
@@ -2646,12 +2646,12 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         oninput="updateFullUrl()">
     </div>
   </label>
-  <div style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <div class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-weight:500;color:#64748b">完整 URL:</span>
     <code id="full-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('full-url-text')" class="btn-mini btn-mini-outline">复制</button>
   </div>
-  <div id="fetch-all-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if allow_fetch_all_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
+  <div id="fetch-all-url-row" class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if allow_fetch_all_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-weight:500;color:#64748b">全量 URL:</span>
     <code id="fetch-all-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('fetch-all-url-text')" class="btn-mini btn-mini-outline">复制</button>
@@ -2735,28 +2735,28 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <select name="output_format" onchange="updateStaticCacheState();updateTemplateState()">{format_opts}</select>
   </label>
 
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
     <input type="hidden" name="static_cache" value="0">
     <input type="checkbox" name="static_cache" value="1"{static_cache_checked} id="static-cache-checkbox"
       onchange="updateStaticUrl()">
     <span style="font-weight:600">静态文件缓存（.json 变体）</span>
     <span id="static-cache-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
   </label>
-  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
     开启后，调用方在端点 URL 后追加 <code>.json</code> 即可访问静态化输出（全量数据 + meta 节点），
     命中时零查询零计算；缓存失效自动回退并重建。TTL 与报表缓存配置（cache_ttl_hours）一致。
   </div>
-  <div id="static-url-row" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if static_cache_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
+  <div id="static-url-row" class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if static_cache_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-weight:500;color:#64748b">静态 URL:</span>
     <code id="static-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('static-url-text')" class="btn-mini btn-mini-outline">复制</button>
   </div>
 
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
     <span style="font-weight:600">智能去引号</span>
     <span id="json-no-quotes-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
   </label>
-  <div style="margin:6px 0 0 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full" style="margin:6px 0 0 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
     <input type="hidden" name="smart_quote_flags" id="smart-quote-flags-input" value="{smart_flags}">
     勾选以下形态时，JSON 输出中对应字符串值<strong>去掉引号</strong>（未勾选形态保持带引号）：
     <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:400">
@@ -2784,7 +2784,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
-  <div id="template-section" style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+  <div id="template-section" class="span-full" style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
     <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">JSON 输出模板（可选）</div>
     <label style="font-size:13px;color:#475569;display:block">
       <textarea name="json_template" id="json-template-input" rows="8"
@@ -2855,7 +2855,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   {_API_TEMPLATE_JS}
 
-  <div class="flash-warn" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
+  <div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
     <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
     展开「<strong>当前规则</strong>」折叠区，点击<strong>复制</strong>按钮即可获取 JSON 格式的配置，
     直接粘贴到下方的 JSON 文本框中。
@@ -2864,7 +2864,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     </div>
   </div>
 
-  <label>规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
+  <label class="span-full">规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
     <textarea name="rule_json" class="sql-textarea"
       placeholder='{{"filters":[{{"col":"status","op":"eq","val":"active"}}],"sorts":[{{"col":"created_at","dir":"desc"}}],"columns":"id,name,email"}}'
       rows="5" style="min-height:100px;font-family:monospace">{_escape(rule_json)}</textarea></label>
@@ -2872,12 +2872,12 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <label>最大行数（0=不限制）:
     <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
 
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
     <input type="hidden" name="allow_fetch_all" value="0">
     <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked} onchange="updateFetchAllUrl()">
     <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
   </label>
-  <div style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
     <strong>使用示例：</strong>开启后，调用方在请求中携带 <code>fetch_all</code> 参数即可一次获取全部数据（不做翻页）：
     <div style="font-family:monospace;font-size:12px;margin-top:4px">
       GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
@@ -2888,17 +2888,17 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   {api_key_block_html}
 
-  <label>CORS 允许来源（逗号分隔，留空=不设 CORS）:
+  <label class="span-full">CORS 允许来源（逗号分隔，留空=不设 CORS）:
     <input type="text" name="allowed_origins" value="{allowed_origins}"
       placeholder="例如: https://example.com,http://localhost:3000"></label>
 
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">
     <input type="hidden" name="enabled" value="0">
     <input type="checkbox" name="enabled" value="1"{enabled_checked}>
     <span style="font-weight:600">启用</span>
   </label>
 
-  <div class="form-actions">
+  <div class="form-actions span-full">
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
     <button type="submit" name="action" value="save_close" class="btn btn-outline">保存并关闭</button>
     <a href="/config/reports/{report_id}/edit" class="cancel">关闭</a>

@@ -1151,6 +1151,13 @@ class TestBuildFieldSettingsPanelHtml(unittest.TestCase):
         self.assertIn("drag-handle", result)
         self.assertIn("⠿", result)
 
+    def test_field_list_responsive_grid(self):
+        """fieldList 应为响应式多列网格（ui-form-wide-layout 矩阵 C）"""
+        result = build_field_settings_panel_html(["id", "name"], ["id", "name"])
+        self.assertIn('id="fieldList"', result)
+        self.assertIn("grid-template-columns:repeat(auto-fill,minmax(300px,1fr))", result)
+        self.assertNotIn("flex-direction:column", result)
+
 
 # ===================================================================
 # 排序设置面板测试

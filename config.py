@@ -149,7 +149,18 @@ _CONFIG_EXTRA_CSS = """
     display: flex; align-items: center; justify-content: space-between;
   }
   .section-title .actions { display: flex; gap: 8px; }
-  form.config-form { max-width: 560px; }
+  form.config-form { max-width: 1200px; }
+  @media (min-width: 1100px) {
+    form.config-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-flow: dense;
+      column-gap: 32px;
+      row-gap: 16px;
+    }
+    form.config-form label { margin-top: 0; }
+    form.config-form .span-full { grid-column: 1 / -1; }
+  }
   .config-form label {
     display: block; margin-top: 16px; font-weight: 600; color: #334155; font-size: 14px;
   }
@@ -336,14 +347,14 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     cache_checked = ' checked' if prefer_cache else ''
     if sql_has_write:
         aw_checked = ' checked' if allow_write else ''
-        allow_write_html = (f'<label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">'
+        allow_write_html = (f'<label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">'
                             f'<input type="hidden" name="allow_write" value="0">'
                             f'<input type="checkbox" name="allow_write" value="1"{aw_checked}>'
                             f'<span style="font-weight:600">允许执行写操作</span>'
                             f'<span style="color:#94a3b8;font-weight:400;font-size:13px">（SQL 含写语句；未开启时将拒绝执行）</span>'
                             f'</label>')
         if not allow_write:
-            allow_write_html += ('<div class="flash-warn" style="'
+            allow_write_html += ('<div class="flash-warn span-full" style="'
                                  + _WARN_BOX_STYLE + '">'
                                  '⚠️ 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
     else:
@@ -355,7 +366,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     else:
         aao_confirm = ''
     allow_all_output_html = (
-        f'<label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">'
+        f'<label style="display:flex;align-items:center;gap:8px;font-weight:400">'
         f'<input type="hidden" name="allow_all_output" value="0">'
         f'<input type="checkbox" name="allow_all_output" value="1"{aao_checked}>'
         f'<span style="font-weight:600">允许全部输出</span>'
@@ -370,7 +381,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
 <form method="post" action="{action_url}" class="config-form" data-action="{action_url}"{aao_confirm}>
   {hidden_id}
   <label>报表名称: <input type="text" name="name" value="{name}" required></label>
-  <label>SQL 查询语句:
+  <label class="span-full">SQL 查询语句:
     <textarea name="sql_query" class="sql-textarea" placeholder="输入 MySQL 语句..." spellcheck="false" rows="8">{sql_query}</textarea>
     <div class="sql-preview"></div>
     <div class="sql-toolbar">
@@ -391,13 +402,13 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
       {category_options}
     </select>
   </label>
-  <label>备注（非必填）:
+  <label class="span-full">备注（非必填）:
     <textarea name="memo" class="sql-textarea" placeholder="输入备注信息..." rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
   </label>
-  <label>结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
+  <label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
     <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
   </label>
-  <label style="margin-top:16px;display:flex;align-items:center;gap:8px;font-weight:400">
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400">
     <input type="hidden" name="prefer_cache" value="0">
     <input type="checkbox" name="prefer_cache" value="1"{cache_checked}>
     <span style="font-weight:600">启用 Redis 缓存</span>
@@ -410,7 +421,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   </label>
   {allow_write_html}
   {allow_all_output_html}
-  <div class="form-actions">
+  <div class="form-actions span-full">
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
     <button type="submit" name="action" value="save_close" class="btn btn-outline">保存返回上级</button>
     {view_btn}
@@ -684,7 +695,7 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None, 
       {parent_opts}
     </select>
   </label>
-  <div class="form-actions">
+  <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
     <a href="/config/categories" class="cancel">取消</a>
   </div>
