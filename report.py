@@ -61,6 +61,7 @@ from render import (
     build_filter_action_html, build_report_switcher_html,
     build_api_urls_section_html, build_flash_html,
 )
+import markdown_render
 
 # ===================================================================
 # 缓存（FILTER_OPS / _OP_MAP / DEFAULT_OP 已移至 render.py）
@@ -351,7 +352,6 @@ _CSS = """
     text-decoration:none; transition:background 0.2s, color 0.2s;
   }
   .btn-refresh:hover { background:#e2e8f0; color:#1e293b; }
-  .report-select { max-width: 500px; }
   .report-select label { font-size: 15px; color: #334155; font-weight: 500; display: block; margin-bottom: 8px; }
   .report-select select {
     width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 8px;
@@ -381,8 +381,9 @@ _CSS = """
 
 
 def _render_page_header() -> str:
-    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 导航高亮。"""
-    return render_page_header(title="Web 报表工具", active_nav="report", extra_css=_CSS)
+    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 代码高亮 CSS + 导航高亮。"""
+    return render_page_header(title="Web 报表工具", active_nav="report",
+                              extra_css=_CSS + markdown_render.codehilite_css())
 
 
 _FOOTER = r"""</div>
@@ -1319,6 +1320,15 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     current_rules_html = build_current_rules_section_html(
         filters, sorts, display_columns, all_columns)
     memo_html = build_memo_section_html(report.get("memo") or "")
+    # 备注含 ```mermaid 块时按需注入 mermaid 渲染脚本（渐进增强：JS 加载失败
+    # 时页面显示 <pre class="mermaid"><code> 转义源码，不空白）
+    mermaid_scripts = ""
+    if markdown_render.contains_mermaid(report.get("memo") or ""):
+        mermaid_scripts = (
+            f'<script src="{markdown_render.MERMAID_JS_URL}"></script>\n'
+            '<script>if (window.mermaid) { '
+            'mermaid.initialize({ startOnLoad: true, securityLevel: "strict" }); '
+            '}</script>\n')
 
     # ---- API URL 区域 ----
     try:
@@ -1431,6 +1441,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             '<div class="table-wrap"><table>' + thead_str + tbody + '</table></div>' +
             pagination +
             '</div>' +
+            mermaid_scripts +
             _FOOTER)
     return body
 

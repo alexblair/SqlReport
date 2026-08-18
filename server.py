@@ -172,6 +172,7 @@ ROUTES = [
     RouteEntry(r"^/config/api-endpoints$", "GET", True, True, "_handle_config_api_endpoints"),
     RouteEntry(r"^/config/api-endpoints$", "POST", True, True, "_handle_config_api_endpoints"),
     RouteEntry(r"^/config/reports$", "GET", True, True, "_handle_config_reports"),
+    RouteEntry(r"^/config/reports/memo-preview$", "POST", True, False, "_handle_config"),
     RouteEntry(r"^/config/categories$", "GET", True, True, "_handle_config_categories"),
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
@@ -179,6 +180,45 @@ ROUTES = [
     RouteEntry(r"^/api/", "*", False, True, "_handle_api"),
     RouteEntry(r"^/audit($|/)", "*", True, False, "_handle_audit"),
 ]
+
+# ---------------------------------------------------------------------------
+# 白名单静态文件服务（唯一例外，不推广为通用静态服务）
+# /static/vendor/<name@version>/<file> — 仅服务 vendor 根目录内文件。
+# 资产版本锁 URL，随仓库提交，无鉴权（与 CDN 直出定位一致）。
+# ---------------------------------------------------------------------------
+
+_VENDOR_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "static", "vendor")
+
+_VENDOR_STATIC_PREFIX = "/static/vendor/"
+
+# MIME 按扩展名映射（不猜类型，仅白名单扩展名）
+_VENDOR_MIME_MAP = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".woff2": "font/woff2",
+}
+
+
+def _vendor_real_path(rel_path: str) -> str | None:
+    """将 /static/vendor/ 后的相对路径规范化为 vendor 根内的绝对路径。
+
+    返回安全的文件绝对路径；相对路径逃出 vendor 根（.. 穿越）返回 None。
+    """
+    root_real = os.path.realpath(_VENDOR_ROOT)
+    candidate = os.path.realpath(os.path.join(root_real, rel_path))
+    if candidate != root_real and not candidate.startswith(root_real + os.sep):
+        return None
+    return candidate
+
+
+def _vendor_mime_for(path: str) -> str | None:
+    """按扩展名返回 MIME，白名单外扩展名返回 None。"""
+    ext = os.path.splitext(path)[1].lower()
+    return _VENDOR_MIME_MAP.get(ext)
 
 
 def _match_route(method: str, path: str) -> RouteEntry | None:
@@ -285,6 +325,14 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         raw_path = parsed.path.rstrip("/") or "/"
         path = urllib.parse.unquote(raw_path)
         query = parsed.query
+
+        # 白名单静态文件服务（路由表之前：仅 /static/vendor/ 前缀走静态，
+        # 其余路径零影响；非 GET 返回 405）
+        if path.startswith(_VENDOR_STATIC_PREFIX):
+            if method != "GET":
+                return self._send_html(
+                    405, "<h1>405 — 方法不允许</h1>", {"Allow": "GET"})
+            return self._serve_static_vendor(path)
 
         route = _match_route(method, path)
         if route is None:
@@ -643,6 +691,34 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             except (UnicodeDecodeError, ValueError, OSError) as e:
                 raise BodyReadError(f"请求体读取失败: {e}") from e
         return ""
+
+    def _serve_static_vendor(self, path: str):
+        """服务 /static/vendor/ 下的白名单静态文件（版本锁 URL，无鉴权）。
+
+        路径穿越/白名单外扩展名/文件缺失 → 404。响应带 immutable
+        Cache-Control（资产 URL 锁定版本，首次加载后零请求）。
+        """
+        rel_path = path[len(_VENDOR_STATIC_PREFIX):]
+        real = _vendor_real_path(rel_path)
+        mime = _vendor_mime_for(rel_path)
+        if real is None or mime is None:
+            return self._send_html(404, "<h1>404 — 页面不存在</h1>")
+        if not os.path.isfile(real):
+            return self._send_html(404, "<h1>404 — 页面不存在</h1>")
+        try:
+            with open(real, "rb") as f:
+                payload = f.read()
+        except OSError:
+            return self._send_html(404, "<h1>404 — 页面不存在</h1>")
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_html(self, status: int, body: str, extra_headers: dict = None):
         """发送 HTML 响应

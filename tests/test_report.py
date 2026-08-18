@@ -386,6 +386,35 @@ class TestReportExecution(unittest.TestCase):
         self.assertIn('toggleSection(this', body)
         self.assertIn("备注", body)
 
+    @patch("report.execute_report")
+    def test_report_injects_mermaid_script_when_memo_has_mermaid(self, mock_exec):
+        """备注含 ```mermaid 块时报表页注入 mermaid script + initialize"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        memo = "```mermaid\nflowchart TD\n A-->B\n```"
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo=memo)
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn('src="/static/vendor/mermaid@11.16.1/mermaid.min.js"', body)
+        self.assertIn("mermaid.initialize", body)
+        self.assertIn("securityLevel", body)
+        self.assertIn('<pre class="mermaid">', body)
+
+    @patch("report.execute_report")
+    def test_report_skips_mermaid_script_without_mermaid(self, mock_exec):
+        """备注不含 mermaid 时报表页不注入 mermaid script"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo="纯文本备注")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertNotIn("mermaid@11.16.1", body)
+        self.assertNotIn("mermaid.initialize", body)
+
 
 class TestReportResult(unittest.TestCase):
     """ReportResult 工具类测试"""

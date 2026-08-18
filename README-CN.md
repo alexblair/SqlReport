@@ -96,7 +96,7 @@ python server.py
 | **ThreadingHTTPServer** | 多线程 HTTP 服务器，提升并发处理能力 |
 | **全局异常兜底** | 未捕获异常返回 500 错误页，避免直接崩溃 |
 | **Redis 可观测性** | 所有静默异常（`except: pass`）改为结构化日志输出 |
-| **纯标准库** | 仅依赖 `mysql-connector-python`，其余全部使用 Python 内置模块 |
+| **纯标准库** | Python 标准库 + 极少量必需 pip 依赖包（见下） |
 
 ---
 
@@ -130,9 +130,11 @@ source venv/bin/activate
 
 # 安装外部依赖
 pip install -r requirements.txt
-# 或手动逐个安装: pip install mysql-connector-python redis
+# 或手动逐个安装: pip install mysql-connector-python redis markdown pygments
 #   - mysql-connector-python: MySQL 查询连接器（必需）
 #   - redis: Redis 快照缓存（可选，启用后需在 app_config.json 设置 "enable": true）
+#   - markdown: Markdown → HTML 渲染（必需，用于报表备注等 Markdown 内容）
+#   - pygments: 代码块语法高亮（必需，驱动 codehilite 扩展）
 ```
 
 服务默认监听 `http://0.0.0.0:8080`（可通过 `HOST` / `PORT` 环境变量或配置文件的 `server` 节覆盖）。
@@ -608,6 +610,7 @@ python -m unittest discover -s tests/ -v
 | Web 服务器 | `http.server.ThreadingHTTPServer` (Python stdlib) |
 | 配置存储 | SQLite (Python stdlib `sqlite3`) 或 MySQL (`mysql-connector-python`)，通过 `app_config.json` 切换 |
 | 数据查询 | MySQL via `mysql-connector-python` |
+| Markdown 渲染 | `markdown` + `pygments`（报表备注 Markdown、代码高亮） |
 | 认证 | Cookie + PBKDF2-SHA-256 salt hash + 滑动过期 (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
 | 前端 | 纯 HTML + 内联 CSS（无 JS 框架） |
 | 测试 | `unittest` (Python stdlib) |

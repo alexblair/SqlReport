@@ -96,7 +96,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **ThreadingHTTPServer** | Multi-threaded HTTP server for better concurrency |
 | **Global Error Handler** | Uncaught exceptions render a 500 error page instead of crashing |
 | **Redis Observability** | All silent exceptions (`except: pass`) upgraded to structured logging |
-| **Pure Stdlib** | Only depends on `mysql-connector-python`; everything else is Python built-in |
+| **Pure Stdlib** | Python stdlib plus a minimal set of required pip packages (see below) |
 
 ---
 
@@ -130,9 +130,11 @@ source venv/bin/activate
 
 # Install external dependencies
 pip install -r requirements.txt
-# Or manually: pip install mysql-connector-python redis
+# Or manually: pip install mysql-connector-python redis markdown pygments
 #   - mysql-connector-python: MySQL query connector (required)
 #   - redis: Redis snapshot cache (optional, set "enable": true in app_config.json)
+#   - markdown: Markdown → HTML rendering (required, for report memo and other Markdown content)
+#   - pygments: Syntax highlighting for code blocks (required, powers the codehilite extension)
 ```
 
 The server listens at `http://0.0.0.0:8080` by default (overridable via the `HOST` / `PORT` env vars or the `server` section of the config file).
@@ -608,6 +610,7 @@ python -m unittest discover -s tests/ -v
 | Web server | `http.server.ThreadingHTTPServer` (Python stdlib) |
 | Config storage | SQLite (Python stdlib `sqlite3`) or MySQL (`mysql-connector-python`), switched via `app_config.json` |
 | Data queries | MySQL via `mysql-connector-python` |
+| Markdown rendering | `markdown` + `pygments` (report memo Markdown, code highlighting) |
 | Auth | Cookie + PBKDF2-SHA-256 salted hash + sliding expiry (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
 | Frontend | Pure HTML + inline CSS (no JS framework) |
 | Tests | `unittest` (Python stdlib) |

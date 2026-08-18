@@ -51,6 +51,7 @@ from render import (
     _WARN_BOX_STYLE,
 )
 from report import parse_result_names
+import markdown_render
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +64,7 @@ from report import parse_result_names
 # API 端点子动作含 api_keys（API Key 管理 POST 端点）
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
-    r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete)"
+    r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete|memo-preview)"
     r"|/(\d+)/(edit|delete|copy|move-category|move-up|move-down)"
     r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview|api_keys)))?$"
 )
@@ -204,6 +205,18 @@ _CONFIG_EXTRA_CSS = """
     border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;
   }
   .sql-preview.show { display: block; }
+  .memo-preview {
+    display: none; margin-top: 8px; padding: 12px 14px;
+    border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff;
+    font-size: 14px; line-height: 1.7;
+  }
+  .memo-preview.show { display: block; }
+  .memo-preview pre {
+    background: #f8fafc; padding: 10px 12px; border-radius: 6px;
+    overflow-x: auto; font-size: 13px; line-height: 1.5;
+  }
+  .memo-preview code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+  .memo-preview pre code { background: none; padding: 0; }
   .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
   .section + .section { margin-top: 8px; }
   .ops-cell { white-space: nowrap; }
@@ -214,6 +227,9 @@ _CONFIG_EXTRA_CSS = """
   }
   .badge-pool { background: #eef2ff; color: #4f46e5; }
 """
+
+# 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
+_CONFIG_MD_EXTRA_CSS = _CONFIG_EXTRA_CSS + markdown_render.codehilite_css()
 
 
 def _escape(text: str) -> str:
@@ -403,7 +419,11 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     </select>
   </label>
   <label class="span-full">备注（非必填）:
-    <textarea name="memo" class="sql-textarea" placeholder="输入备注信息..." rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
+    <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
+    <div class="memo-preview" id="memo-preview"></div>
+    <div class="sql-toolbar">
+      <button type="button" class="btn btn-outline btn-sm" onclick="toggleMemoPreview(this)">预览备注</button>
+    </div>
   </label>
   <label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
     <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
@@ -441,6 +461,27 @@ function previewReport(form) {{
     form.submit();
     form.target = '';
     form.action = form.getAttribute('data-action');
+}}
+function toggleMemoPreview(btn) {{
+    var prev = document.getElementById('memo-preview');
+    var ta = document.querySelector('textarea[name="memo"]');
+    if (!prev || !ta) return;
+    var show = !prev.classList.contains('show');
+    if (!show) {{ prev.classList.remove('show'); btn.textContent = '预览备注'; return; }}
+    prev.classList.add('show');
+    btn.textContent = '预览中...';
+    var body = new URLSearchParams();
+    body.append('memo', ta.value);
+    fetch('/config/reports/memo-preview', {{ method: 'POST', body: body }})
+      .then(function(r) {{ return r.text(); }})
+      .then(function(html) {{
+        prev.innerHTML = html;
+        btn.textContent = '隐藏预览';
+      }})
+      .catch(function() {{
+        prev.textContent = '预览失败，请稍后重试';
+        btn.textContent = '隐藏预览';
+      }});
 }}
 </script>
 </div>"""
@@ -736,7 +777,7 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
         return render_overview(conn, flash="错误: 报表不存在")
     is_edit = report_id is not None and not copy_mode
     flash_html = build_flash_html(flash) if flash else ""
-    body = render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    body = render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_MD_EXTRA_CSS)
     body += flash_html + _render_report_form(conn, report, copy_mode, is_edit=is_edit,
                                              prefill_copy_suffix=not echo_report)
     # 编辑模式下显示 API 接口列表
@@ -1306,6 +1347,17 @@ def handle_batch_delete(conn, form_body: str, session_user=None) -> tuple[int, s
 # ---------------------------------------------------------------------------
 
 
+def handle_memo_preview(form_body: str) -> tuple[int, str, dict]:
+    """报表备注 Markdown 预览端点处理。
+
+    将 memo 原文渲染为已消毒的 HTML 片段返回（纯渲染、无落库、无数据库依赖）。
+    渲染逻辑与报表页共用 render_markdown()，杜绝双实现漂移。
+    """
+    data = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
+    memo = (data.get("memo") or [""])[-1]
+    return 200, markdown_render.render_markdown(memo), {}
+
+
 def handle_request(conn, method: str, path: str, query: str,
                    form_body: str = None, session_user=None) -> tuple[int, str, dict]:
     """
@@ -1375,6 +1427,11 @@ def handle_request(conn, method: str, path: str, query: str,
                       f"/api_endpoints/{route['endpoint_id']}/edit"))
 
     # ---- POST 处理 ----
+    # 备注 Markdown 预览（纯渲染无落库，与报表页共用 render_markdown 单一来源）
+    if (method == "POST" and route["section"] == "reports"
+            and route["action"] == "memo-preview"):
+        return handle_memo_preview(form_body or "")
+
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
     if method == "POST" and route["section"] == "reports" and route["report_id"]:
         if route["action"] == "api_new" and route["report_id"]:

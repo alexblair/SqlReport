@@ -22,6 +22,7 @@ import app_config
 import redis_cache
 import static_cache
 from filter_help import render_filter_help, FILTER_HINT_SUFFIX
+import markdown_render
 
 # ---------------------------------------------------------------------------
 # 公共 CSS（全站单一来源：report.py + config.py + audit + 登录页共享）
@@ -867,14 +868,20 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
 
 
 def build_memo_section_html(memo_raw: str) -> str:
-    """构建备注折叠区 HTML。"""
+    """构建备注折叠区 HTML。
+
+    备注内容为 Markdown 源文本：经 render_markdown() 渲染为已消毒的 HTML
+    （含 ```mermaid 时产出 <pre class="mermaid">，由前端按需渲染）。
+    折叠区展开/收起状态逻辑不变（非空展开、空折叠）。
+    """
     if memo_raw:
         memo_btn_text = "▼ 备注"
         memo_hidden = False
     else:
         memo_btn_text = "▶ 备注"
         memo_hidden = True
-    return build_collapse_section_html("备注", _escape(memo_raw),
+    memo_html = markdown_render.render_markdown(memo_raw)
+    return build_collapse_section_html("备注", memo_html,
                                        default_hidden=memo_hidden,
                                        button_text=memo_btn_text)
 

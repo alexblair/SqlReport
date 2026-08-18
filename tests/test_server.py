@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 import http.server
 import os
 import tempfile
@@ -862,6 +863,156 @@ class TestConfigCategoriesRoute(unittest.TestCase):
         self.assertIn("分类管理", html)
         self.assertIn("路由集成分类", html)
         self.assertIn("新增分类", html)
+
+
+class TestStaticVendorRoute(unittest.TestCase):
+    """M5 白名单静态路由集成测试。
+
+    独立服务器 + 动态端口（bind 0）+ 临时 vendor 根（patch server._VENDOR_ROOT），
+    不依赖真实 vendor 资产文件。静态资产无鉴权（与 CDN 直出定位一致）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        vendor = os.path.join(cls._tmpdir.name, "vendor")
+        js_dir = os.path.join(vendor, "mermaid@11.16.1")
+        other_dir = os.path.join(vendor, "other")
+        os.makedirs(js_dir)
+        os.makedirs(other_dir)
+        with open(os.path.join(js_dir, "mermaid.min.js"), "w", encoding="utf-8") as f:
+            f.write("/* mermaid fixture */")
+        with open(os.path.join(js_dir, "style.css"), "w", encoding="utf-8") as f:
+            f.write("body{}")
+        with open(os.path.join(other_dir, "secret.txt"), "w", encoding="utf-8") as f:
+            f.write("secret")
+        cls._vendor = vendor
+        cls._patcher = patch("server._VENDOR_ROOT", vendor)
+        cls._patcher.start()
+        cls._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), srv.ReportHandler)
+        cls.base_url = f"http://127.0.0.1:{cls._server.server_address[1]}"
+        cls._thread = threading.Thread(target=cls._server.serve_forever, daemon=True)
+        cls._thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._server.shutdown()
+        cls._server.server_close()
+        cls._patcher.stop()
+        cls._tmpdir.cleanup()
+
+    def _get(self, path):
+        return urllib.request.urlopen(f"{self.base_url}{path}")
+
+    def test_vendor_js_served_no_auth(self):
+        """存在的 vendor js 无鉴权 → 200 + text/javascript + immutable"""
+        resp = self._get("/static/vendor/mermaid@11.16.1/mermaid.min.js")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/javascript; charset=utf-8")
+        self.assertIn("immutable", resp.headers.get("Cache-Control", ""))
+        self.assertIn("mermaid fixture", resp.read().decode("utf-8"))
+
+    def test_vendor_css_mime(self):
+        resp = self._get("/static/vendor/mermaid@11.16.1/style.css")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/css; charset=utf-8")
+
+    def test_missing_file_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/mermaid@11.16.1/nope.js")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_missing_vendor_dir_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/unknown@1.0.0/file.js")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_path_traversal_rejected(self):
+        # %2e%2e 编码绕过客户端 URL 规范化，服务端 unquote 后还原为 .. 穿越
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/%2e%2e/%2e%2e/etc/passwd")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_single_dot_traversal_rejected(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/%2e%2e/")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_outside_whitelist_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/other/x.js")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_vendor_subpath_escaping_root_404(self):
+        # vendor/other 仍在 vendor 根内但无 .js 白名单扩展名 → 404
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/other/secret.txt")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_non_whitelist_extension_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/mermaid@11.16.1/evil.exe")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_non_get_method_405(self):
+        data = b"x"
+        req = urllib.request.Request(
+            f"{self.base_url}/static/vendor/mermaid@11.16.1/mermaid.min.js",
+            data=data, method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        self.assertEqual(ctx.exception.code, 405)
+        self.assertIn("GET", ctx.exception.headers.get("Allow", ""))
+
+    def test_directory_path_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/static/vendor/mermaid@11.16.1")
+        self.assertEqual(ctx.exception.code, 404)
+
+
+class TestMemoPreviewEndpoint(unittest.TestCase):
+    """M4 备注 Markdown 预览端点集成测试（动态端口 + 临时 DB）"""
+
+    @classmethod
+    def setUpClass(cls):
+        _set_up_db()
+        cls._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), srv.ReportHandler)
+        cls.base_url = f"http://127.0.0.1:{cls._server.server_address[1]}"
+        cls._thread = threading.Thread(target=cls._server.serve_forever, daemon=True)
+        cls._thread.start()
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._server.shutdown()
+        cls._server.server_close()
+
+    def test_memo_preview_requires_auth(self):
+        """未认证 POST → 302 /login"""
+        opener = urllib.request.build_opener(_NoRedirect)
+        data = urllib.parse.urlencode({"memo": "# 标题"}).encode()
+        req = urllib.request.Request(f"{self.base_url}/config/reports/memo-preview",
+                                     data=data, method="POST")
+        try:
+            opener.open(req)
+            self.fail("未登录应 302")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            self.assertIn("/login", e.headers.get("Location", ""))
+
+    def test_memo_preview_authenticated_returns_html(self):
+        """登录后 POST → 200 渲染 HTML 片段"""
+        opener, _, _ = _login_opener(self.base_url)
+        data = urllib.parse.urlencode({"memo": "# 标题"}).encode()
+        req = urllib.request.Request(f"{self.base_url}/config/reports/memo-preview",
+                                     data=data, method="POST")
+        resp = opener.open(req)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+        self.assertIn("<h1>标题</h1>", resp.read().decode("utf-8"))
 
 
 if __name__ == "__main__":

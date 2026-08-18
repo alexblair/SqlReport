@@ -685,11 +685,27 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         result = build_memo_section_html(None)
         self.assertIn("▶ 备注", result)
 
-    def test_memo_html_escaped(self):
-        """备注中的 HTML 被转义"""
+    def test_memo_html_sanitized(self):
+        """备注中的 raw HTML 被 sanitize 剥离（脚本标签移除、文本保留）"""
         result = build_memo_section_html("<script>alert(1)</script>")
-        self.assertIn("&lt;script&gt;", result)
         self.assertNotIn("<script>", result)
+        self.assertIn("alert(1)", result)
+
+    def test_memo_markdown_rendered(self):
+        """备注按 Markdown 渲染为结构化 HTML"""
+        result = build_memo_section_html("# 标题\n\n- a\n- b")
+        self.assertIn("<h1>标题</h1>", result)
+        self.assertIn("<ul>", result)
+        self.assertIn("<li>a</li>", result)
+
+    def test_memo_mermaid_codeblock(self):
+        """备注含 ```mermaid 块时输出 <pre class="mermaid">"""
+        result = build_memo_section_html("```mermaid\nflowchart TD\n A-->B\n```")
+        self.assertIn('<pre class="mermaid">', result)
+
+    def test_memo_empty_markdown_empty(self):
+        """空备注渲染为空内容"""
+        self.assertNotIn("<p>", build_memo_section_html(""))
 
     def test_long_memo(self):
         """长备注全部显示"""
@@ -1385,6 +1401,22 @@ class TestBuildReportSwitcherHtml(unittest.TestCase):
         result = build_report_switcher_html(reports_data, all_cats, cat_tree, None)
         self.assertIn("无报表", result)
         self.assertIn("空分类", result)
+
+
+class TestReportSwitcherWidthCSS(unittest.TestCase):
+    """切换报表下拉框宽度契约（report 页 _CSS）
+
+    断言真源：本会话决策（2026-08-18）——.report-select 不得有 max-width 钉死，
+    select 填满卡片宽度（跟随容器 1200~2400px 宽屏分级）。
+    """
+
+    def test_select_fills_card_width(self):
+        """select 保持 width:100% 填满卡片"""
+        self.assertIn("  .report-select select {\n    width: 100%", report_mod._CSS)
+
+    def test_no_500px_pin_on_report_select(self):
+        """500px 钉死不得残留"""
+        self.assertNotIn("max-width: 500px", report_mod._CSS)
 
 
 # ===================================================================

@@ -414,6 +414,53 @@ class TestReportFlow(unittest.TestCase):
         self.assertIn('name="memo"', body)
         self.assertIn("备注", body)
 
+    def test_report_form_contains_memo_preview(self):
+        """报表表单应包含备注预览按钮、预览面板与预览端点（字段清单对齐守护）"""
+        code, body, _ = config.handle_request(self.conn, "GET", "/config/reports/add", "")
+        self.assertIn("toggleMemoPreview", body)
+        self.assertIn('id="memo-preview"', body)
+        self.assertIn("预览备注", body)
+        self.assertIn("/config/reports/memo-preview", body)
+        self.assertIn('name="memo"', body)
+
+    def test_memo_preview_renders_markdown(self):
+        """预览端点将 Markdown 渲染为 HTML 片段"""
+        form = urllib.parse.urlencode({"memo": "# 标题\n\n- a\n- b"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/reports/memo-preview", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("<h1>标题</h1>", body)
+        self.assertIn("<ul>", body)
+
+    def test_memo_preview_sanitizes_script(self):
+        """预览端点渲染结果不含可执行脚本"""
+        form = urllib.parse.urlencode({"memo": "<script>alert(1)</script>"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/reports/memo-preview", "", form)
+        self.assertEqual(code, 200)
+        self.assertNotIn("<script>", body)
+        self.assertIn("alert(1)", body)
+
+    def test_memo_preview_mermaid(self):
+        """预览端点渲染 mermaid 块为 pre.mermaid"""
+        form = urllib.parse.urlencode({"memo": "```mermaid\nflowchart TD\n A-->B\n```"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/reports/memo-preview", "", form)
+        self.assertIn('<pre class="mermaid">', body)
+
+    def test_memo_preview_empty(self):
+        """空 memo 预览返回空片段"""
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/reports/memo-preview", "", "memo=")
+        self.assertEqual(code, 200)
+        self.assertEqual(body, "")
+
+    def test_memo_preview_route_parsed(self):
+        """memo-preview 路径解析为 reports 段动作"""
+        r = config.parse_config_path("/config/reports/memo-preview")
+        self.assertEqual(r["section"], "reports")
+        self.assertEqual(r["action"], "memo-preview")
+
     def test_submit_add_report_with_memo(self):
         """提交带备注的报表应正确存储"""
         form = ("name=备注报表&sql_query=SELECT 1&default_page_size=20&pool_id=1"
