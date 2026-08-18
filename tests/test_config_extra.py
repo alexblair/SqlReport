@@ -513,20 +513,20 @@ class TestSortingConfig(BaseConfigTest):
         self.assertEqual(order, [2, 1])
 
     def test_category_move_up_handler(self):
-        """POST /config/categories/{id}/move-up 应交换分类排序并 302 到分类页"""
+        """POST /config/categories/{id}/move-up 应交换分类排序并 302 到报表页"""
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/2/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/categories")
+        self.assertEqual(body, "/config/reports")
         order = [c["id"] for c in db.get_all_categories(self.conn)]
         self.assertEqual(order, [2, 1])
 
     def test_category_move_down_handler(self):
-        """POST /config/categories/{id}/move-down 应 302 到分类页"""
+        """POST /config/categories/{id}/move-down 应 302 到报表页"""
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/1/move-down", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/categories")
+        self.assertEqual(body, "/config/reports")
         order = [c["id"] for c in db.get_all_categories(self.conn)]
         self.assertEqual(order, [2, 1])
 
@@ -1188,80 +1188,88 @@ class TestReportCopyCloseBoundary(BaseConfigTest):
 
 
 # ---------------------------------------------------------------------------
-# PH-14：分类管理独立页（render_categories_page）与回跳目标
+# config-reports-merge：分类管理并入报表管理页（独立页废弃，回跳统一）
 # ---------------------------------------------------------------------------
 
 
 class TestCategoriesPage(BaseConfigTest):
-    """PH-14：/config/categories 独立页渲染与分类回跳目标"""
+    """分类管理并入报表管理页后的渲染与分类回跳目标"""
 
     def setUp(self):
         super().setUp()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
 
-    def test_categories_page_header_and_title(self):
-        """独立页应含分类管理标题与配置菜单高亮"""
-        body = config.render_categories_page(self.conn)
-        self.assertIn("分类管理", body)
-        self.assertIn('href="/config" class="nav-active"', body)
-
-    def test_categories_page_has_add_category_button(self):
-        """独立页应有「新增分类」按钮"""
-        body = config.render_categories_page(self.conn)
+    def test_reports_page_has_add_category_button(self):
+        """报表管理页应含「新增分类」按钮"""
+        body = config.render_reports_page(self.conn)
         self.assertIn("/config/categories/add", body)
         self.assertIn("新增分类", body)
 
-    def test_categories_page_hides_report_add_button(self):
-        """独立页不应显示报表页的「新增报表」快捷按钮（show_report_add=False）"""
-        body = config.render_categories_page(self.conn)
-        self.assertNotIn("新增报表", body)
+    def test_reports_page_has_report_add_button(self):
+        """报表管理页应显示「新增报表」快捷按钮"""
+        body = config.render_reports_page(self.conn)
+        self.assertIn("/config/reports/add", body)
+        self.assertIn("新增报表", body)
 
-    def test_categories_page_renders_tree_with_badge(self):
+    def test_reports_page_has_fold_toggle(self):
+        """分类树区块应含整体折叠按钮与 localStorage 记忆"""
+        body = config.render_reports_page(self.conn)
+        self.assertIn('id="cat-tree-toggle"', body)
+        self.assertIn('onclick="toggleCatTree(this)"', body)
+        self.assertIn('id="cat-tree-content"', body)
+        self.assertIn("cat_tree_collapsed", body)
+
+    def test_reports_page_renders_tree_with_badge(self):
         """分类树应渲染子分类数量角标"""
         db.add_category(self.conn, "根")
         db.add_category(self.conn, "子", parent_id=1)
-        body = config.render_categories_page(self.conn)
+        body = config.render_reports_page(self.conn)
         self.assertIn("根", body)
         self.assertIn("1 子分类", body)
 
-    def test_categories_page_empty_state(self):
+    def test_reports_page_empty_state(self):
         """无分类时应显示暂无分类占位"""
-        body = config.render_categories_page(self.conn)
+        body = config.render_reports_page(self.conn)
         self.assertIn("暂无分类", body)
 
-    def test_categories_page_flash_message(self):
-        """flash 消息应渲染在独立页"""
-        body = config.render_categories_page(self.conn, "分类 甲 已创建")
+    def test_reports_page_flash_message(self):
+        """flash 消息应渲染在报表管理页"""
+        body = config.render_reports_page(self.conn, "分类 甲 已创建")
         self.assertIn("分类 甲 已创建", body)
 
-    def test_category_add_redirects_to_categories_page(self):
-        """新增分类成功应 302 到 /config/categories"""
+    def test_category_add_redirects_to_reports_page(self):
+        """新增分类成功应 302 到 /config/reports"""
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/add", "", "name=销售分类&parent_id=")
         self.assertEqual(code, 302)
-        self.assertTrue(body.startswith("/config/categories"))
+        self.assertTrue(body.startswith("/config/reports"))
 
-    def test_category_edit_redirects_to_categories_page(self):
-        """编辑分类成功应 302 到 /config/categories"""
+    def test_category_edit_redirects_to_reports_page(self):
+        """编辑分类成功应 302 到 /config/reports"""
         db.add_category(self.conn, "旧名")
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/1/edit", "", "name=新名&parent_id=")
         self.assertEqual(code, 302)
-        self.assertTrue(body.startswith("/config/categories"))
+        self.assertTrue(body.startswith("/config/reports"))
 
-    def test_category_delete_redirects_to_categories_page(self):
-        """删除分类成功应 302 到 /config/categories"""
+    def test_category_delete_redirects_to_reports_page(self):
+        """删除分类成功应 302 到 /config/reports"""
         db.add_category(self.conn, "待删")
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/1/delete", "", "")
         self.assertEqual(code, 302)
-        self.assertTrue(body.startswith("/config/categories"))
+        self.assertTrue(body.startswith("/config/reports"))
+
+    def test_category_form_cancel_links_to_reports_page(self):
+        """分类表单页「取消」链接应指向 /config/reports"""
+        body = config.render_category_form_page(self.conn)
+        self.assertIn('href="/config/reports" class="cancel"', body)
 
     def test_overview_has_categories_card(self):
-        """总览应含分类管理入口卡片"""
+        """总览应含分类管理入口卡片，指向 /config/reports"""
         body = config.render_overview(self.conn)
         self.assertIn("分类管理", body)
-        self.assertIn("href=\"/config/categories\"", body)
+        self.assertIn('href="/config/reports"', body)
 
 
 class TestConfigFormWideLayoutCSS(unittest.TestCase):

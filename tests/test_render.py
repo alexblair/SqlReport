@@ -1706,6 +1706,51 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         self.unclassified_reports = [{"id": 3, "name": "测试报表", "sql_query": "SELECT 1", "default_page_size": 10, "pool_id": None, "memo": "", "prefer_cache": 1, "cache_ttl_hours": 0}]
         self.all_reports = [{"id": 1, "name": "日报"}, {"id": 3, "name": "测试报表"}]
 
+    def test_category_tree_visual_guides(self):
+        """分类管理块渲染树形引导线 + 层级图标"""
+        all_cats = [
+            {"id": 1, "name": "根分类", "parent_id": None},
+            {"id": 2, "name": "子分类", "parent_id": 1},
+        ]
+        cat_tree = [
+            {"id": 1, "name": "根分类", "children": [
+                {"id": 2, "name": "子分类", "children": []},
+            ]},
+        ]
+        result = build_category_section_html(self.cat_reports, self.unclassified_reports,
+                                              all_cats, self.all_reports,
+                                              self.pools, cat_tree)
+        self.assertIn('class="tree-guide"', result)
+        self.assertIn("└─", result)
+        self.assertIn("📁", result)
+        self.assertIn("📄", result)
+
+    def test_report_sections_nested_visual(self):
+        """报表区块按层级缩进 + 左侧竖条嵌套（替代全角空格标题缩进）"""
+        all_cats = [
+            {"id": 1, "name": "根分类", "parent_id": None},
+            {"id": 2, "name": "子分类", "parent_id": 1},
+        ]
+        cat_tree = [
+            {"id": 1, "name": "根分类", "children": [
+                {"id": 2, "name": "子分类", "children": []},
+            ]},
+        ]
+        cat_reports = [
+            {"id": 1, "reports": [{"id": 1, "name": "日报", "sql_query": "SELECT * FROM daily",
+                                    "default_page_size": 20, "pool_id": 1, "memo": "",
+                                    "prefer_cache": 1, "cache_ttl_hours": 0}]},
+            {"id": 2, "reports": [{"id": 2, "name": "周报", "sql_query": "SELECT * FROM weekly",
+                                    "default_page_size": 10, "pool_id": None, "memo": "",
+                                    "prefer_cache": 1, "cache_ttl_hours": 0}]},
+        ]
+        result = build_category_section_html(cat_reports, [],
+                                              all_cats, self.all_reports,
+                                              self.pools, cat_tree)
+        self.assertIn("margin-left:24px;border-left:3px solid #c7d2fe", result)
+        self.assertIn("📁 根分类", result)
+        self.assertIn("📊 子分类", result)
+
     def test_contains_category_section(self):
         """包含报表分类段"""
         result = build_category_section_html(self.cat_reports, self.unclassified_reports,
@@ -1743,6 +1788,40 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
                                               self.pools, self.cat_tree)
         self.assertIn("新增分类", result)
         self.assertIn("新增报表", result)
+
+    def test_category_section_has_fold_toggle(self):
+        """分类树区块含整体折叠按钮（标题栏按钮保留）"""
+        result = build_category_section_html(self.cat_reports, self.unclassified_reports,
+                                              self.all_cats, self.all_reports,
+                                              self.pools, self.cat_tree)
+        self.assertIn('id="cat-tree-toggle"', result)
+        self.assertIn('onclick="toggleCatTree(this)"', result)
+        self.assertIn('id="cat-tree-content"', result)
+        self.assertIn("新增分类", result)
+        self.assertIn("新增报表", result)
+
+    def test_category_section_fold_toggle_beside_tree(self):
+        """折叠按钮与树列表容器为兄弟结构，且树列表包裹在可隐藏容器内"""
+        result = build_category_section_html(self.cat_reports, self.unclassified_reports,
+                                              self.all_cats, self.all_reports,
+                                              self.pools, self.cat_tree)
+        toggle_pos = result.index('id="cat-tree-toggle"')
+        content_pos = result.index('id="cat-tree-content"')
+        self.assertGreater(content_pos, toggle_pos)
+        self.assertIn('<div id="cat-tree-content">', result)
+
+    def test_hidden_utility_class_defined_in_common_css(self):
+        """折叠依赖的 .hidden 工具类必须在公共 CSS 中定义为 display:none
+
+        回归：cat-tree-toggle 点击调 classList.toggle('hidden')，若 .hidden 无
+        display:none 规则则点击无视觉变化（用户反馈"折叠按钮点击无效"）。
+        """
+        self.assertIn('.hidden { display: none !important; }', _COMMON_CSS)
+
+    def test_page_style_emits_hidden_rule(self):
+        """render_page_header 输出的 <style> 应包含 .hidden 规则（折叠端到端生效）"""
+        header = render_page_header("t")
+        self.assertIn(".hidden { display: none !important; }", header)
 
     def test_pool_badge(self):
         """报表显示连接池名称"""

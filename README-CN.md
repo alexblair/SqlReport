@@ -492,7 +492,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - **连接池** — 添加/编辑/删除/复制 MySQL 连接配置，支持上下调序
 - **用户** — 添加/编辑/删除系统用户
 - **报表** — 独立管理页 `/config/reports`：配置 SQL 查询、绑定的连接池、默认每页行数、所属分类、备注
-- **分类** — 独立管理页 `/config/categories`：无限层级树形管理，支持调序、新增、删除、重命名
+- **分类** — 已并入报表管理页 `/config/reports`（顶部可折叠分类树）：无限层级树形管理，支持调序、新增、删除、重命名；旧地址 `/config/categories` 自动重定向到 `/config/reports`
 - **API 接口** — 独立管理页 `/config/api-endpoints`，全局 API 接口列表及关联报表名称
 
 报表编辑表单特色：
@@ -505,6 +505,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 
 报表列表页特色：
 - 分类树形展示，缩进表示层级
+- 分类树区块支持整体折叠（折叠状态 localStorage 记忆）
 - 每个报表行内带有上下移动按钮
 - 分类级全选/反选，支持批量删除
 - 报表可跨分类移动（下拉选择目标分类）

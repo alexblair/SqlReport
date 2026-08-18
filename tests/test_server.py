@@ -815,7 +815,7 @@ class TestConfigReportsRoute(unittest.TestCase):
 
 
 class TestConfigCategoriesRoute(unittest.TestCase):
-    """PH-14：/config/categories 分类管理独立页路由端到端"""
+    """config-reports-merge：/config/categories 旧地址重定向到报表管理页"""
 
     @classmethod
     def setUpClass(cls):
@@ -854,15 +854,15 @@ class TestConfigCategoriesRoute(unittest.TestCase):
             self.assertEqual(e.code, 302)
             self.assertIn("/login", e.headers.get("Location", ""))
 
-    def test_categories_route_renders_page(self):
-        """登录后 GET /config/categories → 200 含分类管理与分类列表"""
+    def test_categories_route_redirects_to_reports(self):
+        """登录后 GET /config/categories → 302 /config/reports（旧地址兼容）"""
         opener, _, _ = _login_opener(self.base_url)
-        resp = opener.open(f"{self.base_url}/config/categories")
-        self.assertEqual(resp.status, 200)
-        html = resp.read().decode("utf-8")
-        self.assertIn("分类管理", html)
-        self.assertIn("路由集成分类", html)
-        self.assertIn("新增分类", html)
+        try:
+            opener.open(f"{self.base_url}/config/categories")
+            self.fail("应 302 重定向")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            self.assertEqual(e.headers.get("Location", ""), "/config/reports")
 
 
 class TestStaticVendorRoute(unittest.TestCase):

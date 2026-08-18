@@ -475,12 +475,9 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self._send_html(200, body, {})
 
     def _handle_config_categories(self, method: str, path: str, query: str, conn):
-        """分类管理独立页（/config/categories）"""
-        qs = urllib.parse.parse_qs(query, keep_blank_values=True)
-        flash = qs.get("flash", [None])[0]
-        body = config.render_categories_page(conn, flash)
-        self._log_web_access(path, method, 200)
-        self._send_html(200, body, {})
+        """分类管理已并入报表管理页（/config/reports），旧地址重定向兼容"""
+        self._log_web_access(path, method, 302)
+        self._send_redirect("/config/reports")
 
     def _handle_config(self, method: str, path: str, query: str, conn):
         """委托给 config.py，使用 _handle() 传入的共享连接"""

@@ -126,6 +126,7 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
 }
 .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+.hidden { display: none !important; }
 """
 
 # 迷你按钮公共样式（config 页与 report 页共享；类拆分与内联现状视觉等价）
@@ -231,6 +232,23 @@ function toggleSection(btn, label) {
   var content = btn.nextElementSibling;
   var hidden = content.classList.toggle("hidden");
   btn.textContent = hidden ? "\u25b6 " + label : "\u25bc " + label;
+}
+function toggleCatTree(btn) {
+  var content = document.getElementById("cat-tree-content");
+  if (!content) return;
+  var collapsed = content.classList.toggle("hidden");
+  btn.textContent = (collapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
+  try { localStorage.setItem("cat_tree_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+}
+function initCatTree() {
+  var content = document.getElementById("cat-tree-content");
+  var btn = document.getElementById("cat-tree-toggle");
+  if (!content || !btn) return;
+  var collapsed = "0";
+  try { collapsed = localStorage.getItem("cat_tree_collapsed") || "0"; } catch (e) {}
+  var isCollapsed = collapsed === "1";
+  if (isCollapsed) content.classList.add("hidden");
+  btn.textContent = (isCollapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
 }
 function selectAllInSection(el) {
   var section = el.closest('.section');
@@ -354,6 +372,9 @@ function initApiUrls() {
 }
 document.addEventListener('DOMContentLoaded', function() {
   initApiUrls();
+});
+document.addEventListener('DOMContentLoaded', function() {
+  initCatTree();
 });
 function applyRulesJson() {
   var ta = document.getElementById('current-rules-json');
@@ -1752,19 +1773,24 @@ def build_category_manage_section_html(all_cats, cat_tree,
                                        show_report_add: bool = True) -> str:
     """渲染分类管理区块（分类树 + 排序 + CRUD，纯数据 → HTML，无 DB 调用）
 
-    PH-14：/config/categories 独立页与报表页共用该区块；
-    show_report_add=False 时隐藏「新增报表」快捷按钮（分类页）。
+    config-reports-merge：分类管理并入报表管理页，区块整体可折叠
+    （localStorage 记忆折叠状态，标题栏按钮折叠时仍可见）。
     """
-    def _render_cat_item(cat, depth=0):
+    def _render_cat_item(cat, guide, has_children):
         children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
-        has_children = len(children) > 0
         siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
         idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
         n = len(siblings)
         move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
-        badge = f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>' if has_children else ""
-        return f"""<div style="padding:8px {8 + depth * 24}px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f1f5f9">
-  <span style="font-size:14px;font-weight:500">{_escape(cat["name"])}{badge}</span>
+        badge = (f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>'
+                 if has_children else "")
+        icon = "📁" if has_children else "📄"
+        name_style = ("font-size:14px;font-weight:600" if has_children
+                      else "font-size:14px;font-weight:400;color:#475569")
+        return f"""<div class="cat-tree-item">
+  <span class="tree-guide">{guide}</span>
+  <span style="font-size:13px;line-height:1">{icon}</span>
+  <span style="{name_style}">{_escape(cat["name"])}{badge}</span>
   <span style="flex:1"></span>
   {move_btns}
   {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
@@ -1774,12 +1800,17 @@ def build_category_manage_section_html(all_cats, cat_tree,
                           indent=2)}
 </div>"""
 
-    def _render_tree(nodes, depth=0):
+    def _render_tree(nodes, prefixes=None):
         html = ""
-        for node in nodes:
-            html += _render_cat_item(node, depth)
+        prefixes = prefixes or []
+        for i, node in enumerate(nodes):
+            is_last = i == len(nodes) - 1
+            guide = "".join(prefixes) + ("└─ " if is_last else "├─ ")
+            has_children = len([c for c in all_cats if c.get("parent_id") == node["id"]]) > 0
+            html += _render_cat_item(node, guide, has_children)
             if node["children"]:
-                html += _render_tree(node["children"], depth + 1)
+                child_prefixes = prefixes + (["   "] if is_last else ["│  "])
+                html += _render_tree(node["children"], child_prefixes)
         return html
 
     cat_list_html = _render_tree(cat_tree)
@@ -1791,14 +1822,17 @@ def build_category_manage_section_html(all_cats, cat_tree,
                       if show_report_add else "")
     return f"""<div class="section">
 <div class="section-title">
-  <span>📁 报表分类</span>
+  <button type="button" id="cat-tree-toggle" class="btn btn-outline btn-sm"
+          onclick="toggleCatTree(this)">▼ 报表分类</button>
   <span class="actions">
     {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
     {report_add_btn}
   </span>
 </div>
+<div id="cat-tree-content">
 <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
   {cat_list_html}
+</div>
 </div>
 </div>"""
 
@@ -2011,24 +2045,34 @@ function updateBatchCount() {{
         html = ""
         for node in nodes:
             reports = report_lookup.get(node["id"], [])
+            has_children = bool(node["children"])
+            if not reports and not has_children:
+                continue
+            inner = ""
             if reports:
-                indent = "　" * depth
                 rows = _render_report_rows(reports, in_category=True)
-                html += f"""<div class="section">
-<div class="section-title">
-  <span>📊 {indent}{_escape(node['name'])} <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span></span>
-</div>
-<div class="table-wrap">
+                inner += f"""<div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
   <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th>
 </tr></thead><tbody>
 {rows}
 </tbody></table>
-</div>
 </div>"""
-            if node["children"]:
-                html += _render_report_sections(node["children"], depth + 1)
+            if has_children:
+                inner += _render_report_sections(node["children"], depth + 1)
+            icon = "📁" if has_children else "📊"
+            count_html = (f' <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span>'
+                          if reports else "")
+            nest_style = ""
+            if depth > 0:
+                nest_style = f'margin-left:{24 * depth}px;border-left:3px solid #c7d2fe;'
+            html += f"""<div class="section" style="{nest_style}">
+<div class="section-title">
+  <span>{icon} {_escape(node['name'])}{count_html}</span>
+</div>
+{inner}
+</div>"""
         return html
 
     tab_html = _render_report_sections(cat_tree)

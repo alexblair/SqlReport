@@ -223,6 +223,18 @@ _CONFIG_EXTRA_CSS = """
     font-size: 12px; font-weight: 600;
   }
   .badge-pool { background: #eef2ff; color: #4f46e5; }
+  /* 分类树引导线（文件树风格）：等宽字体保证 ├─/└─/│ 逐层对齐 */
+  .cat-tree-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid #f1f5f9;
+    transition: background 0.15s;
+  }
+  .cat-tree-item:hover { background: #f8fafc; }
+  .cat-tree-item:last-child { border-bottom: none; }
+  .tree-guide {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px; color: #a5b4fc; white-space: pre; user-select: none;
+  }
 """
 
 # 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
@@ -608,26 +620,13 @@ def _render_category_section(conn) -> str:
 
 
 def render_reports_page(conn, flash: str = None) -> str:
-    """渲染报表管理独立页（PH-13：分类树 + 报表列表 + 批量操作）"""
+    """渲染报表管理独立页（PH-13：分类树 + 报表列表 + 批量操作；分类管理已并入本页）"""
     flash_html = build_flash_html(flash) if flash else ""
     return (render_page_header(title="Web 报表工具 - 报表管理", active_nav="config-reports",
                                 extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
             + '<h2 style="margin-bottom:0">报表管理</h2>'
             + _render_category_section(conn)
-            + render_page_footer())
-
-
-def render_categories_page(conn, flash: str = None) -> str:
-    """渲染分类管理独立页（PH-14：分类树 + 排序 + CRUD）"""
-    flash_html = build_flash_html(flash) if flash else ""
-    all_cats = db.get_all_categories(conn)
-    cat_tree = db.get_category_tree(conn)
-    return (render_page_header(title="Web 报表工具 - 分类管理", active_nav="config-categories",
-                                extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html
-            + '<h2 style="margin-bottom:0">分类管理</h2>'
-            + build_category_manage_section_html(all_cats, cat_tree, show_report_add=False)
             + render_page_footer())
 
 
@@ -684,7 +683,7 @@ def render_overview(conn, flash: str = None) -> str:
     categories_card = f"""<div class="card" style="margin-top:8px">
 <div class="section-title" style="font-size:16px;margin-bottom:8px">
   <span>📁 分类管理</span>
-  <span class="actions">{_link_btn("/config/categories", "管理分类", "btn btn-outline btn-sm")}</span>
+  <span class="actions">{_link_btn("/config/reports", "管理分类", "btn btn-outline btn-sm")}</span>
 </div>
 <p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
 </div>"""
@@ -777,7 +776,7 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None, 
   </label>
   <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
-    <a href="/config/categories" class="cancel">取消</a>
+    <a href="/config/reports" class="cancel">取消</a>
   </div>
 </form>
 </div>"""
@@ -1224,7 +1223,7 @@ def handle_category_add(conn, form_body: str, session_user=None) -> tuple[int, s
     try:
         parent_id = int(data["parent_id"]) if data.get("parent_id") else None
         cid = db.add_category(conn, data["name"], parent_id, session_user=session_user)
-        return 302, f"/config/categories?flash=分类 {data['name']} 已创建"
+        return 302, f"/config/reports?flash=分类 {data['name']} 已创建"
     except Exception as e:
         return 200, render_category_form_page(conn, flash=f"错误: {e}",
                                               cat=_category_from_form(data))
@@ -1235,11 +1234,11 @@ def handle_category_edit(conn, category_id: int, form_body: str, session_user=No
     data = _parse_form_data(form_body)
     cat = db.get_category(conn, category_id)
     if not cat:
-        return 302, "/config/categories?flash=错误: 分类不存在"
+        return 302, "/config/reports?flash=错误: 分类不存在"
     try:
         parent_id = int(data["parent_id"]) if data.get("parent_id") else None
         db.update_category(conn, category_id, data["name"], parent_id, session_user=session_user)
-        return 302, f"/config/categories?flash=分类 {data['name']} 已更新"
+        return 302, f"/config/reports?flash=分类 {data['name']} 已更新"
     except Exception as e:
         return 200, render_category_form_page(conn, category_id, flash=f"错误: {e}",
                                               cat=_category_from_form(data, category_id))
@@ -1249,9 +1248,9 @@ def handle_category_delete(conn, category_id: int, session_user=None) -> tuple[i
     """处理删除分类"""
     cat = db.get_category(conn, category_id)
     if not cat:
-        return 302, "/config/categories?flash=错误: 分类不存在"
+        return 302, "/config/reports?flash=错误: 分类不存在"
     db.delete_category(conn, category_id, session_user=session_user)
-    return 302, f"/config/categories?flash=分类 {cat['name']} 已删除"
+    return 302, f"/config/reports?flash=分类 {cat['name']} 已删除"
 
 
 def handle_batch_set_category(conn, form_body: str) -> tuple[int, str]:
@@ -1567,9 +1566,9 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] in ("move-up", "move-down") and route["id"]:
                 direction = "up" if route["action"] == "move-up" else "down"
                 db.move_category(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config/categories", {}
+                return 302, "/config/reports", {}
             else:
-                return 302, "/config/categories", {}
+                return 302, "/config/reports", {}
             return _redirect_or_render(code, result)
 
     return 302, "/config", {}

@@ -492,7 +492,7 @@ Config overview portal, entry cards leading to each management page:
 - **Pools** — add/edit/delete/copy MySQL connection configs, reorder up/down
 - **Users** — add/edit/delete system users
 - **Reports** — standalone page `/config/reports`: configure SQL queries, bound pool, default page size, category, memo
-- **Categories** — standalone page `/config/categories`: unlimited-depth tree management, reorder/add/rename/delete
+- **Categories** — merged into `/config/reports` (top collapsible category tree): unlimited-depth tree management, reorder/add/rename/delete; old address `/config/categories` redirects to `/config/reports`
 - **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
 
 Report edit form highlights:
@@ -505,6 +505,7 @@ Report edit form highlights:
 
 Report list page highlights:
 - Tree display with indentation for hierarchy
+- Collapsible category tree section (fold state remembered via localStorage)
 - Up/down move buttons per report row
 - Category-level select all/deselect, batch delete
 - Reports can be moved across categories (target category dropdown)
