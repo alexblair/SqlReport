@@ -415,13 +415,20 @@ class TestReportFlow(unittest.TestCase):
         self.assertIn("备注", body)
 
     def test_report_form_contains_memo_preview(self):
-        """报表表单应包含备注预览按钮、预览面板与预览端点（字段清单对齐守护）"""
+        """报表表单应包含备注预览面板（md-body 排版）、实时渲染 JS 与预览端点（字段清单对齐守护）"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config/reports/add", "")
         self.assertIn("toggleMemoPreview", body)
         self.assertIn('id="memo-preview"', body)
+        self.assertIn('class="memo-preview md-body"', body)
         self.assertIn("预览备注", body)
         self.assertIn("/config/reports/memo-preview", body)
         self.assertIn('name="memo"', body)
+        self.assertIn("refreshMemoPreview", body)
+        self.assertIn("scheduleMemoPreview", body)
+        self.assertIn("renderPreviewMermaid", body)
+        self.assertIn("addEventListener('input', scheduleMemoPreview)", body)
+        self.assertIn("setTimeout", body)
+        self.assertIn("_memoPreviewSeq", body)
 
     def test_memo_preview_renders_markdown(self):
         """预览端点将 Markdown 渲染为 HTML 片段"""

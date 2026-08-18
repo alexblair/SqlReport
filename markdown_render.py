@@ -294,10 +294,11 @@ def codehilite_css() -> str:
 
     渲染模块的配套样式，消费点（报表页、编辑预览面板）将其追加到页面
     <style> 中，使 render_markdown 产出的 <span class="..."> 高亮真正可见。
+    monokai 为深色高亮色系，配套 .md-body 的深色 pre 代码块（见 render._MD_CSS）。
     """
     global _codehilite_css_cache
     if _codehilite_css_cache is None:
         from pygments.formatters import HtmlFormatter
-        _codehilite_css_cache = HtmlFormatter(style="default").get_style_defs(
+        _codehilite_css_cache = HtmlFormatter(style="monokai").get_style_defs(
             ".highlight")
     return _codehilite_css_cache

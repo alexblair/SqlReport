@@ -29,6 +29,8 @@ from render import (
     build_debug_section_html,
     # 备注区
     build_memo_section_html,
+    # Markdown 排版 CSS
+    _MD_CSS,
     # 结果切换
     build_result_selector_html,
     # 缓存标签
@@ -675,6 +677,13 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         self.assertIn("这是一段备注内容", result)
         self.assertIn("debug-info", result)
 
+    def test_memo_wrapped_in_md_body(self):
+        """渲染内容外包 .md-body 排版容器（列表缩进等样式由 _MD_CSS 提供）"""
+        result = build_memo_section_html("这是备注")
+        self.assertIn('<div class="md-body">', result)
+        result_empty = build_memo_section_html("")
+        self.assertNotIn("md-body", result_empty)
+
     def test_empty_memo(self):
         """备注为空时显示折叠状态"""
         result = build_memo_section_html("")
@@ -706,6 +715,13 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
     def test_memo_empty_markdown_empty(self):
         """空备注渲染为空内容"""
         self.assertNotIn("<p>", build_memo_section_html(""))
+
+    def test_md_css_restores_list_indent_and_dark_code(self):
+        """_MD_CSS 为嵌套列表补回缩进（全局 reset 清掉了 ul/ol 默认 padding）、
+        代码块深色化、mermaid 容器白底独立处理"""
+        self.assertIn("padding-left: 1.6em", _MD_CSS)
+        self.assertIn(".md-body pre.mermaid", _MD_CSS)
+        self.assertIn("background: #0f172a", _MD_CSS)
 
     def test_long_memo(self):
         """长备注全部显示"""

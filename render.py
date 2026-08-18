@@ -159,6 +159,64 @@ _FLASH_WARN_CSS = """
 # 黄色警示框内联样式（flash-warn 块级组件：表单警示、结果集名称警示共用，防样式漂移）
 _WARN_BOX_STYLE = "margin:8px 0;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;font-size:13px"
 
+# Markdown 渲染内容排版（报表页 memo 折叠区 / 编辑预览面板 #memo-preview 共用）。
+# 全局 reset（_BASE_CSS 的 `*, *::before, *::after { margin:0; padding:0 }`）清掉了
+# 浏览器默认的 ul/ol 缩进，必须显式补回，否则嵌套列表左侧挤在一起。
+# 消费页必须把本样式追加在各自 extra_css 的【末尾】（报表页 _CSS、配置页
+# _CONFIG_EXTRA_CSS 之后），保证与既有 .debug-info / .memo-preview 规则特异性
+# 相同时后注入胜出；代码高亮色系见 markdown_render.codehilite_css()（monokai 深色）。
+_MD_CSS = """
+.md-body { font-size: 14px; line-height: 1.7; color: #1e293b; overflow-wrap: break-word; }
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body p { margin: 8px 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  color: #0f172a; font-weight: 700; line-height: 1.35; margin: 20px 0 10px;
+}
+.md-body h1 { font-size: 21px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+.md-body h2 { font-size: 18px; padding-bottom: 6px; border-bottom: 1px solid #eef2f7; }
+.md-body h3 { font-size: 16px; }
+.md-body h4 { font-size: 14px; color: #334155; }
+.md-body ul, .md-body ol { margin: 6px 0; padding-left: 1.6em; }
+.md-body ul ul, .md-body ol ol, .md-body ul ol, .md-body ol ul { margin: 2px 0; }
+.md-body li { margin: 3px 0; }
+.md-body li::marker { color: #94a3b8; }
+.md-body blockquote {
+  margin: 10px 0; padding: 8px 14px; background: #f8fafc;
+  border-left: 3px solid #818cf8; border-radius: 0 6px 6px 0; color: #475569;
+}
+.md-body blockquote p { margin: 4px 0; }
+.md-body code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  background: #eef2f7; padding: 2px 6px; border-radius: 4px;
+  font-size: 0.9em; color: #be185d;
+}
+.md-body pre {
+  background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 8px;
+  overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 10px 0;
+}
+.md-body pre code { background: none; padding: 0; color: inherit; font-size: 13px; }
+.md-body .highlight {
+  background: #0f172a; color: #e2e8f0; border-radius: 8px;
+  overflow-x: auto; margin: 10px 0;
+}
+.md-body .highlight pre { background: none; padding: 12px 14px; margin: 0; }
+.md-body .highlight code { background: none; padding: 0; color: inherit; }
+.md-body pre.mermaid {
+  background: #fff; border: 1px solid #e2e8f0; color: #334155;
+  text-align: center; padding: 12px;
+}
+.md-body a { color: #4f46e5; text-decoration: none; border-bottom: 1px solid rgba(79,70,229,0.3); transition: border-color 0.15s; }
+.md-body a:hover { border-bottom-color: #4f46e5; }
+.md-body hr { border: none; border-top: 1px solid #e2e8f0; margin: 16px 0; }
+.md-body img { max-width: 100%; height: auto; border-radius: 8px; }
+.md-body table { margin: 10px 0; font-size: 13px; border-collapse: collapse; width: auto; max-width: 100%; }
+.md-body th, .md-body td { border: 1px solid #e2e8f0; padding: 6px 12px; }
+.md-body th { background: #f8fafc; }
+.md-body tbody tr:hover { background: #f8fafc; }
+.md-body del { color: #94a3b8; }
+"""
+
 _COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS
 
 # ---------------------------------------------------------------------------
@@ -881,6 +939,8 @@ def build_memo_section_html(memo_raw: str) -> str:
         memo_btn_text = "▶ 备注"
         memo_hidden = True
     memo_html = markdown_render.render_markdown(memo_raw)
+    # 内容外包 .md-body 排版容器（消费页 extra_css 末尾的 _MD_CSS 提供样式）
+    memo_html = f'<div class="md-body">{memo_html}</div>' if memo_html else ""
     return build_collapse_section_html("备注", memo_html,
                                        default_hidden=memo_hidden,
                                        button_text=memo_btn_text)

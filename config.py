@@ -49,6 +49,7 @@ from render import (
     build_api_endpoint_preview_help_html,
     _build_desc_summary_html,
     _WARN_BOX_STYLE,
+    _MD_CSS,
 )
 from report import parse_result_names
 import markdown_render
@@ -211,12 +212,8 @@ _CONFIG_EXTRA_CSS = """
     font-size: 14px; line-height: 1.7;
   }
   .memo-preview.show { display: block; }
-  .memo-preview pre {
-    background: #f8fafc; padding: 10px 12px; border-radius: 6px;
-    overflow-x: auto; font-size: 13px; line-height: 1.5;
-  }
-  .memo-preview code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
-  .memo-preview pre code { background: none; padding: 0; }
+  /* .memo-preview 内 markdown 排版（pre/code/列表/表格等）统一由 .md-body
+     （_MD_CSS，追加在 _CONFIG_MD_EXTRA_CSS 末尾）负责，避免双实现漂移 */
   .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
   .section + .section { margin-top: 8px; }
   .ops-cell { white-space: nowrap; }
@@ -229,7 +226,9 @@ _CONFIG_EXTRA_CSS = """
 """
 
 # 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
-_CONFIG_MD_EXTRA_CSS = _CONFIG_EXTRA_CSS + markdown_render.codehilite_css()
+# + Markdown 排版 CSS（_MD_CSS 必须在 _CONFIG_EXTRA_CSS 之后，保证列表缩进等规则生效）
+_CONFIG_MD_EXTRA_CSS = (_CONFIG_EXTRA_CSS + markdown_render.codehilite_css()
+                        + _MD_CSS)
 
 
 def _escape(text: str) -> str:
@@ -420,7 +419,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   </label>
   <label class="span-full">备注（非必填）:
     <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
-    <div class="memo-preview" id="memo-preview"></div>
+    <div class="memo-preview md-body" id="memo-preview"></div>
     <div class="sql-toolbar">
       <button type="button" class="btn btn-outline btn-sm" onclick="toggleMemoPreview(this)">预览备注</button>
     </div>
@@ -462,26 +461,66 @@ function previewReport(form) {{
     form.target = '';
     form.action = form.getAttribute('data-action');
 }}
-function toggleMemoPreview(btn) {{
+var _memoPreviewSeq = 0;
+function renderPreviewMermaid() {{
+    var nodes = document.querySelectorAll('#memo-preview .mermaid');
+    if (!nodes.length) return;
+    if (window.mermaid) {{
+        mermaid.run({{ nodes: nodes }});
+        return;
+    }}
+    var s = document.createElement('script');
+    s.src = '{markdown_render.MERMAID_JS_URL}';
+    s.onload = function() {{
+        mermaid.initialize({{ startOnLoad: false, securityLevel: 'strict' }});
+        mermaid.run({{ nodes: nodes }});
+    }};
+    document.head.appendChild(s);
+}}
+function refreshMemoPreview(btn) {{
     var prev = document.getElementById('memo-preview');
     var ta = document.querySelector('textarea[name="memo"]');
     if (!prev || !ta) return;
-    var show = !prev.classList.contains('show');
-    if (!show) {{ prev.classList.remove('show'); btn.textContent = '预览备注'; return; }}
-    prev.classList.add('show');
-    btn.textContent = '预览中...';
+    var seq = ++_memoPreviewSeq;
     var body = new URLSearchParams();
     body.append('memo', ta.value);
     fetch('/config/reports/memo-preview', {{ method: 'POST', body: body }})
       .then(function(r) {{ return r.text(); }})
       .then(function(html) {{
+        if (seq !== _memoPreviewSeq) return;
         prev.innerHTML = html;
-        btn.textContent = '隐藏预览';
+        renderPreviewMermaid();
+        if (btn && btn.textContent === '预览中...') btn.textContent = '隐藏预览';
       }})
       .catch(function() {{
+        if (seq !== _memoPreviewSeq) return;
         prev.textContent = '预览失败，请稍后重试';
-        btn.textContent = '隐藏预览';
+        if (btn && btn.textContent === '预览中...') btn.textContent = '隐藏预览';
       }});
+}}
+function scheduleMemoPreview() {{
+    var prev = document.getElementById('memo-preview');
+    if (!prev || !prev.classList.contains('show')) return;
+    if (window._memoPreviewTimer) clearTimeout(window._memoPreviewTimer);
+    window._memoPreviewTimer = setTimeout(function() {{ refreshMemoPreview(); }}, 300);
+}}
+function toggleMemoPreview(btn) {{
+    var prev = document.getElementById('memo-preview');
+    var ta = document.querySelector('textarea[name="memo"]');
+    if (!prev || !ta) return;
+    var show = !prev.classList.contains('show');
+    if (!show) {{
+        prev.classList.remove('show');
+        btn.textContent = '预览备注';
+        return;
+    }}
+    prev.classList.add('show');
+    btn.textContent = '预览中...';
+    if (!ta.dataset.memoPreviewBound) {{
+        ta.dataset.memoPreviewBound = '1';
+        ta.addEventListener('input', scheduleMemoPreview);
+    }}
+    refreshMemoPreview(btn);
 }}
 </script>
 </div>"""

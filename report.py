@@ -60,6 +60,7 @@ from render import (
     build_sort_settings_panel_html, build_filter_form_html,
     build_filter_action_html, build_report_switcher_html,
     build_api_urls_section_html, build_flash_html,
+    _MD_CSS,
 )
 import markdown_render
 
@@ -381,9 +382,9 @@ _CSS = """
 
 
 def _render_page_header() -> str:
-    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 代码高亮 CSS + 导航高亮。"""
+    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 代码高亮 CSS + Markdown 排版 CSS + 导航高亮。"""
     return render_page_header(title="Web 报表工具", active_nav="report",
-                              extra_css=_CSS + markdown_render.codehilite_css())
+                              extra_css=_CSS + markdown_render.codehilite_css() + _MD_CSS)
 
 
 _FOOTER = r"""</div>

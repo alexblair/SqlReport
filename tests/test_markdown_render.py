@@ -10,7 +10,10 @@ test_markdown_render.py — Markdown 渲染模块测试
 
 import unittest
 
-from markdown_render import contains_mermaid, extract_mermaid_blocks, render_markdown
+from markdown_render import (
+    contains_mermaid, extract_mermaid_blocks, render_markdown,
+    codehilite_css,
+)
 
 
 class TestRenderMarkdownInputs(unittest.TestCase):
@@ -153,6 +156,12 @@ class TestRenderMarkdownInputs(unittest.TestCase):
         out = render_markdown("```python\nprint(1)\n```")
         self.assertIn('<div class="highlight">', out)
         self.assertIn('<span class="', out)
+
+    def test_codehilite_css_is_dark_theme(self):
+        """高亮 CSS 为深色系（monokai，配套 .md-body 深色 pre）"""
+        css = codehilite_css()
+        self.assertIn("#272822", css)
+        self.assertIn(".highlight .k { color: #66D9EF", css)
 
     def test_markdown_special_chars_entity_safe(self):
         self.assertIn("&lt;script&gt;", render_markdown("&lt;script&gt;"))
