@@ -1722,7 +1722,10 @@ class TestMySQLCategoryCRUD(_MySQLCRUDTestBase):
         self.assertFalse(db.delete_category(self.conn, 999))
 
     def test_move_category_up(self):
-        """move_category 'up' 应与前一项交换 sort_order。"""
+        """move_category 'up' 应与同父兄弟前一项交换 sort_order。"""
+        self.mock_cursor.fetchone.return_value = {
+            "id": 2, "name": "cat_b", "parent_id": None, "sort_order": 1,
+        }
         self.mock_cursor.fetchall.return_value = [
             {"id": 1, "name": "cat_a", "parent_id": None, "sort_order": 0},
             {"id": 2, "name": "cat_b", "parent_id": None, "sort_order": 1},

@@ -1301,8 +1301,19 @@ def move_category(conn, category_id: int, direction: str, session_user=None) -> 
     """
     调整分类排序。direction 为 'up' 或 'down'。
     与相邻项交换 sort_order，返回 True 表示移动成功。
+
+    限定在同父兄弟范围内移动（与渲染端 idx 计算一致）：多级分类下若在
+    全局列表中取相邻项，父分类的相邻项往往是其子分类，交换后显示顺序不变。
     """
-    return _move_item(conn, get_all_categories, "report_categories", category_id,
+    cat = get_category(conn, category_id)
+    if cat is None:
+        return False
+    pid = cat.get("parent_id")
+
+    def _siblings(c):
+        return [x for x in get_all_categories(c) if x.get("parent_id") == pid]
+
+    return _move_item(conn, _siblings, "report_categories", category_id,
                       direction, "move_category", "category", session_user)
 
 

@@ -522,6 +522,38 @@ class TestSortingSQL(unittest.TestCase):
         cats = db.get_all_categories(self.conn)
         self.assertEqual([c["id"] for c in cats], [2, 1])
 
+    def test_move_category_parent_scoped_swaps_sibling_not_child(self):
+        """多级分类回归：父分类下移只与同级兄弟交换，不与子分类换（原 bug）"""
+        db.add_category(self.conn, "财务")
+        db.add_category(self.conn, "月报", parent_id=1)
+        db.add_category(self.conn, "季报", parent_id=1)
+        db.add_category(self.conn, "销售")
+        ok = db.move_category(self.conn, 1, "down")
+        self.assertTrue(ok)
+        self.assertEqual(db.get_category(self.conn, 1)["sort_order"], 4)
+        self.assertEqual(db.get_category(self.conn, 4)["sort_order"], 1)
+        self.assertEqual(db.get_category(self.conn, 2)["parent_id"], 1)
+
+    def test_move_category_child_scoped_swaps_sibling(self):
+        """子分类移动在同父兄弟内交换，不影响其他分类"""
+        db.add_category(self.conn, "财务")
+        db.add_category(self.conn, "月报", parent_id=1)
+        db.add_category(self.conn, "季报", parent_id=1)
+        db.add_category(self.conn, "销售")
+        ok = db.move_category(self.conn, 2, "down")
+        self.assertTrue(ok)
+        self.assertEqual(db.get_category(self.conn, 2)["sort_order"], 3)
+        self.assertEqual(db.get_category(self.conn, 3)["sort_order"], 2)
+
+    def test_move_category_boundary_scoped_to_parent(self):
+        """同父兄弟边界：根级首/末项在兄弟内判定上下移边界"""
+        db.add_category(self.conn, "财务")
+        db.add_category(self.conn, "月报", parent_id=1)
+        db.add_category(self.conn, "销售")
+        self.assertFalse(db.move_category(self.conn, 3, "down"))
+        self.assertFalse(db.move_category(self.conn, 1, "up"))
+        self.assertFalse(db.move_category(self.conn, 2, "up"))
+
     def test_move_pool_up_swaps(self):
         """move_pool up 应交换连接池 sort_order"""
         db.add_pool(self.conn, "p1", "h", 3306, "u", "p", "d")
