@@ -1322,7 +1322,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         filters, sorts, display_columns, all_columns)
     memo_html = build_memo_section_html(report.get("memo") or "")
     # 备注含 ```mermaid 块时按需注入 mermaid 渲染脚本（渐进增强：JS 加载失败
-    # 时页面显示 <pre class="mermaid"><code> 转义源码，不空白）
+    # 时页面显示 <pre class="mermaid"> 转义源码，不空白）
     mermaid_scripts = ""
     if markdown_render.contains_mermaid(report.get("memo") or ""):
         mermaid_scripts = (

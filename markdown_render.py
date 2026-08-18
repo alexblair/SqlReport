@@ -9,7 +9,8 @@ markdown_render.py — Markdown 渲染单一来源模块
 - 渲染结果经白名单 sanitize（标准库 html.parser 自实现，不引 bleach）
 - URL 协议白名单：仅 http/https/mailto/#；javascript:/data: 等危险协议
   → 对应 <a> 成对剥离，内部文本保留为纯文本
-- mermaid fenced 块输出 <pre class="mermaid"><code>…</code></pre>（源码转义），
+- mermaid fenced 块输出 <pre class="mermaid">…</pre>（源码转义，不带 <code> 子元素：
+  mermaid 11 的 run() 读取元素 innerHTML，套 <code> 会触发 UnknownDiagramError），
   由前端 mermaid.min.js 按需渲染
 """
 
@@ -205,7 +206,7 @@ def _render_with_mermaid(src: str) -> tuple[str, list[tuple[str, str]]]:
 
     markdown 的 codehilite 会把 ```mermaid 当普通代码块高亮，无法产出
     <pre class="mermaid">。故渲染前先将 mermaid 块整体提取为占位 div，
-    渲染 + sanitize 后再原位替换为 <pre class="mermaid"><code>…</code></pre>。
+    渲染 + sanitize 后再原位替换为 <pre class="mermaid">…</pre>（无 <code> 子元素）。
     """
     blocks: list[tuple[str, str]] = []
     out_lines: list[str] = []
@@ -253,7 +254,7 @@ def render_markdown(src: str | None) -> str:
         escaped = html_mod.escape(block_src)
         sanitized = sanitized.replace(
             placeholder,
-            f'<pre class="mermaid"><code>{escaped}</code></pre>',
+            f'<pre class="mermaid">{escaped}</pre>',
         )
     return sanitized
 

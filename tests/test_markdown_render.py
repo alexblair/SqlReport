@@ -98,7 +98,8 @@ class TestRenderMarkdownInputs(unittest.TestCase):
     def test_mermaid_codeblock_pre_style(self):
         out = render_markdown("```mermaid\nflowchart TD\n A-->B\n```")
         self.assertIn('<pre class="mermaid">', out)
-        self.assertIn("<code>flowchart TD\n A--&gt;B</code>", out)
+        self.assertIn('<pre class="mermaid">flowchart TD\n A--&gt;B</pre>', out)
+        self.assertNotIn("<code>flowchart TD", out)
 
     def test_multiple_mermaid_blocks(self):
         out = render_markdown("```mermaid\nA\n```\n\n```mermaid\nB\n```")
