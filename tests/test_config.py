@@ -525,6 +525,75 @@ class TestReportFlow(unittest.TestCase):
         self.assertEqual(rpt["cache_ttl_hours"], 0)
 
 
+class TestDescriptionPreview(unittest.TestCase):
+    """api-desc-markdown T4：API 接口说明 Markdown 预览端点（矩阵 M5）。"""
+
+    def setUp(self):
+        self.conn = _make_conn()
+        db.add_pool(self.conn, "API池", "h", 3306, "u", "p", "d")
+        db.add_report(self.conn, "API报表", "SELECT 1", 20, 1)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_api_endpoint_form_contains_desc_preview(self):
+        """API 端点表单含接口说明预览面板 + 预览按钮 + 预览端点引用（字段清单对齐守护）"""
+        code, body, _ = config.handle_request(
+            self.conn, "GET", "/config/reports/1/api_endpoints/new", "")
+        self.assertEqual(code, 200)
+        self.assertIn("toggleDescPreview", body)
+        self.assertIn('id="description-preview"', body)
+        self.assertIn('class="memo-preview md-body"', body)
+        self.assertIn("预览接口说明", body)
+        self.assertIn("/config/api-endpoints/description-preview", body)
+        self.assertIn('name="description"', body)
+        self.assertIn("refreshDescPreview", body)
+        self.assertIn("scheduleDescPreview", body)
+        self.assertIn("renderDescPreviewMermaid", body)
+        self.assertIn("addEventListener('input', scheduleDescPreview)", body)
+        self.assertIn("_descPreviewSeq", body)
+
+    def test_desc_preview_renders_markdown(self):
+        """预览端点将 Markdown 渲染为 HTML 片段"""
+        form = urllib.parse.urlencode({"description": "# 标题\n\n- a\n- b"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/api-endpoints/description-preview", "", form)
+        self.assertEqual(code, 200)
+        self.assertIn("<h1>标题</h1>", body)
+        self.assertIn("<ul>", body)
+
+    def test_desc_preview_sanitizes_script(self):
+        """预览端点渲染结果不含可执行脚本"""
+        form = urllib.parse.urlencode({"description": "<script>alert(1)</script>"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/api-endpoints/description-preview", "", form)
+        self.assertEqual(code, 200)
+        self.assertNotIn("<script>", body)
+        self.assertIn("alert(1)", body)
+
+    def test_desc_preview_mermaid(self):
+        """预览端点渲染 mermaid 块为 pre.mermaid"""
+        form = urllib.parse.urlencode(
+            {"description": "```mermaid\nflowchart TD\n A-->B\n```"})
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/api-endpoints/description-preview", "", form)
+        self.assertIn('<pre class="mermaid">', body)
+
+    def test_desc_preview_empty(self):
+        """空 description 预览返回空片段"""
+        code, body, _ = config.handle_request(
+            self.conn, "POST", "/config/api-endpoints/description-preview",
+            "", "description=")
+        self.assertEqual(code, 200)
+        self.assertEqual(body, "")
+
+    def test_desc_preview_route_parsed(self):
+        """description-preview 路径解析为 api-endpoints 段动作"""
+        r = config.parse_config_path("/config/api-endpoints/description-preview")
+        self.assertEqual(r["section"], "api-endpoints")
+        self.assertEqual(r["action"], "description-preview")
+
+
 class TestFlashMessage(unittest.TestCase):
     """Flash 消息传递测试"""
 

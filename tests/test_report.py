@@ -415,6 +415,41 @@ class TestReportExecution(unittest.TestCase):
         self.assertNotIn("mermaid@11.16.1", body)
         self.assertNotIn("mermaid.initialize", body)
 
+    @patch("report.execute_report")
+    def test_report_injects_mermaid_when_api_desc_has_mermaid(self, mock_exec):
+        """备注无 mermaid、API 接口说明含 ```mermaid 块时同样注入 mermaid script"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo="纯文本备注")
+        db.add_api_endpoint(
+            self.conn, 1, "带图接口", "/api/chart",
+            description="```mermaid\nflowchart TD\n A-->B\n```")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn('src="/static/vendor/mermaid@11.16.1/mermaid.min.js"', body)
+        self.assertIn("mermaid.initialize", body)
+        self.assertIn('<pre class="mermaid">', body)
+        self.assertIn('data-mem-key="api_desc_fold_1"', body)
+
+    @patch("report.execute_report")
+    def test_report_skips_mermaid_when_neither_memo_nor_api_desc(self, mock_exec):
+        """备注与全部 API 说明均不含 mermaid 时不注入（零请求）"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo="纯文本备注")
+        db.add_api_endpoint(
+            self.conn, 1, "无图接口", "/api/plain",
+            description="普通说明，无流程图")
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertNotIn("mermaid@11.16.1", body)
+        self.assertNotIn("mermaid.initialize", body)
+        self.assertIn("data-mem-key=\"api_desc_fold_1\"", body)
+
 
 class TestReportResult(unittest.TestCase):
     """ReportResult 工具类测试"""

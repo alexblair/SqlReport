@@ -88,6 +88,10 @@ def parse_config_path(path: str) -> dict:
         if path in ("/config", "/config/"):
             return {"section": None, "action": "overview", "id": None,
                     "report_id": None, "endpoint_id": None}
+        # API 接口说明 Markdown 预览（无报表 id，独立前缀；api-desc-markdown T4）
+        if path == "/config/api-endpoints/description-preview":
+            return {"section": "api-endpoints", "action": "description-preview",
+                    "id": None, "report_id": None, "endpoint_id": None}
         return {"section": None, "action": None, "id": None,
                 "report_id": None, "endpoint_id": None}
 
@@ -1396,6 +1400,17 @@ def handle_memo_preview(form_body: str) -> tuple[int, str, dict]:
     return 200, markdown_render.render_markdown(memo), {}
 
 
+def handle_description_preview(form_body: str) -> tuple[int, str, dict]:
+    """API 接口说明 Markdown 预览端点处理（api-desc-markdown T4）。
+
+    将 description 原文渲染为已消毒的 HTML 片段返回（纯渲染、无落库、无数据库依赖）。
+    渲染逻辑与查看页共用 render_markdown()，杜绝双实现漂移（镜像 handle_memo_preview）。
+    """
+    data = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
+    description = (data.get("description") or [""])[-1]
+    return 200, markdown_render.render_markdown(description), {}
+
+
 def handle_request(conn, method: str, path: str, query: str,
                    form_body: str = None, session_user=None) -> tuple[int, str, dict]:
     """
@@ -1469,6 +1484,11 @@ def handle_request(conn, method: str, path: str, query: str,
     if (method == "POST" and route["section"] == "reports"
             and route["action"] == "memo-preview"):
         return handle_memo_preview(form_body or "")
+
+    # API 接口说明 Markdown 预览（纯渲染无落库，api-desc-markdown T4）
+    if (method == "POST" and route["section"] == "api-endpoints"
+            and route["action"] == "description-preview"):
+        return handle_description_preview(form_body or "")
 
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
     if method == "POST" and route["section"] == "reports" and route["report_id"]:

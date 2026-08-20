@@ -232,6 +232,11 @@ function toggleSection(btn, label) {
   var content = btn.nextElementSibling;
   var hidden = content.classList.toggle("hidden");
   btn.textContent = hidden ? "\u25b6 " + label : "\u25bc " + label;
+  var node = btn.closest('[data-mem-key]');
+  if (node) {
+    highlightMemMode(node, hidden ? 'fold' : 'open');
+    try { localStorage.setItem(node.getAttribute('data-mem-key'), hidden ? 'fold' : 'open'); } catch (e) {}
+  }
 }
 function toggleCatTree(btn) {
   var content = document.getElementById("cat-tree-content");
@@ -285,19 +290,6 @@ function buildApiUrl(path, kind) {
     return origin + path + '.json';
   }
   return origin + path;
-}
-function toggleApiDesc(btn) {
-  var box = btn.previousElementSibling;
-  if (!box) return;
-  if (box.style.webkitLineClamp) {
-    box.style.webkitLineClamp = '';
-    box.style.display = 'block';
-    btn.textContent = '收起';
-  } else {
-    box.style.webkitLineClamp = '3';
-    box.style.display = '-webkit-box';
-    btn.textContent = '展开';
-  }
 }
 function toggleFilterInput(inputName, select) {
   var input = document.getElementsByName(inputName)[0];
@@ -375,6 +367,47 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 document.addEventListener('DOMContentLoaded', function() {
   initCatTree();
+});
+function initMemToggles() {
+  var nodes = document.querySelectorAll('[data-mem-key]');
+  for (var i = 0; i < nodes.length; i++) {
+    applyMemMode(nodes[i], null, false);
+  }
+}
+function applyMemMode(node, mode, persist) {
+  var content = node.querySelector('.debug-content');
+  var btn = node.querySelector('.debug-toggle');
+  if (!content) return;
+  var key = node.getAttribute('data-mem-key');
+  var defHidden = node.getAttribute('data-default-hidden') === '1';
+  var m;
+  if (mode === null) {
+    try { m = localStorage.getItem(key) || 'auto'; } catch (e) { m = 'auto'; }
+  } else {
+    m = mode;
+  }
+  var isFold = (m === 'fold') || (m === 'auto' && defHidden);
+  content.classList.toggle('hidden', isFold);
+  if (btn) {
+    var label = btn.textContent.replace(/^[\u25b6\u25bc]\s*/, '');
+    btn.textContent = (isFold ? "\u25b6 " : "\u25bc ") + label;
+  }
+  highlightMemMode(node, m);
+  if (persist) { try { localStorage.setItem(key, m); } catch (e) {} }
+}
+function setMemToggle(btn, key, mode) {
+  var node = btn.closest('[data-mem-key]');
+  if (!node) return;
+  applyMemMode(node, mode, true);
+}
+function highlightMemMode(node, mode) {
+  var btns = node.querySelectorAll('.mem-mode');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === mode);
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  initMemToggles();
 });
 function applyRulesJson() {
   var ta = document.getElementById('current-rules-json');
@@ -946,12 +979,14 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
     return build_collapse_section_html("当前规则", content, extra_style="margin-top:8px")
 
 
-def build_memo_section_html(memo_raw: str) -> str:
+def build_memo_section_html(memo_raw: str, report_id: int = None) -> str:
     """构建备注折叠区 HTML。
 
     备注内容为 Markdown 源文本：经 render_markdown() 渲染为已消毒的 HTML
     （含 ```mermaid 时产出 <pre class="mermaid">，由前端按需渲染）。
-    折叠区展开/收起状态逻辑不变（非空展开、空折叠）。
+    折叠区展开/收起状态逻辑不变（非空展开、空折叠），即三态「自动」语义；
+    report_id 提供时启用三态记忆控件（api-desc-markdown T2），
+    记忆键 memo_fold_{report_id}；report_id 为 None 时保持现状输出。
     """
     if memo_raw:
         memo_btn_text = "▼ 备注"
@@ -964,7 +999,9 @@ def build_memo_section_html(memo_raw: str) -> str:
     memo_html = f'<div class="md-body">{memo_html}</div>' if memo_html else ""
     return build_collapse_section_html("备注", memo_html,
                                        default_hidden=memo_hidden,
-                                       button_text=memo_btn_text)
+                                       button_text=memo_btn_text,
+                                       mem_key=(f"memo_fold_{report_id}"
+                                                if report_id is not None else None))
 
 
 def build_result_selector_html(report_id, qs_page_size, result_names,
@@ -2299,9 +2336,7 @@ def _mask_api_key(key: str) -> str:
 
 # 接口说明截断阈值（字符数）：
 # - 列表页摘要版（表格单元格窄，单行 ellipsis）：40 字符 + title 悬停全文
-# - 折叠区展示版（line-clamp 3 行 + 展开按钮）：80 字符或含换行时截断
 _DESC_SUMMARY_TRUNCATE_LEN = 40
-_API_DESC_TRUNCATE_LEN = 80
 
 
 def _build_desc_summary_html(desc_raw: str,
@@ -2745,7 +2780,11 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     placeholder="例如: 客户数据 API"></label>
 
   <label class="span-full">接口说明（可选，仅页面展示，不进入 API 输出）:
-    <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持换行…" rows="4" style="min-height:80px;font-family:inherit">{description}</textarea>
+    <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持 Markdown（标题/列表/代码块/```mermaid 流程图）…" rows="4" style="min-height:80px;font-family:inherit">{description}</textarea>
+    <div class="memo-preview md-body" id="description-preview"></div>
+    <div class="sql-toolbar">
+      <button type="button" class="btn btn-outline btn-sm" onclick="toggleDescPreview(this)">预览接口说明</button>
+    </div>
   </label>
 
   <label class="span-full">URL 路径:
@@ -2841,6 +2880,65 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     updateFetchAllUrl();
     updateStaticCacheState();
   }});
+  var _descPreviewSeq = 0;
+  function renderDescPreviewMermaid() {{
+    var nodes = document.querySelectorAll('#description-preview .mermaid');
+    if (!nodes.length) return;
+    if (window.mermaid) {{
+      mermaid.run({{ nodes: nodes }});
+      return;
+    }}
+    var s = document.createElement('script');
+    s.src = '{markdown_render.MERMAID_JS_URL}';
+    s.onload = function() {{
+      mermaid.initialize({{ startOnLoad: false, securityLevel: 'strict' }});
+      mermaid.run({{ nodes: nodes }});
+    }};
+    document.head.appendChild(s);
+  }}
+  function refreshDescPreview(btn) {{
+    var prev = document.getElementById('description-preview');
+    var ta = document.querySelector('textarea[name="description"]');
+    if (!prev || !ta) return;
+    var seq = ++_descPreviewSeq;
+    var body = new URLSearchParams();
+    body.append('description', ta.value);
+    fetch('/config/api-endpoints/description-preview', {{ method: 'POST', body: body }})
+      .then(function(r) {{ return r.text(); }})
+      .then(function(html) {{
+        if (seq !== _descPreviewSeq) return;
+        prev.innerHTML = html;
+        renderDescPreviewMermaid();
+        if (btn && btn.textContent === '预览中...') btn.textContent = '隐藏预览';
+      }})
+      .catch(function() {{
+        if (seq !== _descPreviewSeq) return;
+        prev.textContent = '预览失败，请稍后重试';
+        if (btn && btn.textContent === '预览中...') btn.textContent = '隐藏预览';
+      }});
+  }}
+  function scheduleDescPreview() {{
+    var prev = document.getElementById('description-preview');
+    if (!prev || !prev.classList.contains('show')) return;
+    if (window._descPreviewTimer) clearTimeout(window._descPreviewTimer);
+    window._descPreviewTimer = setTimeout(function() {{ refreshDescPreview(); }}, 300);
+  }}
+  function toggleDescPreview(btn) {{
+    var prev = document.getElementById('description-preview');
+    var ta = document.querySelector('textarea[name="description"]');
+    if (!prev || !ta) return;
+    var show = !prev.classList.contains('show');
+    if (!show) {{
+      prev.classList.remove('show');
+      btn.textContent = '预览接口说明';
+      return;
+    }}
+    prev.classList.add('show');
+    btn.textContent = '预览中...';
+    refreshDescPreview(btn);
+  }}
+  var _descTa = document.querySelector('textarea[name="description"]');
+  if (_descTa) _descTa.addEventListener('input', scheduleDescPreview);
   </script>
 
   <label>输出格式:
@@ -3338,27 +3436,52 @@ def build_collapse_section_html(title: str, content: str,
                                 default_hidden: bool = True,
                                 extra_style: str = "",
                                 button_text: str = None,
-                                multiline: bool = False) -> str:
+                                multiline: bool = False,
+                                mem_key: str = None) -> str:
     """构建折叠区骨架 HTML（debug-info 样式）。
 
     标题按钮: class="debug-toggle" onclick="toggleSection(this, '标题')"。
     按钮初始文案为 "▶ 标题"（备注等特殊形态经 button_text 覆盖）。
     multiline=True 时外层按多行排版输出（折叠区内容本身多行的场景），
     内容行的缩进由调用方在 content 中自带，保证与现状逐字符一致。
+
+    mem_key 提供时启用三态记忆控件（api-desc-markdown T1）：
+    - 容器带 data-mem-key 与 data-default-hidden（'1'/'0'），供前端
+      initMemToggles/setMemToggle 读取与覆盖（localStorage 记忆）。
+    - 标题行右侧追加「自动/展开/折叠」三态按钮组（当前态高亮，默认自动）。
+    - 三态控件置于内容 div 之后（不插入 button 与 content 之间），
+      保证 toggleSection 的 nextElementSibling 折叠逻辑不受影响。
+    mem_key 为 None 时输出与现状逐字符一致。
     """
     style_attr = f' style="{extra_style}"' if extra_style else ""
     hidden_cls = " hidden" if default_hidden else ""
     btn_text = button_text if button_text is not None else f"▶ {title}"
+    mem_attrs = ""
+    mem_ctl = ""
+    if mem_key:
+        mem_attrs = (f' data-mem-key="{mem_key}" '
+                     f'data-default-hidden="{"1" if default_hidden else "0"}"')
+        mem_ctl = (
+            f'<span class="mem-toggle">'
+            f'<button type="button" class="mem-mode mem-mode-auto active" data-mode="auto" '
+            f'onclick="setMemToggle(this,\'{mem_key}\',\'auto\')">自动</button>'
+            f'<button type="button" class="mem-mode mem-mode-open" data-mode="open" '
+            f'onclick="setMemToggle(this,\'{mem_key}\',\'open\')">展开</button>'
+            f'<button type="button" class="mem-mode mem-mode-fold" data-mode="fold" '
+            f'onclick="setMemToggle(this,\'{mem_key}\',\'fold\')">折叠</button>'
+            f'</span>')
     if multiline:
-        return (f'<div class="debug-info"{style_attr}>\n'
+        return (f'<div class="debug-info"{mem_attrs}{style_attr}>\n'
                 f'<button class="debug-toggle" onclick="toggleSection(this, \'{title}\')" type="button">{btn_text}</button>\n'
                 f'<div class="debug-content{hidden_cls}">\n'
                 f'{content}\n'
                 f'</div>\n'
+                f'{mem_ctl}\n'
                 f'</div>')
-    return (f'<div class="debug-info"{style_attr}>'
+    return (f'<div class="debug-info"{mem_attrs}{style_attr}>'
             f'<button class="debug-toggle" onclick="toggleSection(this, \'{title}\')" type="button">{btn_text}</button>'
             f'<div class="debug-content{hidden_cls}">{content}</div>'
+            f'{mem_ctl}'
             '</div>')
 
 
@@ -3455,29 +3578,21 @@ def _build_api_status_badge(enabled) -> str:
 
 
 def _build_api_description_html(ep: dict) -> str:
-    """构建接口说明块 HTML（纯展示，保留换行，长文本截断 + 展开/收起）。
+    """构建接口说明折叠区 HTML（api-desc-markdown T3）。
 
-    截断策略：说明长度超过阈值或含换行时，以 CSS line-clamp 限 3 行，
-    配"展开/收起"按钮（toggleApiDesc 切换）；短说明完整显示。
+    说明为纯展示 Markdown 源文本：经 render_markdown() 渲染为已消毒的 HTML
+    （含 ```mermaid 时产出 <pre class="mermaid">，由前端按需渲染），外包
+    .md-body 排版容器，再构建「接口说明」折叠区（默认展开，三态记忆键
+    api_desc_fold_{endpoint_id}）。空说明返回空串（不渲染任何块）。
     """
     desc_raw = (ep.get("description") or "").strip()
     if not desc_raw:
         return ""
-    desc = _escape(desc_raw)
-    truncate = len(desc_raw) > _API_DESC_TRUNCATE_LEN or "\n" in desc_raw
-    if truncate:
-        box = (f'<div style="display:-webkit-box;-webkit-line-clamp:3;'
-               f'-webkit-box-orient:vertical;overflow:hidden;'
-               f'white-space:pre-wrap;word-break:break-word;'
-               f'margin:4px 0 2px 0;font-size:13px;color:#475569;line-height:1.6">'
-               f'{desc}</div>'
-               f'<button type="button" onclick="toggleApiDesc(this)" '
-               f'class="btn-mini btn-mini-outline-accent">展开</button>')
-    else:
-        box = (f'<div style="white-space:pre-wrap;word-break:break-word;'
-               f'margin:4px 0 2px 0;font-size:13px;color:#475569;line-height:1.6">'
-               f'{desc}</div>')
-    return f'<div class="api-desc" style="margin-top:2px">{box}</div>'
+    desc_html = markdown_render.render_markdown(desc_raw)
+    desc_html = f'<div class="md-body">{desc_html}</div>' if desc_html else ""
+    return build_collapse_section_html(
+        "接口说明", desc_html, default_hidden=False,
+        button_text="▼ 接口说明", mem_key=f"api_desc_fold_{ep['id']}")
 
 
 def _build_api_url_item_html(ep: dict, base_url: str, name: str = None,

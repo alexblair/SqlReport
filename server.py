@@ -173,6 +173,7 @@ ROUTES = [
     RouteEntry(r"^/config/api-endpoints$", "POST", True, True, "_handle_config_api_endpoints"),
     RouteEntry(r"^/config/reports$", "GET", True, True, "_handle_config_reports"),
     RouteEntry(r"^/config/reports/memo-preview$", "POST", True, False, "_handle_config"),
+    RouteEntry(r"^/config/api-endpoints/description-preview$", "POST", True, False, "_handle_config"),
     RouteEntry(r"^/config/categories$", "GET", True, True, "_handle_config_categories"),
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),

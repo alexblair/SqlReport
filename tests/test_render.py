@@ -69,8 +69,14 @@ from render import (
     build_api_endpoints_list_html,
     # API URL 折叠区
     build_api_urls_section_html,
-    # 公共 CSS 常量
-    _COMMON_CSS,
+    # API 接口说明 Markdown 折叠区（api-desc-markdown T3）
+    _build_api_description_html,
+    # 接口说明列表摘要（纯文本守护，api-desc-markdown T3）
+    _build_desc_summary_html,
+    # 折叠区骨架
+    build_collapse_section_html,
+    # 公共 CSS/JS 常量
+    _COMMON_CSS, _COMMON_JS,
 )
 
 
@@ -2242,36 +2248,46 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         self.assertIn("禁用", html)
 
     def test_description_keeps_newlines(self):
-        """说明文本保留换行（pre-wrap）且 HTML 转义"""
+        """说明文本 Markdown 渲染保留换行（nl2br）且 HTML 安全剥离"""
         html = build_api_urls_section_html(
             [self._ep(1, description="第一行说明\n第二行 <b>转义</b>")], "http://x")
         self.assertIn("第一行说明", html)
+        self.assertIn("<br>", html)
         self.assertIn("第二行", html)
-        self.assertIn("white-space:pre-wrap", html)
-        self.assertIn("&lt;b&gt;", html)
+        # <b> 标签被消毒剥离、文本保留（render_markdown 语义，非 _escape 原样转义）
+        self.assertNotIn("<b>", html)
+        self.assertNotIn("&lt;b&gt;", html)
+        self.assertIn("转义", html)
 
-    def test_long_description_truncated_with_button(self):
-        """长说明（含换行）截断显示并提供展开按钮"""
+    def test_long_description_full_render_in_fold(self):
+        """长说明（含换行）在折叠区内完整渲染，无 line-clamp、无 toggleApiDesc"""
         html = build_api_urls_section_html(
             [self._ep(1, description="行一\n行二\n行三\n行四")], "http://x")
-        self.assertIn("toggleApiDesc", html)
-        self.assertIn("展开", html)
-        self.assertIn("webkit-line-clamp", html)
+        self.assertNotIn("toggleApiDesc", html)
+        self.assertNotIn("webkit-line-clamp", html)
+        self.assertIn("▼ 接口说明", html)
+        self.assertIn('data-mem-key="api_desc_fold_1"', html)
+        # 折叠区内四行全部渲染（含 <br> 换行保留）
+        self.assertIn("行一<br>", html)
+        self.assertIn("行四", html)
 
-    def test_short_description_no_button(self):
-        """短说明（无换行且未超阈值）完整显示、无展开按钮"""
+    def test_short_description_in_fold(self):
+        """短说明在「接口说明」折叠区内渲染 + 三态控件，无 toggleApiDesc"""
         html = build_api_urls_section_html(
             [self._ep(1, description="简短说明")], "http://x")
         self.assertNotIn("toggleApiDesc", html)
-        self.assertNotIn("展开", html)
-        self.assertIn("简短说明", html)
+        self.assertIn("▼ 接口说明", html)
+        self.assertIn('data-mem-key="api_desc_fold_1"', html)
+        self.assertIn("mem-mode", html)
+        self.assertIn("<p>简短说明</p>", html)
 
     def test_no_description_no_block(self):
-        """无说明时不渲染说明块与展开按钮"""
+        """无说明时不渲染「接口说明」折叠区"""
         html = build_api_urls_section_html([self._ep(1)], "http://x")
         self.assertNotIn("toggleApiDesc", html)
         self.assertNotIn("webkit-line-clamp", html)
         self.assertNotIn("接口说明", html)
+        self.assertNotIn("api_desc_fold_", html)
 
     def test_grouped_badges_and_descriptions(self):
         """分组形态每个接口均含徽章与说明"""
@@ -2378,3 +2394,288 @@ class TestStickyTableHeaderCss(unittest.TestCase):
         self.assertIn("overflow-x: auto", tw_block)
         self.assertIn("overflow-y: auto", tw_block)
         self.assertIn("max-height", tw_block)
+
+
+# ===================================================================
+# api-desc-markdown T1：三态折叠组件（build_collapse_section_html mem_key）
+# 契约矩阵 M1 / M6
+# ===================================================================
+
+class TestCollapseMemKey(unittest.TestCase):
+    """build_collapse_section_html 的 mem_key 三态折叠组件（矩阵 M1）。"""
+
+    def test_without_mem_key_hidden_unchanged(self):
+        """无 mem_key + default_hidden=True：与现状逐字符一致（无三态、无 data 属性）。"""
+        html = build_collapse_section_html("备注", "内容", default_hidden=True)
+        self.assertIn('<div class="debug-info">', html)
+        self.assertIn('class="debug-content hidden"', html)
+        self.assertNotIn("data-mem-key", html)
+        self.assertNotIn("data-default-hidden", html)
+        self.assertNotIn("mem-toggle", html)
+        self.assertNotIn("mem-mode", html)
+
+    def test_without_mem_key_expanded_unchanged(self):
+        """无 mem_key + default_hidden=False：现状输出，无三态。"""
+        html = build_collapse_section_html("备注", "内容", default_hidden=False)
+        self.assertIn('<div class="debug-info">', html)
+        self.assertIn('class="debug-content"', html)
+        self.assertNotIn('class="debug-content hidden"', html)
+        self.assertNotIn("mem-toggle", html)
+
+    def test_mem_key_expanded_by_default(self):
+        """mem_key + default_hidden=False：data 属性 + 三态按钮（自动高亮）+ 初始展开。"""
+        html = build_collapse_section_html(
+            "备注", "内容", default_hidden=False, button_text="▼ 备注", mem_key="memo_fold_3")
+        self.assertIn('data-mem-key="memo_fold_3"', html)
+        self.assertIn('data-default-hidden="0"', html)
+        self.assertIn('class="mem-mode mem-mode-auto active" data-mode="auto"', html)
+        self.assertIn('class="mem-mode mem-mode-open" data-mode="open"', html)
+        self.assertIn('class="mem-mode mem-mode-fold" data-mode="fold"', html)
+        self.assertIn("自动", html)
+        self.assertIn("展开", html)
+        self.assertIn("折叠", html)
+        self.assertIn("▼ 备注", html)
+        self.assertNotIn('class="debug-content hidden"', html)
+
+    def test_mem_key_hidden_by_default(self):
+        """mem_key + default_hidden=True：data-default-hidden=1 + 初始折叠。"""
+        html = build_collapse_section_html(
+            "备注", "内容", default_hidden=True, button_text="▶ 备注", mem_key="memo_fold_3")
+        self.assertIn('data-mem-key="memo_fold_3"', html)
+        self.assertIn('data-default-hidden="1"', html)
+        self.assertIn("▶ 备注", html)
+        self.assertIn('class="debug-content hidden"', html)
+        self.assertIn("mem-mode", html)
+
+    def test_mem_key_api_desc_key(self):
+        """API 说明折叠区使用 api_desc_fold_{id} 记忆键（契约：data-mem-key + 三态 + 初始展开）。"""
+        html = build_collapse_section_html(
+            "接口说明", "说明", default_hidden=False, mem_key="api_desc_fold_7")
+        self.assertIn('data-mem-key="api_desc_fold_7"', html)
+        self.assertIn('data-default-hidden="0"', html)
+        self.assertIn("mem-mode", html)
+        self.assertNotIn('class="debug-content hidden"', html)
+
+    def test_toggle_button_adjacent_to_content(self):
+        """标题按钮与内容 div 保持相邻（toggleSection 依赖 nextElementSibling），三态在内容之后。"""
+        html = build_collapse_section_html(
+            "备注", "内容", default_hidden=False, button_text="▼ 备注", mem_key="memo_fold_3")
+        self.assertIn("</button><div class=\"debug-content\">内容</div>", html)
+        # 三态控件在内容 div 之后、折叠区容器之内
+        self.assertIn('</div><span class="mem-toggle">', html)
+        self.assertLess(
+            html.index('class="debug-content"'), html.index("mem-toggle"))
+
+    def test_mem_key_multiline_keeps_structure(self):
+        """mem_key 与 multiline=True 组合：结构保持，三态仍在内容之后。"""
+        html = build_collapse_section_html(
+            "接口说明", "多行内容", default_hidden=False, multiline=True, mem_key="api_desc_fold_1")
+        self.assertIn('data-mem-key="api_desc_fold_1"', html)
+        self.assertIn('class="debug-content"', html)
+        self.assertIn("mem-toggle", html)
+        # multiline 输出 button 与 content 分行，但 button 后第一个兄弟仍是 content
+        self.assertIn("</button>\n<div class=\"debug-content\">\n", html)
+
+
+class TestCollapseMemKeyJs(unittest.TestCase):
+    """_COMMON_JS 三态 JS 逻辑（矩阵 M6，静态断言）。"""
+
+    def test_has_mem_toggle_functions(self):
+        """_COMMON_JS 含三态初始化与设置函数。"""
+        self.assertIn("function initMemToggles(", _COMMON_JS)
+        self.assertIn("function applyMemMode(", _COMMON_JS)
+        self.assertIn("function setMemToggle(", _COMMON_JS)
+        self.assertIn("function highlightMemMode(", _COMMON_JS)
+
+    def test_auto_open_fold_value_domain(self):
+        """三态值域 auto/open/fold 出现在 JS 逻辑中。"""
+        self.assertIn("'auto'", _COMMON_JS)
+        self.assertIn("'open'", _COMMON_JS)
+        self.assertIn("'fold'", _COMMON_JS)
+
+    def test_init_mem_toggles_called(self):
+        """页面加载即调用 initMemToggles（无 mem_key 元素时 no-op）。"""
+        self.assertIn("initMemToggles();", _COMMON_JS)
+
+    def test_toggle_section_syncs_mem_key(self):
+        """标题按钮折叠切换与三态同步：容器含 data-mem-key 时写 localStorage 并刷新高亮。"""
+        body = self._extract_js_function(_COMMON_JS, "toggleSection")
+        self.assertTrue(body, "应在 _COMMON_JS 中找到 toggleSection 函数")
+        self.assertIn("data-mem-key", body)
+        self.assertIn("localStorage.setItem", body)
+        self.assertIn("highlightMemMode", body)
+
+    @staticmethod
+    def _extract_js_function(js: str, name: str) -> str:
+        start = js.find(f"function {name}(")
+        if start < 0:
+            return ""
+        brace = js.find("{", start)
+        depth = 0
+        i = brace
+        while i < len(js):
+            if js[i] == "{":
+                depth += 1
+            elif js[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return js[brace:i + 1]
+            i += 1
+        return ""
+
+
+# ===================================================================
+# api-desc-markdown T2：报表备注折叠区三态（矩阵 M2）
+# ===================================================================
+
+class TestMemoSectionMemKey(unittest.TestCase):
+    """build_memo_section_html 的 report_id 三态接入（矩阵 M2）。"""
+
+    def test_nonempty_with_report_id(self):
+        """非空备注 + report_id=3：▼ 备注 + data-mem-key + 三态 + .md-body 渲染。"""
+        html = build_memo_section_html("这是备注", 3)
+        self.assertIn("▼ 备注", html)
+        self.assertIn('data-mem-key="memo_fold_3"', html)
+        self.assertIn('data-default-hidden="0"', html)
+        self.assertIn("mem-mode", html)
+        self.assertIn('<div class="md-body"><p>这是备注</p></div>', html)
+        self.assertNotIn('class="debug-content hidden"', html)
+
+    def test_empty_with_report_id(self):
+        """空备注 + report_id=3：▶ 备注 + data-mem-key + 三态（折叠区仍渲染）。"""
+        html = build_memo_section_html("", 3)
+        self.assertIn("▶ 备注", html)
+        self.assertIn('data-mem-key="memo_fold_3"', html)
+        self.assertIn('data-default-hidden="1"', html)
+        self.assertIn("mem-mode", html)
+        self.assertIn('class="debug-content hidden"', html)
+
+    def test_nonempty_without_report_id_unchanged(self):
+        """非空备注 + report_id=None：现状输出，无三态、无 data-mem-key。"""
+        html = build_memo_section_html("这是备注")
+        self.assertIn("▼ 备注", html)
+        self.assertNotIn("data-mem-key", html)
+        self.assertNotIn("data-default-hidden", html)
+        self.assertNotIn("mem-mode", html)
+
+    def test_mermaid_content_kept_with_report_id(self):
+        """含 mermaid 备注 + report_id：折叠区内 <pre class="mermaid"> 保留，三态共存。"""
+        html = build_memo_section_html("```mermaid\nflowchart TD\n A-->B\n```", 3)
+        self.assertIn('data-mem-key="memo_fold_3"', html)
+        self.assertIn("mem-mode", html)
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("▼ 备注", html)
+
+
+# ===================================================================
+# api-desc-markdown T3：API 接口说明查看页 Markdown 化 + 折叠区（矩阵 M3）
+# ===================================================================
+
+class TestApiDescriptionMarkdown(unittest.TestCase):
+    """_build_api_description_html 的 Markdown 折叠区语义（矩阵 M3）。"""
+
+    @staticmethod
+    def _ep(ep_id=7, desc=None):
+        return {"id": ep_id, "name": "测试接口", "description": desc,
+                "url_path": "/api/t", "enabled": 1, "static_cache": 1,
+                "allow_fetch_all": 1}
+
+    def test_empty_returns_blank(self):
+        """desc 空/None/纯空白：返回空串（不渲染任何块）。"""
+        for desc in (None, "", "   "):
+            self.assertEqual(_build_api_description_html(self._ep(desc=desc)), "")
+
+    def test_plain_text(self):
+        """纯文本 desc：▼ 接口说明 + data-mem-key + 三态 + <p> 渲染 + 初始展开。"""
+        html = _build_api_description_html(self._ep(desc="说明"))
+        self.assertIn("▼ 接口说明", html)
+        self.assertIn('data-mem-key="api_desc_fold_7"', html)
+        self.assertIn('data-default-hidden="0"', html)
+        self.assertIn("mem-mode", html)
+        self.assertIn('<div class="md-body"><p>说明</p></div>', html)
+        self.assertNotIn('class="debug-content hidden"', html)
+
+    def test_markdown_heading_and_list(self):
+        """Markdown 结构：# 标题 + 列表 → <h1> + <ul><li>。"""
+        html = _build_api_description_html(self._ep(desc="# 标题\n\n- a\n- b"))
+        self.assertIn("<h1>标题</h1>", html)
+        self.assertIn("<ul>", html)
+        self.assertIn("<li>a</li>", html)
+
+    def test_markdown_bold_italic(self):
+        """**粗** _斜_ → <strong>粗</strong> <em>斜</em>。"""
+        html = _build_api_description_html(self._ep(desc="**粗** _斜_"))
+        self.assertIn("<strong>粗</strong> <em>斜</em>", html)
+
+    def test_newlines_kept_nl2br(self):
+        """第一行\\n第二行 → <p>第一行<br>\\n第二行</p>（保留换行）。"""
+        html = _build_api_description_html(self._ep(desc="第一行\n第二行"))
+        self.assertIn("<p>第一行<br>", html)
+        self.assertIn("第二行</p>", html)
+
+    def test_dangerous_link_sanitized(self):
+        """[危险](javascript:alert(1)) → 链接成对剥离、文本保留、无 javascript:。"""
+        html = _build_api_description_html(self._ep(desc="[危险](javascript:alert(1))"))
+        self.assertIn("危险", html)
+        self.assertNotIn("javascript:", html)
+        self.assertNotIn("<a", html)
+
+    def test_script_tag_stripped(self):
+        """<script>alert(1)</script> → script 剥离、文本保留。"""
+        html = _build_api_description_html(self._ep(desc="<script>alert(1)</script>"))
+        self.assertIn("alert(1)", html)
+        self.assertNotIn("<script>", html)
+
+    def test_long_desc_full_render(self):
+        """超长说明（>80 字符）在折叠区内完整渲染，无 line-clamp、无 toggleApiDesc。"""
+        long_desc = "这是用于验证超长说明折叠区完整渲染的填充文本，" * 10
+        self.assertGreater(len(long_desc), 80)
+        html = _build_api_description_html(self._ep(desc=long_desc))
+        self.assertNotIn("webkit-line-clamp", html)
+        self.assertNotIn("toggleApiDesc", html)
+        self.assertIn("▼ 接口说明", html)
+        self.assertIn("这是用于验证超长说明折叠区完整渲染的填充文本，", html)
+
+    def test_mermaid_block(self):
+        """含 mermaid fenced 块：折叠区内 <pre class="mermaid"><code> 保留。"""
+        html = _build_api_description_html(
+            self._ep(desc="```mermaid\nflowchart TD\n A-->B\n```"))
+        self.assertIn('<pre class="mermaid">', html)
+        self.assertIn("▼ 接口说明", html)
+        self.assertIn("mem-mode", html)
+
+
+# ===================================================================
+# api-desc-markdown T3：接口说明列表摘要保持纯文本（矩阵 M4，守护）
+# ===================================================================
+
+class TestApiDescSummaryPlainText(unittest.TestCase):
+    """_build_desc_summary_html 列表摘要保持纯文本不渲染 Markdown（矩阵 M4）。"""
+
+    def test_markdown_source_kept_verbatim(self):
+        """**bold** 文本：原样转义显示源码，title 含全文，不渲染为 <strong>。"""
+        html = _build_desc_summary_html("**bold** 文本")
+        self.assertIn("**bold** 文本", html)
+        self.assertNotIn("<strong>", html)
+        self.assertIn('title="**bold** 文本"', html)
+
+    def test_long_desc_truncated_with_title_fulltext(self):
+        """超 40 字符：截断 40 字符 + …，title 保留全文。"""
+        desc = ("这是一个用于验证接口说明列表摘要截断行为的文本，"
+            "需要确保总长度明显超过四十个字符的上限以触发省略号。")
+        self.assertGreater(len(desc), 40)
+        html = _build_desc_summary_html(desc)
+        self.assertIn(desc[:40] + "…", html)
+        self.assertIn(f'title="{desc}"', html)
+        self.assertNotIn(desc[40:], html.split("title=")[0])
+
+    def test_empty_returns_none(self):
+        """空/None/纯空白：返回 None。"""
+        for desc in (None, "", "   "):
+            self.assertIsNone(_build_desc_summary_html(desc))
+
+    def test_raw_html_not_parsed(self):
+        """<b>x</b>：转义显示（不解析为 HTML 元素）。"""
+        html = _build_desc_summary_html("<b>x</b>")
+        self.assertIn("&lt;b&gt;x&lt;/b&gt;", html)
+        self.assertNotIn("<b>", html)

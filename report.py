@@ -328,6 +328,18 @@ _CSS = """
   .debug-toggle:hover { color:#475569; background:#f1f5f9; }
   .debug-content { padding: 0 16px 12px; }
   .debug-content.hidden { display: none; }
+  .debug-info[data-mem-key] { position: relative; }
+  .mem-toggle {
+    position: absolute; top: 6px; right: 12px;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .mem-mode {
+    border: 1px solid #e2e8f0; background: #fff; color: #94a3b8;
+    border-radius: 4px; padding: 1px 6px; cursor: pointer; font-size: 12px;
+    line-height: 1.6;
+  }
+  .mem-mode:hover { color: #475569; border-color: #cbd5e1; }
+  .mem-mode.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
   .controls {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 14px 16px; background: #f8fafc; border-radius: 8px; margin-bottom: 16px;
@@ -1320,16 +1332,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         pool_config, actual_sql, active_index, num_results, result_names, filters, sorts)
     current_rules_html = build_current_rules_section_html(
         filters, sorts, display_columns, all_columns)
-    memo_html = build_memo_section_html(report.get("memo") or "")
-    # 备注含 ```mermaid 块时按需注入 mermaid 渲染脚本（渐进增强：JS 加载失败
-    # 时页面显示 <pre class="mermaid"> 转义源码，不空白）
-    mermaid_scripts = ""
-    if markdown_render.contains_mermaid(report.get("memo") or ""):
-        mermaid_scripts = (
-            f'<script src="{markdown_render.MERMAID_JS_URL}"></script>\n'
-            '<script>if (window.mermaid) { '
-            'mermaid.initialize({ startOnLoad: true, securityLevel: "strict" }); '
-            '}</script>\n')
+    memo_html = build_memo_section_html(report.get("memo") or "", report_id)
 
     # ---- API URL 区域 ----
     try:
@@ -1340,6 +1343,20 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         api_urls_html = build_api_urls_section_html(api_endpoints, base_url)
     except Exception:
         api_urls_html = ""
+        api_endpoints = []
+
+    # 备注或任一 API 接口说明含 ```mermaid 块时按需注入 mermaid 渲染脚本
+    # （api-desc-markdown T5；渐进增强：JS 加载失败时页面显示 <pre class="mermaid">
+    # 转义源码，不空白；无 mermaid 内容时零请求）
+    mermaid_sources = [report.get("memo") or ""]
+    mermaid_sources += [ep.get("description") or "" for ep in api_endpoints]
+    mermaid_scripts = ""
+    if any(markdown_render.contains_mermaid(s) for s in mermaid_sources):
+        mermaid_scripts = (
+            f'<script src="{markdown_render.MERMAID_JS_URL}"></script>\n'
+            '<script>if (window.mermaid) { '
+            'mermaid.initialize({ startOnLoad: true, securityLevel: "strict" }); '
+            '}</script>\n')
 
     # ---- 结果参数（多结果集时附加到 URL） ----
     result_param = f"result={active_index}" if num_results > 1 else ""

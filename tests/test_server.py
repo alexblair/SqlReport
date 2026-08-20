@@ -1014,6 +1014,32 @@ class TestMemoPreviewEndpoint(unittest.TestCase):
         self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
         self.assertIn("<h1>标题</h1>", resp.read().decode("utf-8"))
 
+    def test_desc_preview_requires_auth(self):
+        """description-preview 未认证 POST → 302 /login"""
+        opener = urllib.request.build_opener(_NoRedirect)
+        data = urllib.parse.urlencode({"description": "# 标题"}).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/config/api-endpoints/description-preview",
+            data=data, method="POST")
+        try:
+            opener.open(req)
+            self.fail("未登录应 302")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 302)
+            self.assertIn("/login", e.headers.get("Location", ""))
+
+    def test_desc_preview_authenticated_returns_html(self):
+        """登录后 POST → 200 渲染 HTML 片段"""
+        opener, _, _ = _login_opener(self.base_url)
+        data = urllib.parse.urlencode({"description": "# 标题"}).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/config/api-endpoints/description-preview",
+            data=data, method="POST")
+        resp = opener.open(req)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+        self.assertIn("<h1>标题</h1>", resp.read().decode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
