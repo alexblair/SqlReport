@@ -800,7 +800,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    active_index: int = 0,
                    report: Optional[dict] = None,
                    conn=None,
-                   cache: "QueryCache" = None) -> ReportResult:
+                   cache: "QueryCache" = None,
+                   force_rebuild: bool = False) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
@@ -816,11 +817,21 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     report: 报表配置 dict（必须包含 prefer_cache/cache_ttl_hours，由调用方传入）
     cache: 进程内缓存会话（QueryCache 实例）。None 时使用模块级全局缓存；
            测试可注入独立实例避免跨用例污染。
+    force_rebuild: 缓存保活专用（调度器 refresh-ahead）。True 时跳过进程内
+           缓存与 Redis 快照的全部读取路径，直接查询 MySQL 并将新快照原子
+           写回各层缓存。与 refresh 的「先删后查」不同，本模式「先算后换」：
+           不预先删除旧快照，查询成功后新快照覆盖旧值，全程旧数据可持续
+           服务（零空窗）；MySQL 失败时仍走过期快照兜底，不破坏现有缓存。
+           供定时任务/保活链路调用，用户请求路径不应传入。
     """
     if cache is None:
         cache = _query_cache
     page = max(page if page is not None else 1, 1)
     page_size = max(page_size if page_size is not None else 20, 1)
+
+    # 保活强制重建：跳过全部缓存读取（进程缓存 + Redis 快照 + 锁等待），
+    # 直接进入 MySQL 查询分支；写路径（进程缓存/快照回填）保持生效。
+    skip_cache_read = bool(force_rebuild)
 
     # PH-05 写操作护栏：实际 SQL 含写语句且报表未开启 allow_write → 拒绝执行。
     # 拦截置于缓存读取之前，防止已缓存结果绕过拦截；裸调用（report=None，测试等）
@@ -873,7 +884,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 logging.warning("static_cache refresh 联动失败: %s", e)
 
     # ---- 尝试从进程内缓存获取 ----
-    cached = cache.get(report_id, sql_query)
+    cached = None if skip_cache_read else cache.get(report_id, sql_query)
     if cached is not None and _cache_matches_limit_policy(
             bool(getattr(cached, "truncated", False)), limit_rows):
         all_results = cached.results
@@ -890,7 +901,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     else:
         # ---- 尝试从 Redis 快照获取 ----
         redis_hit = False
-        if redis_avail and snapshot_key:
+        if redis_avail and snapshot_key and not skip_cache_read:
             mgr = redis_cache.get_redis_manager()
             if mgr:
                 snapshot = mgr.get_snapshot(snapshot_key)
@@ -911,9 +922,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
         if not redis_hit:
             # ---- 检查是否需要走 Redis 重建锁 ----
+            # force_rebuild（保活）：_mgr 仍需初始化供成功后写快照，但不取
+            # 重建锁、不等他人锁结果——直接查询 MySQL，新快照原子覆盖旧值
+            #（先算后换）；与用户请求触发的锁重建并发时最多重复一次查询，
+            # 无正确性影响。
             lock_held = False  # 本进程是否实际持有 Redis 重建锁
             _mgr = redis_cache.get_redis_manager() if (redis_avail and snapshot_key and lock_key) else None
-            if _mgr:
+            if _mgr and not skip_cache_read:
                 lock_held = _mgr.acquire_lock(lock_key)
                 if not lock_held:
                     # 锁已被占用 → 等待锁释放后重新读取 Redis

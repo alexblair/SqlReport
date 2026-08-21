@@ -32,6 +32,7 @@ import db
 import auth
 import config
 import report
+import scheduler
 import render
 import export as export_mod
 import api_handler
@@ -903,6 +904,17 @@ def main():
     logging.info("服务器已启动: http://%s:%s", HOST, PORT)
     logging.info("按 Ctrl+C 停止服务器")
 
+    # 启动报表调度器（全局开关 scheduler.enable，默认停用；scheduler T3/T4）：
+    # 必须在 HTTP 服务就绪后启动——保活/定时执行经 execute_report 走内部
+    # 调用路径，但启动扫描的 misfire 补跑依赖已初始化的配置库与连接池。
+    try:
+        _sched_cfg = scheduler.get_scheduler_config()
+        if scheduler.start_scheduler_from_config():
+            logging.info("报表调度器已启动（tick=%ss, workers=%s）",
+                         _sched_cfg["tick_seconds"], _sched_cfg["workers"])
+    except Exception as e:
+        logging.warning("报表调度器启动失败（不影响 Web 服务）: %s", e)
+
     # 在守护线程中运行 serve_forever，主线程用 join(timeout) 轮询，
     # 确保 Ctrl+C 能立即中断，不会因为 select() 阻塞而延迟
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -913,6 +925,11 @@ def main():
             server_thread.join(timeout=1)
     except KeyboardInterrupt:
         logging.info("正在关闭服务器...")
+        # 停止调度器并等待在途任务收尾（B17 生命周期）
+        try:
+            scheduler.shutdown_scheduler()
+        except Exception:
+            pass
         # 关闭 socket 迫使 serve_forever 退出，避免 shutdown 阻塞
         try:
             server.shutdown()

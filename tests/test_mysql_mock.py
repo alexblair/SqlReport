@@ -16,7 +16,7 @@ test_mysql_mock.py — MySQL config_db mock 测试框架
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from decimal import Decimal
 import mysql.connector
 
@@ -1471,9 +1471,11 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
             "category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,"
-            "allow_all_output,max_rows,sort_order) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1, 0, 0, 0, 100000, 1),
+            "allow_all_output,max_rows,keepalive_enabled,keepalive_ahead_seconds,"
+            "sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("报表A", "SELECT * FROM t", 20, 1, None, None, '', 1, 0, 0, 0,
+             100000, 0, 0, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 
@@ -1489,9 +1491,11 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_any_call(
             "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,"
             "category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,"
-            "allow_all_output,max_rows,sort_order) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 1, 0, 0, 0, 100000, 6),
+            "allow_all_output,max_rows,keepalive_enabled,keepalive_ahead_seconds,"
+            "sort_order) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            ("完整报表", "SELECT 1", 50, 1, 3, "这是备注", '', 1, 0, 0, 0,
+             100000, 0, 0, 6),
         )
 
     def test_get_report_found(self):
@@ -1543,9 +1547,11 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         self.mock_cursor.execute.assert_called_once_with(
             "UPDATE report_configs SET name=%s,sql_query=%s,default_page_size=%s,"
             "pool_id=%s,category_id=%s,memo=%s,result_names=%s,prefer_cache=%s,"
-            "cache_ttl_hours=%s,allow_write=%s,allow_all_output=%s,max_rows=%s "
+            "cache_ttl_hours=%s,allow_write=%s,allow_all_output=%s,max_rows=%s,"
+            "keepalive_enabled=%s,keepalive_ahead_seconds=%s "
             "WHERE id=%s",
-            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1, 0, 1, 1, 100000, 1),
+            ("newname", "SELECT 2", 50, 1, 2, "新备注", '', 1, 0, 1, 1, 100000,
+             0, 0, 1),
         )
         self.mock_raw.commit.assert_called_once_with()
 
@@ -1556,12 +1562,18 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
             self.conn, 999, "x", "SELECT 1", 10, 1))
 
     def test_delete_report(self):
-        """delete_report 成功时应返回 True。"""
+        """delete_report 成功时应返回 True（含定时任务应用层级联）。"""
         self.mock_cursor.rowcount = 1
         ok = db.delete_report(self.conn, 1)
         self.assertTrue(ok)
-        self.mock_cursor.execute.assert_called_once_with(
-            "DELETE FROM report_configs WHERE id=%s", (1,)
+        calls = self.mock_cursor.execute.call_args_list
+        # 迁移 16 后：先探测任务表（mock 下判为存在），级联删任务行，再删报表
+        self.assertEqual(
+            calls,
+            [call("SELECT name FROM sqlite_master WHERE type='table' "
+                  "AND name='report_schedules'", ()),
+             call("DELETE FROM report_schedules WHERE report_id=%s", (1,)),
+             call("DELETE FROM report_configs WHERE id=%s", (1,))]
         )
         self.mock_raw.commit.assert_called_once_with()
 
@@ -2318,6 +2330,118 @@ class TestMySQLConnectionBegin(_MySQLConnectionTestBase):
         query_executor.execute_mysql_query(raw, "SELECT 1", transactional=True)
         raw.start_transaction.assert_called_once_with()
         raw.commit.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# 回归（2026-08-21 事故）：report_schedules 写路径不得含 SQLite 方言
+#
+# mark_schedule_result / upsert_schedule(更新分支) / 启动扫描 skip 推进
+# 曾用 updated_at=datetime('now','localtime')——SQLite 下合法（测试全绿），
+# MySQL 引擎下 1064 语法错误 → 回写失败 → next_run_at 永不推进 →
+# 每 tick 重复执行且状态永远"未执行"。
+# 钉住：发往 MySQL 的运行时 SQL 一律参数化时间字符串。
+# ---------------------------------------------------------------------------
+
+class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
+    """MySQL 引擎下 report_schedules 写 SQL 不得出现 datetime( 函数调用。"""
+
+    def _assert_no_sqlite_dialect(self):
+        """遍历本用例期间发出的全部 SQL，断言无 datetime('now' 方言。"""
+        for call in self.mock_cursor.execute.call_args_list:
+            sql = call.args[0] if call.args else ""
+            self.assertNotIn(
+                "datetime(", sql,
+                msg=f"SQL 含 SQLite 方言，MySQL 下将 1064: {sql[:120]}")
+
+    def test_mark_result_success_uses_parametrized_time(self):
+        """success 回写：updated_at 参数化为 Python 时间字符串。"""
+        db.mark_schedule_result(self.conn, 1, "success",
+                                next_run_at=1787400000.0,
+                                last_run_at=1787319600.0,
+                                last_duration_ms=100)
+        self._assert_no_sqlite_dialect()
+        # 找到 UPDATE 语句验证参数结构：5 个 ? → (last_run, next_run,
+        # duration, now_str, id)，now_str 为 %Y-%m-%d %H:%M:%S 字符串
+        upd = [c for c in self.mock_cursor.execute.call_args_list
+               if "UPDATE report_schedules" in (c.args[0] if c.args else "")]
+        self.assertEqual(len(upd), 1)
+        params = upd[0].args[1]
+        self.assertEqual(params[0], 1787319600.0)   # last_run_at
+        self.assertEqual(params[1], 1787400000.0)   # next_run_at
+        self.assertEqual(params[2], 100)            # last_duration_ms
+        self.assertRegex(params[3], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+        self.assertEqual(params[4], 1)
+
+    def test_mark_result_fail_uses_parametrized_time(self):
+        """fail 回写：错误摘要截断 + 时间参数化，无方言。"""
+        db.mark_schedule_result(self.conn, 1, "fail", error="x" * 800,
+                                next_run_at=None, last_run_at=123.0,
+                                last_duration_ms=50)
+        self._assert_no_sqlite_dialect()
+        upd = [c for c in self.mock_cursor.execute.call_args_list
+               if "UPDATE report_schedules" in (c.args[0] if c.args else "")]
+        params = upd[0].args[1]
+        self.assertEqual(len(params[0]), 500)       # 错误摘要截断 ≤500
+
+    def test_upsert_schedule_update_no_dialect(self):
+        """upsert 更新分支（任务行已存在）：UPDATE 无方言。"""
+        self.mock_cursor.fetchone.return_value = {"id": 5}
+        sid = db.upsert_schedule(
+            self.conn, report_id=11, schedule_type="daily",
+            interval_minutes=30, daily_time="22:23",
+            misfire_policy="skip", enabled=True, next_run_at=1787322180.0)
+        self.assertEqual(sid, 5)
+        self._assert_no_sqlite_dialect()
+        upd = [c for c in self.mock_cursor.execute.call_args_list
+               if "UPDATE report_schedules" in (c.args[0] if c.args else "")]
+        self.assertEqual(len(upd), 1)
+        params = upd[0].args[1]
+        self.assertEqual(params[:6], ("daily", 30, "22:23", "skip", 1,
+                                      1787322180.0))
+        self.assertRegex(params[6], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+    def test_set_schedule_enabled_no_dialect(self):
+        """回归（2026-08-21 事故同源，修复遗漏）：set_schedule_enabled
+        的 updated_at 必须参数化为 Python 时间字符串，不得含 SQLite
+        方言 datetime('now','localtime')——否则 MySQL 引擎下 toggle
+        任务 1064 失败。
+        """
+        self.mock_cursor.rowcount = 1
+        db.set_schedule_enabled(self.conn, 1, 0)
+        self._assert_no_sqlite_dialect()
+        upd = [c for c in self.mock_cursor.execute.call_args_list
+               if "UPDATE report_schedules" in (c.args[0] if c.args else "")]
+        self.assertEqual(len(upd), 1)
+        params = upd[0].args[1]
+        self.assertEqual(params[0], 0)                # enabled
+        self.assertRegex(params[1], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+        self.assertEqual(params[2], 1)                # id
+
+    def test_scheduler_source_free_of_runtime_dialect(self):
+        """scheduler.py 运行时 SQL 一律不得含 datetime(（DDL 无此文件）。"""
+        import pathlib
+        src = pathlib.Path("/opdev/SqlReport/scheduler.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("datetime(", src)
+
+    def test_mysql_migration_creates_and_patches_duration_column(self):
+        """回归（2026-08-21 事故二）：MySQL 迁移必须含 last_duration_ms。
+
+        线上 MySQL 表建于 T2 批次（无耗时列），T4 新增列未同步到
+        MySQL 迁移段 → 回写 1054 → next_run_at 永不推进。
+        钉住：迁移函数源码含建表 DDL 列 + SHOW COLUMNS 幂等补列段
+        （与 SQLite 迁移同构）。
+        """
+        import inspect
+        import pathlib
+        src = pathlib.Path("/opdev/SqlReport/config_db.py").read_text(
+            encoding="utf-8")
+        mysql_seg = src[src.index("_init_mysql_migrations"):]
+        # 建表 DDL 含耗时列（新环境直接建全）
+        self.assertIn("last_duration_ms BIGINT", mysql_seg)
+        # 幂等补列段存在（存量库升级）
+        self.assertIn("SHOW COLUMNS FROM report_schedules", mysql_seg)
+        self.assertIn("ADD COLUMN last_duration_ms", mysql_seg)
 
 
 # ---------------------------------------------------------------------------

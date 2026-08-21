@@ -65,6 +65,8 @@ _SQL_CREATE_REPORT_CONFIGS = """CREATE TABLE IF NOT EXISTS report_configs (
     allow_write        INTEGER NOT NULL DEFAULT 1,
     allow_all_output   INTEGER NOT NULL DEFAULT 1,
     max_rows           INTEGER NOT NULL DEFAULT 100000,
+    keepalive_enabled  INTEGER NOT NULL DEFAULT 0,
+    keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
     FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
 )"""

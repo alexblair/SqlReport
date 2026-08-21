@@ -37,16 +37,21 @@ def _placeholders(n: int) -> str:
 
 def _write_audit_log(session_user, action, entity_type,
                      entity_id=None, entity_name=None,
-                     before_value=None, after_value=None):
-    """如果 session_user 不为 None，写入一条 operation 类型审计日志到 audit.db。
+                     before_value=None, after_value=None,
+                     log_type="operation"):
+    """写入一条审计日志到 audit.db。
 
     薄包装：统一走 audit_db.record_operation（保持本名称供测试 patch 与
     既有调用点使用）；异常降级为 logging.warning，避免审计失败影响业务操作。
+
+    log_type: 审计类型，默认 operation；定时任务执行链（scheduler.py）传
+    scheduler，使审计页可独立按"定时任务"类型筛选（B19/B20）。
     """
     from audit_db import record_operation
     record_operation(session_user, action, entity_type,
                      entity_id=entity_id, entity_name=entity_name,
-                     before_value=before_value, after_value=after_value)
+                     before_value=before_value, after_value=after_value,
+                     log_type=log_type)
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +615,56 @@ def _init_sqlite_migrations(conn) -> None:
         conn.commit()
     except Exception:
         conn.rollback()
+
+    # 迁移 16：报表定时任务 report_schedules 表 + report_configs 缓存保活列。
+    # 定时执行（interval/daily）与缓存保活（refresh-ahead）共用本批次；
+    # 删除报表时由应用层级联清理任务行（SQLite FK 默认 OFF，不依赖外键）。
+    conn.execute("""CREATE TABLE IF NOT EXISTS report_schedules (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id        INTEGER NOT NULL UNIQUE,
+        schedule_type    TEXT    NOT NULL DEFAULT 'interval',
+        interval_minutes INTEGER NOT NULL DEFAULT 60,
+        daily_time       TEXT    NOT NULL DEFAULT '08:00',
+        misfire_policy   TEXT    NOT NULL DEFAULT 'skip',
+        enabled          INTEGER NOT NULL DEFAULT 1,
+        next_run_at      REAL,
+        last_run_at      REAL,
+        last_status      TEXT,
+        last_error       TEXT,
+        fail_count       INTEGER NOT NULL DEFAULT 0,
+        last_duration_ms INTEGER,
+        created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+    )""")
+    conn.commit()
+    # 旧库升级：迁移 16 早批次的 report_schedules 无耗时列（幂等补齐）
+    cursor = conn.execute("PRAGMA table_info(report_schedules)")
+    sched_cols = {row[1] for row in cursor.fetchall()}
+    if "last_duration_ms" not in sched_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_schedules ADD COLUMN last_duration_ms INTEGER")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    cursor = conn.execute("PRAGMA table_info(report_configs)")
+    rpt_cols = {row[1] for row in cursor.fetchall()}
+    if "keepalive_enabled" not in rpt_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN keepalive_enabled INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    if "keepalive_ahead_seconds" not in rpt_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback()
     # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移批次）----
 
 
@@ -906,6 +961,59 @@ def _init_mysql_migrations(conn) -> None:
         conn.commit()
     except Exception:
         conn.rollback()
+    # 迁移 16：报表定时任务 report_schedules 表 + report_configs 缓存保活列
+    #（与 SQLite 迁移 16 同构；删除报表时应用层级联清理任务行）。
+    try:
+        cursor = conn.execute("SHOW TABLES LIKE 'report_schedules'")
+        if not cursor.fetchone():
+            conn.execute("""CREATE TABLE report_schedules (
+                id               INTEGER AUTO_INCREMENT PRIMARY KEY,
+                report_id        INTEGER NOT NULL UNIQUE,
+                schedule_type    VARCHAR(10) NOT NULL DEFAULT 'interval',
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                daily_time       VARCHAR(5) NOT NULL DEFAULT '08:00',
+                misfire_policy   VARCHAR(10) NOT NULL DEFAULT 'skip',
+                enabled          TINYINT NOT NULL DEFAULT 1,
+                next_run_at      DOUBLE,
+                last_run_at      DOUBLE,
+                last_status      VARCHAR(10),
+                last_error       TEXT,
+                fail_count       INTEGER NOT NULL DEFAULT 0,
+                last_duration_ms BIGINT,
+                created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+            conn.commit()
+        # 与 SQLite 迁移 16 同构：早批次表缺耗时列时幂等补齐
+        #（2026-08-21 事故：线上 MySQL 表建于 T2 批次，T4 新增列未同步，
+        #  回写 1054 → next_run_at 永不推进 → 每 tick 重复执行）
+        cursor = conn.execute("SHOW COLUMNS FROM report_schedules")
+        sched_cols = {row[0] for row in cursor.fetchall()}
+        if "last_duration_ms" not in sched_cols:
+            try:
+                conn.execute(
+                    "ALTER TABLE report_schedules "
+                    "ADD COLUMN last_duration_ms BIGINT")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+    except Exception:
+        conn.rollback()
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM report_configs")
+        report_cols = {row[0] for row in cursor.fetchall()}
+        if "keepalive_enabled" not in report_cols:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN keepalive_enabled TINYINT NOT NULL DEFAULT 0")
+            conn.commit()
+        if "keepalive_ahead_seconds" not in report_cols:
+            conn.execute(
+                "ALTER TABLE report_configs "
+                "ADD COLUMN keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+    except Exception:
+        conn.rollback()
     # ---- 预留：后续批次 ADD COLUMN 幂等段写于此（同一迁移批次）----
 
 
@@ -1094,6 +1202,8 @@ def add_report(conn, name: str, sql_query: str,
                allow_write: int = 0,
                allow_all_output: int = 0,
                max_rows: int = 100000,
+               keepalive_enabled: int = 0,
+               keepalive_ahead_seconds: int = 0,
                session_user=None) -> int:
     """新增报表配置，返回自增 id。自动分配 sort_order。
 
@@ -1102,11 +1212,13 @@ def add_report(conn, name: str, sql_query: str,
     allow_all_output: 是否允许全量输出。新建默认 0（全量输出护栏，PH-06/07），
                       关闭时结果超过 max_rows 即截断；存量数据由迁移 14 统一置 1。
     max_rows: 全量输出关闭时的截断行数上限（默认 100000）。
+    keepalive_enabled / keepalive_ahead_seconds: 缓存保活开关与提前量秒数
+                 （scheduler T2/T4；仅 prefer_cache=1 且 Redis 可用时生效）。
     """
     max_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM report_configs").fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,allow_all_output,max_rows,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, max_order + 1),
+        "INSERT INTO report_configs (name,sql_query,default_page_size,pool_id,category_id,memo,result_names,prefer_cache,cache_ttl_hours,allow_write,allow_all_output,max_rows,keepalive_enabled,keepalive_ahead_seconds,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, int(bool(keepalive_enabled)), int(keepalive_ahead_seconds), max_order + 1),
     )
     conn.commit()
     _write_audit_log(session_user, "create_report", "report", cur.lastrowid, name,
@@ -1117,7 +1229,9 @@ def add_report(conn, name: str, sql_query: str,
                                   "cache_ttl_hours": cache_ttl_hours,
                                   "allow_write": allow_write,
                                   "allow_all_output": allow_all_output,
-                                  "max_rows": max_rows})
+                                  "max_rows": max_rows,
+                                  "keepalive_enabled": int(bool(keepalive_enabled)),
+                                  "keepalive_ahead_seconds": int(keepalive_ahead_seconds)})
     return cur.lastrowid
 
 
@@ -1146,17 +1260,21 @@ def update_report(conn, report_id: int, name: str,
                   allow_write: int = 1,
                   allow_all_output: int = 1,
                   max_rows: int = 100000,
+                  keepalive_enabled: int = 0,
+                  keepalive_ahead_seconds: int = 0,
                   session_user=None) -> bool:
     """更新报表配置，影响行数 >0 返回 True。
 
     allow_write: 编辑表单提交值；缺省 1 兼容历史调用（保持存量语义）。
     allow_all_output: 编辑表单提交值；缺省 1 兼容历史调用（保持存量语义）。
     max_rows: 编辑表单提交值；缺省 100000。
+    keepalive_enabled / keepalive_ahead_seconds: 缓存保活开关与提前量秒数
+                 （scheduler T4 表单；缺省 0/0 兼容历史调用）。
     """
     before = get_report(conn, report_id) if session_user else None
     cur = conn.execute(
-        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=?,allow_write=?,allow_all_output=?,max_rows=? WHERE id=?",
-        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, report_id),
+        "UPDATE report_configs SET name=?,sql_query=?,default_page_size=?,pool_id=?,category_id=?,memo=?,result_names=?,prefer_cache=?,cache_ttl_hours=?,allow_write=?,allow_all_output=?,max_rows=?,keepalive_enabled=?,keepalive_ahead_seconds=? WHERE id=?",
+        (name, sql_query, default_page_size, pool_id, category_id, memo, result_names or '', prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, int(bool(keepalive_enabled)), int(keepalive_ahead_seconds), report_id),
     )
     conn.commit()
     _write_audit_log(session_user, "update_report", "report", report_id, name,
@@ -1168,13 +1286,16 @@ def update_report(conn, report_id: int, name: str,
                                   "cache_ttl_hours": cache_ttl_hours,
                                   "allow_write": allow_write,
                                   "allow_all_output": allow_all_output,
-                                  "max_rows": max_rows})
+                                  "max_rows": max_rows,
+                                  "keepalive_enabled": int(bool(keepalive_enabled)),
+                                  "keepalive_ahead_seconds": int(keepalive_ahead_seconds)})
     return cur.rowcount > 0
 
 
 def delete_report(conn, report_id: int, session_user=None) -> bool:
-    """删除报表配置，影响行数 >0 返回 True。"""
+    """删除报表配置及其定时任务行（应用层级联），影响行数 >0 返回 True。"""
     before = get_report(conn, report_id) if session_user else None
+    delete_schedules_by_report(conn, report_id)
     cur = conn.execute("DELETE FROM report_configs WHERE id=?", (report_id,))
     conn.commit()
     _write_audit_log(session_user, "delete_report", "report", report_id,
@@ -1850,6 +1971,7 @@ def batch_delete_reports(conn, report_ids: list[int], session_user=None) -> int:
         if endpoints:
             conn.execute("DELETE FROM api_endpoints WHERE report_id=?", (rid,))
             invalidate_api_static_cache_by_report(conn, rid, endpoints=endpoints)
+        delete_schedules_by_report(conn, rid)
         cur = conn.execute("DELETE FROM report_configs WHERE id=?", (rid,))
         if cur.rowcount > 0:
             affected += 1
@@ -1857,3 +1979,212 @@ def batch_delete_reports(conn, report_ids: list[int], session_user=None) -> int:
                              row["name"], before_value=dict(row))
     conn.commit()
     return affected
+
+
+# ---------------------------------------------------------------------------
+# 定时任务 CRUD（report_schedules，迁移 16）
+# ---------------------------------------------------------------------------
+
+_SCHEDULE_TYPES = ("interval", "daily")
+_MISFIRE_POLICIES = ("skip", "run_once")
+
+
+def _validate_schedule_fields(schedule_type: str, interval_minutes: int,
+                              daily_time: str, misfire_policy: str) -> None:
+    """校验定时任务字段合法性，非法值抛 ValueError。
+
+    schedule_type ∈ {interval, daily}；misfire_policy ∈ {skip, run_once}；
+    interval_minutes ≥ 1；daily_time 必须为 HH:MM（00:00-23:59）。
+    """
+    if schedule_type not in _SCHEDULE_TYPES:
+        raise ValueError(f"非法调度类型: {schedule_type}")
+    if misfire_policy not in _MISFIRE_POLICIES:
+        raise ValueError(f"非法 misfire 策略: {misfire_policy}")
+    if int(interval_minutes) < 1:
+        raise ValueError("interval_minutes 必须 ≥ 1")
+    parts = str(daily_time).split(":")
+    if (len(parts) != 2 or not all(p.isdigit() for p in parts)
+            or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59)):
+        raise ValueError(f"非法每日时刻: {daily_time}")
+
+
+def upsert_schedule(conn, report_id: int, schedule_type: str = "interval",
+                    interval_minutes: int = 60, daily_time: str = "08:00",
+                    misfire_policy: str = "skip", enabled: int = 1,
+                    next_run_at=None, session_user=None) -> int:
+    """创建或更新报表的定时任务（每报表唯一），返回任务 id。
+
+    变更调度参数时由调用方负责重算并传入 next_run_at（None 表示待排程，
+    调度器启动扫描会兜底推进）；enabled 切换不重置执行状态字段。
+    """
+    _validate_schedule_fields(schedule_type, interval_minutes, daily_time,
+                              misfire_policy)
+    before = get_schedule_by_report(conn, report_id) if session_user else None
+    existing = conn.execute(
+        "SELECT id FROM report_schedules WHERE report_id=?", (report_id,)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE report_schedules SET schedule_type=?, interval_minutes=?, "
+            "daily_time=?, misfire_policy=?, enabled=?, next_run_at=?, "
+            "updated_at=? WHERE report_id=?",
+            (schedule_type, int(interval_minutes), str(daily_time),
+             misfire_policy, int(bool(enabled)), next_run_at,
+             time.strftime("%Y-%m-%d %H:%M:%S"), report_id))
+        sid = existing["id"] if isinstance(existing, dict) else existing[0]
+        action = "update_schedule"
+    else:
+        cur = conn.execute(
+            "INSERT INTO report_schedules (report_id, schedule_type, "
+            "interval_minutes, daily_time, misfire_policy, enabled, next_run_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (report_id, schedule_type, int(interval_minutes), str(daily_time),
+             misfire_policy, int(bool(enabled)), next_run_at))
+        sid = cur.lastrowid
+        action = "create_schedule"
+    conn.commit()
+    _write_audit_log(session_user, action, "schedule", sid,
+                     f"report#{report_id}",
+                     before_value=before,
+                     after_value={"report_id": report_id,
+                                  "schedule_type": schedule_type,
+                                  "interval_minutes": int(interval_minutes),
+                                  "daily_time": str(daily_time),
+                                  "misfire_policy": misfire_policy,
+                                  "enabled": int(bool(enabled)),
+                                  "next_run_at": next_run_at})
+    return sid
+
+
+def get_schedule_by_report(conn, report_id: int) -> Optional[dict]:
+    """按报表查询定时任务，不存在返回 None。"""
+    row = conn.execute(
+        "SELECT * FROM report_schedules WHERE report_id=?", (report_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_schedule(conn, schedule_id: int) -> Optional[dict]:
+    """按任务 id 查询定时任务，不存在返回 None。"""
+    row = conn.execute(
+        "SELECT * FROM report_schedules WHERE id=?", (schedule_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_all_schedules(conn) -> list[dict]:
+    """返回全部定时任务（按下次执行时间升序，未排程靠后）。
+
+    附带报表名（LEFT JOIN，报表已删显示 NULL），供 /config/scheduler
+    管理页与列表徽标使用。
+    """
+    rows = conn.execute(
+        "SELECT s.*, r.name AS report_name "
+        "FROM report_schedules s "
+        "LEFT JOIN report_configs r ON r.id = s.report_id "
+        "ORDER BY (s.next_run_at IS NULL), s.next_run_at, s.id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_due_schedules(conn, now: float) -> list[dict]:
+    """返回已到期且可执行的启用任务（next_run_at ≤ now 且 fail_count < 5）。"""
+    rows = conn.execute(
+        "SELECT * FROM report_schedules WHERE enabled=1 AND fail_count<5 "
+        "AND next_run_at IS NOT NULL AND next_run_at<=?",
+        (now,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_schedule_result(conn, schedule_id: int, status: str,
+                         error: str = None, next_run_at=None,
+                         last_run_at: float = None,
+                         last_duration_ms: int = None) -> None:
+    """记录一次执行结果并推进下次执行时间。
+
+    status ∈ {success, fail}：success 重置 fail_count 与 last_error；
+    fail 递增 fail_count 并记录错误摘要。last_run_at/next_run_at 为 epoch 秒；
+    last_duration_ms 为本次执行耗时（毫秒，供管理页"上次结果(含耗时)"展示）。
+    """
+    if status not in ("success", "fail"):
+        raise ValueError(f"非法执行状态: {status}")
+    # updated_at 用 Python 本地时间参数化：SQLite 方言 datetime('now',...)
+    # 在 MySQL 引擎下是语法错误（2026-08-21 事故根因），两引擎通用字符串
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    if status == "success":
+        conn.execute(
+            "UPDATE report_schedules SET last_status='success', last_error=NULL, "
+            "fail_count=0, last_run_at=?, next_run_at=?, last_duration_ms=?, "
+            "updated_at=? WHERE id=?",
+            (last_run_at, next_run_at, last_duration_ms, now_str, schedule_id))
+    else:
+        summary = (error or "")[:500]
+        conn.execute(
+            "UPDATE report_schedules SET last_status='fail', last_error=?, "
+            "fail_count=fail_count+1, last_run_at=?, next_run_at=?, "
+            "last_duration_ms=?, updated_at=? WHERE id=?",
+            (summary, last_run_at, next_run_at, last_duration_ms, now_str,
+             schedule_id))
+    conn.commit()
+
+
+def set_schedule_enabled(conn, schedule_id: int, enabled: int,
+                         session_user=None) -> bool:
+    """切换任务启停（不影响执行状态字段），影响行数 >0 返回 True。"""
+    before = get_schedule(conn, schedule_id) if session_user else None
+    # updated_at 用 Python 本地时间参数化：SQLite 方言 datetime('now',...)
+    # 在 MySQL 引擎下是语法错误（2026-08-21 事故同源，本处为修复遗漏），
+    # 两引擎通用字符串。
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    cur = conn.execute(
+        "UPDATE report_schedules SET enabled=?, updated_at=? WHERE id=?",
+        (int(bool(enabled)), now_str, schedule_id))
+    conn.commit()
+    _write_audit_log(session_user, "toggle_schedule", "schedule", schedule_id,
+                     f"report#{before['report_id']}" if before else None,
+                     before_value=before,
+                     after_value={"enabled": int(bool(enabled))})
+    return cur.rowcount > 0
+
+
+def delete_schedule(conn, schedule_id: int, session_user=None) -> bool:
+    """删除定时任务，影响行数 >0 返回 True。"""
+    before = get_schedule(conn, schedule_id) if session_user else None
+    cur = conn.execute("DELETE FROM report_schedules WHERE id=?", (schedule_id,))
+    conn.commit()
+    _write_audit_log(session_user, "delete_schedule", "schedule", schedule_id,
+                     f"report#{before['report_id']}" if before else None,
+                     before_value=before)
+    return cur.rowcount > 0
+
+
+def _report_schedules_table_exists(conn) -> bool:
+    """探测 report_schedules 表是否存在（兼容 SQLite / MySQL / 测试 mock）。
+
+    先按 SQLite sqlite_master 探测；表不存在或查询失败（非 SQLite 引擎）
+    再降级 SHOW TABLES。均不可判定时视为不存在，调用方跳过级联清理。
+    """
+    try:
+        if conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='report_schedules'").fetchone() is not None:
+            return True
+        return False
+    except Exception:
+        pass
+    try:
+        return conn.execute(
+            "SHOW TABLES LIKE 'report_schedules'").fetchone() is not None
+    except Exception:
+        return False
+
+
+def delete_schedules_by_report(conn, report_id: int) -> None:
+    """删除某报表的全部定时任务行（应用层级联，幂等）。
+
+    report_schedules 表不存在时静默跳过（兼容迁移 16 之前的存量库
+    与手工建表的测试内存库）。不自行 commit/rollback——事务边界由
+    调用方统一控制，避免误伤同事务中其他已执行的变更。
+    """
+    if not _report_schedules_table_exists(conn):
+        return
+    conn.execute("DELETE FROM report_schedules WHERE report_id=?", (report_id,))

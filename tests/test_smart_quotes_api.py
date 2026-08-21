@@ -84,7 +84,7 @@ def _set_up_db():
             result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1,
             cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
             allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1,
-            max_rows INTEGER NOT NULL DEFAULT 100000);
+            max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE api_endpoints (
             id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL,
             name TEXT NOT NULL, url_path TEXT UNIQUE NOT NULL,

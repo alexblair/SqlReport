@@ -547,6 +547,7 @@ _PAGE_FOOTER = """</div>
 _NAV_ITEMS = [
     ("report", "/report", "报表页"),
     ("config", "/config", "配置管理"),
+    ("scheduler", "/config/scheduler", "定时任务"),
     ("api", "/config/api-endpoints", "API 接口"),
     ("audit", "/audit", "审计日志"),
     ("logout", "/logout", "退出"),
@@ -1876,11 +1877,14 @@ def build_category_manage_section_html(all_cats, cat_tree,
 
 def build_category_section_html(cat_reports, unclassified_reports, all_cats,
                                  all_reports, pools, cat_tree,
-                                 api_endpoints_map: dict[int, list[dict]] = None) -> str:
+                                 api_endpoints_map: dict[int, list[dict]] = None,
+                                 schedules_map: dict[int, dict] = None) -> str:
     """渲染报表分类配置段（分类管理 + 各分类下的报表列表，纯数据 → HTML，无 DB 调用）
 
     参数:
         api_endpoints_map: { report_id: [api_endpoint_dict, ...] }，可选。
+        schedules_map: { report_id: schedule_dict }，可选；提供时在报表名
+                       后渲染 ⏰ 定时徽标（保活徽标取报表行 keepalive 列）。
     """
     pools_map: dict = {p["id"]: p for p in pools}
 
@@ -2053,7 +2057,7 @@ function updateBatchCount() {{
 
             rows += f"""<tr>
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
-   <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a></strong></td>
+   <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a>{build_schedule_flags_badge_html((schedules_map or {}).get(rpt_id, {}).get('enabled'), r.get('keepalive_enabled'))}</strong></td>
   <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">
     <code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r['sql_query'][:80])}{'...' if len(r['sql_query']) > 80 else ''}</code>
   </td>
@@ -3214,7 +3218,8 @@ def render_audit_page(
     now = time.time()
     total_pages = max(1, (total + page_size - 1) // page_size)
     selected_type = filters.get("type", "")
-    type_options = {"": "全部类型", "operation": "操作日志", "web_access": "页面访问", "api": "API 调用"}
+    type_options = {"": "全部类型", "operation": "操作日志", "web_access": "页面访问",
+                    "api": "API 调用", "scheduler": "定时任务"}
     type_html = ""
     for val, label in type_options.items():
         sel = ' selected' if val == selected_type else ''
@@ -3237,7 +3242,8 @@ def render_audit_page(
       <th>详情</th>
     </tr></thead>"""
 
-    type_labels = {"operation": "操作", "web_access": "页面", "api": "API"}
+    type_labels = {"operation": "操作", "web_access": "页面", "api": "API",
+                   "scheduler": "定时"}
     rows_html = ""
     for r in rows:
         rtype = r.get("type", "")
@@ -3264,6 +3270,29 @@ def render_audit_page(
                 detail_parts.append(f"改前: {html_mod.escape(str(before_val)[:80])}")
             if after_val:
                 detail_parts.append(f"改后: {html_mod.escape(str(after_val)[:80])}")
+        elif rtype == "scheduler":
+            # 定时任务执行：展示 after_value 中的 trigger/status/duration/error
+            try:
+                av = json.loads(after_val) if isinstance(after_val, str) else (after_val or {})
+            except (ValueError, TypeError):
+                av = {}
+            if isinstance(av, dict):
+                if entity_name:
+                    detail_parts.append(f"报表: {entity_name}")
+                trigger_map = {"scheduler": "定时", "manual": "手动", "misfire": "补跑"}
+                trig = av.get("trigger")
+                if trig:
+                    detail_parts.append(f"触发: {trigger_map.get(trig, trig)}")
+                st = av.get("status")
+                if st:
+                    detail_parts.append(f"结果: {'成功' if st == 'success' else '失败'}")
+                if av.get("duration_ms") is not None:
+                    detail_parts.append(f"耗时: {av['duration_ms']}ms")
+                err = av.get("error")
+                if err:
+                    detail_parts.append(f"错误: {html_mod.escape(str(err)[:100])}")
+                if av.get("policy") == "skip" and "missed_at" in av:
+                    detail_parts.append("跳过（推进到下次计划）")
         elif rtype in ("web_access", "api"):
             detail_parts.append(f"{http_method} {http_path}")
             if http_status:
@@ -3311,6 +3340,7 @@ def render_audit_page(
     .audit-type-operation { background:#ede9fe; color:#5b21b6; }
     .audit-type-web_access { background:#dbeafe; color:#1e40af; }
     .audit-type-api { background:#d1fae5; color:#065f46; }
+    .audit-type-scheduler { background:#fef3c7; color:#92400e; }
     .date-shortcuts { display:flex; gap:4px; align-items:flex-end; }
     .audit-actions { display:flex; gap:10px; margin-bottom:16px; }
     .audit-info { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:14px; color:#64748b; }
@@ -3561,6 +3591,192 @@ def build_state_span(text: str, state: str = "ok", bold: bool = True) -> str:
 def _api_endpoint_url(report_id, ep_id, action: str = "edit") -> str:
     """拼装 API 端点配置页 URL（/config/reports/{report_id}/api_endpoints/{ep_id}/{action}）。"""
     return f"/config/reports/{report_id}/api_endpoints/{ep_id}/{action}"
+
+
+# ---------------------------------------------------------------------------
+# 报表定时任务（scheduler T4：管理页 + 列表徽标）
+# ---------------------------------------------------------------------------
+
+_SCHED_MISFIRE_LABELS = {"skip": "跳过", "run_once": "补跑一次"}
+
+
+def build_schedule_flags_badge_html(sched_flag, keepalive_flag) -> str:
+    """报表列表名称后的功能徽标：⏰=已配定时、♻=已开保活（纯文本符号）。
+
+    两项均未启用时返回空串（不渲染单元格内容变化，仅追加徽标）。
+    """
+    parts = ""
+    if int(sched_flag or 0) == 1:
+        parts += '<span title="已配置定时执行">⏰</span>'
+    if int(keepalive_flag or 0) == 1:
+        parts += '<span title="已开启缓存保活">♻</span>'
+    if parts:
+        parts = f' <span style="margin-left:4px;font-size:13px">{parts}</span>'
+    return parts
+
+
+def _format_schedule_plan(sched: dict) -> str:
+    """任务计划描述文本（类型列 + 计划列共用数据源）。"""
+    stype = sched.get("schedule_type")
+    if stype == "daily":
+        return f'每天 {sched.get("daily_time") or ""}'
+    minutes = int(sched.get("interval_minutes") or 0)
+    return f"每 {minutes} 分钟"
+
+
+def _format_schedule_last_result(sched: dict) -> str:
+    """上次结果单元格：状态 + 耗时（含失败摘要 title 提示）。"""
+    status = sched.get("last_status")
+    duration = sched.get("last_duration_ms")
+    dur_text = f" ({duration}ms)" if duration is not None else ""
+    if status == "success":
+        return f'<span title="上次执行成功">✅ 成功{_escape(dur_text)}</span>'
+    if status == "fail":
+        err = (sched.get("last_error") or "").replace('"', "&quot;")
+        summary = _escape((sched.get("last_error") or "")[:60])
+        return (f'<span style="color:#dc2626;cursor:help" '
+                f'title="{err}">❌ 失败{dur_text}：{summary}</span>')
+    return '<span style="color:#cbd5e1">— 未执行</span>'
+
+
+def _format_schedule_last_run(sched: dict) -> str:
+    """上次执行时间单元格：epoch 秒 → 本地时间文本；未执行显示占位符。"""
+    at = sched.get("last_run_at")
+    if not at:
+        return '<span style="color:#cbd5e1">—</span>'
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(at)))
+
+
+def _format_schedule_event_row(ev: dict) -> str:
+    """最近执行记录单行：时间 / 动作 / 结果 / 耗时 / 错误摘要。
+
+    after_value 结构（scheduler 写入）：
+      scheduled_run: {trigger, status, duration_ms, error}
+      scheduled_misfire: {policy, ...}
+    """
+    try:
+        after = json.loads(ev.get("after_value") or "{}")
+        if not isinstance(after, dict):
+            after = {}
+    except Exception:
+        after = {}
+    ts = ev.get("timestamp")
+    time_text = (time.strftime("%m-%d %H:%M:%S", time.localtime(ts))
+                 if isinstance(ts, (int, float)) else str(ts or "—"))
+    action = ev.get("action") or ""
+    if action == "scheduled_run":
+        status = after.get("status") or "?"
+        trigger = after.get("trigger") or "?"
+        duration = after.get("duration_ms")
+        error = (after.get("error") or "").replace('"', "&quot;")
+        summary = (after.get("error") or "")[:60]
+        ok = status == "success"
+        badge = ('<span style="color:#16a34a">✅ 成功</span>' if ok else
+                 f'<span style="color:#dc2626;cursor:help" title="{error}">'
+                 f'❌ 失败</span>')
+        dur = f' <span style="color:#94a3b8">{duration}ms</span>' \
+            if duration is not None else ""
+        trig_label = "手动" if trigger == "manual" else "自动"
+        return (f"<tr><td>{_escape(time_text)}</td>"
+                f"<td>执行</td><td>{badge}{dur}</td>"
+                f'<td style="color:#64748b">{trig_label}</td>'
+                f"<td>{_escape(summary)}</td></tr>")
+    # scheduled_misfire
+    policy = after.get("policy") or "?"
+    label = "跳过（推进到下次计划）" if policy == "skip" else "补跑一次"
+    return (f"<tr><td>{_escape(time_text)}</td><td>错过补偿</td>"
+            f'<td style="color:#d97706">⚠ {_escape(label)}</td>'
+            "<td style=\"color:#64748b\">自动</td><td></td></tr>")
+
+
+def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
+                              recent_events: list | None = None) -> str:
+    """构建 /config/scheduler 任务管理页主体（纯数据 → HTML，无 DB 调用）。
+
+    表格列（spec §5.3）：报表名 / 类型 / 计划 / 下次执行 / 上次执行 /
+    上次结果(含耗时) / 失败计数 / 状态 / 操作。全局停用时顶部显示横幅
+    （B17，页面仍可查看）；recent_events 提供时底部渲染"最近执行记录"
+    区块（来自审计库 scheduled_run/scheduled_misfire，最多 20 条）。
+    """
+    banner = ""
+    if not scheduler_enabled:
+        banner = ('<div class="flash-warn" style="padding:10px 14px;'
+                  'border-radius:8px;margin-bottom:12px">'
+                  '⛔ 定时调度全局已停用（app_config.json → scheduler.enable=false），'
+                  '以下配置仅展示，不会自动执行</div>')
+    rows = ""
+    for s in schedules:
+        sid = s["id"]
+        report_name = s.get("report_name") or ""
+        name_cell = (_escape(report_name)
+                     if report_name else
+                     '<span style="color:#dc2626;font-size:13px">报表已删除</span>')
+        enabled = int(s.get("enabled", 1))
+        fail_count = int(s.get("fail_count", 0))
+        status_cell = (build_state_span("启用")
+                       if enabled else
+                       build_state_span("停用", "muted"))
+        if fail_count >= 5 and enabled:
+            status_cell += ' <span style="color:#dc2626;font-size:13px" title="连续失败达上限，自动派发已熔断；手动成功后恢复">🔥熔断</span>'
+        next_at = s.get("next_run_at")
+        next_cell = (time.strftime("%Y-%m-%d %H:%M", time.localtime(next_at))
+                     if next_at else
+                     '<span style="color:#cbd5e1">—</span>')
+        misfire_label = _SCHED_MISFIRE_LABELS.get(
+            s.get("misfire_policy"), s.get("misfire_policy") or "")
+        toggle_label = "停用" if enabled else "启用"
+        toggle_cls = "btn-outline" if enabled else "btn-success"
+        rows += f"""<tr>
+  <td><a href="/config/reports/{s['report_id']}/edit" style="color:#4f46e5;text-decoration:none">{name_cell}</a></td>
+  <td>{"每日" if s.get("schedule_type") == "daily" else "间隔"}</td>
+  <td>{_escape(_format_schedule_plan(s))}<span style="color:#94a3b8;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
+  <td>{next_cell}</td>
+  <td>{_format_schedule_last_run(s)}</td>
+  <td>{_format_schedule_last_result(s)}</td>
+  <td style="text-align:center">{fail_count}</td>
+  <td style="white-space:nowrap">{status_cell}</td>
+  <td class="ops-cell" style="white-space:nowrap">
+    <form method="post" action="/config/scheduler/run/{sid}" style="display:inline" onsubmit="this.querySelector('button').disabled=true">
+      <button type="submit" class="btn btn-primary btn-sm">立即执行</button>
+    </form>
+    <form method="post" action="/config/scheduler/toggle/{sid}" style="display:inline">
+      <button type="submit" class="btn {toggle_cls} btn-sm">{toggle_label}</button>
+    </form>
+    {build_delete_form_html(f"/config/scheduler/delete/{sid}", f"确定删除报表「{report_name or sid}」的定时任务？", button_cls="btn-sm")}
+  </td>
+</tr>"""
+    if not schedules:
+        rows = ('<tr><td colspan="9" class="empty-state">'
+                '暂无定时任务 — 在报表编辑页的「定时执行」区配置后在此管理</td></tr>')
+    events_block = ""
+    if recent_events is not None:
+        event_rows = "".join(_format_schedule_event_row(ev)
+                             for ev in recent_events[:20])
+        if not event_rows:
+            event_rows = ('<tr><td colspan="5" class="empty-state">'
+                          '暂无执行记录</td></tr>')
+        events_block = (
+            '<div class="section" style="margin-top:16px">'
+            '<div class="section-title"><span>📜 最近执行记录</span>'
+            '<span style="color:#94a3b8;font-size:13px;font-weight:400">'
+            '来自审计日志，最多显示 20 条</span></div>'
+            '<div class="table-wrap"><table><thead><tr>'
+            '<th>时间</th><th>动作</th><th>结果</th><th>触发方式</th>'
+            '<th>错误摘要</th></tr></thead><tbody>'
+            + event_rows + '</tbody></table></div></div>')
+    return (banner
+            + '<div class="section"><div class="section-title"><span>⏰ 报表定时任务</span>'
+              '<span class="actions">'
+              + _link_btn("/config/reports", "前往报表编辑页配置",
+                          "btn btn-outline btn-sm")
+              + '</span></div>'
+            + '<div class="table-wrap"><table><thead><tr>'
+              '<th>报表名</th><th>类型</th><th>计划</th><th>下次执行</th>'
+              '<th>上次执行</th><th>上次结果</th>'
+              '<th style="text-align:center">失败计数</th>'
+              '<th>状态</th><th>操作</th>'
+              '</tr></thead><tbody>' + rows + '</tbody></table></div></div>'
+            + events_block)
 
 
 def _api_url_variants(base_url: str, url_path: str) -> tuple[str, str, str]:

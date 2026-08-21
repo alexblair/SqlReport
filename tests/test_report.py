@@ -46,6 +46,8 @@ def _make_conn():
             prefer_cache INTEGER NOT NULL DEFAULT 1,
             cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000,
+            keepalive_enabled INTEGER NOT NULL DEFAULT 0,
+            keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
@@ -120,6 +122,8 @@ def _make_conn2():
             prefer_cache INTEGER NOT NULL DEFAULT 1,
             cache_ttl_hours INTEGER NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000,
+            keepalive_enabled INTEGER NOT NULL DEFAULT 0,
+            keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
             FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
         );
@@ -875,7 +879,7 @@ class TestSortBarUI(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1000,7 +1004,7 @@ class TestNofilter(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1112,7 +1116,7 @@ class TestFieldSettingsPanel(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1249,7 +1253,7 @@ class TestSortSettingsPanel(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)
@@ -1386,7 +1390,7 @@ class TestCombinationScenarios(unittest.TestCase):
         self.conn.executescript("""
             CREATE TABLE connection_pools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, user TEXT NOT NULL, password TEXT NOT NULL, database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE report_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, parent_id INTEGER);
-            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000);
+            CREATE TABLE report_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, pool_id INTEGER, category_id INTEGER, memo TEXT, result_names TEXT DEFAULT '', prefer_cache INTEGER NOT NULL DEFAULT 1, cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, max_rows INTEGER NOT NULL DEFAULT 100000, keepalive_enabled INTEGER NOT NULL DEFAULT 0, keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         """)
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "测试", "SELECT * FROM t", 20, 1)

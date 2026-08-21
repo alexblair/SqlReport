@@ -84,6 +84,8 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **API Static File Cache** | Append `.json` to endpoint URL for static full output (zero query/compute), auto rebuild on miss, NGINX serve-ready |
 | **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
 | **3-Layer Query Cache** | L1 process memory (300s TTL) → L2 Redis snapshot (versioned keys + distributed lock) → L3 DB direct (Redis fallback) |
+| **Scheduled Reports** | Per-report scheduled execution (fixed interval in minutes or daily at HH:MM), configurable misfire policy (skip / run-once per day), 5-consecutive-failure circuit breaker, manual trigger & management page `/config/scheduler`, full audit trail |
+| **Cache Keepalive** | For cache-enabled reports, proactively rebuilds the Redis snapshot when its remaining TTL drops below the configured lead time, so the first request never pays the rebuild cost (requires report-level caching and an available Redis) |
 | **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
 | **Health Check** | `GET /health` returns JSON status (status + uptime), no auth required |
 | **API Endpoint Indep. Mgmt** | Standalone page `/config/api-endpoints` with global list & linked report |
@@ -244,6 +246,22 @@ In MySQL mode, an optional `socket` key specifies a Unix socket path (mutually e
 
 - `path` — audit database file path, defaults to `audit.db`
 - `retention_days` — retention days (0 = keep forever); expired records are cleaned up on startup and on every audit page visit
+
+### Scheduler Configuration
+
+```json
+{
+    "scheduler": {
+        "enable": false
+    }
+}
+```
+
+- `scheduler.enable` — `true` starts the background report scheduler with the web server; `false` (default) keeps it off. When disabled, existing schedule configs are kept but never auto-executed, and the `/config/scheduler` page shows a banner
+- Schedule behavior is configured per report on the report edit form ("⏰ Scheduled execution" section): interval minutes or daily time, misfire policy, on/off switch
+- On startup the scheduler scans overdue tasks once: `interval` tasks merge into a single catch-up run; `daily` tasks follow their misfire policy (`skip` advances to the next day and logs a `scheduled_misfire` audit record, `run_once` re-runs at most once that day)
+- A schedule is suspended automatically after 5 consecutive failures (circuit breaker); a manual trigger from `/config/scheduler` bypasses it, and a successful run restores auto dispatch
+- Cache keepalive ("♻ Cache keepalive" section) requires the report to have Redis caching enabled; when a snapshot's remaining TTL falls below the lead seconds, the scheduler rebuilds it in the background
 
 > ⚠️ `app_config.json` contains credentials and is in `.gitignore` — do not commit.
 
@@ -496,11 +514,15 @@ Config overview portal, entry cards leading to each management page:
 - **Reports** — standalone page `/config/reports`: configure SQL queries, bound pool, default page size, category, memo
 - **Categories** — merged into `/config/reports` (top collapsible category tree): unlimited-depth tree management, reorder/add/rename/delete; old address `/config/categories` redirects to `/config/reports`
 - **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
+- **Schedules** — standalone page `/config/scheduler`: all report schedules with next run time, last result (with duration), failure counter and circuit-breaker badge; per-task manual trigger / enable / delete; a banner shows when the scheduler is globally disabled
 
 Report edit form highlights:
 - SQL editor with format button and syntax-highlighted preview toggle
 - Memo field for documenting report purpose
 - Output limit guard: per-report "allow all output" switch plus truncation cap (`max_rows`, default 100,000, only effective when the switch is off); enabling the switch asks for confirmation
+- "⏰ Scheduled execution" section: enable auto execution, interval minutes or daily HH:MM, misfire policy (skip / run-once); saving syncs the schedule row (unchanged params keep the existing rhythm)
+- "♻ Cache keepalive" section: rebuild the Redis snapshot proactively before TTL expiry (requires Redis caching); lead seconds configurable, `0` disables
+- Report list badges: ⏰ = schedule configured & enabled, ♻ = cache keepalive on
 - [View] button: opens the report page in a new window
 - [Preview] button: live-previews the query result using the current form SQL (unsaved), handy for checking SQL correctness
 - [Save] returns to the list page on success

@@ -250,57 +250,99 @@ def _compute_static_config_version(endpoint: dict, report: dict) -> str:
     return _md5_hex("|".join(parts))
 
 
-def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
-                         ttl_hours: int, config_version: str,
-                         headers: dict) -> tuple:
-    """miss 链路：失效记录 → 全量计算 → 200 成功原子落盘（非 200 不落盘）。
+def rebuild_static_endpoint_file(conn, endpoint: dict,
+                                 record_invalidation: bool = True,
+                                 headers: dict | None = None) -> tuple:
+    """对单个 API 端点执行全量计算链路并原子落盘静态缓存文件。
 
-    last_invalidated_at 语义（该缓存路径"上次被判定失效"的时刻）：
-    - 文件存在但版本不匹配/过期 → 本次即一次失效事件，记录本次时刻
-    - 文件缺失（首次/第三方删除）→ 本次没有文件被判定失效，沿用历史记录（无则 null）
+    请求 miss 链路与调度器缓存保活共用的落盘原语：
+    - 前置校验：路径解析 / 报表存在且绑定连接池 / PH-05 写护栏，
+      任一不满足返回 (False, 404/403, 错误体, 默认JSON头)，不落盘
+    - record_invalidation=True 时按 miss 语义记录失效事件（请求链路）；
+      保活链路传 False（计划内预热，非失效事件，不改写 last_invalidated_at）
+    - headers 透传给参数解析与错误响应构造（请求链路传真实请求头，
+      保活链路传 None → 按无自定义头处理）
+    - 全量语义计算（Redis 快照 → MySQL 兜底），200 成功后原子落盘
+      （稳定文件或版本化文件双路径），非 200 不落盘
+
+    返回 (written: bool, http_status: int, resp_body: str, src_headers: dict)；
+    src_headers 为计算链路的原始响应头（含 Content-Type），调用方在其上
+    追加自有标记（如 X-Static-Cache）后返回给客户端。
     """
-    if os.path.exists(file_path):
+    default_headers = {"Content-Type": "application/json; charset=utf-8"}
+    url_key = (endpoint.get("url_path") or "").lstrip("/")
+    file_path = static_cache.resolve_file_path(url_key)
+    if not url_key or file_path is None:
+        return False, 404, '{"error": "invalid static cache path"}', dict(default_headers)
+
+    report = db.get_report(conn, endpoint["report_id"])
+    if report is None or report.get("pool_id") is None:
+        return False, 404, '{"error": "report not found"}', dict(default_headers)
+    # PH-05 写护栏：allow_write=0 且 SQL 含写 → 拒绝静态化
+    if not int(report.get("allow_write", 1) or 0) \
+            and sql_contains_write(report.get("sql_query") or ""):
+        return False, 403, '{"error": "write blocked"}', dict(default_headers)
+
+    ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
+    config_version = _compute_static_config_version(endpoint, report)
+
+    if record_invalidation and os.path.exists(file_path):
         static_cache.record_invalidated(url_key)
     last_invalidated = static_cache.get_last_invalidated(url_key)
     template = _endpoint_template(endpoint)
     # smart_quote_flags 归一化在 _execute_api_query 内完成（面板是唯一控制，
     # 旧列 json_no_quotes 已由迁移 15 转换并重置）
     meta = _build_static_meta(ttl_hours, url_key, config_version, last_invalidated)
-    result = _execute_api_query(conn, endpoint, "GET", "", {}, headers,
+    result = _execute_api_query(conn, endpoint, "GET", "", {}, headers or {},
                                 force_full=True, meta=meta)
     if isinstance(result, tuple):
-        if result[0] != 200:
-            # 非 200 不落盘
-            status, resp_body, resp_headers = result[0], result[1], dict(result[2])
-        else:
-            # result_mode=all 成功：直接返回 (200, JSON 串, 响应头)
-            status, resp_body, resp_headers = 200, result[1], dict(result[2])
+        status, resp_body, src_headers = result
+        if status != 200:
+            # 非 200 不落盘（保留错误响应头，Accept 协商的 Content-Type 在其中）
+            return False, status, resp_body, dict(src_headers)
+        # result_mode=all 成功：直接使用 (200, JSON 串, 响应头)
     else:
-        status, resp_body, resp_headers = _format_output(
+        status, resp_body, src_headers = _format_output(
             result.data_rows, result.display_cols, result.total,
             result.page, result.page_size, result.total_pages,
             result.output_format, result.add_bom, result.full,
             template=template, meta=meta, truncated=result.truncated,
             smart_quote_flags=result.smart_quote_flags)
+        if status != 200:
+            return False, status, resp_body, dict(src_headers)
 
-    if status == 200:
-        # 默认结构与模板：meta 均已在序列化前注入（模板内嵌 {{meta}}，
-        # 默认结构由 _format_json_response / all 分支在构造 resp 时注入；
-        # 模板不含 {{meta}} 占位符则自然不带 meta）
-        file_content = resp_body
-        # 写入方式选择：内容可解析且含对象 meta → 稳定文件 + 内容判定；
-        # 否则（模板无 meta）→ 版本化文件双写（版本嵌入文件名，try_read
-        # 靠版本路径判定，不依赖内容解析）
-        has_object_meta = static_cache.content_has_object_meta(file_content)
-        if has_object_meta:
-            written = static_cache.write_file(file_path, file_content)
-        else:
-            written = static_cache.write_versioned_file(
-                file_path, config_version[:8], file_content)
-        if written:
-            resp_body = file_content
+    # 默认结构与模板：meta 均已在序列化前注入（模板内嵌 {{meta}}，
+    # 默认结构由 _format_json_response / all 分支在构造 resp 时注入；
+    # 模板不含 {{meta}} 占位符则自然不带 meta）
+    # 写入方式选择：内容可解析且含对象 meta → 稳定文件 + 内容判定；
+    # 否则（模板无 meta）→ 版本化文件双写（版本嵌入文件名，try_read
+    # 靠版本路径判定，不依赖内容解析）
+    has_object_meta = static_cache.content_has_object_meta(resp_body)
+    if has_object_meta:
+        written = static_cache.write_file(file_path, resp_body)
+    else:
+        written = static_cache.write_versioned_file(
+            file_path, config_version[:8], resp_body)
+    return written, 200, resp_body, dict(src_headers)
 
-    resp_headers = dict(resp_headers)
+
+def _execute_static_miss(conn, endpoint: dict, url_key: str, file_path: str,
+                         ttl_hours: int, config_version: str,
+                         headers: dict) -> tuple:
+    """miss 链路：失效记录 → 全量计算 → 200 成功原子落盘（非 200 不落盘）。
+
+    落盘与计算逻辑统一走 rebuild_static_endpoint_file（保活共用）；
+    本函数仅补齐 HTTP 响应语义（X-Static-Cache 标记 + CORS 头，
+    并保留计算链路的原始响应头）。
+
+    last_invalidated_at 语义（该缓存路径"上次被判定失效"的时刻）：
+    - 文件存在但版本不匹配/过期 → 本次即一次失效事件，记录本次时刻
+    - 文件缺失（首次/第三方删除）→ 本次没有文件被判定失效，沿用历史记录（无则 null）
+    """
+    _, status, resp_body, src_headers = rebuild_static_endpoint_file(
+        conn, endpoint, record_invalidation=True, headers=headers)
+
+    resp_headers = dict(src_headers)
     resp_headers["X-Static-Cache"] = "miss"
     resp_headers.update(_build_cors_headers(endpoint, headers))
     return status, resp_body, resp_headers

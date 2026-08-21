@@ -1,8 +1,9 @@
 """
 audit_db.py — 审计数据库模块
 
-管理独立的 audit.db，存储三种类型的审计日志：
+管理独立的 audit.db，存储四种类型的审计日志：
   - operation: 用户对配置的 CRUD 操作（连接池/用户/报表/分类）
+  - scheduler: 定时任务执行情况（scheduled_run / scheduled_misfire）
   - web_access: 用户页面访问
   - api: API 端点调用
 
@@ -103,12 +104,15 @@ def init_audit_db(conn) -> None:
 
 def record_operation(session_user, action, entity_type, entity_id=None,
                      entity_name=None, before_value=None, after_value=None,
-                     details=None) -> None:
-    """写入一条 operation 类型审计日志（业务操作审计的统一入口）。
+                     details=None, log_type="operation") -> None:
+    """写入一条审计日志（业务操作审计的统一入口）。
 
     签名覆盖既有两处实现（auth._record_auth_event 与 config_db._write_audit_log）
     的参数集；session_user 为空时跳过（不写日志）；异常降级为
     logging.warning，避免审计失败影响业务操作（符合 conv 降级约定）。
+
+    log_type: 审计类型，默认 operation（操作日志）；调度器自动执行
+    传 scheduler（定时任务），见 scheduler.py 的 scheduled_run/scheduled_misfire。
 
     details: 预留扩展字段（当前未写入审计表，仅保持签名一致）。
     """
@@ -119,7 +123,7 @@ def record_operation(session_user, action, entity_type, entity_id=None,
         try:
             insert_audit_log(
                 audit_conn,
-                type="operation",
+                type=log_type,
                 session_user=session_user,
                 action=action,
                 entity_type=entity_type,
@@ -157,7 +161,7 @@ def insert_audit_log(
     """插入一条审计日志，返回自增 id。
 
     参数：
-      type — 审计类型（'operation' / 'web_access' / 'api'）
+      type — 审计类型（'operation' / 'scheduler' / 'web_access' / 'api'）
       before_value / after_value — dict 或 JSON 字符串，自动序列化
       request_body — 字符串（WEB/API 请求的完整内容）
       timestamp — ISO 8601 格式，缺省时自动填充当前时间
@@ -286,6 +290,25 @@ def export_audit_logs(conn, filters: dict) -> list[dict]:
     rows = conn.execute(
         f"SELECT * FROM audit_logs WHERE {where_sql} ORDER BY id DESC", params
     ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_recent_schedule_events(conn, schedule_id=None, limit: int = 20
+                               ) -> list[dict]:
+    """查询最近的定时执行事件（scheduled_run / scheduled_misfire）。
+
+    schedule_id 为 None 时返回全部任务的最近事件，否则仅该任务；
+    按 id 降序（最新在前），供 /config/scheduler 管理页"最近执行记录"展示。
+    """
+    sql = ("SELECT * FROM audit_logs "
+           "WHERE action IN ('scheduled_run','scheduled_misfire') "
+           "AND entity_type='schedule'")
+    params: list = []
+    if schedule_id is not None:
+        sql += " AND entity_id=?"
+        params.append(schedule_id)
+    rows = conn.execute(sql + " ORDER BY id DESC LIMIT ?",
+                        params + [int(limit)]).fetchall()
     return [dict(r) for r in rows]
 
 

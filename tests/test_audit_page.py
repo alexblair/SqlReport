@@ -302,6 +302,30 @@ class TestAuditWriteDegradation(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_record_operation_log_type_scheduler(self):
+        """log_type=scheduler：写入定时任务类型审计日志（B19/B20）。"""
+        conn, path = _make_audit_file_conn()
+        try:
+            with patch("audit_db.get_audit_db", return_value=conn):
+                audit_db.record_operation(
+                    "system", "scheduled_run", "schedule",
+                    entity_id=1, entity_name="report#1",
+                    after_value={"trigger": "scheduler", "status": "success",
+                                 "duration_ms": 10, "error": None},
+                    log_type="scheduler")
+            check = sqlite3.connect(path)
+            check.row_factory = sqlite3.Row
+            try:
+                rows = check.execute("SELECT * FROM audit_logs").fetchall()
+            finally:
+                check.close()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["type"], "scheduler")
+            self.assertEqual(rows[0]["action"], "scheduled_run")
+            self.assertEqual(rows[0]["entity_type"], "schedule")
+        finally:
+            os.unlink(path)
+
     def test_server_write_audit_log_silent_on_db_error(self):
         """server._write_audit_log：审计 DB 异常静默吞掉，不抛"""
         handler = srv.ReportHandler.__new__(srv.ReportHandler)
@@ -325,6 +349,78 @@ class TestAuditWriteDegradation(unittest.TestCase):
                     duration_ms=1, ip_address="127.0.0.1", request_body="")   # 不抛
         finally:
             bare.close()
+
+
+class TestAuditPageSchedulerType(_AuditConnTestCase):
+    """定时任务独立审计类型：筛选下拉、type=scheduler 筛选、详情渲染。"""
+
+    def _insert_scheduler(self, action="scheduled_run", status="success",
+                          trigger="scheduler", duration_ms=42, error=None,
+                          policy=None, missed_at=None, resumed_at=None):
+        av = {"trigger": trigger, "status": status,
+              "duration_ms": duration_ms}
+        if error:
+            av["error"] = error
+        if policy:
+            av["policy"] = policy
+        if missed_at is not None:
+            av["missed_at"] = missed_at
+        if resumed_at is not None:
+            av["resumed_at"] = resumed_at
+        insert_audit_log(
+            self.conn, type="scheduler", session_user="system",
+            action=action, entity_type="schedule", entity_id=1,
+            entity_name="report#1", after_value=av)
+
+    def test_type_filter_option_present(self):
+        """筛选下拉含"定时任务"选项。"""
+        _, body, _ = audit_page.handle_audit_request("GET", "")
+        self.assertIn('<option value="scheduler">定时任务</option>', body)
+
+    def test_filter_type_scheduler_shows_only_scheduler(self):
+        """type=scheduler：仅渲染定时任务日志，不显示 operation/api。"""
+        self._insert(2)                                   # operation 日志
+        self._insert_scheduler(status="success")          # scheduler 日志
+        insert_audit_log(self.conn, type="api", session_user="api_key:x",
+                         action="api_call", entity_name="/api/a",
+                         http_path="/api/a", http_status=200)
+        code, body, _ = audit_page.handle_audit_request(
+            "GET", "type=scheduler")
+        self.assertEqual(code, 200)
+        self.assertIn("scheduled_run", body)
+        self.assertIn("report#1", body)
+        self.assertIn("定时", body)          # 类型徽标
+        self.assertNotIn("op_1", body)
+        self.assertNotIn("api_call", body)
+
+    def test_scheduler_detail_shows_trigger_status_duration(self):
+        """详情列：触发=定时、结果=成功、耗时=42ms。"""
+        self._insert_scheduler()
+        _, body, _ = audit_page.handle_audit_request("GET", "type=scheduler")
+        self.assertIn("触发: 定时", body)
+        self.assertIn("结果: 成功", body)
+        self.assertIn("耗时: 42ms", body)
+
+    def test_scheduler_detail_failure_with_error(self):
+        """失败记录：结果=失败 + 错误信息展示。"""
+        self._insert_scheduler(status="fail", error="MySQL down",
+                               duration_ms=88)
+        _, body, _ = audit_page.handle_audit_request("GET", "type=scheduler")
+        self.assertIn("结果: 失败", body)
+        self.assertIn("MySQL down", body)
+
+    def test_scheduler_detail_manual_trigger_label(self):
+        """手动触发 trigger=manual → 详情显示"触发: 手动"。"""
+        self._insert_scheduler(trigger="manual")
+        _, body, _ = audit_page.handle_audit_request("GET", "type=scheduler")
+        self.assertIn("触发: 手动", body)
+
+    def test_scheduler_misfire_skip_detail(self):
+        """misfire skip：详情含"跳过（推进到下次计划）"。"""
+        self._insert_scheduler(action="scheduled_misfire", policy="skip",
+                               missed_at=1000.0, resumed_at=2000.0)
+        _, body, _ = audit_page.handle_audit_request("GET", "type=scheduler")
+        self.assertIn("跳过（推进到下次计划）", body)
 
 
 class TestAuditPagePaginationBounds(_AuditConnTestCase):
