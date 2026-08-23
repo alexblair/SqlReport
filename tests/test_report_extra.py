@@ -42,6 +42,7 @@ test_report_extra.py — 报表执行与预览域补充测试（T3 批次）
 """
 
 import unittest
+import urllib.parse
 from unittest.mock import patch, MagicMock
 
 import report
@@ -118,6 +119,28 @@ class TestRefreshPrefillFlow(BaseReportTest):
         self.assertEqual(code, 302)
         self.assertIn("id=1", body)
 
+    def test_refresh_missing_pool_flash_error(self):
+        """找茬中危#2（D1）：连接池缺失 = 重建未发生 → flash 必须是错误提示"""
+        self.conn.execute("DELETE FROM connection_pools")
+        self.conn.commit()
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=1")
+        flash_val = urllib.parse.parse_qs(
+            urllib.parse.urlparse(body).query).get("flash", [""])[0]
+        self.assertTrue(flash_val.startswith("错误"),
+                        f"缺池时 flash 应以「错误」开头，实为: {flash_val}")
+
+    def test_refresh_missing_report_flash_error(self):
+        """找茬中危#2（D1）：报表缺失 = 重建未发生 → flash 必须是错误提示"""
+        code, body, _ = report.handle_request(
+            self.conn, "POST", "/report", "",
+            "action=refresh_cache&id=999")
+        flash_val = urllib.parse.parse_qs(
+            urllib.parse.urlparse(body).query).get("flash", [""])[0]
+        self.assertTrue(flash_val.startswith("错误"),
+                        f"缺报表时 flash 应以「错误」开头，实为: {flash_val}")
+
     def test_refresh_missing_report_falls_back_302(self):
         """2. POST refresh_cache 但报表不存在 → 不预填仍 302"""
         code, body, _ = report.handle_request(
@@ -136,6 +159,27 @@ class TestRefreshPrefillFlow(BaseReportTest):
             self.conn, "POST", "/report", "", "action=refresh_cache&id=abc")
         self.assertEqual(code, 302)
         self.assertEqual(body, "/report")
+
+    @patch("report.db.execute_mysql_query")
+    @patch("report.db.create_mysql_connection")
+    def test_refresh_execute_failure_flash_error(self, mock_conn_f, mock_query):
+        """♻️ 契约变更(spec ux-optimization 批次1#2)：预填执行异常 → 回跳 flash
+        必须是错误提示而非「缓存已重建」（旧契约在 except 后仍报成功 = 假绿横幅）。
+        """
+        mock_query.return_value = [{"columns": ["id"], "rows": [(1,)]}]
+        mock_conn_f.return_value = MagicMock()
+        with patch("report.execute_report",
+                   side_effect=Exception("连接超时")):
+            code, body, _ = report.handle_request(
+                self.conn, "POST", "/report", "",
+                "action=refresh_cache&id=1")
+        self.assertEqual(code, 302)
+        flash_val = urllib.parse.parse_qs(
+            urllib.parse.urlparse(body).query).get("flash", [""])[0]
+        self.assertTrue(
+            flash_val.startswith("错误"),
+            f"执行失败时 flash 应以「错误」开头，实为: {flash_val}")
+        self.assertIn("缓存重建失败", flash_val)
 
     def test_post_without_refresh_action_renders_normally(self):
         """2. POST 无 refresh_cache action → 不触发重建，正常渲染"""
@@ -190,6 +234,56 @@ class TestRefreshPrefillFlow(BaseReportTest):
                     "sql_query": "SELECT * FROM test_table", "pool_id": 1},
             conn=None)
         mock_inv.assert_not_called()
+
+
+class TestInvalidNumericFilterWarning(BaseReportTest):
+    """spec ux-optimization 批次1#3：gt/lt/gte/lte 条件值非数字时，
+    filter_rows 静默跳过（既有语义不变），但 Web 报表页应回传可见提示；
+    API / 导出路径不调用检测函数，行为不变。"""
+
+    def setUp(self):
+        super().setUp()
+        report._query_cache.clear()
+
+    def tearDown(self):
+        report._query_cache.clear()
+        super().tearDown()
+
+    def _get(self, query):
+        with patch("report.db.execute_mysql_query") as mock_query, \
+             patch("report.db.create_mysql_connection") as mock_conn_f:
+            mock_query.return_value = [{"columns": ["id", "amount"],
+                                        "rows": [(1, "5"), (2, "10")]}]
+            mock_conn_f.return_value = MagicMock()
+            return report.handle_request(self.conn, "GET", "/report", query)
+
+    def test_gt_non_numeric_shows_warning(self):
+        code, body, _ = self._get("id=1&f_amount=abc&op_amount=gt")
+        self.assertEqual(code, 200)
+        self.assertIn('class="flash flash-error"', body,
+                      "应渲染错误样式提示条（class 用法断言，非 CSS 定义）")
+        self.assertIn("不是有效数字", body)
+        self.assertIn("amount", body)
+
+    def test_valid_numeric_no_warning(self):
+        code, body, _ = self._get("id=1&f_amount=8&op_amount=gt")
+        self.assertEqual(code, 200)
+        self.assertNotIn("不是有效数字", body)
+
+    def test_contains_non_numeric_no_warning(self):
+        """文本类操作符不做数值校验"""
+        code, body, _ = self._get("id=1&f_name=abc&op_name=contains")
+        self.assertEqual(code, 200)
+        self.assertNotIn("不是有效数字", body)
+
+    def test_warning_merges_with_existing_flash(self):
+        """回跳 flash 与筛选警告并存时拼接展示"""
+        code, body, _ = self._get(
+            "id=1&f_amount=abc&op_amount=gt"
+            "&flash=%E7%BC%93%E5%AD%98%E5%B7%B2%E9%87%8D%E5%BB%BA")
+        self.assertEqual(code, 200)
+        self.assertIn("不是有效数字", body)
+        self.assertIn("缓存已重建", body)
 
 
 # ===================================================================

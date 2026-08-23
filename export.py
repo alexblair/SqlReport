@@ -34,6 +34,7 @@ JSON 格式规范：
 import csv
 import io
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -146,6 +147,9 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
+    发生 max_rows 截断时，末尾追加一行 "# " 开头的注释说明
+    （spec ux-optimization 批次1#4：仅响应头 X-Export-Truncated 无法在
+    本地打开文件时感知截断）。
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
@@ -155,8 +159,12 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
 
     # 序列化为 CSV（QUOTE_ALL 全字段加双引号 + BOM + "\n" 行尾，与既有输出一致）
     rows_out = [[row[i] for i in display_indices] for row in filtered]
-    return rows_to_csv(output_columns, rows_out, bom=True,
-                       quoting=csv.QUOTE_ALL, lineterminator="\n")
+    content = rows_to_csv(output_columns, rows_out, bom=True,
+                          quoting=csv.QUOTE_ALL, lineterminator="\n")
+    if truncated:
+        content += (f"# 注意：查询结果超过 {max_rows} 行上限，"
+                    f"已截断为前 {max_rows} 行数据\n")
+    return content
 
 
 def export_report_to_json(sql_query: str, pool_config: dict,
@@ -193,6 +201,9 @@ def export_report_to_json(sql_query: str, pool_config: dict,
         ...
       ]
     }
+    发生 max_rows 截断时，顶层额外携带 "_meta" 元信息对象
+    （{"truncated": true, "max_rows": N}，spec ux-optimization 批次1#4）；
+    未截断时不输出 "_meta"，结构保持不变。
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
@@ -215,13 +226,23 @@ def export_report_to_json(sql_query: str, pool_config: dict,
 
     # 顶层结构：以报表名（清理后）作为数据键
     safe_name = report_name.strip().replace(" ", "_").replace("-", "_")
+    payload = {safe_name: rows_data}
+    if truncated:
+        if safe_name == "_meta":
+            # 极端撞名（报表名恰为 "_meta"）：跳过注入避免覆盖数据键
+            # （独立找茬高危项；响应头 X-Export-Truncated 仍兜底标记）
+            logging.warning(
+                "export_report_to_json: 报表名 %r 与 _meta 键冲突，"
+                "文件内截断标记跳过", report_name)
+        else:
+            payload["_meta"] = {"truncated": True, "max_rows": max_rows}
 
     if smart_quote_flags > 0:
         output = app_config.serialize_smart_quotes(
-            {safe_name: rows_data}, flags=smart_quote_flags, indent=2)
+            payload, flags=smart_quote_flags, indent=2)
     else:
         output = json.dumps(
-            {safe_name: rows_data},
+            payload,
             ensure_ascii=False,
             indent=2,
         )

@@ -11,7 +11,8 @@ result_transform.py — 结果集变换模块（纯函数，无 IO）
 - 筛选值匹配表达式（全系统统一语法，parse_filter_expr）：`*` 通配符（任意位置/多次，非正则）、
   英文逗号多值（段 strip、空段忽略，多值之间 OR）、`\*` / `\,` / `\\` 转义；
   仅 contains / eq / neq 生效（contains 不敏感，eq/neq 敏感），无通配符输入保持既有语义
-- 排序：稳定排序，None 值始终在最后，不受升降序影响
+- 排序：稳定排序；数值（含数值字符串）按数值大小比较，非数值按字符串比较且
+  恒排在全部数值之后（同向）；None 值始终在最后，不受升降序影响
 - 列选择：仅保留存在且不重复的列（保序）；空请求或全部无效时回退全部列
 - 总页数：page_size 或 total 非正时返回 1（防除零），否则向上取整
 """
@@ -35,13 +36,20 @@ def calc_total_pages(total: int, page_size: int) -> int:
 
 
 def _try_float(val):
-    """尝试将值转为 float，失败返回 None"""
+    """尝试将值转为 float，失败或非有限值（NaN/Inf）返回 None。
+
+    NaN 参与数值比较恒为 False 会产生「静默清空结果集」的错误答案，
+    Inf 无业务意义；统一按不可比较处理（独立找茬中危项 #3）。
+    """
     if val is None:
         return None
     try:
-        return float(val)
+        num = float(val)
     except (ValueError, TypeError):
         return None
+    if not math.isfinite(num):
+        return None
+    return num
 
 
 def parse_filter_expr(raw) -> list[list[tuple]]:
@@ -204,6 +212,9 @@ def filter_rows(rows: list[tuple], columns: list[str],
                 q_num = float(q)
             except (ValueError, TypeError):
                 continue
+            if not math.isfinite(q_num):
+                # 条件值为 NaN/Inf：与非法值同路——跳过条件而非静默清空结果集
+                continue
             if op == "gt":
                 result = [
                     r for r in result
@@ -245,7 +256,8 @@ def sort_rows(rows: list[tuple], columns: list[str],
     sorts: list[(col, dir), ...]  按优先级从高到低
     使用稳定排序，从最低优先级到最高优先级依次排序。
     调用方应保证 sorts 中无重复列名。
-    None 值始终排在最后，不受升降序影响。
+    排序分区见 _ordered_by_column：数值（含数值字符串）按数值序且恒在
+    文本之前，文本按字符串序；None 值始终排在最后，不受升降序影响。
     """
     if not sorts:
         return rows
@@ -259,9 +271,58 @@ def sort_rows(rows: list[tuple], columns: list[str],
         # 分离 None 值与非 None 值，确保 None 始终最后
         none_part = [r for r in result if r[col_idx] is None]
         not_none_part = [r for r in result if r[col_idx] is not None]
-        not_none_part.sort(key=lambda r, c=col_idx: str(r[c]), reverse=reverse)
-        result = not_none_part + none_part
+        result = _ordered_by_column(not_none_part, col_idx, reverse) + none_part
     return result
+
+
+def _ordered_by_column(part: list[tuple], col_idx: int,
+                       reverse: bool) -> list[tuple]:
+    """单列分区排序（spec ux-optimization 批次1#1）。
+
+    数值（int/float/Decimal/数值字符串）与文本分成两组：
+    - 数值组恒排在文本组之前（不随方向翻转——"数字优先、文本垫底"）；
+    - 组内分别按数值大小 / 字符串字典序，受 reverse 控制。
+    None 已由 sort_rows 分离，不会出现在 part 中。
+    """
+    numeric = []
+    text = []
+    for r in part:
+        num = _try_float(r[col_idx])
+        if num is not None:
+            numeric.append((num, r))
+        else:
+            text.append((str(r[col_idx]), r))
+    numeric.sort(key=lambda pair: pair[0], reverse=reverse)
+    text.sort(key=lambda pair: pair[0], reverse=reverse)
+    return [r for _, r in numeric] + [r for _, r in text]
+
+
+# gt / lt / gte / lte — filter_rows 中要求条件值可转 float 的操作符集合
+NUMERIC_FILTER_OPS = ("gt", "lt", "gte", "lte")
+
+
+def invalid_numeric_filters(filters) -> list[tuple]:
+    """返回条件值无法转为有限数值的数值比较条目 [(col, op, val), ...]。
+
+    NaN/Inf 同样视为无效（float() 可转但比较无意义，独立找茬中危项 #3）。
+    filter_rows 对这类条目静默跳过（既有语义保持不变）；本函数供 Web 报表页
+    在渲染前检测被忽略的条件并回传提示。API 与导出路径不调用本函数，
+    行为保持不变。
+    注意：列名有效性不在检测范围（filter_rows 对未知列同样跳过该条件，
+    其提示属后续工作）；本函数只保证「值不是有效数字」的归因成立。
+    """
+    bad = []
+    for col_name, op, q in (filters or []):
+        if op not in NUMERIC_FILTER_OPS:
+            continue
+        try:
+            num = float(q)
+        except (ValueError, TypeError):
+            bad.append((col_name, op, q))
+            continue
+        if not math.isfinite(num):
+            bad.append((col_name, op, q))
+    return bad
 
 
 def select_columns(all_columns: list[str], requested=None) -> list[str]:

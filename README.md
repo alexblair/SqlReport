@@ -84,7 +84,7 @@ It is built for people who write SQL — developers, ops engineers, data enginee
 | **API Static File Cache** | Append `.json` to endpoint URL for static full output (zero query/compute), auto rebuild on miss, NGINX serve-ready |
 | **Dual Config Engine** | SQLite or MySQL for config storage, switchable via `app_config.json` |
 | **3-Layer Query Cache** | L1 process memory (300s TTL) → L2 Redis snapshot (versioned keys + distributed lock) → L3 DB direct (Redis fallback) |
-| **Scheduled Reports** | Per-report scheduled execution (fixed interval in minutes or daily at HH:MM), configurable misfire policy (skip / run-once per day), 5-consecutive-failure circuit breaker, manual trigger & management page `/config/scheduler`, full audit trail |
+| **Scheduled Reports** | Standalone scheduled tasks bound to one or many reports (ordered execution), exclusion windows (silent windows with `dow`/`tod`/`date`/`date_range` rules, nested AND/OR, multiple rules OR-ed together), configurable misfire policy (skip / run-once per day), per-task audit switch (off by default), 5-consecutive-failure circuit breaker, manual trigger & management page `/config/scheduler`, full audit trail |
 | **Cache Keepalive** | For cache-enabled reports, proactively rebuilds the Redis snapshot when its remaining TTL drops below the configured lead time, so the first request never pays the rebuild cost (requires report-level caching and an available Redis) |
 | **Report-Editor Link** | Jump from report view to editor, preview unsaved SQL in real time |
 | **Health Check** | `GET /health` returns JSON status (status + uptime), no auth required |
@@ -258,8 +258,11 @@ In MySQL mode, an optional `socket` key specifies a Unix socket path (mutually e
 ```
 
 - `scheduler.enable` — `true` starts the background report scheduler with the web server; `false` (default) keeps it off. When disabled, existing schedule configs are kept but never auto-executed, and the `/config/scheduler` page shows a banner
+- Tasks are managed on `/config/scheduler`: each task has a name and binds one or more reports (`schedule_reports`, executed sequentially by `order_index`; a binding can be disabled individually). One report may appear in multiple tasks
+- Exclusion windows ("silent windows") define when a task must NOT run: rules are stored as a JSON tree (`exclusions`) supporting leaf types `dow` / `tod` (midnight-crossing aware) / `date` / `date_range`, nested `AND`/`OR` groups, multiple rules OR-ed together. A hit skips execution, marks the task `skipped` and advances `next_run_at`; invalid trees never silence (fail-open). Manual trigger ignores exclusions
+- Per-task audit switch (`audit_enabled`, off by default): when off no `scheduler`-type audit records are written; when on, runs / skips / misfires are logged as `scheduled_run` / `scheduled_skip` / `scheduled_misfire`
 - Schedule behavior is configured per report on the report edit form ("⏰ Scheduled execution" section): interval minutes or daily time, misfire policy, on/off switch
-- On startup the scheduler scans overdue tasks once: `interval` tasks merge into a single catch-up run; `daily` tasks follow their misfire policy (`skip` advances to the next day and logs a `scheduled_misfire` audit record, `run_once` re-runs at most once that day)
+- On startup the scheduler scans overdue tasks once: if the missed moment falls inside an exclusion window it counts as a correct skip (advance only, no catch-up); otherwise `interval` tasks merge into a single catch-up run and `daily` tasks follow their misfire policy (`skip` advances to the next day and logs a `scheduled_misfire` audit record, `run_once` re-runs at most once that day)
 - A schedule is suspended automatically after 5 consecutive failures (circuit breaker); a manual trigger from `/config/scheduler` bypasses it, and a successful run restores auto dispatch
 - Cache keepalive ("♻ Cache keepalive" section) requires the report to have Redis caching enabled; when a snapshot's remaining TTL falls below the lead seconds, the scheduler rebuilds it in the background
 
@@ -514,13 +517,13 @@ Config overview portal, entry cards leading to each management page:
 - **Reports** — standalone page `/config/reports`: configure SQL queries, bound pool, default page size, category, memo
 - **Categories** — merged into `/config/reports` (top collapsible category tree): unlimited-depth tree management, reorder/add/rename/delete; old address `/config/categories` redirects to `/config/reports`
 - **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
-- **Schedules** — standalone page `/config/scheduler`: all report schedules with next run time, last result (with duration), failure counter and circuit-breaker badge; per-task manual trigger / enable / delete; a banner shows when the scheduler is globally disabled
+- **Schedules** — standalone page `/config/scheduler`: all report schedules with task name, bound reports, next run time, last result (with duration), failure counter, audit badge and circuit-breaker marker; per-task manual trigger / enable / delete; 🔇 marks tasks with exclusion rules; a banner shows when the scheduler is globally disabled
 
 Report edit form highlights:
 - SQL editor with format button and syntax-highlighted preview toggle
 - Memo field for documenting report purpose
 - Output limit guard: per-report "allow all output" switch plus truncation cap (`max_rows`, default 100,000, only effective when the switch is off); enabling the switch asks for confirmation
-- "⏰ Scheduled execution" section: enable auto execution, interval minutes or daily HH:MM, misfire policy (skip / run-once); saving syncs the schedule row (unchanged params keep the existing rhythm)
+- "⏰ Scheduled execution" section: enable auto execution, interval minutes or daily HH:MM, misfire policy (skip / run-once); saving syncs the schedule row (unchanged params keep the existing rhythm). Full task management — multi-report binding, exclusion rules editor, audit switch — lives on `/config/scheduler`
 - "♻ Cache keepalive" section: rebuild the Redis snapshot proactively before TTL expiry (requires Redis caching); lead seconds configurable, `0` disables
 - Report list badges: ⏰ = schedule configured & enabled, ♻ = cache keepalive on
 - [View] button: opens the report page in a new window
@@ -558,7 +561,7 @@ Report list page highlights:
 - JSON smart no-quotes panel (decimal / scientific / thousands; URL param `smart_quotes=<comma list, e.g. 1,4>`; legacy `json_no_quotes=1` maps to the full panel — output always stays valid JSON)
 - ZIP archive download
 - Applies custom column settings (export only selected columns, in the chosen order)
-- Applies the output limit guard: when full output is disabled and results exceed `max_rows`, the export is truncated with header `X-Export-Truncated: true`
+- Applies the output limit guard: when full output is disabled and results exceed `max_rows`, the export is truncated with header `X-Export-Truncated: true` plus an in-file marker (a trailing `# ...` note line for CSV; a top-level `_meta: {"truncated": true, "max_rows": N}` object for JSON)
 
 ---
 

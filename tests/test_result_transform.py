@@ -18,6 +18,7 @@ tests/test_result_transform.py — 结果集变换模块边界测试
 """
 
 import unittest
+from decimal import Decimal
 
 import result_transform
 from result_transform import (
@@ -25,6 +26,7 @@ from result_transform import (
     sort_rows,
     select_columns,
     column_indices,
+    invalid_numeric_filters,
 )
 
 
@@ -105,13 +107,58 @@ class TestSortRowsBoundaries(unittest.TestCase):
         self.assertEqual(names, ["c", "a", None])
 
     def test_sort_numeric_strings(self):
-        """✅ Positive: 数值字符串按字符串排序（与历史行为一致）"""
+        """♻️ 契约变更(spec ux-optimization 批次1#1): 数值字符串列按数值大小排序。
+
+        旧契约「与历史行为一致」（字典序 "1"<"10"<"2"）钉住的是缺陷：
+        用户对金额/数量列排序拿到的是错误答案。修复后按数值序 "1"<"2"<"10"。
+        """
         rows = [(1, "10"), (2, "2"), (3, "1")]
         columns = ["id", "name"]
         sorts = [("name", "asc")]
         result = sort_rows(rows, columns, sorts)
-        # str 比较："1" < "10" < "2"
-        self.assertEqual([r[0] for r in result], [3, 1, 2])
+        self.assertEqual([r[0] for r in result], [3, 2, 1])
+
+    def test_sort_native_numbers(self):
+        """✅ Positive: 原生 int/float 数值按数值序"""
+        rows = [(1, 10), (2, 2.5), (3, -1)]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        self.assertEqual([r[0] for r in result], [3, 2, 1])
+
+    def test_sort_decimal_values(self):
+        """✅ Positive: Decimal 数值参与数值序"""
+        rows = [(1, Decimal("2.5")), (2, 3), (3, "10")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        self.assertEqual([r[0] for r in result], [1, 2, 3])
+
+    def test_sort_mixed_number_and_text_asc(self):
+        """✅ Positive: 混合列升序——数值组在前(数值序)，文本组在后(字典序)"""
+        rows = [(1, "b"), (2, "3"), (3, "a"), (4, "10")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        self.assertEqual([r[1] for r in result], ["3", "10", "a", "b"])
+
+    def test_sort_mixed_number_and_text_desc(self):
+        """✅ Positive: 混合列降序——数值大者在前，文本组垫底，组内各自反序"""
+        rows = [(1, "b"), (2, "3"), (3, "a"), (4, "10")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "desc")])
+        self.assertEqual([r[1] for r in result], ["10", "3", "b", "a"])
+
+    def test_sort_none_still_last_with_mixed(self):
+        """✅ Positive: None 排最后语义在混合类型下保持不变"""
+        rows = [(1, None), (2, "5"), (3, "x")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        self.assertEqual([r[1] for r in result], ["5", "x", None])
+
+    def test_sort_text_column_unchanged(self):
+        """✅ Positive: 纯文本列仍按字典序（回归保护）"""
+        rows = [(1, "banana"), (2, "apple"), (3, "cherry")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        self.assertEqual([r[1] for r in result], ["apple", "banana", "cherry"])
 
 
 # ===================================================================
@@ -715,6 +762,86 @@ class TestResultTransformModuleSymbols(unittest.TestCase):
         """✅ Positive: 模块不依赖 report.py（纯函数，无 IO）"""
         import result_transform as rt
         self.assertNotIn("report", rt.__dict__)
+
+
+# ===================================================================
+# 6. invalid_numeric_filters — 非法数值筛选检测
+# ===================================================================
+
+class TestInvalidNumericFilters(unittest.TestCase):
+    """invalid_numeric_filters（spec ux-optimization 批次1#3）：
+
+    filter_rows 对 gt/lt/gte/lte 遇非数值条件静默跳过（既有语义保持不变），
+    本检测函数供 Web 报表页在渲染前发现被忽略的条件并回传提示；
+    API / 导出路径不调用，行为不变。
+    """
+
+    def test_gt_non_numeric_reported(self):
+        bad = invalid_numeric_filters([("amount", "gt", "100元")])
+        self.assertEqual(bad, [("amount", "gt", "100元")])
+
+    def test_nan_inf_reported(self):
+        """NaN/Inf 可被 float() 转换但比较无意义 → 视为无效（找茬中危#3）"""
+        filters = [("a", "gt", "nan"), ("b", "lt", "inf"),
+                   ("c", "gte", "-inf")]
+        result = invalid_numeric_filters(filters)
+        self.assertEqual(len(result), 3)
+
+    def test_filter_rows_gt_nan_skips_condition(self):
+        """回归保护: gt nan 条件被跳过而非静默清空结果集"""
+        rows = [(1, "5"), (2, "10")]
+        columns = ["id", "val"]
+        result = filter_rows(rows, columns, [("val", "gt", "nan")])
+        self.assertEqual(len(result), 2)
+
+    def test_sort_with_nan_string_stays_ordered(self):
+        """"NaN" 归文本组按字典序，不破坏数值组全序"""
+        rows = [(1, "10"), (2, "NaN"), (3, "2")]
+        columns = ["id", "val"]
+        result = sort_rows(rows, columns, [("val", "asc")])
+        # 数值组在前（2,10），"NaN" 文本组垫底
+        self.assertEqual([r[1] for r in result], ["2", "10", "NaN"])
+
+    def test_all_numeric_ops_checked(self):
+        filters = [
+            ("a", "gt", "abc"),
+            ("b", "lt", "x"),
+            ("c", "gte", "1.2.3"),
+            ("d", "lte", ""),
+        ]
+        result = invalid_numeric_filters(filters)
+        self.assertEqual(len(result), 4)
+        self.assertEqual({op for _, op, _ in result},
+                         {"gt", "lt", "gte", "lte"})
+
+    def test_valid_numbers_not_reported(self):
+        """合法数值（含负数/科学计数法/小数/空串外数字字符串）不报告"""
+        filters = [("a", "gt", "-5"), ("b", "lt", "1e3"),
+                   ("c", "gte", "0.5"), ("d", "lte", 42)]
+        self.assertEqual(invalid_numeric_filters(filters), [])
+
+    def test_none_value_reported(self):
+        """None 值 float(None) 抛 TypeError → 视为非法"""
+        bad = invalid_numeric_filters([("a", "gt", None)])
+        self.assertEqual(bad, [("a", "gt", None)])
+
+    def test_text_ops_not_checked(self):
+        """contains/eq 等文本操作符不做数值校验"""
+        filters = [("a", "contains", "任意文本"), ("b", "eq", "x"),
+                   ("c", "neq", "*"), ("d", "isempty", ""),
+                   ("e", "notempty", "")]
+        self.assertEqual(invalid_numeric_filters(filters), [])
+
+    def test_empty_filters(self):
+        self.assertEqual(invalid_numeric_filters([]), [])
+        self.assertEqual(invalid_numeric_filters(None), [])
+
+    def test_filter_rows_still_silently_skips(self):
+        """回归保护: filter_rows 对非法数值条件的既有静默跳过语义保持不变"""
+        rows = [(1, "5"), (2, "10")]
+        columns = ["id", "val"]
+        result = filter_rows(rows, columns, [("val", "gt", "abc")])
+        self.assertEqual(len(result), 2)
 
 
 if __name__ == "__main__":

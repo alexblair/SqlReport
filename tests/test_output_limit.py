@@ -310,13 +310,21 @@ class TestExportOutputLimit(unittest.TestCase):
                                         pool_override=self.mock_pool)
 
     def test_csv_truncates_and_marks(self):
-        """ET-01：关闭全量输出 + 超限 → 截断 + X-Export-Truncated: true。"""
+        """ET-01：关闭全量输出 + 超限 → 截断 + X-Export-Truncated: true。
+
+        ♻️ 契约变更(spec ux-optimization 批次1#4)：文件末尾追加截断注释行，
+        行数 = 表头 + 5 行数据 + 1 注释行。
+        """
         code, content, headers = self._export(
             {"allow_all_output": 0, "max_rows": 5}, "charset=utf8", 8)
         self.assertEqual(code, 200)
         self.assertEqual(headers.get("X-Export-Truncated"), "true")
         text = content.decode("utf-8")
-        self.assertEqual(text.count("\n"), 6, "表头 + 5 行数据")
+        self.assertEqual(text.count("\n"), 7, "表头 + 5 行数据 + 截断注释行")
+        note_line = text.rstrip("\n").split("\n")[-1]
+        self.assertIn("#", note_line)
+        self.assertIn("截断", note_line)
+        self.assertIn("5", note_line)
 
     def test_csv_no_header_under_limit(self):
         """ET-02：行数未超限 → 无截断头。"""

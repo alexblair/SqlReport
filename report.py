@@ -32,7 +32,9 @@ import redis_cache
 import static_cache
 import app_config
 import config_db
-from result_transform import filter_rows, sort_rows, select_columns, calc_total_pages
+from result_transform import (filter_rows, sort_rows, select_columns,
+                              calc_total_pages, invalid_numeric_filters,
+                              NUMERIC_FILTER_OPS)
 from query_executor import sql_contains_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
@@ -1496,7 +1498,9 @@ def _handle_refresh_cache(conn, form_data: dict) -> tuple[int, str, dict]:
     """处理「重建缓存」POST：强制刷新缓存后 302 回跳报表页。
 
     回跳保留当前视图全部状态参数（page/page_size/sort/dir/filters/cols/result），
-    并附带 flash=缓存已重建 提示（复用 config 表单 POST + 回跳模式）。
+    并附带 flash 提示（复用 config 表单 POST + 回跳模式）：预填成功 →
+    「缓存已重建」；报表/连接池缺失或执行异常 → 错误提示（不以成功文案
+    掩盖失败，spec ux-optimization 批次1#2）。
     预填失败不影响回跳（错误在回跳后的页面展示）。
     """
     try:
@@ -1506,33 +1510,63 @@ def _handle_refresh_cache(conn, form_data: dict) -> tuple[int, str, dict]:
     if report_id <= 0:
         return 302, "/report", {}
     report = db.get_report(conn, report_id)
+    # flash 默认成功；预填未执行（报表/连接池缺失）或执行异常时改为错误提示，
+    # 避免「假绿色横幅」（spec ux-optimization 批次1#2）
+    refresh_ok = bool(report)
     if report:
         pool_id = report.get("pool_id")
-        if pool_id:
-            pool_config = db.get_pool(conn, pool_id)
-            if pool_config:
-                page = max(1, app_config.safe_int(_qs_val(form_data, "page"), 1))
-                page_size = None
-                parsed_page_size = app_config.safe_int(_qs_val(form_data, "page_size"), None)
-                if parsed_page_size is not None:
-                    page_size = max(1, parsed_page_size)
-                sorts = parse_sorts(form_data)
-                filters = _parse_filters(form_data)
-                active_index = parse_result_index(form_data)
-                try:
-                    execute_report(report_id, report["sql_query"], pool_config,
-                                   page, page_size, sorts, filters, True,
-                                   active_index, report, conn)
-                except Exception as e:
-                    logging.warning("refresh_cache 预填失败: %s", e)
-    # 回跳：保留视图状态参数 + flash（parse_qs → urlencode 往返保持编码一致）
-    keep = {"id": [str(report_id)], "flash": ["缓存已重建"]}
+        pool_config = db.get_pool(conn, pool_id) if pool_id else None
+        if not pool_config:
+            refresh_ok = False
+        else:
+            page = max(1, app_config.safe_int(_qs_val(form_data, "page"), 1))
+            page_size = None
+            parsed_page_size = app_config.safe_int(_qs_val(form_data, "page_size"), None)
+            if parsed_page_size is not None:
+                page_size = max(1, parsed_page_size)
+            sorts = parse_sorts(form_data)
+            filters = _parse_filters(form_data)
+            active_index = parse_result_index(form_data)
+            try:
+                execute_report(report_id, report["sql_query"], pool_config,
+                               page, page_size, sorts, filters, True,
+                               active_index, report, conn)
+            except Exception as e:
+                logging.warning("refresh_cache 预填失败: %s", e)
+                refresh_ok = False
+    # 回跳：保留视图状态参数 + flash（parse_qs → urlencode 往返保持编码一致；
+    # urlencode 自动百分号编码中文，规避 latin-1 响应头限制）
+    flash_msg = ("缓存已重建" if refresh_ok
+                 else "错误: 缓存重建失败，数据未刷新，请稍后重试或检查数据库连接")
+    keep = {"id": [str(report_id)], "flash": [flash_msg]}
     for key, vals in form_data.items():
         if key in ("page", "page_size", "sort", "dir", "cols", "result"):
             keep[key] = vals
         elif key.startswith("f_") or key.startswith("op_"):
             keep[key] = vals
     return 302, "/report?" + urllib.parse.urlencode(keep, doseq=True), {}
+
+
+_OP_SYMBOLS = {"gt": ">", "lt": "<", "gte": "≥", "lte": "≤"}
+
+
+def _filter_warning_flash(filters, existing_flash: str = "") -> str:
+    """检测非法数值筛选并生成提示 flash（spec ux-optimization 批次1#3）。
+
+    filter_rows 对 gt/lt/gte/lte 遇非数值条件静默跳过，用户看到的是
+    「被悄悄忽略」的结果；本函数把被忽略的条件显式回传给页面。
+    仅 Web 报表页调用；API / 导出路径行为不变。
+    """
+    bad = invalid_numeric_filters(filters)
+    if not bad:
+        return existing_flash
+    items = "；".join(
+        f"{col} {_OP_SYMBOLS.get(op, op)} {val}"
+        for col, op, val in bad)
+    warn = f"错误: 筛选条件 {items} 的值不是有效数字，已忽略对应条件"
+    if existing_flash:
+        return f"{warn}；{existing_flash}"
+    return warn
 
 
 def handle_request(conn, method: str, path: str, query: str,
@@ -1608,6 +1642,7 @@ def handle_request(conn, method: str, path: str, query: str,
     if "id" not in qs or not qs["id"][0]:
         return 200, render_report_selector(conn), {}
 
+
     try:
         report_id = int(qs["id"][0])
     except (ValueError, IndexError):
@@ -1636,5 +1671,6 @@ def handle_request(conn, method: str, path: str, query: str,
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
                               sorts, filters, False, cols_raw,
-                              active_index=active_index, flash=_qs_val(qs, "flash"))
+                              active_index=active_index, flash=_filter_warning_flash(
+                                  filters, _qs_val(qs, "flash")))
     return 200, html, {}

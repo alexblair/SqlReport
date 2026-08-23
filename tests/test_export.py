@@ -16,8 +16,10 @@ import urllib.parse
 from unittest.mock import patch, MagicMock
 import sqlite3
 import db
+import app_config
 import export
 import server as srv
+from tests import BaseReportTest
 
 
 def _make_conn():
@@ -1933,6 +1935,131 @@ class TestExportClientDisconnect(unittest.TestCase):
         wfile.write.assert_called_once_with(b"data")
         handler.send_response.assert_called_once_with(200)
         handler.end_headers.assert_called_once()
+
+
+# ===================================================================
+# 导出截断文件内标记（spec ux-optimization 批次1#4）
+# ===================================================================
+
+_POOL = {"host": "h", "port": 3306, "user": "u",
+         "password": "p", "database": "d"}
+
+
+def _mock_mysql(rows):
+    """返回 (decorator参数已应用的) mock 场景：cursor 返回 rows。"""
+    patcher = patch("db.create_mysql_connection")
+    mock_create_conn = patcher.start()
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    mock_cursor.description = [("id",)]
+    mock_cursor.fetchall.return_value = rows
+    mock_create_conn.return_value = mock_conn
+    return patcher
+
+
+class TestExportTruncationMarker(BaseReportTest):
+    """max_rows 截断时导出文件内部自带标记（此前仅响应头 X-Export-Truncated，
+    用户下载到本地后无从感知数据被截断）。"""
+
+    def test_csv_truncated_appends_note(self):
+        """CSV 截断 → 末尾追加注释行说明上限与实际行数"""
+        patcher = _mock_mysql([(i,) for i in range(8)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_csv(
+            "SELECT * FROM t", _POOL, max_rows=5)
+        lines = result.split("\n")
+        # BOM 行 + 表头 + 5 行数据 + 注释行（末尾空串来自最后一个 \n）
+        self.assertEqual(lines[0], '\ufeff"id"')
+        data = [ln for ln in lines[1:6]]
+        self.assertEqual(len(data), 5)
+        note = lines[6]
+        self.assertIn("超过", note)
+        self.assertIn("5", note)
+        self.assertIn("截断", note)
+
+    def test_csv_not_truncated_no_note(self):
+        """未触发截断 → 文件不含任何注释行"""
+        patcher = _mock_mysql([(1,), (2,)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_csv(
+            "SELECT * FROM t", _POOL, max_rows=100)
+        self.assertNotIn("\n#", result)
+
+    def test_csv_no_limit_no_note(self):
+        """无 max_rows 参数 → 文件不含任何注释行"""
+        patcher = _mock_mysql([(1,)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_csv("SELECT * FROM t", _POOL)
+        self.assertNotIn("\n#", result)
+
+    def test_json_truncated_meta(self):
+        """JSON 截断 → 顶层追加 _meta（truncated/max_rows），数据键保留"""
+        patcher = _mock_mysql([(i,) for i in range(8)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_json(
+            "SELECT * FROM t", _POOL, "我的报表", max_rows=5)
+        payload = json.loads(result)
+        # 默认分支（无智能去引号）所有单元格值经 format_cell 转字符串（既有行为）
+        self.assertEqual(payload["我的报表"], [{"id": "0"}, {"id": "1"},
+                                              {"id": "2"}, {"id": "3"},
+                                              {"id": "4"}])
+        self.assertIs(payload["_meta"]["truncated"], True)
+        self.assertEqual(payload["_meta"]["max_rows"], 5)
+
+    def test_json_not_truncated_no_meta(self):
+        """未截断 → JSON 无 _meta 键（结构不变）"""
+        patcher = _mock_mysql([(1,)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_json(
+            "SELECT * FROM t", _POOL, "r", max_rows=100)
+        payload = json.loads(result)
+        self.assertNotIn("_meta", payload)
+
+    def test_json_smart_quotes_truncated_meta(self):
+        """智能去引号分支下截断：_meta 正常输出且整体合法 JSON"""
+        patcher = _mock_mysql([(i,) for i in range(8)])
+        self.addCleanup(patcher.stop)
+        flags = app_config.SMART_FLAG_DECIMAL | app_config.SMART_FLAG_THOUSAND
+        result = export.export_report_to_json(
+            "SELECT * FROM t", _POOL, "r", smart_quote_flags=flags,
+            max_rows=5)
+        payload = json.loads(result)
+        self.assertEqual(payload["_meta"]["truncated"], True)
+        self.assertEqual(payload["_meta"]["max_rows"], 5)
+
+    def test_json_meta_key_collision_keeps_data(self):
+        """报表名恰为 "_meta" 时不注入元信息，数据键完整保留（找茬高危#1）"""
+        patcher = _mock_mysql([(i,) for i in range(8)])
+        self.addCleanup(patcher.stop)
+        result = export.export_report_to_json(
+            "SELECT * FROM t", _POOL, "_meta", max_rows=5)
+        payload = json.loads(result)
+        # 数据不被覆盖："_meta" 键下仍是 5 行完整数据
+        self.assertEqual(len(payload["_meta"]), 5)
+        self.assertEqual(payload["_meta"][0], {"id": "0"})
+
+    def test_gbk_charset_truncated_note_decodable(self):
+        """GBK 编码路径：中文注释行可正常编码（errors=replace 不炸）"""
+        pool_id = db.add_pool(self.conn, "池", host="h", port=3306,
+                              user="u", password="p", database="d")
+        rid = db.add_report(self.conn, "导出报表", "SELECT * FROM t", 20,
+                            pool_id, allow_all_output=0, max_rows=5)
+        with patch("db.create_mysql_connection") as mock_f:
+            mock_conn = MagicMock()
+            mock_cursor = MagicMock()
+            mock_conn.cursor.return_value = mock_cursor
+            mock_cursor.description = [("id",)]
+            mock_cursor.fetchall.return_value = [(i,) for i in range(8)]
+            mock_f.return_value = mock_conn
+            code, content, headers = export.handle_export(
+                self.conn, f"id={rid}&charset=gbk",
+                pool_override=_POOL)
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("X-Export-Truncated"), "true")
+        text = content.decode("gbk")
+        self.assertIn("超过", text)
+        self.assertIn("5", text)
 
 
 if __name__ == "__main__":
