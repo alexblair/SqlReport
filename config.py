@@ -50,6 +50,7 @@ from render import (
     build_api_endpoint_form_html,
     build_api_endpoint_preview_help_html,
     build_scheduler_page_html,
+    build_scheduler_task_form_html,
     _build_desc_summary_html,
     _WARN_BOX_STYLE,
     _MD_CSS,
@@ -104,6 +105,9 @@ def parse_config_path(path: str) -> dict:
             return {"section": "scheduler", "action": m.group(1),
                     "id": int(m.group(2)), "report_id": None,
                     "endpoint_id": None}
+        if path == "/config/scheduler/save":
+            return {"section": "scheduler", "action": "save", "id": None,
+                    "report_id": None, "endpoint_id": None}
         return {"section": None, "action": None, "id": None,
                 "report_id": None, "endpoint_id": None}
 
@@ -204,6 +208,37 @@ _CONFIG_EXTRA_CSS = """
   .config-form .form-actions .cancel { color: #64748b; text-decoration: none; font-size: 14px; font-weight: 500; }
   .config-form .form-actions .cancel:hover { color: #334155; }
   .config-form select { cursor: pointer; }
+  /* 定时任务表单：宽屏进一步利用宽度（仅 .sched-form 作用域，不影响其他 config-form） */
+  @media (min-width: 1700px) {
+    form.config-form.sched-form { max-width: 1680px; }
+  }
+  @media (min-width: 2100px) {
+    form.config-form.sched-form { max-width: 1920px; }
+  }
+  .config-form .field-hint {
+    display: block; margin-top: 2px; font-weight: 400;
+    color: #94a3b8; font-size: 12px;
+  }
+  .config-form .check-inline {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 400; margin: 4px 18px 4px 0; cursor: pointer;
+  }
+  .config-form .muted { color: #94a3b8; }
+  .sched-reports-wrap {
+    max-height: 300px; overflow: auto;
+    border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
+  }
+  table.sched-reports { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.sched-reports thead th {
+    position: sticky; top: 0; background: #f1f5f9;
+    text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e8f0;
+    color: #334155; font-weight: 600;
+  }
+  table.sched-reports tbody td {
+    padding: 6px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
+  }
+  table.sched-reports tbody tr:last-child td { border-bottom: none; }
+  table.sched-reports .bind-col { width: 56px; text-align: center; }
   .sql-textarea {
     width: 100%; padding: 10px 14px; margin-top: 6px;
     border: 2px solid #e2e8f0; border-radius: 8px;
@@ -373,8 +408,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
                        prefer_cache=1, cache_ttl_hours=0,
                        allow_write=0, sql_has_write=False,
                        allow_all_output=0, max_rows=100000,
-                       keepalive_enabled=0, keepalive_ahead_seconds=0,
-                       sched=None):
+                       keepalive_enabled=0, keepalive_ahead_seconds=0):
     """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）。
 
     allow_write: 「允许执行写操作」当前值（存量 1、新建 0）。
@@ -383,7 +417,6 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     allow_all_output: 「允许全部输出」当前值（存量 1、新建 0）。
     max_rows: 全量输出关闭时的截断行数上限（默认 100000，仅关闭全量输出时生效）。
     keepalive_enabled / keepalive_ahead_seconds: 缓存保活折叠区当前值（scheduler T4）。
-    sched: 定时任务行 dict（无任务为 None）；编辑态回显，新建/复制为 None。
     """
     view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
                 if is_edit and report_id else "")
@@ -423,53 +456,6 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
         f'<input type="number" name="max_rows" value="{max_rows}" min="1" step="1" style="width:140px">'
         f'<span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">仅关闭「允许全部输出」时生效</span>'
         f'</label>')
-    # scheduler T4：定时执行折叠区（编辑态回显任务行；新建/复制默认收起未配置）
-    sched = sched or {}
-    sched_enabled = int(sched.get("enabled", 0) or 0)
-    sched_type = sched.get("schedule_type") or "interval"
-    sched_interval = sched.get("interval_minutes", 30)
-    sched_daily = sched.get("daily_time") or "08:00"
-    sched_misfire = sched.get("misfire_policy") or "skip"
-    interval_row_style = "" if sched_type == "interval" else ' style="display:none"'
-    daily_row_style = ' style="display:none"' if sched_type == "interval" else ""
-    schedule_html = f"""
-  <details class="span-full" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;background:#f8fafc">
-    <summary style="cursor:pointer;font-weight:600;color:#334155">⏰ 定时执行</summary>
-    <div style="margin-top:12px">
-      <label style="display:flex;align-items:center;gap:8px;font-weight:400">
-        <input type="hidden" name="schedule_enabled" value="0">
-        <input type="checkbox" name="schedule_enabled" value="1"{' checked' if sched_enabled else ''}>
-        <span style="font-weight:600">启用定时自动执行</span>
-        <span style="color:#94a3b8;font-weight:400;font-size:13px">（保存后可在顶部「定时任务」页管理与手动触发）</span>
-      </label>
-      <label>调度类型:
-        <select name="schedule_type" onchange="schedToggleType(this.value)">
-          <option value="interval"{' selected' if sched_type == 'interval' else ''}>固定间隔（分钟）</option>
-          <option value="daily"{' selected' if sched_type == 'daily' else ''}>每天固定时刻</option>
-        </select>
-      </label>
-      <label id="sched-interval-row"{interval_row_style}>执行间隔（分钟）:
-        <input type="number" name="interval_minutes" value="{sched_interval}" min="1" max="525600" step="1" style="width:140px">
-      </label>
-      <label id="sched-daily-row"{daily_row_style}>每天执行时刻:
-        <input type="time" name="daily_time" value="{_escape(sched_daily)}" style="width:140px">
-      </label>
-      <label>错过执行的补偿策略:
-        <select name="misfire_policy">
-          <option value="skip"{' selected' if sched_misfire == 'skip' else ''}>跳过（下次按计划执行）</option>
-          <option value="run_once"{' selected' if sched_misfire == 'run_once' else ''}>补跑一次（当天仅一次）</option>
-        </select>
-      </label>
-    </div>
-  </details>
-  <script>
-  function schedToggleType(t) {{
-    var iv = document.getElementById('sched-interval-row');
-    var dy = document.getElementById('sched-daily-row');
-    if (iv) iv.style.display = (t === 'interval') ? '' : 'none';
-    if (dy) dy.style.display = (t === 'daily') ? '' : 'none';
-  }}
-  </script>"""
     # 缓存保活折叠区（scheduler T4）
     ka_checked = ' checked' if keepalive_enabled else ''
     keepalive_html = f"""
@@ -537,7 +523,6 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   </label>
   {allow_write_html}
   {allow_all_output_html}
-  {schedule_html}
   {keepalive_html}
   <div class="form-actions span-full">
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
@@ -670,13 +655,6 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
     keepalive_enabled = _tolerant_int(report.get("keepalive_enabled"), 0) if report else 0
     keepalive_ahead = (_tolerant_int(report.get("keepalive_ahead_seconds"), 600)
                        if report else 600)
-    # 定时任务行回显：仅编辑态读取；复制不继承任务（新报表从零配置）
-    sched_row = None
-    if is_edit and report and report.get("id"):
-        try:
-            sched_row = db.get_schedule_by_report(conn, report["id"])
-        except Exception:
-            sched_row = None
 
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
@@ -686,20 +664,26 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
                               allow_write=allow_write, sql_has_write=sql_has_write,
                               allow_all_output=allow_all_output, max_rows=max_rows,
                               keepalive_enabled=keepalive_enabled,
-                              keepalive_ahead_seconds=keepalive_ahead,
-                              sched=sched_row)
+                              keepalive_ahead_seconds=keepalive_ahead)
 
 
 def _render_pool_section(conn) -> str:
-    """渲染连接池配置列表（含复制、排序）"""
+    """渲染连接池配置列表（含复制、排序）
+
+    批次2#6：删除确认弹窗披露各池关联报表数（破坏半径前置披露）。
+    """
     pools = db.get_all_pools(conn)
-    return build_pool_section_html(pools)
+    return build_pool_section_html(pools,
+                                   report_counts=db.count_reports_by_pool(conn))
 
 
-def _render_user_section(conn) -> str:
-    """渲染用户配置列表"""
+def _render_user_section(conn, current_username: str = None) -> str:
+    """渲染用户配置列表
+
+    批次2#7：当前登录用户所在行不渲染删除按钮。
+    """
     users = db.get_all_users(conn)
-    return build_user_section_html(users)
+    return build_user_section_html(users, current_username=current_username)
 
 
 def _render_category_section(conn) -> str:
@@ -719,7 +703,8 @@ def _render_category_section(conn) -> str:
     schedules_map: dict[int, dict] = {}
     try:
         for s in db.get_all_schedules(conn):
-            schedules_map[s["report_id"]] = s
+            for rid in s.get("report_ids") or []:
+                schedules_map[rid] = s
     except Exception:
         schedules_map = {}
     return build_category_section_html(cat_reports, unclassified_reports, all_cats,
@@ -739,8 +724,13 @@ def render_reports_page(conn, flash: str = None) -> str:
             + render_page_footer())
 
 
-def render_overview(conn, flash: str = None) -> str:
-    """渲染配置总览页，包含三个配置段"""
+def render_overview(conn, flash: str = None,
+                    current_username: str = None) -> str:
+    """渲染配置总览页，包含三个配置段
+
+    current_username: 当前登录用户名（批次2#7，透传用户列表渲染以隐藏
+    自身行的删除按钮）。
+    """
     flash_html = ""
     if flash:
         flash_html = build_flash_html(flash)
@@ -797,7 +787,8 @@ def render_overview(conn, flash: str = None) -> str:
 <p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
 </div>"""
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + onboarding_html + _render_pool_section(conn) + _render_user_section(conn)
+            + flash_html + onboarding_html + _render_pool_section(conn)
+            + _render_user_section(conn, current_username=current_username)
             + reports_card + categories_card + api_card + render_page_footer())
     return body
 
@@ -967,32 +958,6 @@ def _parse_report_form(data: dict) -> dict:
         "keepalive_enabled": int(data.get("keepalive_enabled", 0) or 0),
         "keepalive_ahead_seconds": max(
             0, app_config.safe_int(data.get("keepalive_ahead_seconds"), 600)),
-    }
-
-
-def _parse_schedule_form(data: dict) -> dict:
-    """解析报表表单「定时执行」折叠区字段（scheduler T4）。
-
-    返回 upsert_schedule 兼容的参数字典（不含 next_run_at——由调用方
-    按变更与否决定重算策略）；schedule_type/时间非法值由
-    config_db._validate_schedule_fields 在写入前把关。
-    """
-    stype = data.get("schedule_type") or "interval"
-    if stype not in ("interval", "daily"):
-        stype = "interval"
-    daily = (data.get("daily_time") or "").strip()
-    if not re.match(r"^\d{2}:\d{2}$", daily):
-        daily = "08:00"
-    policy = data.get("misfire_policy") or "skip"
-    if policy not in ("skip", "run_once"):
-        policy = "skip"
-    minutes = app_config.safe_int(data.get("interval_minutes"), 30)
-    return {
-        "schedule_type": stype,
-        "interval_minutes": min(max(minutes, 1), 525600),
-        "daily_time": daily,
-        "misfire_policy": policy,
-        "enabled": int(data.get("schedule_enabled", 0) or 0),
     }
 
 
@@ -1186,11 +1151,19 @@ def handle_pool_copy(conn, pool_id: int, form_body: str, session_user=None) -> t
 
 
 def handle_pool_delete(conn, pool_id: int, session_user=None) -> tuple[int, str]:
-    """处理删除连接池"""
+    """处理删除连接池。
+
+    批次2#6（spec ux-optimization）：flash 披露断连破坏半径——
+    其下 N 个关联报表将失去数据库连接（报表保留但无法执行）。
+    """
     pool = db.get_pool(conn, pool_id)
     if not pool:
         return 302, "/config?flash=错误: 连接池不存在"
+    ref_count = db.count_reports_by_pool(conn).get(pool_id, 0)
     db.delete_pool(conn, pool_id, session_user=session_user)
+    if ref_count > 0:
+        return 302, (f"/config?flash=连接池 {pool['name']} 已删除"
+                     f"（已断开 {ref_count} 个报表的连接，报表保留但无法执行）")
     return 302, f"/config?flash=连接池 {pool['name']} 已删除"
 
 
@@ -1207,15 +1180,31 @@ def handle_user_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
 
 
 def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> tuple[int, str]:
-    """处理编辑用户表单提交"""
+    """处理编辑用户表单提交。
+
+    批次2#7（spec ux-optimization）：密码被修改时注销该用户全部登录会话
+    （旧凭据立即作废；管理员改自己的密码同样会踢掉自己——预期安全语义）。
+    仅改名不改密不注销（规格语义：踢会话仅由改密触发）。
+    """
     data = _parse_form_data(form_body)
     target = db.get_user_by_id(conn, user_id)
     if not target:
         return 302, "/config?flash=错误: 用户不存在"
     try:
-        password_hash = auth.hash_password(data["password"]) if data.get("password") else target["password_hash"]
+        password_changed = bool(data.get("password"))
+        username_changed = data.get("username") != target["username"]
+        password_hash = auth.hash_password(data["password"]) if password_changed else target["password_hash"]
         ok = db.update_user(conn, user_id, data["username"], password_hash, session_user=session_user)
         if ok:
+            if password_changed or username_changed:
+                # 用旧用户名踢会话：token 绑定的是变更前的用户名。
+                # 改名同样注销——session 不回查 users 表，旧 token 会以
+                # 已不存在的用户名继续通过认证（批次2#7 边界补丁）。
+                auth.remove_sessions_for_user(target["username"])
+                reason = ("其登录会话已全部注销，需重新登录"
+                          if password_changed else
+                          f"已改名为 {data['username']}，其登录会话已注销，需重新登录")
+                return 302, f"/config?flash=用户 {target['username']} 已更新，{reason}"
             return 302, f"/config?flash=用户 {data['username']} 已更新"
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
@@ -1224,38 +1213,21 @@ def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> t
 
 
 def handle_user_delete(conn, user_id: int, session_user=None) -> tuple[int, str]:
-    """处理删除用户"""
+    """处理删除用户。
+
+    批次2#7（spec ux-optimization）：
+    - 服务端拒绝删除当前登录账号（前端隐藏删除按钮之外的兜底）；
+    - 删除成功后注销该用户全部登录会话（内存 + 持久层）。
+    """
     target = db.get_user_by_id(conn, user_id)
     if not target:
         return 302, "/config?flash=错误: 用户不存在"
+    if session_user and target["username"] == session_user:
+        return 302, "/config?flash=错误: 不能删除当前登录账号"
     db.delete_user(conn, user_id, session_user=session_user)
-    return 302, f"/config?flash=用户 {target['username']} 已删除"
-
-
-def _apply_schedule_from_form(conn, report_id: int, data: dict,
-                              session_user=None) -> None:
-    """报表保存后同步「定时执行」折叠区到任务行（scheduler T4）。
-
-    next_run_at 策略：任务已存在且调度参数完全未变 → 保持原值（不扰动
-    既有节拍）；否则按当前时间重算（新建/参数变更立即生效）。
-    """
-    args = _parse_schedule_form(data)
-    try:
-        old = db.get_schedule_by_report(conn, report_id)
-        unchanged = old is not None and all(
-            old.get(k) == v for k, v in args.items())
-        if unchanged:
-            args["next_run_at"] = old.get("next_run_at")
-        else:
-            import scheduler as _scheduler
-            now = time.time()
-            args["next_run_at"] = _scheduler.compute_next_run(
-                args["schedule_type"], args["interval_minutes"],
-                args["daily_time"], now)
-        db.upsert_schedule(conn, report_id=report_id,
-                           session_user=session_user, **args)
-    except Exception as e:
-        logging.warning(f"同步定时任务失败 (report_id={report_id}): {e}")
+    kicked = auth.remove_sessions_for_user(target["username"])
+    suffix = f"（已注销其 {kicked} 个登录会话）" if kicked > 0 else ""
+    return 302, f"/config?flash=用户 {target['username']} 已删除{suffix}"
 
 
 def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1280,7 +1252,6 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
                             keepalive_enabled=rf["keepalive_enabled"],
                             keepalive_ahead_seconds=rf["keepalive_ahead_seconds"],
                             session_user=session_user)
-        _apply_schedule_from_form(conn, rid, data, session_user=session_user)
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
             success_flash=f"报表 {data['name']} 已创建 (id={rid})",
@@ -1311,8 +1282,6 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
                               keepalive_ahead_seconds=rf["keepalive_ahead_seconds"],
                               session_user=session_user)
         if ok:
-            _apply_schedule_from_form(conn, report_id, data,
-                                      session_user=session_user)
             return _save_or_render(
                 data, render_report_form_page, (conn, report_id), {},
                 success_flash=f"报表 {data['name']} 已更新",
@@ -1359,11 +1328,19 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
 
 
 def handle_report_delete(conn, report_id: int, session_user=None) -> tuple[int, str]:
-    """处理删除报表"""
+    """处理删除报表。
+
+    批次2#5（spec ux-optimization）：flash 披露一并清理的 API 端点数
+    （级联删除在 db.delete_report 内完成，含静态缓存失效）。
+    """
     rpt = db.get_report(conn, report_id)
     if not rpt:
         return 302, "/config/reports?flash=错误: 报表不存在"
+    ep_count = len(db.get_api_endpoints_by_report(conn, report_id))
     db.delete_report(conn, report_id, session_user=session_user)
+    if ep_count > 0:
+        return 302, (f"/config/reports?flash=报表 {rpt['name']} 已删除"
+                     f"（含 {ep_count} 个 API 接口及其静态缓存）")
     return 302, f"/config/reports?flash=报表 {rpt['name']} 已删除"
 
 
@@ -1582,23 +1559,35 @@ def handle_description_preview(form_body: str) -> tuple[int, str, dict]:
     return 200, markdown_render.render_markdown(description), {}
 
 
-def render_scheduler_page(conn, flash: str = None) -> str:
+def render_scheduler_page(conn, flash: str = None, edit_id: int = None) -> str:
     """渲染定时任务管理页（/config/scheduler，scheduler T4）。
 
     全局停用时页面仍可查看（横幅提示），操作按钮提交后由
-    handle_scheduler_* 各自降级处理（B17/B21）。
-    底部"最近执行记录"来自审计库 scheduled_run/scheduled_misfire
+    handle_scheduler_* 各自降级处理（B17/B21）。edit_id 给定时回填
+    任务编辑表单。底部"最近执行记录"来自审计库 scheduled_run/scheduled_misfire
     （读取失败不阻断页面，降级为空记录区块）。
     """
     flash_html = build_flash_html(flash) if flash else ""
     scheduler_enabled = bool(app_config.get_config().get(
         "scheduler", {}).get("enable", False))
     schedules = db.get_all_schedules(conn)
+    reports = db.get_all_reports(conn)
+    prefill = None
+    if edit_id:
+        sched = db.get_schedule(conn, edit_id)
+        if sched:
+            reps = db.get_schedule_reports(conn, edit_id)
+            sched = dict(sched)
+            sched["report_ids"] = [r["report_id"] for r in reps]
+            # 绑定级启停回显（S10）
+            sched["binding_enabled"] = {r["report_id"]: r["enabled"]
+                                        for r in reps}
+            prefill = sched
     try:
         import audit_db
         with contextlib.closing(audit_db.get_audit_db()) as audit_conn:
             recent_events = audit_db.get_recent_schedule_events(audit_conn,
-                                                                limit=20)
+                                                                 limit=20)
     except Exception as e:
         logging.warning("读取调度执行记录失败（降级为空）: %s", e)
         recent_events = []
@@ -1607,6 +1596,7 @@ def render_scheduler_page(conn, flash: str = None) -> str:
                                extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
             + '<h2 style="margin-bottom:12px">报表定时任务</h2>'
+            + build_scheduler_task_form_html(prefill, reports)
             + build_scheduler_page_html(schedules, scheduler_enabled,
                                         recent_events=recent_events)
             + render_page_footer())
@@ -1659,6 +1649,77 @@ def handle_scheduler_delete(conn, schedule_id: int, session_user=None) -> tuple[
     return 302, _scheduler_flash_url("错误: 任务不存在")
 
 
+def handle_scheduler_save(conn, form_body: str, session_user=None) -> tuple[int, str]:
+    """保存/更新定时任务（多报表组合，spec §7.2 POST /config/scheduler/save）。
+
+    表单字段：edit_id（编辑态隐藏域，给定时按 id 精确更新、支持改名）、
+    name、schedule_type、interval_minutes、daily_time、misfire_policy、
+    schedule_enabled、audit_enabled、report_ids（多选）、exclusions（JSON
+    文本）。后端校验排除规则结构，非法回显错误且不落库；任务名与既有
+    任务冲突时回显错误（防错位顶替更新）。
+    """
+    import scheduler as _scheduler
+    qs = urllib.parse.parse_qs(form_body, keep_blank_values=True)
+    data = _parse_form_data(form_body)
+    edit_id = app_config.safe_int(data.get("edit_id"), None)
+    name = (data.get("name") or "").strip()
+    schedule_type = data.get("schedule_type") or "interval"
+    if schedule_type not in ("interval", "daily"):
+        schedule_type = "interval"
+    daily_time = (data.get("daily_time") or "").strip()
+    if not re.match(r"^\d{2}:\d{2}$", daily_time):
+        daily_time = "08:00"
+    misfire_policy = data.get("misfire_policy") or "skip"
+    if misfire_policy not in ("skip", "run_once"):
+        misfire_policy = "skip"
+    interval_minutes = app_config.safe_int(data.get("interval_minutes"), 60)
+    interval_minutes = min(max(interval_minutes, 1), 525600)
+    enabled = 1 if data.get("schedule_enabled") else 0
+    audit_enabled = 1 if data.get("audit_enabled") else 0
+    # 关联报表（多选；表单可能以重复键或逗号分隔传递）
+    raw_ids = qs.get("report_ids") or []
+    report_ids: list[int] = []
+    for x in raw_ids:
+        for y in str(x).split(","):
+            y = y.strip()
+            if y.isdigit():
+                report_ids.append(int(y))
+    report_ids = list(dict.fromkeys(report_ids))  # 保序去重
+    # 排除规则（JSON 文本），后端校验结构合法
+    exclusions_raw = (data.get("exclusions") or "").strip()
+    if exclusions_raw:
+        ok, err = _scheduler.validate_exclusions(exclusions_raw)
+        if not ok:
+            return 302, _scheduler_flash_url(f"错误: 排除规则无效 - {err}")
+    if not name:
+        return 302, _scheduler_flash_url("错误: 任务名不能为空")
+    if not report_ids:
+        return 302, _scheduler_flash_url("错误: 至少选择一个关联报表")
+    # 校验全部关联报表存在（创建任务时要求报表已存在，基础规格 B22 调整）
+    for rid in report_ids:
+        if db.get_report(conn, rid) is None:
+            return 302, _scheduler_flash_url(f"错误: 报表 #{rid} 不存在")
+    # 绑定级启停（S10）：bind_enabled_<rid> 勾选=参与执行，缺省 1
+    binding_enabled = {}
+    for rid in report_ids:
+        binding_enabled[rid] = 1 if data.get(f"bind_enabled_{rid}") else 0
+    now = time.time()
+    next_run_at = _scheduler.compute_next_run(
+        schedule_type, interval_minutes, daily_time, now)
+    try:
+        db.upsert_schedule(conn, name=name, schedule_type=schedule_type,
+                           interval_minutes=interval_minutes,
+                           daily_time=daily_time, misfire_policy=misfire_policy,
+                           enabled=enabled, exclusions=exclusions_raw,
+                           audit_enabled=audit_enabled, report_ids=report_ids,
+                           binding_enabled=binding_enabled,
+                           next_run_at=next_run_at, session_user=session_user,
+                           schedule_id=edit_id)
+    except Exception as e:
+        return 302, _scheduler_flash_url(f"错误: {e}")
+    return 302, _scheduler_flash_url(f"任务「{name}」已保存")
+
+
 def handle_scheduler_request(conn, method: str, path: str, query: str,
                              form_body: str = None,
                              session_user=None) -> tuple[int, str, dict]:
@@ -1667,7 +1728,12 @@ def handle_scheduler_request(conn, method: str, path: str, query: str,
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
     flash = qs.get("flash", [None])[0]
     if method == "GET":
-        return 200, render_scheduler_page(conn, flash), {}
+        edit_id = None
+        try:
+            edit_id = int(qs.get("edit", [None])[0])
+        except (TypeError, ValueError):
+            edit_id = None
+        return 200, render_scheduler_page(conn, flash, edit_id=edit_id), {}
     if method == "POST":
         action = route["action"]
         if action == "run" and route["id"]:
@@ -1679,6 +1745,9 @@ def handle_scheduler_request(conn, method: str, path: str, query: str,
         elif action == "delete" and route["id"]:
             code, result = handle_scheduler_delete(conn, route["id"],
                                                    session_user=session_user)
+        elif action == "save":
+            code, result = handle_scheduler_save(conn, form_body or "",
+                                                 session_user=session_user)
         else:
             code, result = 302, "/config/scheduler"
         return code, result, {}
@@ -1709,7 +1778,8 @@ def handle_request(conn, method: str, path: str, query: str,
 
     # ---- 总览 ----
     if route["action"] == "overview":
-        return 200, render_overview(conn, flash), {}
+        return 200, render_overview(conn, flash,
+                                    current_username=session_user), {}
 
     # ---- 定时任务管理（独立前缀，scheduler T4）----
     if route["section"] == "scheduler":

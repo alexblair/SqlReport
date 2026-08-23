@@ -1402,5 +1402,11 @@ class TestEndpointFormSpanFull(unittest.TestCase):
             self.assertIn(token, self.html, token)
 
 
+# ---------------------------------------------------------------------------
+# 批次2 删除安全 handler 测试统一收敛于 tests/test_deletion_safety.py
+# （单一来源；本文件原 TestDeletionSafetyHandlers 与其重复且契约分叉，已移除）
+# ---------------------------------------------------------------------------
+
+
 if __name__ == "__main__":
     unittest.main()

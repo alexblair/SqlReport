@@ -183,6 +183,28 @@ def remove_session(token: str) -> bool:
     return existed
 
 
+def remove_sessions_for_user(username: str) -> int:
+    """注销指定用户的全部会话（内存 + SQLite），返回清除的 token 数。
+
+    批次2#7（spec ux-optimization）：删除用户 / 修改密码后调用，
+    使该用户所有登录态立即失效。
+    """
+    with _sessions_lock:
+        stale = [t for t, (u, _) in _sessions.items() if u == username]
+        for t in stale:
+            _sessions.pop(t, None)
+    removed = len(stale)
+    try:
+        conn = db.get_config_db()
+        try:
+            removed = max(removed, db.delete_sessions_for_user(conn, username))
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return removed
+
+
 def clear_all_sessions() -> None:
     """清空所有 session（内存 + SQLite）。"""
     with _sessions_lock:

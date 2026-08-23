@@ -26,8 +26,10 @@ import db
 import auth
 import server as srv
 
-TEST_PORT = 19082
-BASE_URL = f"http://127.0.0.1:{TEST_PORT}"
+# 动态端口（bind 0）：固定端口在多会话并行下互相争用产生假失败
+# （AGENTS.md 测试约定；与 tests/test_server.py 同模式）
+TEST_PORT = 0
+BASE_URL = None  # setUpClass 按实际绑定端口生成
 TIMEOUT = 5
 
 
@@ -43,9 +45,9 @@ def _set_up_db():
 _server_ref = None
 
 
-def _start_server():
+def _start_server(port: int):
     global _server_ref
-    _server_ref = http.server.ThreadingHTTPServer((srv.HOST, TEST_PORT), srv.ReportHandler)
+    _server_ref = http.server.ThreadingHTTPServer((srv.HOST, port), srv.ReportHandler)
     _server_ref.serve_forever()
 
 
@@ -53,9 +55,16 @@ class TestDoubleReadBodyBug(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _set_up_db()
-        cls._thread = threading.Thread(target=_start_server, daemon=True)
+        cls._thread = threading.Thread(
+            target=_start_server, args=(TEST_PORT,), daemon=True)
         cls._thread.start()
         time.sleep(0.3)
+        # bind 0 → 从服务器实例取实际端口
+        cls.port = _server_ref.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        # 动态端口回填：测试请求一律走 cls.base_url
+        cls.port = _server_ref.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
 
     @classmethod
     def tearDownClass(cls):
@@ -74,7 +83,7 @@ class TestDoubleReadBodyBug(unittest.TestCase):
             "username": "admin", "password": "admin123"
         }).encode()
         req = urllib.request.Request(
-            f"{BASE_URL}/login", data=data, method="POST"
+            f"{self.base_url}/login", data=data, method="POST"
         )
         opener.open(req)
         return opener
@@ -96,7 +105,7 @@ class TestDoubleReadBodyBug(unittest.TestCase):
             "database": "test",
         }).encode()
         req = urllib.request.Request(
-            f"{BASE_URL}/config/pools/add",
+            f"{self.base_url}/config/pools/add",
             data=form_data, method="POST",
         )
         start = time.time()
@@ -117,7 +126,7 @@ class TestDoubleReadBodyBug(unittest.TestCase):
             "id": "1", "sql_query": "SELECT 1",
         }).encode()
         req = urllib.request.Request(
-            f"{BASE_URL}/report/preview",
+            f"{self.base_url}/report/preview",
             data=form_data, method="POST",
         )
         start = time.time()
@@ -138,7 +147,7 @@ class TestDoubleReadBodyBug(unittest.TestCase):
             "username": "newuser", "password": "pass123",
         }).encode()
         req = urllib.request.Request(
-            f"{BASE_URL}/config/users/add",
+            f"{self.base_url}/config/users/add",
             data=form_data, method="POST",
         )
         start = time.time()

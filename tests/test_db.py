@@ -202,6 +202,13 @@ class TestReportCRUD(unittest.TestCase):
                 FOREIGN KEY (pool_id) REFERENCES connection_pools(id) ON DELETE SET NULL,
                 FOREIGN KEY (category_id) REFERENCES report_categories(id) ON DELETE SET NULL
             );
+            CREATE TABLE IF NOT EXISTS api_endpoints (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id        INTEGER NOT NULL,
+                name             TEXT    NOT NULL,
+                url_path         TEXT    NOT NULL,
+                output_format    TEXT    NOT NULL DEFAULT 'json'
+            );
         """)
         # 插入一个连接池供报表引用
         self.conn.execute(
@@ -788,6 +795,103 @@ class TestSQLiteMigrationRollback(unittest.TestCase):
         db._init_sqlite_migrations(proxy)
         # 表仍可查询（结构不完整但不崩溃）
         self.conn.execute("SELECT COUNT(*) FROM report_configs").fetchone()
+
+
+# ===================================================================
+# 批次2 删除安全（spec ux-optimization）：db 层级联与计数原语
+# ===================================================================
+
+class TestDeletionSafetyDb(unittest.TestCase):
+    """delete_report 级联对齐 batch_delete_reports + 计数辅助函数。
+
+    缺陷背景：单删报表不清理 api_endpoints，遗留孤儿端点让 API 调用方
+    500（批量删却有完整级联——两条路径语义不一致）。
+    """
+
+    def setUp(self):
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        db.init_db(self.conn)
+        self.pool_id = db.add_pool(self.conn, "池", host="h", port=3306,
+                                   user="u", password="p", database="d")
+
+    def tearDown(self):
+        self.conn.close()
+        self.engine_patcher.stop()
+
+    def _make_report_with_endpoints(self, n=2, url_paths=None):
+        rid = db.add_report(self.conn, "报表A", "SELECT 1", 20, self.pool_id)
+        for i in range(n):
+            path = (url_paths[i] if url_paths else f"/api/r{rid}_{i}.json")
+            db.add_api_endpoint(self.conn, rid, f"ep{i}", path,
+                                output_format="json")
+        return rid
+
+    def test_delete_report_cascades_endpoints(self):
+        """批次2#5：单删报表应一并删除其 API 端点"""
+        rid = self._make_report_with_endpoints(2)
+        self.assertTrue(db.delete_report(self.conn, rid))
+        left = self.conn.execute(
+            "SELECT COUNT(*) FROM api_endpoints WHERE report_id=?",
+            (rid,)).fetchone()[0]
+        self.assertEqual(left, 0)
+
+    def test_delete_report_without_endpoints_ok(self):
+        """无端点报表删除不受影响"""
+        rid = db.add_report(self.conn, "裸报表", "SELECT 1", 20, self.pool_id)
+        self.assertTrue(db.delete_report(self.conn, rid))
+
+    def test_delete_report_still_cascades_schedules(self):
+        """回归保护：原有 schedules 绑定级联保持（schedule_reports 绑定表）"""
+        rid = self._make_report_with_endpoints(0)
+        cur = self.conn.execute(
+            "INSERT INTO report_schedules (name, schedule_type,"
+            " interval_minutes, misfire_policy, enabled)"
+            " VALUES ('任务', 'interval', 60, 'skip', 0)")
+        sid = cur.lastrowid
+        self.conn.execute(
+            "INSERT INTO schedule_reports (schedule_id, report_id)"
+            " VALUES (?, ?)", (sid, rid))
+        self.conn.commit()
+        db.delete_report(self.conn, rid)
+        left = self.conn.execute(
+            "SELECT COUNT(*) FROM schedule_reports WHERE report_id=?",
+            (rid,)).fetchone()[0]
+        self.assertEqual(left, 0)
+
+    def test_count_reports_by_pool(self):
+        """批次2#6：按连接池聚合报表数（NULL pool 不计入）"""
+        r1 = db.add_report(self.conn, "R1", "SELECT 1", 20, self.pool_id)
+        db.add_report(self.conn, "R2", "SELECT 1", 20, self.pool_id)
+        other_pool = db.add_pool(self.conn, "池B", host="h2", port=3307,
+                                 user="u", password="p", database="d")
+        db.add_report(self.conn, "R3", "SELECT 1", 20, other_pool)
+        # 无池报表（pool_id NULL）
+        self.conn.execute("UPDATE report_configs SET pool_id=NULL WHERE id=?",
+                          (r1,))
+        self.conn.commit()
+        counts = db.count_reports_by_pool(self.conn)
+        self.assertEqual(counts.get(self.pool_id), 1)
+        self.assertEqual(counts.get(other_pool), 1)
+        self.assertNotIn(None, counts)
+
+    def test_count_reports_by_pool_empty(self):
+        self.assertEqual(db.count_reports_by_pool(self.conn), {})
+
+    def test_delete_sessions_for_user(self):
+        """批次2#7：按用户名清除持久层会话，返回行数"""
+        db.add_session(self.conn, "tok-a", "alice")
+        db.add_session(self.conn, "tok-b", "alice")
+        db.add_session(self.conn, "tok-c", "bob")
+        removed = db.delete_sessions_for_user(self.conn, "alice")
+        self.assertEqual(removed, 2)
+        remaining = {r["username"] for r in db.get_all_sessions(self.conn)}
+        self.assertEqual(remaining, {"bob"})
+
+    def test_delete_sessions_for_user_none(self):
+        self.assertEqual(db.delete_sessions_for_user(self.conn, "ghost"), 0)
 
 
 if __name__ == "__main__":

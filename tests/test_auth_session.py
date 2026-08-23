@@ -682,5 +682,45 @@ class TestDefaultAdminCreation(unittest.TestCase):
         self.assertEqual(users[0]["username"], "admin")
 
 
+class TestRemoveSessionsForUser(_SharedConfigDbMixin, BaseConfigTest):
+    """批次2#7（spec ux-optimization）：按用户名注销全部会话（内存+持久层）。
+
+    删除用户 / 修改密码后必须使该用户所有登录态立即失效，
+    否则被删用户仍可凭旧 token 继续操作。
+    """
+
+    _CFG_DB_NAME = "t1_cfg_kickuser"
+
+    def setUp(self):
+        super().setUp()
+        self._patch_config_db()
+        auth.clear_all_sessions()
+
+    def tearDown(self):
+        auth.clear_all_sessions()
+        self._unpatch_config_db()
+        super().tearDown()
+
+    def test_removes_all_tokens_of_user_both_layers(self):
+        t1 = auth.create_session("alice")
+        t2 = auth.create_session("alice")
+        bob = auth.create_session("bob")
+        removed = auth.remove_sessions_for_user("alice")
+        self.assertEqual(removed, 2)
+        self.assertIsNone(auth.get_session_user(t1))
+        self.assertIsNone(auth.get_session_user(t2))
+        self.assertEqual(auth.get_session_user(bob), "bob")
+
+    def test_persists_deletion_to_db(self):
+        auth.create_session("alice")
+        auth.remove_sessions_for_user("alice")
+        rows = [r for r in self._query_cfg(
+            "SELECT username FROM sessions WHERE username=?", ("alice",))]
+        self.assertEqual(rows, [])
+
+    def test_unknown_user_returns_zero(self):
+        self.assertEqual(auth.remove_sessions_for_user("ghost"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

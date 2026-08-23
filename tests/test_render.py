@@ -2679,3 +2679,42 @@ class TestApiDescSummaryPlainText(unittest.TestCase):
         html = _build_desc_summary_html("<b>x</b>")
         self.assertIn("&lt;b&gt;x&lt;/b&gt;", html)
         self.assertNotIn("<b>", html)
+
+
+class TestDeletionSafetyRender(unittest.TestCase):
+    """批次2 删除安全渲染（spec ux-optimization）：
+
+    confirm 弹窗必须披露破坏半径——删除不是「确定删除X？」一句话的事，
+    管理员需要在点击前知道会连带发生什么。
+    """
+
+    def test_pool_confirm_with_ref_count(self):
+        """#6：池有关联报表时 confirm 披露断连数量"""
+        pools = [{"id": 1, "name": "主库", "host": "h", "port": 3306,
+                  "user": "u", "database": "d"}]
+        result = build_pool_section_html(pools, report_counts={1: 3})
+        self.assertIn("3 个报表将失去数据库连接", result)
+        self.assertIn("报表保留但无法执行", result)
+
+    def test_pool_confirm_plain_without_refs(self):
+        """无关联报表保持原文案"""
+        pools = [{"id": 1, "name": "主库", "host": "h", "port": 3306,
+                  "user": "u", "database": "d"}]
+        result = build_pool_section_html(pools)
+        self.assertIn("确定删除连接池 主库？", result)
+        self.assertNotIn("失去数据库连接", result)
+
+    def test_user_row_delete_hidden_for_current(self):
+        """#7：当前登录用户的行不渲染删除按钮（服务端兜底仍在）"""
+        users = [{"id": 1, "username": "admin"},
+                 {"id": 2, "username": "bob"}]
+        result = build_user_section_html(users, current_username="admin")
+        # admin 行无删除表单；bob 行有
+        self.assertEqual(result.count("/config/users/1/delete"), 0)
+        self.assertIn("/config/users/2/delete", result)
+
+    def test_user_confirm_mentions_sessions(self):
+        """他人行 confirm 披露会话失效后果"""
+        users = [{"id": 2, "username": "bob"}]
+        result = build_user_section_html(users, current_username="admin")
+        self.assertIn("登录会话将立即失效", result)

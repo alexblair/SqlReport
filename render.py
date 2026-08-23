@@ -1588,6 +1588,19 @@ def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm") -> str:
     return f'<a href="{_escape(url)}" class="{cls}">{_escape(label)}</a>'
 
 
+def _report_delete_confirm(report: dict,
+                           api_endpoints_map: dict = None) -> str:
+    """报表删除确认文案（spec ux-optimization 批次2#5）。
+
+    有关联 API 端点时披露一并删除的数量（级联在 db.delete_report 内完成）。
+    """
+    ep_count = len((api_endpoints_map or {}).get(report.get("id"), []))
+    if ep_count > 0:
+        return (f"确定删除报表 {_escape(report.get('name'))}？"
+                f"其下 {ep_count} 个 API 接口将一并删除")
+    return f"确定删除报表 {_escape(report.get('name'))}？"
+
+
 def build_delete_form_html(action_url: str, confirm_msg: str,
                            extra_hidden: str = "",
                            button_cls: str = "",
@@ -1748,12 +1761,23 @@ def _get_cat_depth(cat: dict, all_cats: list[dict]) -> int:
     return depth
 
 
-def build_pool_section_html(pools: list) -> str:
-    """渲染连接池配置列表（含复制、排序）（纯数据 → HTML，无 DB 调用）"""
+def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
+    """渲染连接池配置列表（含复制、排序）（纯数据 → HTML，无 DB 调用）
+
+    report_counts: {pool_id: 关联报表数}（spec ux-optimization 批次2#6）；
+    提供时删除确认弹窗披露断连破坏半径。
+    """
     rows = ""
     pool_count = len(pools)
     for i, p in enumerate(pools):
         move_btns = build_move_buttons_html(p["id"], "pools", i, pool_count)
+        ref_count = (report_counts or {}).get(p["id"], 0)
+        if ref_count > 0:
+            pool_confirm = (f"确定删除连接池 {_escape(p['name'])}？"
+                            f"其下 {ref_count} 个报表将失去数据库连接"
+                            f"（报表保留但无法执行）")
+        else:
+            pool_confirm = f"确定删除连接池 {_escape(p['name'])}？"
         rows += f"""<tr>
   <td><strong>{_escape(p['name'])}</strong></td>
   <td><span class="badge badge-pool">{_escape(p['host'])}:{p['port']}</span></td>
@@ -1763,7 +1787,7 @@ def build_pool_section_html(pools: list) -> str:
     {move_btns}
     {_link_btn(f"/config/pools/{p['id']}/edit", "编辑")}
     {_link_btn(f"/config/pools/{p['id']}/copy", "复制")}
-    {build_delete_form_html(f"/config/pools/{p['id']}/delete", f"确定删除连接池 {_escape(p['name'])}？")}
+    {build_delete_form_html(f"/config/pools/{p['id']}/delete", pool_confirm)}
   </td>
 </tr>"""
     return f"""<div class="section">
@@ -1781,15 +1805,27 @@ def build_pool_section_html(pools: list) -> str:
 </div>"""
 
 
-def build_user_section_html(users: list) -> str:
-    """渲染用户配置列表（纯数据 → HTML，无 DB 调用）"""
+def build_user_section_html(users: list, current_username: str = None) -> str:
+    """渲染用户配置列表（纯数据 → HTML，无 DB 调用）
+
+    current_username: 当前登录用户名（spec ux-optimization 批次2#7）；
+    其所在行不渲染删除按钮——删除自己会立即失效自己的会话，
+    服务端同样兜底拒绝（config.handle_user_delete）。
+    """
     rows = ""
     for u in users:
+        if current_username and u["username"] == current_username:
+            delete_btn = '<span style="color:#cbd5e1;font-size:13px" title="不能删除当前登录账号">—</span>'
+        else:
+            delete_btn = build_delete_form_html(
+                f"/config/users/{u['id']}/delete",
+                f"确定删除用户 {_escape(u['username'])}？"
+                f"其全部登录会话将立即失效")
         rows += f"""<tr>
   <td><strong>{_escape(u['username'])}</strong></td>
   <td class="ops-cell">
     {_link_btn(f"/config/users/{u['id']}/edit", "编辑")}
-    {build_delete_form_html(f"/config/users/{u['id']}/delete", f"确定删除用户 {_escape(u['username'])}？")}
+    {delete_btn}
   </td>
 </tr>"""
     return f"""<div class="section">
@@ -2071,7 +2107,7 @@ function updateBatchCount() {{
     {move_btns}
     {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
     {_link_btn(f"/config/reports/{rpt_id}/copy", "复制")}
-    {build_delete_form_html(f"/config/reports/{rpt_id}/delete", f"确定删除报表 {_escape(r['name'])}？")}
+    {build_delete_form_html(f"/config/reports/{rpt_id}/delete", _report_delete_confirm(r, api_endpoints_map))}
   </td>
 </tr>"""
         return rows
@@ -3636,6 +3672,8 @@ def _format_schedule_last_result(sched: dict) -> str:
         summary = _escape((sched.get("last_error") or "")[:60])
         return (f'<span style="color:#dc2626;cursor:help" '
                 f'title="{err}">❌ 失败{dur_text}：{summary}</span>')
+    if status == "skipped":
+        return '<span title="排除规则命中（静默窗口），本次未执行">🔇 静默跳过</span>'
     return '<span style="color:#cbd5e1">— 未执行</span>'
 
 
@@ -3648,10 +3686,12 @@ def _format_schedule_last_run(sched: dict) -> str:
 
 
 def _format_schedule_event_row(ev: dict) -> str:
-    """最近执行记录单行：时间 / 动作 / 结果 / 耗时 / 错误摘要。
+    """最近执行记录单行：时间 / 任务 / 动作 / 结果 / 触发 / 报表（T3）。
 
     after_value 结构（scheduler 写入）：
-      scheduled_run: {trigger, status, duration_ms, error}
+      scheduled_run: {trigger, status, duration_ms, error,
+                      report_total, report_executed, report_names}
+      scheduled_skip: {trigger}
       scheduled_misfire: {policy, ...}
     """
     try:
@@ -3663,6 +3703,12 @@ def _format_schedule_event_row(ev: dict) -> str:
     ts = ev.get("timestamp")
     time_text = (time.strftime("%m-%d %H:%M:%S", time.localtime(ts))
                  if isinstance(ts, (int, float)) else str(ts or "—"))
+    # 任务列：entity_name 形如 task#{name}，去掉前缀显示为任务名并链接到编辑页
+    raw_name = ev.get("entity_name") or ""
+    task_name = raw_name[5:] if raw_name.startswith("task#") else raw_name
+    task_link = (f'<a href="/config/scheduler?edit={ev.get("entity_id")}" '
+                 f'style="color:#4f46e5;text-decoration:none">'
+                 f'{_escape(task_name) or "—"}</a>')
     action = ev.get("action") or ""
     if action == "scheduled_run":
         status = after.get("status") or "?"
@@ -3677,16 +3723,36 @@ def _format_schedule_event_row(ev: dict) -> str:
         dur = f' <span style="color:#94a3b8">{duration}ms</span>' \
             if duration is not None else ""
         trig_label = "手动" if trigger == "manual" else "自动"
+        # 报表列：本次参与执行的报表清单（向后兼容缺键降级为「—」）
+        names = after.get("report_names") or []
+        total = after.get("report_total")
+        executed = after.get("report_executed")
+        if names or total is not None:
+            rep_text = "报表：" + "、".join(_escape(n) for n in names)
+            if total is not None and executed is not None:
+                rep_text += f"（{executed}/{total}）"
+        else:
+            rep_text = "—"
         return (f"<tr><td>{_escape(time_text)}</td>"
+                f"<td>{task_link}</td>"
                 f"<td>执行</td><td>{badge}{dur}</td>"
                 f'<td style="color:#64748b">{trig_label}</td>'
-                f"<td>{_escape(summary)}</td></tr>")
+                f"<td>{rep_text}</td></tr>")
+    # scheduled_skip（排除规则命中 → 静默跳过）
+    if action == "scheduled_skip":
+        trigger = after.get("trigger") or "?"
+        trig_label = "手动" if trigger == "manual" else "自动"
+        return (f"<tr><td>{_escape(time_text)}</td><td>{task_link}</td>"
+                '<td>静默跳过</td>'
+                '<td style="color:#94a3b8">🔇 排除命中未执行</td>'
+                f'<td style="color:#64748b">{trig_label}</td><td>—</td></tr>')
     # scheduled_misfire
     policy = after.get("policy") or "?"
     label = "跳过（推进到下次计划）" if policy == "skip" else "补跑一次"
-    return (f"<tr><td>{_escape(time_text)}</td><td>错过补偿</td>"
+    return (f"<tr><td>{_escape(time_text)}</td><td>{task_link}</td>"
+            f'<td>错过补偿</td>'
             f'<td style="color:#d97706">⚠ {_escape(label)}</td>'
-            "<td style=\"color:#64748b\">自动</td><td></td></tr>")
+            '<td style="color:#64748b">自动</td><td>—</td></tr>')
 
 
 def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
@@ -3695,8 +3761,8 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
 
     表格列（spec §5.3）：报表名 / 类型 / 计划 / 下次执行 / 上次执行 /
     上次结果(含耗时) / 失败计数 / 状态 / 操作。全局停用时顶部显示横幅
-    （B17，页面仍可查看）；recent_events 提供时底部渲染"最近执行记录"
-    区块（来自审计库 scheduled_run/scheduled_misfire，最多 20 条）。
+     （B17，页面仍可查看）；recent_events 提供时底部渲染"最近执行记录"
+     区块（来自审计库 scheduled_run/scheduled_skip/scheduled_misfire，最多 20 条）。
     """
     banner = ""
     if not scheduler_enabled:
@@ -3707,10 +3773,16 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
     rows = ""
     for s in schedules:
         sid = s["id"]
-        report_name = s.get("report_name") or ""
-        name_cell = (_escape(report_name)
-                     if report_name else
-                     '<span style="color:#dc2626;font-size:13px">报表已删除</span>')
+        task_name = _escape(s.get("name") or f"#{sid}")
+        report_names = s.get("report_names") or []
+        reports_cell = (", ".join(_escape(r) for r in report_names)
+                        if report_names else
+                        '<span style="color:#dc2626;font-size:13px">无关联报表</span>')
+        badges = ""
+        if s.get("exclusions"):
+            badges += ' <span title="已配置执行排除（静默窗口）">🔇</span>'
+        if int(s.get("audit_enabled", 0) or 0):
+            badges += ' <span title="执行审计已开启">📝</span>'
         enabled = int(s.get("enabled", 1))
         fail_count = int(s.get("fail_count", 0))
         status_cell = (build_state_span("启用")
@@ -3727,8 +3799,8 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
         toggle_label = "停用" if enabled else "启用"
         toggle_cls = "btn-outline" if enabled else "btn-success"
         rows += f"""<tr>
-  <td><a href="/config/reports/{s['report_id']}/edit" style="color:#4f46e5;text-decoration:none">{name_cell}</a></td>
-  <td>{"每日" if s.get("schedule_type") == "daily" else "间隔"}</td>
+  <td><a href="/config/scheduler?edit={sid}" style="color:#4f46e5;text-decoration:none">{task_name}</a>{badges}</td>
+  <td>{reports_cell}</td>
   <td>{_escape(_format_schedule_plan(s))}<span style="color:#94a3b8;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
   <td>{next_cell}</td>
   <td>{_format_schedule_last_run(s)}</td>
@@ -3742,41 +3814,355 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
     <form method="post" action="/config/scheduler/toggle/{sid}" style="display:inline">
       <button type="submit" class="btn {toggle_cls} btn-sm">{toggle_label}</button>
     </form>
-    {build_delete_form_html(f"/config/scheduler/delete/{sid}", f"确定删除报表「{report_name or sid}」的定时任务？", button_cls="btn-sm")}
+    {build_delete_form_html(f"/config/scheduler/delete/{sid}", f"确定删除任务「{_escape(s.get('name') or sid)}」？", button_cls="btn-sm")}
   </td>
 </tr>"""
     if not schedules:
         rows = ('<tr><td colspan="9" class="empty-state">'
-                '暂无定时任务 — 在报表编辑页的「定时执行」区配置后在此管理</td></tr>')
+                '暂无定时任务 — 在下方「新建定时任务」区配置</td></tr>')
     events_block = ""
     if recent_events is not None:
         event_rows = "".join(_format_schedule_event_row(ev)
                              for ev in recent_events[:20])
         if not event_rows:
-            event_rows = ('<tr><td colspan="5" class="empty-state">'
-                          '暂无执行记录</td></tr>')
+            any_audit = any(int(s.get("audit_enabled", 0) or 0)
+                            for s in schedules)
+            if any_audit:
+                empty_text = '暂无执行记录'
+            else:
+                empty_text = ('暂无执行记录（所有任务均未开启「记录执行审计」，'
+                              '因此这里没有执行历史）')
+            event_rows = (f'<tr><td colspan="6" class="empty-state">'
+                          f'{empty_text}</td></tr>')
         events_block = (
             '<div class="section" style="margin-top:16px">'
             '<div class="section-title"><span>📜 最近执行记录</span>'
             '<span style="color:#94a3b8;font-size:13px;font-weight:400">'
             '来自审计日志，最多显示 20 条</span></div>'
             '<div class="table-wrap"><table><thead><tr>'
-            '<th>时间</th><th>动作</th><th>结果</th><th>触发方式</th>'
-            '<th>错误摘要</th></tr></thead><tbody>'
+            '<th>时间</th><th>任务</th><th>动作</th><th>结果</th>'
+            '<th>触发方式</th><th>报表</th></tr></thead><tbody>'
             + event_rows + '</tbody></table></div></div>')
     return (banner
             + '<div class="section"><div class="section-title"><span>⏰ 报表定时任务</span>'
               '<span class="actions">'
-              + _link_btn("/config/reports", "前往报表编辑页配置",
+              + _link_btn("/config/reports", "前往报表编辑页",
                           "btn btn-outline btn-sm")
               + '</span></div>'
             + '<div class="table-wrap"><table><thead><tr>'
-              '<th>报表名</th><th>类型</th><th>计划</th><th>下次执行</th>'
+              '<th>任务名</th><th>关联报表</th><th>计划</th>'
+              '<th>下次执行</th>'
               '<th>上次执行</th><th>上次结果</th>'
               '<th style="text-align:center">失败计数</th>'
               '<th>状态</th><th>操作</th>'
               '</tr></thead><tbody>' + rows + '</tbody></table></div></div>'
             + events_block)
+
+
+_EXCL_EDITOR_JS = """
+(function(){
+  var DOWS = ["mon","tue","wed","thu","fri","sat","sun"];
+  var DOW_LABELS = {mon:"一",tue:"二",wed:"三",thu:"四",fri:"五",sat:"六",sun:"日"};
+
+  function el(html){var t=document.createElement("template");
+    t.innerHTML=html.trim();return t.content.firstChild;}
+  function rulesBox(){return document.getElementById("excl-rules");}
+  function hiddenBox(){return document.getElementById("excl-json");}
+  function sourceBox(){return document.getElementById("excl-source");}
+
+  function leafFields(type,data){
+    data=data||{};
+    var w="padding:4px 6px;border:1px solid #cbd5e1;border-radius:6px";
+    if(type==="dow"){
+      var h="",set=data.in||[];
+      for(var i=0;i<DOWS.length;i++){var d=DOWS[i];
+        var ck=set.indexOf(d)>=0?" checked":"";
+        h+='<label style="font-size:12px;margin-right:6px;font-weight:400">'
+          +'<input type="checkbox" class="excl-dow" value="'+d+'"'+ck+">"
+          +DOW_LABELS[d]+"</label>";}
+      return '<span>'+h+'</span>';
+    }
+    if(type==="tod")
+      return '<span>从 <input type="time" class="excl-from" value="'
+        +(data.from||"21:00")+'" style="'+w+'"> 到 <input type="time" '
+        +'class="excl-to" value="'+(data.to||"09:00")+'" style="'+w
+        +'">（含边界，可跨午夜）</span>';
+    if(type==="date")
+      return '<span>日期（逗号分隔 YYYY-MM-DD）<input type="text" '
+        +'class="excl-on" value="'+(data.on||[]).join(",")+'" style="'
+        +w+';width:220px"></span>';
+    return '<span>自 <input type="date" class="excl-from" value="'
+      +(data.from||"")+'" style="'+w+'"> 至 <input type="date" '
+      +'class="excl-to" value="'+(data.to||"")+'" style="'+w
+      +'">（闭区间）</span>';
+  }
+
+  function nodeHtml(kind,type){
+    var head;
+    if(kind==="group"){
+      head='<select class="excl-op" style="padding:3px 5px;border:1px solid '
+        +'#cbd5e1;border-radius:6px"><option value="OR">任一命中（OR）</option>'
+        +'<option value="AND">全部满足（AND）</option></select>';
+    }else{
+      head='<select class="excl-type" onchange="exclRebuild(this)">'
+        +'<option value="dow">星期（dow）</option>'
+        +'<option value="tod">每日时段（tod）</option>'
+        +'<option value="date">指定日期（date）</option>'
+        +'<option value="date_range">日期区间（date_range）</option>'
+        +'</select><span class="excl-fields"></span>';
+    }
+    var del=' onclick="exclDel(this)"';
+    return '<div class="excl-node" data-kind="'+kind+'"'
+      +(type?' data-type="'+type+'"':'')
+      +' style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;'
+      +'margin:6px 0;background:#fff"><div style="display:flex;gap:8px;'
+      +'align-items:center;flex-wrap:wrap">'+head
+      +'<button type="button" class="btn btn-outline btn-sm"'+del+'>删除</button></div>'
+      +'<div class="excl-children"></div></div>';
+  }
+
+  function addChild(containerId,kind,json){
+    var box=document.getElementById(containerId)||rulesBox();
+    var isRoot=box===rulesBox();
+    var type=isRoot||kind==="group"?null:(json?json.type:"dow");
+    var div=el(nodeHtml(kind,type));
+    if(kind==="leaf"){
+      div.querySelector(".excl-type").value=type;
+      div.querySelector(".excl-fields").innerHTML=
+        leafFields(type,json);
+    }else{
+      var op=json&&json.op?json.op:(isRoot?"OR":"AND");
+      if(isRoot)op="OR"; // 根固定 OR：多规则并行语义（规格 §4.5）
+      div.querySelector(".excl-op").value=op;
+      var kids=(json&&json.children)||[];
+      for(var i=0;i<kids.length;i++)
+        addChildInner(div.querySelector(".excl-children"),kids[i]);
+    }
+    box.appendChild(div);return div;
+  }
+  function addChildInner(container,json){
+    var kind=json&&json.op?"group":"leaf";
+    var div=el(nodeHtml(kind,kind==="leaf"?json.type:null));
+    if(kind==="group"){
+      div.querySelector(".excl-op").value=json.op;
+      var kids=json.children||[];
+      for(var i=0;i<kids.length;i++)
+        addChildInner(div.querySelector(".excl-children"),kids[i]);
+    }else{
+      div.setAttribute("data-type",json.type);
+      div.querySelector(".excl-type").value=json.type;
+      div.querySelector(".excl-fields").innerHTML=leafFields(json.type,json);
+    }
+    container.appendChild(div);return div;
+  }
+
+  window.exclAddRule=function(){addChild("","leaf",{type:"dow"});};
+  window.exclAddGroup=function(){addChild("","group",{op:"AND",children:[]});};
+  window.exclAddChild=function(btn){
+    addChildInner(btn.closest(".excl-node").querySelector(".excl-children"),
+                  {type:"dow"});
+  };
+  window.exclAddSubgroup=function(btn){
+    addChildInner(btn.closest(".excl-node").querySelector(".excl-children"),
+                  {op:"AND",children:[]});
+  };
+  window.exclDel=function(btn){btn.closest(".excl-node").remove();};
+  window.exclRebuild=function(sel){
+    var node=sel.closest(".excl-node");
+    node.setAttribute("data-type",sel.value);
+    node.querySelector(".excl-fields").innerHTML=leafFields(sel.value,null);
+  };
+
+  function serializeNode(div){
+    if(div.getAttribute("data-kind")==="group"){
+      var op=div.querySelector(":scope > div > .excl-op").value,kids=[];
+      div.querySelectorAll(":scope > .excl-children > .excl-node")
+        .forEach(function(c){kids.push(serializeNode(c));});
+      return {op:op,children:kids};
+    }
+    var type=div.getAttribute("data-type"),n={type:type};
+    if(type==="dow"){var arr=[];
+      div.querySelectorAll(".excl-dow:checked").forEach(function(c){arr.push(c.value);});
+      n.in=arr;}
+    else if(type==="tod"||type==="date_range"){
+      n.from=div.querySelector(".excl-from").value;
+      n.to=div.querySelector(".excl-to").value;}
+    else{n.on=div.querySelector(".excl-on").value.split(",")
+      .map(function(s){return s.trim();}).filter(Boolean);}
+    return n;
+  }
+  function serializeAll(){
+    var kids=[];
+    rulesBox().querySelectorAll(":scope > .excl-node")
+      .forEach(function(c){kids.push(serializeNode(c));});
+    if(!kids.length)return "";
+    return JSON.stringify({op:"OR",children:kids});
+  }
+
+  function showMsg(text){
+    var m=document.getElementById("excl-msg");
+    m.textContent=text;m.style.display=text?"block":"none";
+  }
+
+  window.exclToggleSource=function(){
+    var src=sourceBox();
+    if(src.style.display==="none"){
+      try{src.value=serializeAll()||hiddenBox().value||"";}catch(e){}
+      src.style.display="block";showMsg("");
+    }else{
+      var raw=src.value.trim();
+      if(raw){
+        try{
+          var tree=JSON.parse(raw);
+          if(!tree||typeof tree!=="object")throw new Error("根必须是对象");
+          rulesBox().innerHTML="";
+          var kids=tree.op==="OR"&&tree.children?tree.children:[tree];
+          for(var i=0;i<kids.length;i++)addChildInner(rulesBox(),kids[i]);
+        }catch(e){showMsg("JSON 无效："+e.message+"，已保留源码模式");return;}
+      }
+      src.style.display="none";showMsg("");
+    }
+  };
+
+  function init(){
+    var form=hiddenBox().closest("form");
+    form.addEventListener("submit",function(){
+      if(sourceBox().style.display!=="none")
+        hiddenBox().value=sourceBox().value.trim();
+      else
+        hiddenBox().value=serializeAll();
+    });
+    var raw=(hiddenBox().value||"").trim();
+    if(!raw)return;
+    try{
+      var tree=JSON.parse(raw);
+      var kids=tree.op==="OR"&&tree.children?tree.children:[tree];
+      for(var i=0;i<kids.length;i++)addChildInner(rulesBox(),kids[i]);
+    }catch(e){showMsg("既有排除规则不是合法 JSON，请点「源码」查看修正");}
+  }
+  if(document.readyState==="loading")
+    document.addEventListener("DOMContentLoaded",init);
+  else init();
+})();
+"""
+
+
+def build_scheduler_task_form_html(prefill: dict | None,
+                                   reports: list) -> str:
+    """构建「新建/编辑定时任务」表单（spec §7.2/§7.3，多报表组合）。
+
+    prefill 为现有任务 dict（含 report_ids）时预填并带 edit_id 隐藏域；
+    reports 为全部报表列表（id/name），用于关联报表多选框。排除规则为
+    前端内联 JS 树编辑器（增删规则/叶子类型/嵌套组，产出 JSON 写入隐藏
+    域 name="exclusions"；另提供源码模式直接改 JSON），后端仍以
+    validate_exclusions 校验兜底。
+    """
+    pf = prefill or {}
+    edit_id = pf.get("id")
+    name = pf.get("name") or ""
+    stype = pf.get("schedule_type") or "interval"
+    interval = pf.get("interval_minutes") if pf.get("interval_minutes") \
+        is not None else 60
+    daily = pf.get("daily_time") or "08:00"
+    policy = pf.get("misfire_policy") or "skip"
+    enabled_checked = "checked" if int(pf.get("enabled", 1) or 0) else ""
+    audit_checked = "checked" if int(pf.get("audit_enabled", 0) or 0) else ""
+    selected = set(pf.get("report_ids") or [])
+    binding_map = {int(k): int(v)
+                   for k, v in (pf.get("binding_enabled") or {}).items()}
+    exclusions = pf.get("exclusions") or ""
+    type_opts = "".join(
+        f'<option value="{t}"{" selected" if t == stype else ""}>'
+        f'{"每日" if t == "daily" else "间隔"}</option>'
+        for t in ("interval", "daily"))
+    policy_opts = "".join(
+        f'<option value="{p}"{" selected" if p == policy else ""}>'
+        f'{_SCHED_MISFIRE_LABELS.get(p, p)}</option>'
+        for p in ("skip", "run_once"))
+    # 关联报表：绑定 | 报表 | 参与执行 三列表格（未绑定行不渲染 bind_enabled 输入，根治误勾选）
+    _rows = []
+    for r in reports:
+        rid = r["id"]
+        bound = rid in selected
+        if bound:
+            pchecked = "checked" if binding_map.get(rid, 1) else ""
+            bind_cell = (f'<label class="check-inline">'
+                         f'<input type="checkbox" name="bind_enabled_{rid}" '
+                         f'value="1" {pchecked}> 参与执行</label>')
+        else:
+            bind_cell = '<span class="muted">—</span>'
+        _rows.append(
+            f'<tr>'
+            f'<td class="bind-col"><input type="checkbox" name="report_ids" '
+            f'value="{rid}"{" checked" if bound else ""} '
+            f'onchange="syncBindRow(this)"></td>'
+            f'<td>{_escape(r.get("name") or rid)} (#{rid})</td>'
+            f'<td class="bind-cell" data-rid="{rid}">{bind_cell}</td>'
+            f'</tr>')
+    report_rows_html = "".join(_rows)
+    title = "编辑定时任务" if edit_id else "新建定时任务"
+    edit_hidden = (f'<input type="hidden" name="edit_id" value="{edit_id}">'
+                   if edit_id else "")
+    excl_editor = f'''
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      <label style="width:120px;padding-top:6px">排除规则<br>
+        <span style="color:#94a3b8;font-size:12px">静默窗口<br>任一规则命中即不执行</span></label>
+      <div style="flex:1">
+        <div id="excl-rules"></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button type="button" class="btn btn-outline btn-sm" onclick="exclAddRule()">+ 添加规则</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="exclAddGroup()">+ 规则组</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="exclToggleSource()">源码</button>
+        </div>
+        <textarea id="excl-source" rows="5" style="display:none;width:100%;margin-top:6px;padding:6px;font-family:monospace;font-size:12px"></textarea>
+        <div id="excl-msg" style="display:none;color:#dc2626;font-size:12px;margin-top:4px"></div>
+      </div>
+    </div>
+    <input type="hidden" name="exclusions" id="excl-json" value="{_escape(exclusions)}">'''
+    interval_disp = "" if stype == "interval" else ' style="display:none"'
+    daily_disp = "" if stype == "daily" else ' style="display:none"'
+    return f'''<div class="section"><div class="section-title"><span>⏱️ {title}</span></div>
+  <form method="post" action="/config/scheduler/save" class="config-form sched-form">
+    {edit_hidden}
+    <label>任务名<input type="text" name="name" value="{_escape(name)}" required></label>
+    <label>调度类型<select name="schedule_type" onchange="syncSchedType()">{type_opts}</select></label>
+    <div class="schedule-row span-full" id="row-interval"{interval_disp}><label>间隔（分钟）<input type="number" name="interval_minutes" value="{int(interval)}" min="1"></label></div>
+    <div class="schedule-row span-full" id="row-daily"{daily_disp}><label>每日时刻<input type="time" name="daily_time" value="{_escape(daily)}"></label></div>
+    <label>错过策略<select name="misfire_policy">{policy_opts}</select></label>
+    <div class="span-full">
+      <label style="margin-bottom:6px">关联报表<span class="field-hint">勾选=绑定该报表；「参与执行」未勾选的报表在任务中停用（S10）</span></label>
+      <div class="sched-reports-wrap">
+        <table class="sched-reports">
+          <thead><tr><th>绑定</th><th>报表</th><th>参与执行</th></tr></thead>
+          <tbody>{report_rows_html}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="span-full">{excl_editor}</div>
+    <div class="span-full">
+      <label class="check-inline"><input type="checkbox" name="schedule_enabled" {enabled_checked}> 启用</label>
+      <label class="check-inline"><input type="checkbox" name="audit_enabled" {audit_checked}> 记录执行审计</label>
+    </div>
+    <div class="form-actions span-full"><button type="submit" class="btn btn-primary">保存任务</button></div>
+  </form></div>
+<script>{_EXCL_EDITOR_JS}
+function syncSchedType() {{
+  var sel = document.querySelector('form.sched-form select[name=schedule_type]');
+  if (!sel) return;
+  var t = sel.value;
+  document.getElementById('row-interval').style.display = (t === 'interval') ? '' : 'none';
+  document.getElementById('row-daily').style.display = (t === 'daily') ? '' : 'none';
+}}
+function syncBindRow(cb) {{
+  var cell = cb.parentNode.parentNode.querySelector('.bind-cell');
+  if (cb.checked) {{
+    cell.innerHTML = '<label class="check-inline"><input type="checkbox" name="bind_enabled_' + cb.value + '" value="1" checked> 参与执行</label>';
+  }} else {{
+    cell.innerHTML = '<span class="muted">—</span>';
+  }}
+}}
+syncSchedType();
+</script>'''
 
 
 def _api_url_variants(base_url: str, url_path: str) -> tuple[str, str, str]:
