@@ -58,8 +58,10 @@ import api_handler
 import report
 from tests.test_mysql_mock import MockMySQLMixin
 
-TEST_PORT = 19091
-BASE_URL = f"http://127.0.0.1:{TEST_PORT}"
+# 动态端口（bind 0）：固定端口在多会话并行/同进程前后模块间偶发争用，
+# 产生整类假失败（AGENTS.md 测试约定；与 tests/test_server.py 同模式）
+TEST_PORT = 0
+BASE_URL = None  # setUpClass 按实际绑定端口回填
 
 
 def _get_conn():
@@ -143,12 +145,15 @@ _TEST_REPORT_ID = _set_up_db()
 
 
 def _start_server():
-    """在后台线程启动 HTTP 服务器"""
+    """在后台线程启动 HTTP 服务器（动态端口，回填模块 BASE_URL）"""
+    global BASE_URL
     _stop_server()
-    srv.PORT = TEST_PORT
     try:
-        server = http.server.ThreadingHTTPServer((srv.HOST, srv.PORT), srv.ReportHandler)
+        server = http.server.ThreadingHTTPServer((srv.HOST, TEST_PORT), srv.ReportHandler)
+        srv.PORT = server.server_address[1]
         srv._server_ref = server
+        import sys
+        sys.modules[__name__].BASE_URL = f"http://127.0.0.1:{srv.PORT}"
         server.serve_forever()
     except Exception:
         import traceback
@@ -572,7 +577,7 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         """API 路径含中文（百分号编码）时应正确匹配"""
         import http.client
         self._create_endpoint_in_db(url_path="/api/中文", name="中文接口测试")
-        hc = http.client.HTTPConnection("127.0.0.1", TEST_PORT, timeout=5)
+        hc = http.client.HTTPConnection("127.0.0.1", srv.PORT, timeout=5)
         try:
             hc.request("GET", "/api/%E4%B8%AD%E6%96%87")
             resp = hc.getresponse()
@@ -587,7 +592,7 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         """API 路径含特殊字符（百分号编码）时应正确匹配"""
         import http.client
         self._create_endpoint_in_db(url_path="/api/特殊-path", name="特殊路径")
-        hc = http.client.HTTPConnection("127.0.0.1", TEST_PORT, timeout=5)
+        hc = http.client.HTTPConnection("127.0.0.1", srv.PORT, timeout=5)
         try:
             hc.request("GET", "/api/%E7%89%B9%E6%AE%8A-path")
             resp = hc.getresponse()

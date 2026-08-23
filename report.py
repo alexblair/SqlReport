@@ -23,6 +23,7 @@ URL 路由：
 """
 
 import logging
+import re
 import urllib.parse
 import time
 import threading
@@ -393,6 +394,96 @@ _CSS = """
 
 # _PAGE_HEADER 已删除：页面头部（<head>/导航栏/公共 CSS）统一由
 # render.render_page_header 生成，见 _render_page_header()。
+
+# 常见 MySQL 错误码 → 业务用户可读提示（spec ux-optimization 批次3#10）。
+# 命中映射时页面展示人话 + 折叠原始错误供技术排查；未命中保留原文。
+_DB_ERROR_HINTS = {
+    1064: "SQL 语法有误，请检查报表的 SQL 语句",
+    1146: "查询的数据表不存在，可能已被删除或改名",
+    1054: "查询的字段不存在，可能已被删除或改名",
+    1142: "数据库账号缺少执行该操作的权限，请联系管理员",
+    1044: "数据库账号缺少访问该库的权限，请联系管理员",
+    2003: "无法连接数据库服务器，请稍后重试或联系管理员检查连接池配置",
+    2005: "数据库主机名无法解析，请检查连接池配置",
+    1045: "数据库账号或密码被拒绝，请检查连接池配置",
+    1205: "数据库锁等待超时，可能有其他任务占用，请稍后重试",
+    1049: "数据库不存在，请检查连接池配置",
+}
+
+
+def humanize_db_error(e) -> tuple[str, str]:
+    """把数据库异常翻译为业务用户可读文案（批次3#10）。
+
+    返回 (friendly, raw)：friendly 为人话主文案；raw 保留原始错误文本，
+    由 render_sql_error_section 折叠展示。errno 提取双通道：优先取
+    mysql.connector.Error 的 errno 属性，否则从消息 "(NNNN)" 模式正则匹配
+    （兼容测试 mock 与第三方包装异常）。未命中映射时 friendly 即原文。
+    """
+    msg = str(e)
+    errno = getattr(e, "errno", None)
+    if not isinstance(errno, int):
+        m = re.search(r"\((\d{4})\)", msg)
+        errno = int(m.group(1)) if m else None
+    hint = _DB_ERROR_HINTS.get(errno) if errno else None
+    return (hint or msg, msg)
+
+
+def render_sql_error_section(friendly: str, raw: str) -> str:
+    """渲染 SQL 执行错误区块：人话主文案 + <details> 折叠原始错误。
+
+    原始错误默认折叠——业务用户只需看懂出了什么问题；
+    需要排查的技术人员可展开复制完整信息反馈给管理员。
+    """
+    from html import escape as _h  # 局部引用避免与模块级 _escape 混淆
+    return (
+        f'<div class="flash flash-error">查询失败：{_h(friendly)}'
+        f'<details style="margin-top:6px"><summary style="cursor:pointer;'
+        f'color:#94a3b8;font-size:13px">查看原始错误信息</summary>'
+        f'<pre style="white-space:pre-wrap;word-break:break-all;'
+        f'font-size:12px;color:#7f1d1d;margin:6px 0 0">{_h(raw)}</pre>'
+        f'</details></div>')
+
+
+# 常见 MySQL 错误码 → 用户可读文案（spec ux-optimization 批次3#10）。
+# 数值 errno 优先取异常属性，其次从消息文本 "(HY000)" 形式代码正则提取。
+_DB_ERRNO_HINTS = {
+    1064: "SQL 语法有误：请检查报表 SQL（该错误通常需要管理员修正）",
+    1146: "查询的数据表不存在：表可能已被删除或改名",
+    1054: "查询的字段不存在：列可能已被删除或改名",
+    1142: "数据库权限不足：当前账号无权访问该表",
+    1044: "数据库权限不足：当前账号无权访问该库",
+    1045: "数据库账号或密码被拒绝：请检查连接池配置",
+    2003: "无法连接数据库：目标库暂时不可用，请稍后重试或联系管理员",
+    2005: "数据库地址无法识别：请检查连接池主机配置",
+    1205: "数据库锁等待超时：可能有其他任务占用该表，请稍后重试",
+}
+
+
+def humanize_db_error(e: Exception) -> tuple[str, str]:
+    """把数据库异常翻译为用户可读文案。
+
+    返回 (friendly, raw)：friendly 为人话主文案；raw 为原始错误文本，
+    供页面折叠展示与技术排查。未识别的异常原样返回（不制造虚假解释）。
+    """
+    raw = str(e)
+    errno = getattr(e, "errno", None)
+    if not isinstance(errno, int):
+        m = re.search(r"\((\d{4})\)", raw) or re.match(r"^(\d{4})\s", raw)
+        errno = int(m.group(1)) if m else None
+    hint = _DB_ERRNO_HINTS.get(errno)
+    if not hint:
+        return raw, raw
+    return hint, raw
+
+
+def render_sql_error_section(friendly: str, raw: str) -> str:
+    """渲染报表执行错误区块：人话主文案 + <details> 折叠原始错误。"""
+    return (f'<div class="flash flash-error">查询执行失败：'
+            f'{_escape(friendly)}'
+            f'<details style="margin-top:6px"><summary style="cursor:pointer;'
+            f'color:#64748b;font-size:12px">查看原始错误信息</summary>'
+            f'<pre style="white-space:pre-wrap;font-size:12px;color:#7f1d1d;'
+            f'margin:6px 0 0">{_escape(raw)}</pre></details></div>')
 
 
 def _render_page_header() -> str:
@@ -1273,11 +1364,12 @@ def render_report_page(conn, report_id: int, page: int = 1,
         pool_host = pool_config.get("host", "?")
         pool_port = pool_config.get("port", "?")
         pool_user = pool_config.get("user", "?")
+        friendly, raw = humanize_db_error(e)
         return (_render_page_header() +
-                f'<div class="flash flash-error">查询执行失败: {_escape(str(e))}'
-                f'<br><small>连接池: {_escape(str(pool_name))}'
+                render_sql_error_section(friendly, raw) +
+                f'<div class="flash flash-error">连接池: {_escape(str(pool_name))}'
                 f' ({_escape(str(pool_host))}:{pool_port}, 用户: {_escape(str(pool_user))})'
-                f'</small></div>' + _FOOTER)
+                f'</div>' + _FOOTER)
 
     # 越界/空结果集安全：以执行结果为准对 active_index 做上界 clamp（保留 -1 哨兵），
     # 防止调用方构造越界 ReportResult 时 result.columns 等属性抛 IndexError 导致 500。

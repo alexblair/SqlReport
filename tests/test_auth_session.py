@@ -46,6 +46,7 @@ def _make_handler(headers=None, client_address=("127.0.0.1", 5555)):
     h = srv.ReportHandler.__new__(srv.ReportHandler)
     h._session_token = None
     h.headers = headers or {}
+    h.path = "/report"  # 批次3#9：_authenticate 重定向需要原路径
     h.client_address = client_address
     h._sent = []
     h.wfile = MagicMock()
@@ -332,26 +333,35 @@ class TestAuthenticateMiddleware(_SharedConfigDbMixin, BaseConfigTest):
         super().tearDown()
 
     def test_invalid_cookie_redirects_login(self):
-        """缺口2：无效 token → 302 /login，_authenticate 返回 False"""
+        """缺口2：无效 token → 302 /login，_authenticate 返回 False
+
+        ♻️ 契约变更（spec ux-optimization 批次3#9）：重定向携带
+        expired=1 与 next=<原路径>（登录后回原页面），不再裸 /login。
+        """
         h = _make_handler(headers={"Cookie": "session_id=deadbeef"})
         self.assertFalse(h._authenticate())
         headers = _sent_headers(h)
         self.assertIn(302, _sent_statuses(h))
-        self.assertEqual(headers.get("Location"), "/login")
+        loc = headers.get("Location", "")
+        self.assertTrue(loc.startswith("/login?"), f"实际: {loc}")
+        self.assertIn("expired=1", loc)
+        self.assertIn("next=", loc)
 
     def test_missing_cookie_redirects_login(self):
-        """缺口2：无 Cookie 头 → 302 /login"""
+        """缺口2：无 Cookie 头 → 302 /login（契约变更见上）"""
         h = _make_handler()
         self.assertFalse(h._authenticate())
-        self.assertEqual(_sent_headers(h).get("Location"), "/login")
+        self.assertTrue(
+            _sent_headers(h).get("Location", "").startswith("/login?"))
 
     def test_expired_cookie_redirects_login(self):
-        """缺口2：过期 token → 302 /login 且被清理"""
+        """缺口2：过期 token → 302 /login 且被清理（契约变更见上）"""
         token = auth.create_session("admin")
         auth._sessions[token] = ("admin", time.time() - auth._SESSION_TTL - 100)
         h = _make_handler(headers={"Cookie": f"session_id={token}"})
         self.assertFalse(h._authenticate())
-        self.assertEqual(_sent_headers(h).get("Location"), "/login")
+        self.assertTrue(
+            _sent_headers(h).get("Location", "").startswith("/login?"))
         self.assertNotIn(token, auth._sessions)
 
     def test_valid_cookie_authenticates_and_refreshes(self):

@@ -71,7 +71,11 @@ def _open_no_redirect(opener, url, headers=None):
 
 
 def _expect_redirect(opener, url, location, headers=None):
-    """断言 opener 请求 url 得到 302 且 Location 匹配，返回响应头"""
+    """断言 opener 请求 url 得到 302 且 Location 匹配，返回响应头。
+
+    ♻️ 契约变更（spec ux-optimization 批次3#9）：认证重定向携带
+    expired=1 与 next= 参数，location 传 "/login" 时按前缀匹配。
+    """
     req = urllib.request.Request(url, headers=headers or {})
     try:
         opener.open(req)
@@ -80,6 +84,8 @@ def _expect_redirect(opener, url, location, headers=None):
         if e.code != 302:
             raise AssertionError(f"期望 302，实际 {e.code}: {url}") from e
         got = e.headers.get("Location")
+        if location == "/login" and got.startswith("/login?"):
+            return e.headers
         if got != location:
             raise AssertionError(f"期望 Location={location}，实际 {got}: {url}") from e
         return e.headers
@@ -563,7 +569,9 @@ class TestReportRefreshIntegration(unittest.TestCase):
             self.fail("未认证应 302 到 /login，实际 200")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 302)
-            self.assertEqual(e.headers["Location"], "/login")
+            # ♻️ 契约变更（批次3#9）：认证重定向携带 expired/next 参数
+            self.assertTrue(e.headers["Location"].startswith("/login?"),
+                            f"实际: {e.headers['Location']}")
 
     def test_refresh_target_page_renders_after_redirect(self):
         """1. 302 后跟随 Location 的目标页可正常渲染（200，无 MySQL 时降级为错误页）"""

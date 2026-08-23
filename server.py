@@ -99,6 +99,10 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     color: #dc2626; text-align: center; margin-bottom: 20px; font-size: 14px;
     padding: 10px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca;
   }
+  .login-box .notice {
+    color: #92400e; text-align: center; margin-bottom: 20px; font-size: 14px;
+    padding: 10px; background: #fffbeb; border-radius: 8px; border: 1px solid #fde68a;
+  }
   .login-footer { text-align: center; margin-top: 24px; color: #94a3b8; font-size: 12px; }
 </style>
 </head>
@@ -108,6 +112,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <p class="login-subtitle">请登录以访问系统</p>
   {error}
   <form method="post" action="/login">
+    {next_field}
     <label>用户名</label>
     <input type="text" name="username" required autofocus>
     <label>密码</label>
@@ -126,9 +131,75 @@ def _render_login_page(error: str = "") -> str:
     return _LOGIN_PAGE.replace("{error}", err_html)
 
 
-# ---------------------------------------------------------------------------
-# 路由表
-# ---------------------------------------------------------------------------
+def _render_login_page_ex(error: str = "", expired: bool = False,
+                          next_url: str = "") -> str:
+    """渲染登录页（批次3#9 扩展）：过期提示 + hidden next 透传。
+
+    next 仅接受站内绝对路径（/ 开头且非 //），防开放重定向；
+    外部 URL 一律忽略（回落默认 /report）。
+    """
+    if expired:
+        notice = ('<div class="notice">会话已过期，请重新登录</div>')
+        err_html = (error and f'<div class="error">{error}</div>') or ""
+        err_html = notice + err_html
+    else:
+        err_html = f'<div class="error">{error}</div>' if error else ""
+    safe_next = _sanitize_next_url(next_url)
+    next_field = (f'<input type="hidden" name="next" value="{_html_mod.escape(safe_next)}">'
+                  if safe_next else "")
+    return _LOGIN_PAGE.replace("{error}", err_html).replace(
+        "{next_field}", next_field)
+
+
+def _sanitize_next_url(next_url: str) -> str:
+    """next 回跳白名单：仅站内绝对路径（批次3#9）。
+
+    拒绝外部 URL、协议相对路径（//）、反斜杠变体；空值返回空串。
+    """
+    if not next_url or not next_url.startswith("/"):
+        return ""
+    if next_url.startswith("//") or next_url.startswith("/\\"):
+        return ""
+    return next_url
+
+
+def _safe_next_target(next_url: str) -> str:
+    """登录成功后的跳转目标：合法 next 或默认 /report。"""
+    return _sanitize_next_url(next_url) or "/report"
+
+
+def _render_error_page(status: int, title: str) -> str:
+    """统一错误页模板（spec ux-optimization 批次3#8）。
+
+    所有页面级错误（404/405/400/500）共用：状态码 + 人话标题 + 返回报表页
+    导航入口，避免死胡同。异常详情一律只进日志、不进响应体（防信息泄露）。
+    """
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{status} - {title}</title>
+<style>
+body {{ display:flex; justify-content:center; align-items:center; min-height:100vh;
+       margin:0; background:#f1f5f9; font-family:system-ui,-apple-system,sans-serif; }}
+.err-box {{ background:#fff; padding:48px 56px; border-radius:16px;
+            box-shadow:0 4px 24px rgba(0,0,0,0.08); text-align:center; max-width:420px; }}
+.err-code {{ font-size:56px; font-weight:700; color:#4f46e5; margin:0; }}
+.err-title {{ color:#334155; font-size:18px; margin:12px 0 24px; }}
+.err-back {{ display:inline-block; padding:10px 22px; background:#4f46e5; color:#fff;
+             border-radius:8px; text-decoration:none; font-size:14px; }}
+.err-back:hover {{ background:#4338ca; }}
+</style>
+</head>
+<body>
+<div class="err-box">
+  <p class="err-code">{status}</p>
+  <p class="err-title">{_html_mod.escape(title)}</p>
+  <a class="err-back" href="/report">返回报表页</a>
+</div>
+</body>
+</html>"""
 
 
 class RouteEntry:
@@ -333,7 +404,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         if path.startswith(_VENDOR_STATIC_PREFIX):
             if method != "GET":
                 return self._send_html(
-                    405, "<h1>405 — 方法不允许</h1>", {"Allow": "GET"})
+                    405, _render_error_page(405, "方法不允许"),
+                    {"Allow": "GET"})
             return self._serve_static_vendor(path)
 
         route = _match_route(method, path)
@@ -341,9 +413,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             allowed = _allowed_methods_for_path(path)
             if allowed:
                 return self._send_html(
-                    405, "<h1>405 — 方法不允许</h1>",
+                    405, _render_error_page(405, "方法不允许"),
                     {"Allow": ", ".join(allowed)})
-            return self._send_html(404, "<h1>404 — 页面不存在</h1>")
+            return self._send_html(
+                404, _render_error_page(404, "页面不存在"))
 
         if route.needs_auth and not self._authenticate():
             return
@@ -354,11 +427,12 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
                 getattr(self, route.handler)(method, path, query, conn)
             except BodyReadError as e:
                 logging.warning("请求体读取失败: %s", e)
-                self._send_html(400, f"请求体读取失败: {e}",
-                                {"Content-Type": "text/plain; charset=utf-8"})
+                self._send_html(400, _render_error_page(
+                    400, "请求无效"), {"Content-Type": "text/html; charset=utf-8"})
             except Exception as e:
                 logging.error("未捕获异常: %s", e, exc_info=True)
-                self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
+                # 异常详情只进日志，不进响应体（批次3#8 防信息泄露）
+                self._send_html(500, _render_error_page(500, "服务器内部错误"))
             finally:
                 conn.close()
         else:
@@ -366,22 +440,28 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
                 getattr(self, route.handler)(method, path, query, None)
             except BodyReadError as e:
                 logging.warning("请求体读取失败: %s", e)
-                self._send_html(400, f"请求体读取失败: {e}",
-                                {"Content-Type": "text/plain; charset=utf-8"})
+                self._send_html(400, _render_error_page(
+                    400, "请求无效"), {"Content-Type": "text/html; charset=utf-8"})
             except Exception as e:
                 logging.error("未捕获异常: %s", e, exc_info=True)
-                self._send_html(500, f"<h1>500 — 服务器内部错误</h1><pre>{_html_mod.escape(str(e))}</pre>")
+                self._send_html(500, _render_error_page(500, "服务器内部错误"))
 
     # ---- 认证 ----
 
     def _authenticate(self) -> bool:
-        """检查 session cookie，未认证则重定向到登录页"""
+        """检查 session cookie，未认证则重定向到登录页。
+
+        批次3#9：携带 next=<原路径> 与 expired=1，登录成功后回到原页面
+        （POST 表单数据无法恢复——零框架边界，至少不迷路）。
+        """
         cookie_header = self.headers.get("Cookie", "")
         cookies = auth.parse_cookie(cookie_header)
         token = cookies.get("session_id")
         user = auth.get_session_user(token) if token else None
         if user is None:
-            self._send_redirect("/login")
+            # 全量编码（safe=""）：路径内含 & 的 query 不会被外层参数截断
+            target = urllib.parse.quote((self.path or "/"), safe="")
+            self._send_redirect(f"/login?expired=1&next={target}")
             return False
         # 滑动过期：刷新 session 时间戳 + 下行 cookie Max-Age
         auth.refresh_session(token)
@@ -396,8 +476,16 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         return auth.get_session_user(token) if token else None
 
     def _handle_login_get(self, method, path, query, conn=None):
-        """显示登录页"""
-        self._send_html(200, _render_login_page())
+        """显示登录页。
+
+        批次3#9：query 带 expired=1 时显示会话过期提示；
+        next 参数经白名单校验后以 hidden 字段透传给 POST /login。
+        """
+        qs = urllib.parse.parse_qs(query or "", keep_blank_values=True)
+        expired = qs.get("expired", [""])[0] == "1"
+        next_url = qs.get("next", [""])[0]
+        self._send_html(200, _render_login_page_ex(
+            expired=expired, next_url=next_url))
 
     def _handle_home_redirect(self, method, path, query, conn=None):
         """首页重定向到 /report"""
@@ -415,27 +503,39 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         }).encode("utf-8"))
 
     def _handle_login(self, method=None, path=None, query=None, conn=None):
-        """处理登录表单提交"""
+        """处理登录表单提交。
+
+        批次3#11：被限流的用户名直接返回提示页（模糊措辞，不透露账号
+        是否存在），不再触达用户查询与密码校验。
+        批次3#9：登录成功后跳转表单携带的 next（站内路径白名单校验）。
+        """
         form_body = self._read_body()
         data = urllib.parse.parse_qs(form_body, keep_blank_values=True)
         username = data.get("username", [""])[0]
         password = data.get("password", [""])[0]
+        next_url = data.get("next", [""])[0]
+
+        if auth.is_login_blocked(username):
+            auth._record_auth_event(username, "login_throttled")
+            self._send_html(200, _render_login_page(
+                "尝试过于频繁，请稍后再试"))
+            return
 
         conn = db.get_config_db()
         try:
             user = db.get_user(conn, username)
             if user and auth.verify_password(password, user["password_hash"]):
                 token = auth.create_session(username)
+                auth.clear_login_failures(username)
                 auth._record_auth_event(username, "login")
-                self.send_response(302)
-                self.send_header("Location", "/report")
-                self.send_header("Set-Cookie", auth.make_set_cookie_header(token))
-                self.end_headers()
+                self._session_token = token
+                self._send_redirect(_safe_next_target(next_url))
                 return
         finally:
             conn.close()
 
         # 登录失败
+        auth.register_login_failure(username)
         auth._record_auth_event(username, "login_failed")
         self._send_html(200, _render_login_page("用户名或密码错误"))
 
@@ -507,8 +607,16 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             self._send_html(code, body, headers)
 
     def _handle_export(self, method: str, path: str, query: str, conn):
-        """委托给 export.py，使用 _handle() 传入的共享连接"""
+        """委托给 export.py，使用 _handle() 传入的共享连接。
+
+        批次3#8：非 200 的错误分支（404 报表不存在 / 403 写拒绝等）
+        收口为统一 HTML 错误页——导出消费者是人（浏览器下载），
+        纯文本错误既难看又无返回入口。
+        """
         code, body, headers = export_mod.handle_export(conn, query)
+        if code != 200:
+            self._send_html(code, _render_error_page(code, "导出失败"))
+            return
 
         self.send_response(code)
         for key, val in headers.items():

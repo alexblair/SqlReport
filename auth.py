@@ -24,6 +24,55 @@ from typing import Optional
 import db
 
 # ---------------------------------------------------------------------------
+# 登录失败限流（spec ux-optimization 批次3#11）
+# ---------------------------------------------------------------------------
+
+# 内存滑动窗口：5 分钟内连续 5 次失败 → 暂时拒绝该用户名的登录尝试。
+# 单实例部署内存实现即可（重启清零可接受）；按用户名键控，
+# 不区分来源 IP——同一账号的爆破无论从哪里来都应被拦。
+LOGIN_MAX_FAILURES = 5
+_LOGIN_WINDOW_SECONDS = 300
+
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def register_login_failure(username: str) -> None:
+    """记录一次登录失败（滑动窗口追加）。"""
+    now = time.time()
+    with _login_failures_lock:
+        window = [t for t in _login_failures.get(username, [])
+                  if now - t < _LOGIN_WINDOW_SECONDS]
+        window.append(now)
+        _login_failures[username] = window
+
+
+def clear_login_failures(username: str) -> None:
+    """登录成功后清零失败计数。"""
+    with _login_failures_lock:
+        _login_failures.pop(username, None)
+
+
+def is_login_blocked(username: str) -> bool:
+    """窗口内失败次数达到上限即拒绝（不区分后续尝试的密码是否正确）。"""
+    now = time.time()
+    with _login_failures_lock:
+        window = [t for t in _login_failures.get(username, [])
+                  if now - t < _LOGIN_WINDOW_SECONDS]
+        if window:
+            _login_failures[username] = window
+        else:
+            _login_failures.pop(username, None)
+        return len(window) >= LOGIN_MAX_FAILURES
+
+
+def reset_login_failures() -> None:
+    """清空全部限流状态（测试隔离用）。"""
+    with _login_failures_lock:
+        _login_failures.clear()
+
+
+# ---------------------------------------------------------------------------
 # 密码处理
 # ---------------------------------------------------------------------------
 

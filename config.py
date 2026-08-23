@@ -69,7 +69,7 @@ import markdown_render
 # API 端点子动作含 api_keys（API Key 管理 POST 端点）
 _PATH_PATTERN = re.compile(
     r"^/config/(pools|users|reports|categories)"
-    r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete|memo-preview)"
+    r"(?:/(add|batch-pool|batch-set-category|batch-cache|batch-delete|memo-preview|test)"
     r"|/(\d+)/(edit|delete|copy|move-category|move-up|move-down)"
     r"|/(\d+)/api_endpoints/(new|(\d+)/(edit|delete|preview|api_keys)))?$"
 )
@@ -107,6 +107,10 @@ def parse_config_path(path: str) -> dict:
                     "endpoint_id": None}
         if path == "/config/scheduler/save":
             return {"section": "scheduler", "action": "save", "id": None,
+                    "report_id": None, "endpoint_id": None}
+        # 连接池「测试连接」（批次3#12）：POST 表单试连，不落库
+        if path == "/config/pools/test":
+            return {"section": "pools", "action": "test", "id": None,
                     "report_id": None, "endpoint_id": None}
         return {"section": None, "action": None, "id": None,
                 "report_id": None, "endpoint_id": None}
@@ -997,15 +1001,15 @@ def _echo_int(value, default):
 def _pool_from_form(data: dict, pool_id: int = None) -> dict:
     """从表单数据构造临时连接池 dict（保存失败时表单回显用户原输入）。"""
     pool = {
+        "id": pool_id,  # 批次3#12：测试连接 hidden 字段需要 id 键恒存在
         "name": data.get("name", ""),
         "host": data.get("host", ""),
         "port": data.get("port", "3306"),
         "user": data.get("user", ""),
-        "password": data.get("password", ""),
+        # 密码不回显（批次3#12）：失败回显时同样留空
+        "password": "",
         "database": data.get("database", ""),
     }
-    if pool_id is not None:
-        pool["id"] = pool_id
     return pool
 
 
@@ -1086,6 +1090,70 @@ def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
     if s_raw:
         sorts_str = json.dumps(s_raw, ensure_ascii=False) if isinstance(s_raw, list) else str(s_raw)
     return columns, filters_str, sorts_str
+
+
+def handle_pool_test(conn, form_body: str, session_user=None) -> tuple[int, str]:
+    """处理「测试连接」表单提交（spec ux-optimization 批次3#12）。
+
+    用当前表单填写的信息试连一次 MySQL（短超时），不落库；
+    结果以 flash 回跳回来源页。编辑态密码留空时沿用库中旧密码
+    （与 handle_pool_edit 的空值语义一致——否则「没改密码」的池
+    永远测不通）。驱动未安装 / 参数缺失同样返回 flash 而非 500。
+    """
+    data = _parse_form_data(form_body)
+    host = (data.get("host") or "").strip()
+    port_raw = (data.get("port") or "").strip()
+    user = (data.get("user") or "").strip()
+    database = (data.get("database") or "").strip()
+    password = data.get("password") or ""
+    pool_id = None
+    try:
+        pool_id = int(data.get("pool_id") or 0) or None
+    except (TypeError, ValueError):
+        pool_id = None
+
+    # 编辑态留空密码 → 取库中旧值补齐（与保存语义一致）
+    if not password and pool_id:
+        stored = db.get_pool(conn, pool_id)
+        if stored:
+            password = stored["password"]
+
+    back_url = f"/config/pools/{pool_id}/edit" if pool_id else "/config/pools/add"
+    if not host or not user:
+        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 主机地址和用户名不能为空')}"
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 端口必须是数字')}"
+
+    try:
+        import mysql.connector
+    except ImportError:
+        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 未安装 MySQL 驱动（mysql-connector-python），无法测试连接')}"
+
+    try:
+        test_conn = mysql.connector.connect(
+            host=host, port=port, user=user, password=password,
+            database=database, connection_timeout=3)
+        try:
+            test_conn.close()
+        except Exception:
+            pass
+        return 302, f"{back_url}?flash={urllib.parse.quote('连接成功：数据库可达，账号密码正确')}"
+    except Exception as e:
+        logging.warning("测试连接失败 (%s:%s/%s): %s", host, port, database, e)
+        friendly, _ = _pool_test_error_hint(e)
+        msg = f"错误: 连接失败——{friendly}"
+        return 302, f"{back_url}?flash={urllib.parse.quote(msg)}"
+
+
+def _pool_test_error_hint(e: Exception) -> tuple[str, str]:
+    """测试连接失败的人话提示（复用 report.humanize_db_error 的映射）。"""
+    try:
+        from report import humanize_db_error
+        return humanize_db_error(e)
+    except Exception:
+        return str(e), str(e)
 
 
 def handle_pool_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1867,6 +1935,12 @@ def handle_request(conn, method: str, path: str, query: str,
 
     if method == "POST":
         if route["section"] == "pools":
+            if route["action"] == "test":
+                # 批次3#12：测试连接（不保存配置，仅验证连通性）；
+                # handler 返回 (302, Location)，补空 headers 对齐分支约定
+                code, location = handle_pool_test(conn, form_body or "",
+                                                  session_user=session_user)
+                return code, location, {}
             if route["action"] == "add":
                 code, result = handle_pool_add(conn, form_body or "", session_user=session_user)
             elif route["action"] == "edit" and route["id"]:

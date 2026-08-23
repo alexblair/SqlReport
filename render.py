@@ -697,10 +697,13 @@ def _escape(val) -> str:
 def build_flash_html(flash: str, is_error: bool = None) -> str:
     """构建 flash 提示条 HTML。
 
-    默认按消息是否以"错误"开头判定错误样式；is_error 传入时显式指定。
+    默认自动判定错误样式：以"错误"开头，或冒号前缀段含"失败"
+    （批次3#13 单点判定——此前仅识别"错误"前缀，「xx 失败」类文案
+    会误用成功样式）。is_error 传入时显式指定。
     """
     if is_error is None:
-        is_error = flash.startswith("错误")
+        prefix = flash.split(":", 1)[0]
+        is_error = flash.startswith("错误") or "失败" in prefix
     css_cls = " flash-error" if is_error else " flash-success"
     return f'<div class="flash{css_cls}">{_escape(flash)}</div>'
 
@@ -1680,26 +1683,34 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
     host = _escape(pool["host"] if pool else "")
     port = str(pool["port"]) if pool else "3306"
     user = _escape(pool["user"] if pool else "")
-    password = _escape(pool["password"] if (pool and is_edit) else "")
+    # 批次3#12（spec ux-optimization）：编辑态不回显已存密码——
+    # value 恒为空 + 非必填，留空提交时沿用库中旧密码（handle_pool_edit 语义）。
+    password = ""
     database = _escape(pool["database"] if pool else "")
+    pw_required = "" if is_edit else "required"
+    pw_hint = (' <span style="color:#94a3b8;font-weight:400;font-size:13px">'
+               '留空则沿用当前密码</span>') if is_edit else ""
 
     if is_copy:
         if prefill_copy_suffix:
             # 复制时自动加后缀，允许用户改名
             name = _escape(pool["name"] + " (副本)")
-        password = _escape(pool["password"])
+        # 复制模式同样不回显密码：留空则需重新输入
 
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form">
+  <input type="hidden" name="pool_id" value="{_escape(pool['id']) if pool and pool.get('id') else ''}">
   <label>名称: <input type="text" name="name" value="{name}" required></label>
   <label>主机地址: <input type="text" name="host" value="{host}" placeholder="例如 127.0.0.1" required></label>
   <label>端口: <input type="number" name="port" value="{port}" required></label>
   <label>用户名: <input type="text" name="user" value="{user}" required></label>
-  <label>密码: <input type="password" name="password" value="{password}" required></label>
+  <label>密码: <input type="password" name="password" value="" {pw_required}>{pw_hint}</label>
   <label>数据库: <input type="text" name="database" value="{database}" required></label>
   <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
+    <button type="submit" class="btn btn-outline" formaction="/config/pools/test"
+            formnovalidate title="用当前表单填写的连接信息试连数据库（不保存）">测试连接</button>
     <a href="/config" class="cancel">取消</a>
   </div>
 </form>
