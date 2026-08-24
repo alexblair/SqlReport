@@ -49,35 +49,42 @@ def _get_conn():
 
 def _set_up_db():
     conn = _get_conn()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS connection_pools (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
-            host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306,
-            user TEXT NOT NULL, password TEXT NOT NULL,
-            database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS report_configs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
-            sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20,
-            pool_id INTEGER, memo TEXT, prefer_cache INTEGER NOT NULL DEFAULT 1,
-            cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
-            allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1,
-            max_rows INTEGER NOT NULL DEFAULT 100000,
-            keepalive_enabled INTEGER NOT NULL DEFAULT 0,
-            keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS report_schedules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id INTEGER NOT NULL UNIQUE,
-            schedule_type TEXT NOT NULL DEFAULT 'interval',
-            interval_minutes INTEGER NOT NULL DEFAULT 60,
-            daily_time TEXT NOT NULL DEFAULT '08:00',
-            misfire_policy TEXT NOT NULL DEFAULT 'skip',
-            enabled INTEGER NOT NULL DEFAULT 1,
-            next_run_at REAL, last_run_at REAL, last_status TEXT,
-            last_error TEXT, fail_count INTEGER NOT NULL DEFAULT 0,
-            last_duration_ms INTEGER,
-            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
-    """)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS connection_pools ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, "
+        "host TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 3306, "
+        "user TEXT NOT NULL, password TEXT NOT NULL, "
+        "database TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS report_configs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, "
+        "sql_query TEXT NOT NULL, default_page_size INTEGER NOT NULL DEFAULT 20, "
+        "pool_id INTEGER, memo TEXT, prefer_cache INTEGER NOT NULL DEFAULT 1, "
+        "cache_ttl_hours INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, "
+        "allow_write INTEGER NOT NULL DEFAULT 1, allow_all_output INTEGER NOT NULL DEFAULT 1, "
+        "max_rows INTEGER NOT NULL DEFAULT 100000, "
+        "keepalive_enabled INTEGER NOT NULL DEFAULT 0, "
+        "keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS report_schedules ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "name TEXT NOT NULL DEFAULT '', "
+        "schedule_type TEXT NOT NULL DEFAULT 'interval', "
+        "interval_minutes INTEGER NOT NULL DEFAULT 60, "
+        "daily_time TEXT NOT NULL DEFAULT '08:00', "
+        "misfire_policy TEXT NOT NULL DEFAULT 'skip', "
+        "enabled INTEGER NOT NULL DEFAULT 1, "
+        "exclusions TEXT, audit_enabled INTEGER NOT NULL DEFAULT 0, "
+        "next_run_at REAL, last_run_at REAL, last_status TEXT, "
+        "last_error TEXT, fail_count INTEGER NOT NULL DEFAULT 0, "
+        "last_duration_ms INTEGER, "
+        "created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), "
+        "updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schedule_reports ("
+        "schedule_id INTEGER NOT NULL, report_id INTEGER NOT NULL, "
+        "order_index INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, "
+        "PRIMARY KEY (schedule_id, report_id))")
     conn.commit()
     conn.close()
 
@@ -130,7 +137,8 @@ class TestScheduleForcesCacheRebuild(unittest.TestCase):
         self.addCleanup(cfg_patcher.stop)
 
         conn = _get_conn()
-        for table in ("report_schedules", "report_configs", "connection_pools"):
+        for table in ("schedule_reports", "report_schedules", "report_configs",
+                      "connection_pools"):
             conn.execute(f"DELETE FROM {table}")
         conn.execute(
             "INSERT INTO connection_pools "
@@ -144,10 +152,11 @@ class TestScheduleForcesCacheRebuild(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        # 建任务（interval 30 分钟）
+        # 建任务（interval 30 分钟，绑定报表 11）
         self.sid = config_db.upsert_schedule(
-            _get_conn(), 11, "interval", 30, "08:00", "skip", 1,
-            next_run_at=0.0)
+            _get_conn(), report_ids=[11], schedule_type="interval",
+            interval_minutes=30, daily_time="08:00", misfire_policy="skip",
+            enabled=1, next_run_at=0.0)
         conn.close()
 
         # MySQL 查询层：计数 + 递增标记数据（每次执行返回不同值）
@@ -207,7 +216,7 @@ class TestScheduleForcesCacheRebuild(unittest.TestCase):
         conn = _get_conn()
         try:
             row = conn.execute(
-                "SELECT * FROM report_schedules WHERE report_id=11"
+                "SELECT * FROM report_schedules WHERE id=?", (self.sid,)
             ).fetchone()
             return dict(row) if row else None
         finally:

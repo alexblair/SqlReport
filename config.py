@@ -25,6 +25,7 @@ import urllib.parse
 import db
 import config_db
 import auth
+import branding
 import redis_cache
 import static_cache
 import api_handler
@@ -112,6 +113,10 @@ def parse_config_path(path: str) -> dict:
         # 连接池「测试连接」（批次3#12）：POST 表单试连，不落库
         if path == "/config/pools/test":
             return {"section": "pools", "action": "test", "id": None,
+                    "report_id": None, "endpoint_id": None}
+        # 站点标识保存（spec site-branding）
+        if path == "/config/site-branding":
+            return {"section": "site-branding", "action": "save", "id": None,
                     "report_id": None, "endpoint_id": None}
         return {"section": None, "action": None, "id": None,
                 "report_id": None, "endpoint_id": None}
@@ -737,6 +742,115 @@ def render_reports_page(conn, flash: str = None) -> str:
             + render_page_footer())
 
 
+def _render_branding_section() -> str:
+    """站点标识配置区块（spec site-branding）：三模式表单 + FileReader
+    base64 上传 + 模式显隐联动（原生 JS，零框架）。配置存实例本地库。"""
+    settings = branding.read_site_settings()
+    mode = settings.get("favicon_mode") or "default"
+    if mode not in ("default", "color", "custom"):
+        mode = "default"
+    color = settings.get("favicon_color") or ""
+    prefix = settings.get("title_prefix") or ""
+    return f"""<div class="card" style="margin-top:8px">
+<div class="section-title" style="font-size:16px;margin-bottom:8px"><span>🏷️ 站点标识</span></div>
+<p style="color:#64748b;margin:0 0 10px">favicon 图标与标签页环境前缀，全站生效（保存后刷新页面立即生效）</p>
+<form method="post" action="/config/site-branding" class="config-form" id="branding-form">
+  <label>图标模式:
+    <select name="favicon_mode" id="favmode" onchange="brandingModeChanged()">
+      <option value="default"{' selected' if mode == 'default' else ''}>默认（内置图标）</option>
+      <option value="color"{' selected' if mode == 'color' else ''}>纯色生成</option>
+      <option value="custom"{' selected' if mode == 'custom' else ''}>自定义图片</option>
+    </select>
+  </label>
+  <label id="row-color" style="display:{'' if mode == 'color' else 'none'}">颜色 (#RGB / #RRGGBB):
+    <input type="text" name="favicon_color" value="{_escape(color)}" placeholder="#FF0000">
+  </label>
+  <label id="row-file" style="display:{'' if mode == 'custom' else 'none'}">上传图片 (PNG / ICO, ≤256KB):
+    <input type="file" id="favfile" accept=".png,.ico,image/png,image/x-icon">
+    <input type="hidden" name="favicon_data" id="favdata">
+  </label>
+  <label>标题前缀 (≤20 字符，如 [DEV] ):
+    <input type="text" name="title_prefix" maxlength="20" value="{_escape(prefix)}">
+  </label>
+  <div class="form-actions span-full">
+    <button type="submit" class="btn btn-primary">保存站点标识</button>
+  </div>
+</form>
+<script>
+function brandingModeChanged() {{
+  var m = document.getElementById('favmode').value;
+  document.getElementById('row-color').style.display = m === 'color' ? '' : 'none';
+  document.getElementById('row-file').style.display = m === 'custom' ? '' : 'none';
+}}
+(function () {{
+  var file = document.getElementById('favfile');
+  if (!file) return;
+  file.addEventListener('change', function () {{
+    var f = this.files[0];
+    var data = document.getElementById('favdata');
+    data.value = '';
+    if (!f) return;
+    if (f.size > 256 * 1024) {{ alert('图片超过 256 KB 上限'); this.value = ''; return; }}
+    var r = new FileReader();
+    r.onload = function () {{ data.value = r.result; }};
+    r.readAsDataURL(f);
+  }});
+}})();
+</script>
+</div>"""
+
+
+def handle_site_branding_save(form_body: str,
+                              session_user=None) -> tuple[int, str, dict]:
+    """保存站点标识（spec site-branding）。
+
+    整单校验：任一项非法则全部不落库、已传旧图不动（矩阵 M34）；
+    成功后失效渲染缓存并写审计 update_site_setting（含前后快照）。
+    存储为实例本地库（branding.write_site_settings），与配置库引擎无关。
+    """
+    form = urllib.parse.parse_qs(form_body or "", keep_blank_values=True)
+    mode = (form.get("favicon_mode", [""])[0] or "").strip()
+    color = (form.get("favicon_color", [""])[0] or "").strip()
+    prefix = form.get("title_prefix", [""])[0] or ""
+    image_b64 = form.get("favicon_data", [""])[0] or ""
+
+    before = branding.read_site_settings()
+
+    errors = []
+    if mode not in branding.ALLOWED_MODES:
+        errors.append(f"未知的图标模式: {mode}")
+    if not errors and mode == "color" and branding.normalize_color(color) is None:
+        errors.append("颜色值无效，仅支持 #RGB 或 #RRGGBB 形态")
+    if len(prefix) > 20:
+        errors.append("标题前缀不能超过 20 个字符")
+    new_image = False
+    if not errors and mode == "custom" and image_b64.strip():
+        try:
+            branding.save_custom_favicon(image_b64)
+            new_image = True
+        except branding.BrandingError as e:
+            errors.append(str(e))
+    if errors:
+        msg = "错误: " + "；".join(errors)
+        return 302, f"/config?flash={urllib.parse.quote(msg)}", {}
+
+    values = {"favicon_mode": mode, "favicon_color": color,
+              "title_prefix": prefix}
+    branding.write_site_settings(values)
+    branding.invalidate_site_branding_cache()
+
+    config_db._write_audit_log(
+        session_user, "update_site_setting", "site_setting",
+        entity_name="站点标识",
+        before_value=json.dumps(before, ensure_ascii=False) if before else None,
+        after_value=json.dumps(values, ensure_ascii=False))
+
+    flash = "站点标识已更新"
+    if mode == "custom" and not new_image and not branding.load_custom_favicon():
+        flash += "（提示：尚未上传自定义图片，当前显示默认图标）"
+    return 302, f"/config?flash={urllib.parse.quote(flash)}", {}
+
+
 def render_overview(conn, flash: str = None,
                     current_username: str = None) -> str:
     """渲染配置总览页，包含三个配置段
@@ -803,7 +917,8 @@ def render_overview(conn, flash: str = None,
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + onboarding_html + _render_pool_section(conn)
             + _render_user_section(conn, current_username=current_username)
-            + reports_card + categories_card + api_card + render_page_footer())
+            + reports_card + categories_card + api_card
+            + _render_branding_section() + render_page_footer())
     return body
 
 
@@ -1924,6 +2039,12 @@ def handle_request(conn, method: str, path: str, query: str,
     if (method == "POST" and route["section"] == "api-endpoints"
             and route["action"] == "description-preview"):
         return handle_description_preview(form_body or "")
+
+    # 站点标识保存（spec site-branding；/config 路由 needs_auth 已拦截未登录）
+    if (method == "POST" and route["section"] == "site-branding"
+            and route["action"] == "save"):
+        return handle_site_branding_save(conn, form_body or "",
+                                         session_user=session_user)
 
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
     if method == "POST" and route["section"] == "reports" and route["report_id"]:

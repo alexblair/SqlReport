@@ -3,7 +3,7 @@ audit_db.py — 审计数据库模块
 
 管理独立的 audit.db，存储四种类型的审计日志：
   - operation: 用户对配置的 CRUD 操作（连接池/用户/报表/分类）
-  - scheduler: 定时任务执行情况（scheduled_run / scheduled_misfire）
+  - scheduler: 定时任务执行情况（scheduled_run / scheduled_skip / scheduled_misfire）
   - web_access: 用户页面访问
   - api: API 端点调用
 
@@ -112,7 +112,7 @@ def record_operation(session_user, action, entity_type, entity_id=None,
     logging.warning，避免审计失败影响业务操作（符合 conv 降级约定）。
 
     log_type: 审计类型，默认 operation（操作日志）；调度器自动执行
-    传 scheduler（定时任务），见 scheduler.py 的 scheduled_run/scheduled_misfire。
+    传 scheduler（定时任务），见 scheduler.py 的 scheduled_run/scheduled_skip/scheduled_misfire。
 
     details: 预留扩展字段（当前未写入审计表，仅保持签名一致）。
     """
@@ -295,13 +295,13 @@ def export_audit_logs(conn, filters: dict) -> list[dict]:
 
 def get_recent_schedule_events(conn, schedule_id=None, limit: int = 20
                                ) -> list[dict]:
-    """查询最近的定时执行事件（scheduled_run / scheduled_misfire）。
+    """查询最近的定时执行事件（scheduled_run / scheduled_skip / scheduled_misfire）。
 
     schedule_id 为 None 时返回全部任务的最近事件，否则仅该任务；
     按 id 降序（最新在前），供 /config/scheduler 管理页"最近执行记录"展示。
     """
     sql = ("SELECT * FROM audit_logs "
-           "WHERE action IN ('scheduled_run','scheduled_misfire') "
+           "WHERE action IN ('scheduled_run','scheduled_skip','scheduled_misfire') "
            "AND entity_type='schedule'")
     params: list = []
     if schedule_id is not None:

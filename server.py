@@ -30,6 +30,7 @@ import html as _html_mod
 import threading
 import db
 import auth
+import branding
 import config
 import report
 import scheduler
@@ -202,33 +203,9 @@ body {{ display:flex; justify-content:center; align-items:center; min-height:100
 </html>"""
 
 
-def _build_favicon_bytes() -> bytes:
-    """生成 16x16 内置图标并包装为 ICO 字节流（spec ux-optimization 批次6#27b）。
-
-    纯标准库构造：RGBA PNG（品牌紫 #4f46e5 单色块）经 ICONDIR+ICONDIRENTRY
-    包装为合法 .ico，消除浏览器默认请求 /favicon.ico 的 404 噪音。
-    """
-    import struct as _struct
-    import zlib as _zlib
-
-    width = height = 16
-
-    def _chunk(typ: bytes, data: bytes) -> bytes:
-        body = typ + data
-        return (_struct.pack(">I", len(data)) + body
-                + _struct.pack(">I", _zlib.crc32(body) & 0xFFFFFFFF))
-
-    raw = b"".join(b"\x00" + b"\x4f\x46\xe5\xff" * width for _ in range(height))
-    ihdr = _struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    png = (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
-           + _chunk(b"IDAT", _zlib.compress(raw)) + _chunk(b"IEND", b""))
-    ico = (_struct.pack("<HHH", 0, 1, 1)
-           + _struct.pack("<BBBBHHII", width, height, 0, 0, 1, 32,
-                          len(png), 6 + 16))
-    return ico + png
-
-
-_FAVICON_BYTES = _build_favicon_bytes()
+# 内置图标字节（spec ux-optimization 批次6#27b；site-branding 起迁至
+# branding.py 统一三模式产出，本别名保留供既有测试与回退引用）
+_FAVICON_BYTES = branding.DEFAULT_FAVICON_BYTES
 
 
 class RouteEntry:
@@ -277,6 +254,7 @@ ROUTES = [
     RouteEntry(r"^/config/reports/memo-preview$", "POST", True, False, "_handle_config"),
     RouteEntry(r"^/config/api-endpoints/description-preview$", "POST", True, False, "_handle_config"),
     RouteEntry(r"^/config/categories$", "GET", True, True, "_handle_config_categories"),
+    RouteEntry(r"^/config/site-branding$", "POST", True, True, "_handle_config_site_branding"),
     RouteEntry(r"^/config($|/)", "*", True, True, "_handle_config"),
     RouteEntry(r"^/report($|/)", "*", True, True, "_handle_report"),
     RouteEntry(r"^/export($|/)", "*", True, True, "_handle_export"),
@@ -622,6 +600,21 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self._log_web_access(path, method, 302)
         self._send_redirect("/config/reports")
 
+    def _handle_config_site_branding(self, method: str, path: str, query: str, conn):
+        """站点标识保存（spec site-branding）：表单 POST → 整单校验落库 →
+        重定向回 /config。审计由 handle_site_branding_save 内部记录前后快照，
+        web 访问日志不记原始 body（自定义图片为 base64 大对象）——必须显式
+        传空串：None 会触发 _read_body 惰性重读已耗尽的流而挂死请求。"""
+        form_body = self._read_body() if method == "POST" else None
+        session_user = self._get_current_user()
+        code, body, headers = config.handle_site_branding_save(
+            form_body, session_user=session_user)
+        self._log_web_access(path, method, code, request_body="")
+        if code == 302:
+            self._send_redirect(body)
+        else:
+            self._send_html(code, body, headers)
+
     def _handle_config(self, method: str, path: str, query: str, conn):
         """委托给 config.py，使用 _handle() 传入的共享连接"""
         form_body = self._read_body() if method == "POST" else None
@@ -738,13 +731,17 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _handle_favicon(self, method, path, query, conn=None):
-        """内置 favicon（spec ux-optimization 批次6#27b）：避免 404 噪音。"""
+        """favicon 三模式动态服务（spec site-branding）：default 内置 /
+        color 动态生成 / custom 上传图片，任何异常回退内置；公开无认证。
+        Cache-Control no-cache（修订 M13：协商缓存——服务端有进程内缓存，
+        成本可忽略；保存后刷新立即生效，不再容忍 5 分钟浏览器强缓存窗口）。"""
+        payload = branding.resolve_favicon_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "image/x-icon")
-        self.send_header("Cache-Control", "public, max-age=86400")
-        self.send_header("Content-Length", str(len(_FAVICON_BYTES)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self._write_body(_FAVICON_BYTES)
+        self._write_body(payload)
 
     def _write_audit_log(self, *, log_type, session_user, action, entity_type,
                          entity_name, http_method, http_path, http_status,

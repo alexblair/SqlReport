@@ -20,6 +20,7 @@
 """
 
 import os
+import json
 import shutil
 import sqlite3
 import tempfile
@@ -89,12 +90,14 @@ def _set_up_db():
             updated_at TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS report_schedules (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id        INTEGER NOT NULL UNIQUE,
+            name             TEXT    NOT NULL DEFAULT '',
             schedule_type    TEXT    NOT NULL DEFAULT 'interval',
             interval_minutes INTEGER NOT NULL DEFAULT 60,
             daily_time       TEXT    NOT NULL DEFAULT '08:00',
             misfire_policy   TEXT    NOT NULL DEFAULT 'skip',
             enabled          INTEGER NOT NULL DEFAULT 1,
+            exclusions       TEXT,
+            audit_enabled    INTEGER NOT NULL DEFAULT 0,
             next_run_at      REAL,
             last_run_at      REAL,
             last_status      TEXT,
@@ -103,6 +106,13 @@ def _set_up_db():
             last_duration_ms INTEGER,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS schedule_reports (
+            schedule_id INTEGER NOT NULL,
+            report_id   INTEGER NOT NULL,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (schedule_id, report_id)
         );
     """)
     conn.commit()
@@ -154,8 +164,8 @@ class SchedulerCoreTest(unittest.TestCase):
 
         # 清表并植入种子：1 池 + 1 报表
         conn = _get_conn()
-        for table in ("report_schedules", "api_endpoints", "report_configs",
-                      "connection_pools"):
+        for table in ("schedule_reports", "report_schedules", "api_endpoints",
+                      "report_configs", "connection_pools"):
             conn.execute(f"DELETE FROM {table}")
         # 种子行显式固定 id=1：临时文件库跨测试方法持久，
         # AUTOINCREMENT 序号会递增，写死 id 保证 self.report_id 恒有效
@@ -216,19 +226,21 @@ class SchedulerCoreTest(unittest.TestCase):
 
     # -- 公共辅助 ----------------------------------------------------------
 
-    def _add_schedule(self, report_id=None, next_run_at=1000.0,
+    def _add_schedule(self, report_ids=None, next_run_at=1000.0,
                       last_run_at=None, **kw):
         """经 CRUD 建任务行（贴近真实写入路径），返回 schedule_id。
 
+        report_ids 为绑定报表列表（多报表模型）；默认绑定 self.report_id。
         last_run_at 是运行时回写字段、不在 upsert 签名内，
         非 None 时以 SQL 直接预置。
         """
         conn = _get_conn()
         try:
-            args = dict(report_id=self.report_id if report_id is None else report_id,
+            args = dict(report_ids=[self.report_id] if report_ids is None
+                        else report_ids,
                         schedule_type="interval", interval_minutes=30,
                         daily_time="08:00", misfire_policy="skip",
-                        enabled=1, next_run_at=next_run_at)
+                        enabled=1, audit_enabled=1, next_run_at=next_run_at)
             args.update(kw)
             sid = config_db.upsert_schedule(conn, session_user=None, **args)
             if last_run_at is not None:
@@ -355,14 +367,13 @@ class TestTickDispatch(SchedulerCoreTest):
 
     def test_tick_ignores_future_disabled_and_burned(self):
         self._add_schedule(next_run_at=NOW + 3600)                    # 未到期
-        self._add_schedule(report_id=2, next_run_at=NOW - 60, enabled=0)
-        self._add_schedule(report_id=3, next_run_at=NOW - 60)
+        self._add_schedule(report_ids=[2], next_run_at=NOW - 60, enabled=0)
+        sid3 = self._add_schedule(report_ids=[3], next_run_at=NOW - 60)
         conn = _get_conn()
-        conn.execute("UPDATE report_schedules SET fail_count=5 WHERE report_id=3")
+        conn.execute("UPDATE report_schedules SET fail_count=5 WHERE id=?", (sid3,))
         conn.commit()
         conn.close()
-        # 补齐 report 2/3 行（外键无约束，但 _run_schedule 需要报表存在；
-        # 本用例不应有任何派发，故仅需行满足过滤条件）
+        # 本用例不应有任何派发（未到期 / 停用 / 熔断）
         self.assertEqual(self.sched.run_tick(now=NOW), 0)
         self.mock_exec.assert_not_called()
 
@@ -374,15 +385,46 @@ class TestTickDispatch(SchedulerCoreTest):
 class TestRunScheduleOutcome(SchedulerCoreTest):
 
     def test_failure_records_summary_and_increments_counter(self):
-        """B4：异常摘要截断 ≤500 字符入 last_error，fail_count 递增。"""
+        """B4：异常摘要截断 ≤500 字符入 last_error，fail_count 递增。
+
+        多报表聚合语义（2026-08-24 用户确认）：单绑定失败不中断整包，
+        摘要带「报表 #id:」前缀定位失败绑定。
+        """
         sid = self._add_schedule(next_run_at=NOW - 60)
         self.mock_exec.side_effect = RuntimeError("x" * 800)
         self.sched.trigger_schedule(sid)
         row = self._row(sid)
         self.assertEqual(row["last_status"], "fail")
         self.assertEqual(row["fail_count"], 1)
-        self.assertTrue(row["last_error"].startswith("RuntimeError"))
+        self.assertTrue(row["last_error"].startswith("报表 #1: RuntimeError"))
         self.assertEqual(len(row["last_error"]), 500)
+
+    def test_multi_report_aggregated_failure_continues(self):
+        """#8：多报表任务单绑定失败 → 继续执行剩余绑定（已完成报表落库），
+        任务整体记 fail，last_error 定位失败绑定。"""
+        for rid in (2, 3):
+            conn = _get_conn()
+            conn.execute(
+                "INSERT INTO report_configs (id,name,sql_query,"
+                "default_page_size,pool_id,prefer_cache) VALUES (?,?,?,20,1,1)",
+                (rid, f"报表{rid}", "SELECT 1"))
+            conn.commit()
+            conn.close()
+        sid = self._add_schedule(report_ids=[1, 2, 3], next_run_at=NOW - 60)
+        real = self.mock_exec.side_effect
+        def _fail_on_2(*args, **kw):
+            if kw.get("report", {}).get("id") == 2:
+                raise RuntimeError("boom")
+        self.mock_exec.side_effect = _fail_on_2
+        self.sched.trigger_schedule(sid)
+        calls = [c.kwargs["report"]["id"]
+                 for c in self.mock_exec.call_args_list]
+        self.assertEqual(calls, [1, 2, 3])          # 1、3 照常执行，2 失败但不断链
+        row = self._row(sid)
+        self.assertEqual(row["last_status"], "fail")
+        self.assertIn("报表 #2: RuntimeError: boom", row["last_error"])
+        self.assertEqual(row["fail_count"], 1)
+        self.mock_exec.side_effect = real
 
     def test_success_audit_fields(self):
         """B19：自动执行审计 action=scheduled_run，type=scheduler，after_value 结构完整。"""
@@ -400,6 +442,35 @@ class TestRunScheduleOutcome(SchedulerCoreTest):
         self.assertEqual(after["status"], "success")
         self.assertIn("duration_ms", after)
         self.assertIn("error", after)
+
+    def test_scheduled_run_audit_includes_report_list(self):
+        """T3：scheduled_run 审计 after_value 附带本次执行报表清单。
+
+        report_total=绑定总数、report_executed=实际参与执行（启用绑定）数、
+        report_names=参与执行的报表名（未启用「参与执行」的报表应被排除）。
+        """
+        # 补充报表 #2/#3 种子（默认仅 #1 已种子），便于断言可读的报表名
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO report_configs (id,name,sql_query,default_page_size,"
+            "pool_id,prefer_cache,cache_ttl_hours,keepalive_enabled,"
+            "keepalive_ahead_seconds) VALUES (2,'报表B','SELECT 2',20,1,1,0,0,0),"
+            "(3,'报表C','SELECT 3',20,1,1,0,0,0)")
+        conn.commit()
+        conn.close()
+        # 绑定 3 张报表，其中报表 #2 的「参与执行」停用（enabled=0）
+        sid = self._add_schedule(report_ids=[1, 2, 3], next_run_at=NOW - 60)
+        conn = _get_conn()
+        conn.execute(
+            "UPDATE schedule_reports SET enabled=0 WHERE schedule_id=? "
+            "AND report_id=2", (sid,))
+        conn.commit()
+        conn.close()
+        self.sched.run_tick(now=NOW)
+        after = self._audit_of("scheduled_run")[0]["after_value"]
+        self.assertEqual(after["report_total"], 3)
+        self.assertEqual(after["report_executed"], 2)
+        self.assertEqual(after["report_names"], ["报表A", "报表C"])
 
     def test_manual_trigger_resets_fail_count(self):
         """B6：手动触发绕过熔断，成功后 fail_count 重置、审计记操作者。"""
@@ -507,10 +578,294 @@ class TestStartupScanMisfire(SchedulerCoreTest):
     def test_scan_ignores_disabled_and_future_tasks(self):
         """启动扫描同样受 enabled=1 与 fail_count<5、next_run_at<=now 约束。"""
         self._add_schedule(next_run_at=NOW + 3600)
-        self._add_schedule(report_id=2, next_run_at=NOW - 60, enabled=0)
+        self._add_schedule(report_ids=[2], next_run_at=NOW - 60, enabled=0)
         stats = self.sched.run_startup_scan(now=NOW)
         self.assertEqual(stats, {"ran": 0, "skipped": 0})
         self.mock_exec.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# G3：执行静默窗口（S1/S3/S9/S11/S16）
+# ---------------------------------------------------------------------------
+
+class TestExclusionSilence(SchedulerCoreTest):
+
+    def _tod_tree(self, frm, to):
+        return json.dumps({"op": "OR", "children": [
+            {"type": "tod", "from": frm, "to": to}]})
+
+    def test_interval_exclusion_skips_and_advances(self):
+        """S1：到期 + 排除命中 → 不执行、last_status=skipped、next 推进、fail 不变。"""
+        tree = self._tod_tree("00:00", "23:59")  # 全天命中
+        sid = self._add_schedule(next_run_at=NOW - 60, exclusions=tree)
+        self.assertEqual(self.sched.run_tick(now=NOW), 0)
+        self.mock_exec.assert_not_called()
+        row = self._row(sid)
+        self.assertEqual(row["last_status"], "skipped")
+        self.assertIsNone(row["last_error"])
+        self.assertEqual(row["fail_count"], 0)
+        self.assertGreater(row["next_run_at"], NOW)
+
+    def test_exclusion_miss_runs(self):
+        """S2：排除未命中 → 正常执行。"""
+        tree = self._tod_tree("00:00", "00:01")  # 几乎不命中
+        sid = self._add_schedule(next_run_at=NOW - 60, exclusions=tree)
+        self.assertEqual(self.sched.run_tick(now=NOW), 1)
+        self.mock_exec.assert_called_once()
+
+    def test_daily_exclusion_skips_and_advances_to_next_day(self):
+        """S3：daily 到期 + 排除命中 → 不执行、skipped、next 推进至次日 HH:MM。"""
+        tree = self._tod_tree("00:00", "23:59")  # 全天命中
+        sid = self._add_schedule(schedule_type="daily", daily_time="08:00",
+                                 next_run_at=_local_ts(2026, 8, 21, 8, 0),
+                                 exclusions=tree)
+        self.assertEqual(self.sched.run_tick(now=NOW), 0)
+        self.mock_exec.assert_not_called()
+        row = self._row(sid)
+        self.assertEqual(row["last_status"], "skipped")
+        nxt = time.localtime(row["next_run_at"])
+        self.assertEqual((nxt.tm_year, nxt.tm_mon, nxt.tm_mday,
+                          nxt.tm_hour, nxt.tm_min), (2026, 8, 22, 8, 0))
+
+    def test_manual_ignores_exclusion(self):
+        """S16：手动触发不受排除影响，按序跑全部关联报表。"""
+        tree = self._tod_tree("00:00", "23:59")
+        sid = self._add_schedule(next_run_at=NOW - 60, exclusions=tree)
+        self.assertTrue(self.sched.trigger_schedule(sid))
+        self.mock_exec.assert_called_once()
+
+    def test_multi_report_runs_in_order(self):
+        """S9：多报表任务按 order_index 顺序执行（T4 组合作业）。"""
+        for rid in (2, 3):
+            conn = _get_conn()
+            conn.execute(
+                "INSERT INTO report_configs (id,name,sql_query,"
+                "default_page_size,pool_id,prefer_cache) VALUES (?,?,?,20,1,1)",
+                (rid, f"报表{rid}", "SELECT 1"))
+            conn.commit()
+            conn.close()
+        sid = self._add_schedule(report_ids=[3, 1, 2], next_run_at=NOW - 60)
+        self.sched.run_tick(now=NOW)
+        calls = [c.kwargs["report"]["id"]
+                 for c in self.mock_exec.call_args_list]
+        self.assertEqual(calls, [3, 1, 2])
+
+    def test_binding_disabled_is_skipped(self):
+        """S10：绑定级 enabled=0 不执行该报表，其余绑定照常（间接验证拼接）。"""
+        for rid in (2, 3):
+            conn = _get_conn()
+            conn.execute(
+                "INSERT INTO report_configs (id,name,sql_query,"
+                "default_page_size,pool_id,prefer_cache) VALUES (?,?,?,20,1,1)",
+                (rid, f"报表{rid}", "SELECT 1"))
+            conn.commit()
+            conn.close()
+        sid = self._add_schedule(report_ids=[1, 2, 3], next_run_at=NOW - 60)
+        conn = _get_conn()
+        conn.execute(
+            "UPDATE schedule_reports SET enabled=0 WHERE schedule_id=? "
+            "AND report_id=2", (sid,))
+        conn.commit()
+        conn.close()
+        self.sched.run_tick(now=NOW)
+        calls = [c.kwargs["report"]["id"]
+                 for c in self.mock_exec.call_args_list]
+        self.assertEqual(calls, [1, 3])
+
+    def test_silent_window_consecutive_ticks_advance(self):
+        """S4：静默窗口内连续 tick 每次推进 next_run_at，不重复执行、不卡死。"""
+        tree = self._tod_tree("00:00", "23:59")
+        sid = self._add_schedule(next_run_at=NOW - 60, exclusions=tree)
+        first = self.sched.run_tick(now=NOW)
+        row = self._row(sid)
+        n1 = row["next_run_at"]
+        second = self.sched.run_tick(now=n1)
+        n2 = self._row(sid)["next_run_at"]
+        self.assertEqual((first, second), (0, 0))
+        self.assertGreater(n1, NOW)
+        self.assertGreater(n2, n1)
+        self.assertEqual(self._row(sid)["last_status"], "skipped")
+        self.mock_exec.assert_not_called()
+
+    def test_audit_disabled_writes_no_scheduler_logs(self):
+        """S5：audit_enabled=0 时执行/跳过/手动均不产生 scheduler 审计。"""
+        silent = self._tod_tree("00:00", "23:59")
+        open_tree = self._tod_tree("00:00", "00:01")
+        sid_skip = self._add_schedule(name="t-skip", next_run_at=NOW - 60,
+                                      exclusions=silent, audit_enabled=0)
+        self.sched.run_tick(now=NOW)          # skipped
+        sid_run = self._add_schedule(name="t-run", next_run_at=NOW - 7200,
+                                     exclusions=open_tree, audit_enabled=0)
+        self.sched.run_tick(now=NOW + 1)      # 正常执行
+        self.sched.trigger_schedule(sid_run)  # 手动执行
+        scheduler_logs = [a for a in self.audit_calls
+                          if a["log_type"] == "scheduler"]
+        self.assertEqual(scheduler_logs, [])
+
+    def test_startup_misfire_disabled_audit_writes_nothing(self):
+        """S5 misfire 部分：audit_enabled=0 时启动补跑（B8/B9）不写 scheduler 审计。"""
+        sid = self._add_schedule(next_run_at=NOW - 7200, audit_enabled=0)
+        self.sched.run_startup_scan(now=NOW)
+        self.assertEqual(self.mock_exec.call_count, 1)   # 补跑确实发生
+        scheduler_logs = [a for a in self.audit_calls
+                          if a["log_type"] == "scheduler"]
+        self.assertEqual(scheduler_logs, [])
+
+    def test_skipped_writes_scheduled_skip_audit(self):
+        """S6：audit_enabled=1 时跳过记 scheduled_skip，trigger 维度为 skip。"""
+        tree = self._tod_tree("00:00", "23:59")
+        sid = self._add_schedule(next_run_at=NOW - 60, exclusions=tree)
+        self.sched.run_tick(now=NOW)
+        skips = self._audit_of("scheduled_skip")
+        self.assertEqual(len(skips), 1)
+        ev = skips[0]
+        self.assertEqual((ev["entity_id"], ev["log_type"], ev["user"]),
+                         (sid, "scheduler", "system"))
+        self.assertEqual(ev["after_value"].get("trigger"), "skip")
+        self.assertEqual(ev["after_value"].get("status"), "skipped")
+
+    def test_startup_scan_missed_time_in_exclusion(self):
+        """S7：错过时刻命中排除 → 视为正确跳过，不补跑只推进。
+
+        任务 hourly、排除周末；next_run_at=周六 10:00（命中）、启动扫描于
+        周一 09:30（未命中）→ 以错过时刻判定，合并补跑不得发生。
+        """
+        tree = json.dumps({"op": "OR", "children": [
+            {"type": "dow", "in": ["sat", "sun"]}]})
+        missed = _local_ts(2026, 8, 22, 10, 0)   # 周六 10:00（2026-08 实际历法）
+        scan_at = _local_ts(2026, 8, 24, 9, 30)  # 周一 09:30
+        self.assertEqual(time.localtime(missed).tm_wday, 5)
+        self.assertEqual(time.localtime(scan_at).tm_wday, 0)
+        sid = self._add_schedule(next_run_at=missed, exclusions=tree)
+        stats = self.sched.run_startup_scan(now=scan_at)
+        self.assertEqual(stats, {"ran": 0, "skipped": 1})
+        self.mock_exec.assert_not_called()
+        self.assertGreater(self._row(sid)["next_run_at"], scan_at)
+
+    def test_startup_scan_missed_time_not_in_exclusion(self):
+        """S8：错过时刻未命中排除 → 按基础规格 B8 合并补跑一次。"""
+        tree = self._tod_tree("00:00", "01:00")  # 周六 10:00 不命中
+        missed = _local_ts(2026, 8, 22, 10, 0)
+        scan_at = _local_ts(2026, 8, 24, 9, 30)
+        sid = self._add_schedule(next_run_at=missed, exclusions=tree)
+        stats = self.sched.run_startup_scan(now=scan_at)
+        self.assertEqual(stats["ran"], 1)
+        self.mock_exec.assert_called_once()
+        self.assertIsNone(self._row(sid).get("last_error"))
+
+    def test_exclusion_hits_whole_package(self):
+        """S11：多报表任务排除命中 → 整包全部不执行。"""
+        for rid in (2, 3):
+            conn = _get_conn()
+            conn.execute(
+                "INSERT INTO report_configs (id,name,sql_query,"
+                "default_page_size,pool_id,prefer_cache) VALUES (?,?,?,20,1,1)",
+                (rid, f"报表{rid}", "SELECT 1"))
+            conn.commit()
+            conn.close()
+        tree = self._tod_tree("00:00", "23:59")
+        sid = self._add_schedule(report_ids=[1, 2, 3], next_run_at=NOW - 60,
+                                 exclusions=tree)
+        self.assertEqual(self.sched.run_tick(now=NOW), 0)
+        self.mock_exec.assert_not_called()
+        self.assertEqual(self._row(sid)["last_status"], "skipped")
+
+    def test_deleted_report_unbinds_and_rest_still_run(self):
+        """S13：删报表仅拆绑定，任务继续跑剩余报表。"""
+        for rid in (2, 3):
+            conn = _get_conn()
+            conn.execute(
+                "INSERT INTO report_configs (id,name,sql_query,"
+                "default_page_size,pool_id,prefer_cache) VALUES (?,?,?,20,1,1)",
+                (rid, f"报表{rid}", "SELECT 1"))
+            conn.commit()
+            conn.close()
+        sid = self._add_schedule(report_ids=[1, 2, 3], next_run_at=NOW - 60)
+        conn = _get_conn()
+        try:
+            self.assertTrue(config_db.delete_report(conn, 2))
+            reps = config_db.get_schedule_reports(conn, sid)
+            self.assertEqual([r["report_id"] for r in reps], [1, 3])
+        finally:
+            conn.close()
+        self.assertIsNotNone(self._row(sid))  # 任务未被级联删除
+        self.sched.run_tick(now=NOW)
+        calls = [c.kwargs["report"]["id"]
+                 for c in self.mock_exec.call_args_list]
+        self.assertEqual(calls, [1, 3])
+
+
+# ---------------------------------------------------------------------------
+# G12：规格 §6 Golden Sample 一周扫描验收（用户原话场景回归）
+# ---------------------------------------------------------------------------
+
+class TestGoldenSampleWeekly(SchedulerCoreTest):
+    """报表 A 挂两个独立任务：
+
+    - 任务一：每小时执行；排除 = 周六周日 ∪（工作日 AND 21:00–08:59 静默）
+    - 任务二：每天 23:00 执行一次；无排除
+
+    固定 now 从周一 00:00 逐小时扫一周（168 tick），断言：
+    工作日 09:00–20:00 每小时各执行一次（共 60 次）；周六周日全天静默；
+    任务二每日 23:00 必执行（含周末，共 7 次）。
+    """
+
+    MON_0000 = _local_ts(2026, 8, 17, 0, 0)   # 2026-08-17 为周一
+
+    def test_week_scan_golden_sample(self):
+        task1_tree = json.dumps({"op": "OR", "children": [
+            {"type": "dow", "in": ["sat", "sun"]},
+            {"op": "AND", "children": [
+                {"type": "dow",
+                 "in": ["mon", "tue", "wed", "thu", "fri"]},
+                {"op": "OR", "children": [
+                    {"type": "tod", "from": "21:00", "to": "23:59"},
+                    {"type": "tod", "from": "00:00", "to": "08:59"}]}]}]})
+        mon0 = self.MON_0000
+        self._add_schedule(name="golden-task1", next_run_at=mon0,
+                           interval_minutes=60, exclusions=task1_tree,
+                           audit_enabled=0)
+        self._add_schedule(name="golden-task2",
+                           next_run_at=_local_ts(2026, 8, 17, 23, 0),
+                           schedule_type="daily", daily_time="23:00",
+                           misfire_policy="skip", audit_enabled=0)
+
+        exec_hours = []
+        state = {"now": mon0}
+
+        def _record_exec(*args, **kwargs):
+            # 23:00 整点到期时任务一必处于静默窗口 → 该小时的执行属于任务二
+            exec_hours.append(state["now"])
+
+        self.mock_exec.side_effect = _record_exec
+        with patch("time.time",
+                   side_effect=lambda: state["now"]):
+            for h in range(168):
+                state["now"] = mon0 + h * 3600
+                self.sched.run_tick(now=state["now"])
+
+        t1_hours = [ts for ts in exec_hours if time.localtime(ts).tm_hour != 23]
+        t2_hours = [ts for ts in exec_hours if time.localtime(ts).tm_hour == 23]
+
+        expected_t1 = [
+            mon0 + h * 3600 for h in range(168)
+            if time.localtime(mon0 + h * 3600).tm_wday < 5
+            and 9 <= time.localtime(mon0 + h * 3600).tm_hour <= 20]
+        self.assertEqual(len(expected_t1), 60)
+        self.assertEqual(t1_hours, expected_t1)
+
+        expected_t2 = [mon0 + h * 3600 for h in range(168)
+                       if time.localtime(mon0 + h * 3600).tm_hour == 23]
+        self.assertEqual(t2_hours, expected_t2)
+        # 周末（8/22 周六、8/23 周日）任务二仍在 23:00 执行
+        sat2300 = _local_ts(2026, 8, 22, 23, 0)
+        sun2300 = _local_ts(2026, 8, 23, 23, 0)
+        self.assertIn(sat2300, t2_hours)
+        self.assertIn(sun2300, t2_hours)
+        # 任务一周六周日零执行
+        weekend = [ts for ts in t1_hours
+                   if time.localtime(ts).tm_wday >= 5]
+        self.assertEqual(weekend, [])
 
 
 # ---------------------------------------------------------------------------
@@ -562,9 +917,13 @@ class TestKeepalive(SchedulerCoreTest):
             "keepalive_ahead_seconds=?, cache_ttl_hours=?, prefer_cache=? "
             "WHERE id=?", (ahead, ttl_hours, prefer_cache, report_id))
         if with_schedule:
+            cur = conn.execute(
+                "INSERT INTO report_schedules (name, enabled, fail_count, "
+                "next_run_at) VALUES ('', 1, ?, ?)", (fail_count, NOW))
+            sid = cur.lastrowid
             conn.execute(
-                "INSERT INTO report_schedules (report_id, next_run_at, "
-                "fail_count) VALUES (?,?,?)", (report_id, NOW, fail_count))
+                "INSERT INTO schedule_reports (schedule_id, report_id, "
+                "order_index, enabled) VALUES (?,?,0,1)", (sid, report_id))
         conn.commit()
         conn.close()
 
@@ -642,10 +1001,10 @@ class TestKeepalive(SchedulerCoreTest):
         """B16：单个报表保活异常仅告警，其余报表继续处理。"""
         conn = _get_conn()
         conn.execute(
-            "INSERT INTO report_configs (name,sql_query,default_page_size,"
+            "INSERT INTO report_configs (id,name,sql_query,default_page_size,"
             "pool_id,prefer_cache,cache_ttl_hours,keepalive_enabled,"
             "keepalive_ahead_seconds) "
-            "VALUES ('报表B','SELECT 2',20,1,1,6,1,300)")
+            "VALUES (2,'报表B','SELECT 2',20,1,1,6,1,300)")
         conn.commit()
         conn.close()
         self._enable_keepalive(report_id=1, ahead=600)

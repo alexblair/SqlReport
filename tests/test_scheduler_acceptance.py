@@ -109,12 +109,14 @@ def _set_up_db():
             updated_at TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS report_schedules (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id        INTEGER NOT NULL UNIQUE,
+            name             TEXT    NOT NULL DEFAULT '',
             schedule_type    TEXT    NOT NULL DEFAULT 'interval',
             interval_minutes INTEGER NOT NULL DEFAULT 60,
             daily_time       TEXT    NOT NULL DEFAULT '08:00',
             misfire_policy   TEXT    NOT NULL DEFAULT 'skip',
             enabled          INTEGER NOT NULL DEFAULT 1,
+            exclusions       TEXT,
+            audit_enabled    INTEGER NOT NULL DEFAULT 0,
             next_run_at      REAL,
             last_run_at      REAL,
             last_status      TEXT,
@@ -123,6 +125,13 @@ def _set_up_db():
             last_duration_ms INTEGER,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS schedule_reports (
+            schedule_id INTEGER NOT NULL,
+            report_id   INTEGER NOT NULL,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (schedule_id, report_id)
         );
     """)
     conn.commit()
@@ -166,8 +175,8 @@ class AcceptanceBase(unittest.TestCase):
         self.addCleanup(cfg_patcher.stop)
 
         conn = _get_conn()
-        for table in ("report_schedules", "api_endpoints", "report_configs",
-                      "connection_pools"):
+        for table in ("schedule_reports", "report_schedules", "api_endpoints",
+                      "report_configs", "connection_pools"):
             conn.execute(f"DELETE FROM {table}")
         conn.execute(
             "INSERT INTO connection_pools "
@@ -264,13 +273,14 @@ class AcceptanceBase(unittest.TestCase):
     def _add_schedule(self, report_id=1, schedule_type="interval",
                       interval_minutes=30, daily_time="08:00",
                       misfire_policy="skip", enabled=1, next_run_at=1000.0,
-                      last_run_at=None, fail_count=0):
+                      last_run_at=None, fail_count=0, audit_enabled=0):
         conn = _get_conn()
         try:
             sid = config_db.upsert_schedule(
                 conn, report_id=report_id, schedule_type=schedule_type,
                 interval_minutes=interval_minutes, daily_time=daily_time,
                 misfire_policy=misfire_policy, enabled=enabled,
+                audit_enabled=audit_enabled,
                 next_run_at=next_run_at)
             conn.execute(
                 "UPDATE report_schedules SET fail_count=? WHERE id=?",
@@ -315,10 +325,14 @@ class AcceptanceBase(unittest.TestCase):
             "keepalive_ahead_seconds=?, cache_ttl_hours=?, prefer_cache=? "
             "WHERE id=?", (ahead, ttl_hours, prefer_cache, report_id))
         if with_schedule:
-            conn.execute(
-                "INSERT INTO report_schedules (report_id, next_run_at, "
-                "fail_count) VALUES (?,?,?)",
-                (report_id, NOW, fail_count))
+            sid = config_db.upsert_schedule(
+                conn, report_id=report_id, schedule_type="interval",
+                interval_minutes=30, daily_time="08:00",
+                misfire_policy="skip", enabled=1, next_run_at=NOW)
+            if fail_count:
+                conn.execute(
+                    "UPDATE report_schedules SET fail_count=? WHERE id=?",
+                    (fail_count, sid))
         conn.commit()
         conn.close()
 
@@ -405,14 +419,31 @@ class TestKeepaliveAcceptance(AcceptanceBase):
         self._set_snapshot_remaining(100)
         self.assertEqual(self.sched.run_keepalive_tick(now=NOW), 0)
 
+    def test_k18_multi_binding_single_rebuild(self):
+        """回归（2026-08-23 审查）：同一报表挂在多个启用任务下，保活扫描
+        必须去重只重建一次（JOIN 多行曾导致重复重建与计数虚高）。"""
+        self._enable_keepalive()
+        self._set_snapshot_remaining(100)
+        # 同一张报表 1 再挂第二个独立任务（多对多合法场景）
+        conn = _get_conn()
+        config_db.upsert_schedule(
+            conn, name="task2-same-report", report_ids=[1],
+            schedule_type="interval", interval_minutes=60,
+            daily_time="08:00", misfire_policy="skip", enabled=1,
+            next_run_at=NOW)
+        conn.close()
+        self.assertEqual(self.sched.run_keepalive_tick(now=NOW), 1)
+        self.mock_exec.assert_called_once()
+
     def test_k10_single_report_error_isolated(self):
         """B16：报表1 保活异常 → 报表2 仍正常重建。"""
         self._add_report(2, "报表B", keepalive_enabled=1,
                          keepalive_ahead_seconds=300, cache_ttl_hours=6)
         conn = _get_conn()
-        conn.execute("INSERT INTO report_schedules (report_id, next_run_at) "
-                     "VALUES (2, ?)", (NOW,))
-        conn.commit()
+        config_db.upsert_schedule(
+            conn, report_id=2, schedule_type="interval",
+            interval_minutes=30, daily_time="08:00",
+            misfire_policy="skip", enabled=1, next_run_at=NOW)
         conn.close()
         self._enable_keepalive(report_id=1, ahead=600)
         self._set_snapshot_remaining(100)
@@ -490,7 +521,9 @@ class TestKeepaliveAcceptance(AcceptanceBase):
         conn = _get_conn()
         try:
             row = conn.execute(
-                "SELECT * FROM report_schedules WHERE report_id=?",
+                "SELECT s.* FROM report_schedules s "
+                "JOIN schedule_reports sr ON sr.schedule_id=s.id "
+                "WHERE sr.report_id=? LIMIT 1",
                 (self.report_id,)).fetchone()
             self.assertEqual(row["last_status"], None)
             self.assertEqual(row["fail_count"], 0)
@@ -517,7 +550,7 @@ class TestMisfireAcceptance(AcceptanceBase):
     def test_m2_daily_skip_advance_and_audit(self):
         """B9：daily skip 当日已过 → 不补跑、next=次日 09:00、审计。"""
         sid = self._add_schedule(schedule_type="daily", daily_time="09:00",
-                                 misfire_policy="skip",
+                                 misfire_policy="skip", audit_enabled=1,
                                  next_run_at=_local_ts(2026, 8, 21, 9, 0))
         stats = self.sched.run_startup_scan(now=NOW)
         self.assertEqual(stats, {"ran": 0, "skipped": 1})
@@ -645,7 +678,7 @@ class TestMisfireAcceptance(AcceptanceBase):
 
     def test_m14_runtime_tick_uses_scheduler_trigger(self):
         """B11：运行期 tick 只按到期派发，trigger=scheduler（非 misfire）。"""
-        sid = self._add_schedule(next_run_at=NOW - 60)
+        sid = self._add_schedule(next_run_at=NOW - 60, audit_enabled=1)
         self.sched.run_tick(now=NOW)
         self.assertEqual(self.mock_exec.call_count, 1)
         audit = self._audit_of("scheduled_run")
@@ -665,7 +698,7 @@ class TestMisfireAcceptance(AcceptanceBase):
 
     def test_m16_misfire_rerun_audit_trigger(self):
         """misfire 补跑审计 trigger=misfire，after_value 完整（B19）。"""
-        self._add_schedule(next_run_at=NOW - 7200)
+        self._add_schedule(next_run_at=NOW - 7200, audit_enabled=1)
         self.sched.run_startup_scan(now=NOW)
         records = self._audit_of("scheduled_run")
         self.assertEqual(len(records), 1)

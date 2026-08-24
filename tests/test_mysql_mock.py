@@ -1562,20 +1562,34 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
             self.conn, 999, "x", "SELECT 1", 10, 1))
 
     def test_delete_report(self):
-        """delete_report 成功时应返回 True（含定时任务应用层级联）。"""
+        """delete_report 成功时应返回 True（含 API 端点 + 定时任务应用层级联）。
+
+        批次2#5：单删对齐批量删级联语义——先查端点快照并删端点行，
+        再拆定时任务绑定、清理孤儿任务，最后删报表行。
+        """
         self.mock_cursor.rowcount = 1
         ok = db.delete_report(self.conn, 1)
         self.assertTrue(ok)
         calls = self.mock_cursor.execute.call_args_list
-        # 迁移 16 后：先探测任务表（mock 下判为存在），级联删任务行，再删报表
+        # 端点快照查询 → 删端点行（快照为空则缓存失效无文件调用）
+        # → 探测任务表（mock 下判为存在）→ 拆本报表绑定，
+        # 清理孤儿任务（无任何绑定）→ 删报表行
         self.assertEqual(
             calls,
-            [call("SELECT name FROM sqlite_master WHERE type='table' "
+            [call("SELECT * FROM api_endpoints WHERE report_id=%s ORDER BY id",
+                  (1,)),
+             call("DELETE FROM api_endpoints WHERE report_id=%s", (1,)),
+             call("SELECT name FROM sqlite_master WHERE type='table' "
                   "AND name='report_schedules'", ()),
-             call("DELETE FROM report_schedules WHERE report_id=%s", (1,)),
+             call("DELETE FROM schedule_reports WHERE report_id=%s", (1,)),
+             call("DELETE FROM report_schedules WHERE id IN ("
+                  "SELECT s.id FROM report_schedules s LEFT JOIN schedule_reports "
+                  "sr ON sr.schedule_id=s.id WHERE sr.schedule_id IS NULL)", ()),
              call("DELETE FROM report_configs WHERE id=%s", (1,))]
         )
-        self.mock_raw.commit.assert_called_once_with()
+        # 2 次 commit：delete_api_endpoints_by_report 端点清理自带 1 次
+        # （复用既有函数保持与批量删同源），delete_report 尾部统一提交 1 次
+        self.assertEqual(self.mock_raw.commit.call_count, 2)
 
     def test_delete_report_not_found(self):
         """delete_report 不存在时应返回 False。"""
@@ -2396,9 +2410,41 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
                if "UPDATE report_schedules" in (c.args[0] if c.args else "")]
         self.assertEqual(len(upd), 1)
         params = upd[0].args[1]
-        self.assertEqual(params[:6], ("daily", 30, "22:23", "skip", 1,
-                                      1787322180.0))
-        self.assertRegex(params[6], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+        # 多报表任务拆分后列序：name, schedule_type, interval_minutes,
+        # daily_time, misfire_policy, enabled, exclusions, audit_enabled,
+        # next_run_at, updated_at, id
+        self.assertEqual(params[0], "")             # name（未传默认空）
+        self.assertEqual(params[1], "daily")
+        self.assertEqual(params[2], 30)
+        self.assertEqual(params[3], "22:23")
+        self.assertEqual(params[4], "skip")
+        self.assertEqual(params[5], 1)
+        self.assertIsNone(params[6])            # exclusions（未传）
+        self.assertEqual(params[7], 0)          # audit_enabled（未传默认 0）
+        self.assertEqual(params[8], 1787322180.0)  # next_run_at
+        self.assertRegex(params[9], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+    def test_sync_schedule_reports_no_sqlite_dialect(self):
+        """回归（2026-08-23 审查）：绑定同步不得使用 INSERT OR REPLACE
+        （SQLite 方言，MySQL 引擎下 1064）；重复 report_ids 在应用层保序
+        去重，避免 (schedule_id, report_id) 主键冲突。"""
+        self.mock_cursor.fetchone.return_value = None   # 任务名未命中 → 创建分支
+        self.mock_cursor.lastrowid = 7
+        sid = db.upsert_schedule(self.conn, name="组合任务",
+                                 report_ids=[9, 9, 3], next_run_at=100.0)
+        self.assertEqual(sid, 7)
+        calls = self.mock_cursor.execute.call_args_list
+        for call in calls:
+            sql = call.args[0] if call.args else ""
+            self.assertNotIn(
+                "OR REPLACE", sql.upper(),
+                msg=f"SQL 含 SQLite 方言 OR REPLACE，MySQL 下将 1064: {sql[:120]}")
+        ins = [call.args[1] for call in calls
+               if "INSERT INTO schedule_reports"
+               in (call.args[0] if call.args else "")]
+        self.assertEqual(len(ins), 2)
+        self.assertEqual([p[1] for p in ins], [9, 3])   # 去重保序
+        self.assertEqual([p[2] for p in ins], [0, 1])   # order_index 连续
 
     def test_set_schedule_enabled_no_dialect(self):
         """回归（2026-08-21 事故同源，修复遗漏）：set_schedule_enabled
@@ -2442,6 +2488,27 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
         # 幂等补列段存在（存量库升级）
         self.assertIn("SHOW COLUMNS FROM report_schedules", mysql_seg)
         self.assertIn("ADD COLUMN last_duration_ms", mysql_seg)
+
+    def test_mysql_migration_17_schedule_reports_and_drop_report_id(self):
+        """迁移 17（G1 MySQL 侧）：MySQL 段必须含 report_id 列探测 → 建
+        schedule_reports → 回填 INSERT...SELECT id,report_id → DROP COLUMN
+        report_id → 补 name/exclusions/audit_enabled。否则旧库升级后：
+        report_id 残留 UNIQUE、schedule_reports 空表 → 多报表解耦失效。
+        """
+        import pathlib
+        src = pathlib.Path("/opdev/SqlReport/config_db.py").read_text(
+            encoding="utf-8")
+        mysql_seg = src[src.index("_init_mysql_migrations"):]
+        self.assertIn("SHOW COLUMNS FROM report_schedules", mysql_seg)
+        self.assertIn("CREATE TABLE IF NOT EXISTS schedule_reports", mysql_seg)
+        self.assertIn("INSERT INTO schedule_reports (schedule_id, report_id, ",
+                      mysql_seg)
+        self.assertIn("SELECT id, report_id, 0, 1", mysql_seg)
+        self.assertIn("ALTER TABLE report_schedules DROP COLUMN report_id",
+                      mysql_seg)
+        self.assertIn("ADD COLUMN name ", mysql_seg)
+        self.assertIn("ADD COLUMN exclusions TEXT", mysql_seg)
+        self.assertIn("ADD COLUMN audit_enabled ", mysql_seg)
 
 
 # ---------------------------------------------------------------------------

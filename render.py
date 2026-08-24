@@ -22,6 +22,7 @@ import os
 import threading
 from decimal import Decimal
 import app_config
+import branding
 import redis_cache
 import static_cache
 from filter_help import render_filter_help, FILTER_HINT_SUFFIX
@@ -797,6 +798,7 @@ _PAGE_HEADER_TEMPLATE = string.Template("""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+$favicon_link
 <title>$title</title>
 $common_css_assets
 <style>${extra_css}</style>
@@ -937,6 +939,12 @@ def _build_navbar_html(active: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
+def _get_branding_prefix() -> str:
+    """站点标识标题前缀（已 HTML 转义）；页面头模板全部注入点共用。"""
+    site = branding.get_site_branding()
+    return _escape(site["prefix"]) if site["prefix"] else ""
+
+
 def render_navbar(active: str = "") -> str:
     """
     渲染导航栏。
@@ -974,8 +982,13 @@ def render_page_header(title: str = "Web 报表工具",
         common_css_assets = f'<link rel="stylesheet" href="{css_url}">'
     else:
         common_css_assets = f"<style>{_COMMON_CSS}</style>"
+    # site-branding：favicon link 单点注入 + 环境标题前缀（HTML 转义，
+    # 前缀与 favicon 模式正交——default 模式下前缀仍生效，矩阵 M31）
+    prefix = _get_branding_prefix()
+    full_title = f"{prefix}{title}" if prefix else title
     return _PAGE_HEADER_TEMPLATE.substitute(
-        title=title.replace("$", "$$"),
+        title=full_title.replace("$", "$$"),
+        favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=common_css_assets,
         extra_css=extra_css.replace("$", "$$"),
         navbar=navbar_html,
@@ -3860,7 +3873,8 @@ def render_audit_page(
     else:
         audit_common_assets = f"<style>{_COMMON_CSS}</style>"
     html = _PAGE_HEADER_TEMPLATE.substitute(
-        title="审计日志",
+        title=_get_branding_prefix() + "审计日志",
+        favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=audit_common_assets,
         extra_css=extra_css.replace("$", "$$"),
         navbar=navbar_html,

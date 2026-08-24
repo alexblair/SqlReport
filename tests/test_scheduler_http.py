@@ -1,11 +1,10 @@
 """test_scheduler_http.py — 定时任务 HTTP/UI 集成测试（T4）。
 
-覆盖规格 .scratch/report-scheduler/spec.md 缺口（覆盖矩阵登记）：
-- G8  报表编辑页渲染「定时执行」「缓存保活」折叠区（编辑态任务行回显，
-       未配置报表用默认值）
-- G9  报表保存链路：调度字段落 report_schedules（参数变更重算 next_run_at，
-       参数未变保持原值）；保活字段落 report_configs；新建带调度字段同时建
-       任务；复制不继承任务（防双跑）
+覆盖规格 .scratch/scheduler-composition-exclusion/spec.md 缺口（覆盖矩阵登记）：
+- G8  报表编辑页「定时执行」折叠区已退役（任务统一在 /config/scheduler 管理，
+       spec §7.3）；「缓存保活」折叠区保留并回显
+- G9  报表保存只落保活字段；即使请求携带旧 schedule 字段也不创建任务行
+       （折叠区退役后该路径彻底关闭）；复制报表不继承任务（防双跑）
 - G11 报表管理列表徽标 ⏰/♻（仅启用任务出 ⏰）；管理页 /config/scheduler
        列表列 + 全局停用横幅（B17 页面可看不可自动跑）
 - B21 手动触发端点（全局停用/未启动降级为一次性实例同步执行）、启停端点
@@ -103,12 +102,14 @@ def _set_up_db():
             keepalive_ahead_seconds INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS report_schedules (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id        INTEGER NOT NULL UNIQUE,
+            name             TEXT    NOT NULL DEFAULT '',
             schedule_type    TEXT    NOT NULL DEFAULT 'interval',
             interval_minutes INTEGER NOT NULL DEFAULT 60,
             daily_time       TEXT    NOT NULL DEFAULT '08:00',
             misfire_policy   TEXT    NOT NULL DEFAULT 'skip',
             enabled          INTEGER NOT NULL DEFAULT 1,
+            exclusions       TEXT,
+            audit_enabled    INTEGER NOT NULL DEFAULT 0,
             next_run_at      REAL,
             last_run_at      REAL,
             last_status      TEXT,
@@ -116,7 +117,14 @@ def _set_up_db():
             fail_count       INTEGER NOT NULL DEFAULT 0,
             last_duration_ms INTEGER,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-            updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+            updated_at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS schedule_reports (
+            schedule_id INTEGER NOT NULL,
+            report_id   INTEGER NOT NULL,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (schedule_id, report_id)
         );
     """)
     conn.commit()
@@ -138,7 +146,8 @@ class SchedulerHttpTest(unittest.TestCase):
         self.addCleanup(cfg_patcher.stop)
 
         conn = _get_conn()
-        for table in ("report_schedules", "report_configs", "connection_pools"):
+        for table in ("report_schedules", "schedule_reports", "report_configs",
+                      "connection_pools"):
             conn.execute(f"DELETE FROM {table}")
         # 种子行显式固定 id=1（跨测试方法持久库的 AUTOINCREMENT 防漂移）
         conn.execute(
@@ -192,9 +201,9 @@ class SchedulerHttpTest(unittest.TestCase):
         return code, result, headers
 
     def _add_schedule_row(self, report_id=1, last_run_at=None, **overrides):
-        args = dict(report_id=report_id, schedule_type="interval",
+        args = dict(report_ids=[report_id], schedule_type="interval",
                     interval_minutes=30, daily_time="08:00",
-                    misfire_policy="skip", enabled=1,
+                    misfire_policy="skip", enabled=1, audit_enabled=1,
                     next_run_at=time.time() - 60)
         args.update(overrides)
         conn = _get_conn()
@@ -213,8 +222,9 @@ class SchedulerHttpTest(unittest.TestCase):
         conn = _get_conn()
         try:
             row = conn.execute(
-                "SELECT * FROM report_schedules WHERE report_id=?",
-                (report_id,)).fetchone()
+                "SELECT s.* FROM report_schedules s "
+                "JOIN schedule_reports sr ON sr.schedule_id=s.id "
+                "WHERE sr.report_id=? LIMIT 1", (report_id,)).fetchone()
             return dict(row) if row else None
         finally:
             conn.close()
@@ -252,28 +262,23 @@ class SchedulerHttpTest(unittest.TestCase):
 
 class TestReportFormSchedule(SchedulerHttpTest):
 
-    def test_edit_page_renders_schedule_and_keepalive_sections(self):
-        """G8：编辑页含定时/保活折叠区，任务行字段回显到表单默认值。"""
+    def test_edit_page_renders_keepalive_but_no_schedule_foldout(self):
+        """G8：报表编辑页含「缓存保活」折叠区；「定时执行」折叠区已退役
+        （任务统一在 /config/scheduler 管理，spec §7.3）。"""
         self._add_schedule_row(schedule_type="daily", daily_time="09:30",
                                misfire_policy="run_once", interval_minutes=99)
         _, body, _ = self._get("/config/reports/1/edit")
-        self.assertIn("定时执行", body)
         self.assertIn("缓存保活", body)
-        self.assertIn('value="09:30"', body)              # daily 回显
-        self.assertIn('value="run_once"', body)           # 补偿策略回显
-        # 未配任务的报表也正常渲染折叠区（默认值）
-        self._add_schedule_row()                          # 先确保存在再删除场景
-        conn = _get_conn()
-        conn.execute("DELETE FROM report_schedules WHERE report_id=1")
-        conn.commit()
-        conn.close()
-        _, body, _ = self._get("/config/reports/1/edit")
-        self.assertIn('name="schedule_type"', body)
-        self.assertIn('value="08:00"', body)              # 默认时刻
+        self.assertNotIn("⏰ 定时执行", body)            # 折叠区退役
+        self.assertNotIn('name="schedule_type"', body)
+        self.assertNotIn('name="schedule_enabled"', body)
+        self.assertNotIn('name="interval_minutes"', body)
+        self.assertNotIn('name="daily_time"', body)
+        self.assertNotIn('name="misfire_policy"', body)
 
-    def test_save_persists_schedule_and_keepalive(self):
-        """G9：保存带调度+保活字段 → 任务行/报表行落库，next_run_at 未来。"""
-        before = time.time()
+    def test_save_persists_keepalive_but_no_schedule_task(self):
+        """G9：保存报表只落保活字段；即使请求携带旧 schedule 字段也不创建
+        任务行（折叠区退役后该路径彻底关闭）。"""
         code, result, headers = self._post("/config/reports/1/edit",
                                            self._base_form(
                                                schedule_enabled="1",
@@ -284,49 +289,10 @@ class TestReportFormSchedule(SchedulerHttpTest):
                                                keepalive_ahead_seconds="900"))
         self.assertEqual(code, 302)
         sched = self._sched_row()
-        self.assertIsNotNone(sched)
-        self.assertEqual(sched["schedule_type"], "daily")
-        self.assertEqual(sched["daily_time"], "16:30")
-        self.assertEqual(sched["misfire_policy"], "run_once")
-        self.assertEqual(sched["enabled"], 1)
-        self.assertGreater(sched["next_run_at"], before)
-        nxt = time.localtime(sched["next_run_at"])
-        self.assertEqual((nxt.tm_hour, nxt.tm_min), (16, 30))
-        report = self._report_row()
-        self.assertEqual(report["keepalive_enabled"], 1)
-        self.assertEqual(report["keepalive_ahead_seconds"], 900)
-        self.assertEqual(len(self._audit_of("create_schedule")), 1)
-
-    def test_save_disabled_clears_schedule(self):
-        """未勾选启用 → upsert enabled=0（保留配置但不再派发）。"""
-        self._add_schedule_row()
-        self._post("/config/reports/1/edit", self._base_form())
-        self.assertEqual(self._sched_row()["enabled"], 0)
-
-    def test_save_unchanged_params_keeps_next_run_at(self):
-        """G9：调度参数完全未变 → next_run_at 保持原值（不扰动节拍）。"""
-        fixed_next = time.time() + 3600
-        self._add_schedule_row(interval_minutes=30, next_run_at=fixed_next)
-        self._post("/config/reports/1/edit",
-                   self._base_form(schedule_enabled="1"))
-        self.assertAlmostEqual(self._sched_row()["next_run_at"],
-                               fixed_next, delta=1)
-
-    def test_report_add_creates_schedule(self):
-        """新建报表带调度字段 → 报表与任务同时创建。"""
-        form = self._base_form(name="新报表", schedule_enabled="1",
-                               schedule_type="interval",
-                               interval_minutes="45")
-        code, result, _ = self._post("/config/reports/add", form)
-        self.assertEqual(code, 302)
-        conn = _get_conn()
-        new_id = conn.execute(
-            "SELECT id FROM report_configs WHERE name='新报表'").fetchone()[0]
-        conn.close()
-        sched = self._sched_row(new_id)
-        self.assertIsNotNone(sched)
-        self.assertEqual(sched["interval_minutes"], 45)
-        self.assertGreater(sched["next_run_at"], time.time())
+        self.assertIsNone(sched)                        # 不再自动建任务
+        row = self._report_row()
+        self.assertEqual(row["keepalive_enabled"], 1)
+        self.assertEqual(row["keepalive_ahead_seconds"], 900)
 
     def test_report_copy_does_not_inherit_schedule(self):
         """复制报表不继承定时任务（避免新旧双跑）。"""
@@ -338,7 +304,7 @@ class TestReportFormSchedule(SchedulerHttpTest):
         copy_id = conn.execute(
             "SELECT id FROM report_configs WHERE name='副本A'").fetchone()[0]
         count = conn.execute(
-            "SELECT COUNT(*) FROM report_schedules WHERE report_id=?",
+            "SELECT COUNT(*) FROM schedule_reports WHERE report_id=?",
             (copy_id,)).fetchone()[0]
         conn.close()
         self.assertEqual(count, 0)
@@ -383,10 +349,13 @@ class TestSchedulerPage(SchedulerHttpTest):
              "entity_id": 1, "timestamp": now - 7200,
              "after_value": _json.dumps({"trigger": "scheduler",
                                          "status": "success",
-                                         "duration_ms": 42})},
+                                         "duration_ms": 42,
+                                         "report_total": 3,
+                                         "report_executed": 2,
+                                         "report_names": ["报表A", "报表C"]})},
         ]
         with patch("audit_db.get_recent_schedule_events",
-                   return_value=events):
+                    return_value=events):
             _, body, _ = self._get("/config/scheduler")
         self.assertIn("最近执行记录", body)
         self.assertIn("✅ 成功", body)
@@ -395,13 +364,31 @@ class TestSchedulerPage(SchedulerHttpTest):
         self.assertIn("手动", body)                       # trigger=manual
         self.assertIn("跳过（推进到下次计划）", body)       # misfire skip
         self.assertIn("来自审计日志", body)
+        # T3：记录表 6 列，含「任务」「报表」列头
+        self.assertIn(">任务</th>", body)
+        self.assertIn(">报表</th>", body)
+        # T3：任务列链接回编辑页
+        self.assertIn('href="/config/scheduler?edit=1"', body)
+        # T3：报表列展示「报表：…（n/m）」
+        self.assertIn("报表：", body)
 
-    def test_page_empty_events_block(self):
-        """无执行记录时区块仍渲染（空状态占位）。"""
+    def test_page_empty_events_block_all_audit_off(self):
+        """无执行记录 + 所有任务未开审计 → 显示审计关闭提示（T4 空态）。"""
+        self._add_schedule_row(audit_enabled=0)
         with patch("audit_db.get_recent_schedule_events", return_value=[]):
             _, body, _ = self._get("/config/scheduler")
         self.assertIn("最近执行记录", body)
         self.assertIn("暂无执行记录", body)
+        self.assertIn("所有任务均未开启", body)
+
+    def test_page_empty_events_block_some_audit_on(self):
+        """无执行记录 + 有任务开启审计 → 仅通用占位，不含审计关闭提示（T4）。"""
+        self._add_schedule_row(audit_enabled=1)
+        with patch("audit_db.get_recent_schedule_events", return_value=[]):
+            _, body, _ = self._get("/config/scheduler")
+        self.assertIn("最近执行记录", body)
+        self.assertIn("暂无执行记录", body)
+        self.assertNotIn("所有任务均未开启", body)
 
     def test_page_shows_banner_when_globally_disabled(self):
         """B17：全局停用 → 横幅提示，页面仍可查看。"""
@@ -435,13 +422,90 @@ class TestSchedulerPage(SchedulerHttpTest):
             self.assertIn("♻", body)
             # 停用任务不出 ⏰ 徽标
             conn.execute(
-                "UPDATE report_schedules SET enabled=0 WHERE report_id=1")
+                "UPDATE report_schedules SET enabled=0 WHERE id=?",
+                (self._sched_row(1)["id"],))
             conn.commit()
             body = config.render_reports_page(conn)
             self.assertNotIn(badge_sched, body)
             self.assertIn("♻", body)
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 定时任务 UX 优化（scheduler-ux-optimization）：T1 表单 config-form 化、
+# T2 报表三列参与执行、T3 记录增强（测试在 test_scheduler_core）、T4 列表合并
+# ---------------------------------------------------------------------------
+
+class TestSchedulerUXForm(SchedulerHttpTest):
+    """T1/T2：新增表单（无预填，默认 interval）。
+
+    表单始终渲染在 /config/scheduler 页面底部（build_scheduler_task_form_html
+    无 prefill）。所有报表初始未绑定 → 不渲染 bind_enabled 输入（T2 根因修复）。
+    """
+
+    def _form_body(self, query=""):
+        _, body, _ = self._get("/config/scheduler", query)
+        return body
+
+    def test_form_uses_config_form_class_no_inline_maxwidth(self):
+        """T1：表单改用 config-form sched-form，不再硬编码 max-width:640px。"""
+        body = self._form_body()
+        self.assertIn('class="config-form sched-form"', body)
+        self.assertNotIn("max-width:640px", body)
+
+    def test_form_new_defaults_interval_shows_only_interval_row(self):
+        """T1/A1：新建默认 interval → row-interval 可见、row-daily 隐藏。"""
+        body = self._form_body()
+        self.assertIn('<div class="schedule-row span-full" id="row-interval">',
+                      body)
+        self.assertIn('<div class="schedule-row span-full" id="row-daily" '
+                      'style="display:none">', body)
+
+    def test_form_edit_daily_shows_only_daily_row(self):
+        """T1/A2：编辑预填 daily → row-daily 可见、row-interval 隐藏。"""
+        self._add_schedule_row(schedule_type="daily", daily_time="09:30")
+        sid = self._sched_row()["id"]
+        body = self._form_body(f"edit={sid}")
+        self.assertIn('<div class="schedule-row span-full" id="row-daily"',
+                      body)
+        self.assertIn('<div class="schedule-row span-full" id="row-interval" '
+                      'style="display:none">', body)
+
+    def test_form_three_column_report_table(self):
+        """T2：关联报表为「绑定|报表|参与执行」三列表头。"""
+        body = self._form_body()
+        self.assertIn("绑定</th><th>报表</th><th>参与执行", body)
+
+    def test_form_unbound_report_has_no_bind_enabled_input(self):
+        """T2/B3 根因：未绑定报表行不渲染 bind_enabled 输入，参与执行列显示「—」。"""
+        # 新表单下报表A(id=1)未绑定
+        body = self._form_body()
+        self.assertIn('name="report_ids" value="1"', body)
+        self.assertNotIn("bind_enabled_1", body)
+        self.assertIn('<span class="muted">—</span>', body)
+
+    def test_form_bound_report_renders_bind_enabled_input(self):
+        """T2/B1：编辑已绑定任务时，绑定报表渲染 bind_enabled 输入。"""
+        self._add_schedule_row()
+        sid = self._sched_row()["id"]
+        body = self._form_body(f"edit={sid}")
+        self.assertIn("bind_enabled_1", body)
+
+
+class TestSchedulerPlanColumn(SchedulerHttpTest):
+    """T4：任务列表「计划」列（合并原类型/计划）。"""
+
+    def test_plan_interval_text(self):
+        self._add_schedule_row(schedule_type="interval", interval_minutes=45)
+        _, body, _ = self._get("/config/scheduler")
+        self.assertIn("每 45 分钟", body)
+        self.assertNotIn("<th>类型</th>", body)       # T4 合并：无独立类型列
+
+    def test_plan_daily_text(self):
+        self._add_schedule_row(schedule_type="daily", daily_time="08:30")
+        _, body, _ = self._get("/config/scheduler")
+        self.assertIn("每天 08:30", body)
 
 
 # ---------------------------------------------------------------------------
@@ -477,8 +541,12 @@ class TestSchedulerEndpoints(SchedulerHttpTest):
         self.assertEqual(row["enabled"], 1)
         self.assertGreater(row["next_run_at"], time.time())
         self.assertNotAlmostEqual(row["next_run_at"], stale_next, delta=1)
-        self.assertTrue(any(a["action"] == "toggle_schedule"
-                            for a in self.audit_calls))
+        toggles = [a for a in self.audit_calls if a["action"] == "toggle_schedule"]
+        self.assertTrue(toggles)
+        # S15：解耦后审计文案引用任务名/任务 id，不再引用 report#/report_id
+        rec = toggles[-1]
+        self.assertNotIn("report#", rec.get("detail") or "")
+        self.assertNotIn("report_id", str(rec.get("before_value") or {}))
 
     def test_delete_removes_row_and_audits(self):
         sid = self._add_schedule_row()
@@ -487,6 +555,122 @@ class TestSchedulerEndpoints(SchedulerHttpTest):
         self.assertIsNone(self._sched_row())
         rec = self._audit_of("delete_schedule")[0]
         self.assertEqual(rec["entity_id"], sid)
+
+
+# ---------------------------------------------------------------------------
+# 回归（2026-08-23 审查）：save 必须消费 edit_id 隐藏域
+#
+# 表单带 edit_id 但后端丢弃 → 定位全靠任务名：编辑改名会另建重复任务、
+# 同名任务互相顶替更新（数据事故源）。
+# ---------------------------------------------------------------------------
+
+class TestSchedulerSaveEditId(SchedulerHttpTest):
+
+    def _task_count(self):
+        conn = _get_conn()
+        try:
+            return conn.execute(
+                "SELECT COUNT(*) FROM report_schedules").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _save(self, **extra):
+        fields = dict(name="任务X", schedule_type="interval",
+                      interval_minutes="45", daily_time="08:00",
+                      misfire_policy="skip", report_ids="1",
+                      exclusions="", action="save_close")
+        fields.update(extra)
+        return self._post("/config/scheduler/save", fields)
+
+    def test_save_with_edit_id_updates_same_task_even_renamed(self):
+        """编辑态改名 → 原任务行原地更新，不新建重复任务。"""
+        sid = self._add_schedule_row(name="旧名")
+        code, result, _ = self._save(edit_id=str(sid), name="新名",
+                                     interval_minutes="90")
+        self.assertEqual(code, 302)
+        self.assertNotIn("错误", result)
+        self.assertEqual(self._task_count(), 1)
+        row = self._sched_row()
+        self.assertIsNotNone(row)
+        self.assertEqual((row["id"], row["name"], row["interval_minutes"]),
+                         (sid, "新名", 90))
+
+    def test_save_new_with_existing_name_rejected(self):
+        """新建时任务名已被占用 → 回显错误且不落库（不顶替既有任务）。"""
+        self._add_schedule_row(name="占用")
+        code, result, _ = self._save(name="占用")
+        self.assertEqual(code, 302)
+        self.assertIn("错误", urllib.parse.unquote(result))
+        self.assertIn("已存在", urllib.parse.unquote(result))
+        self.assertEqual(self._task_count(), 1)
+
+    def test_save_invalid_exclusions_rejected_without_write(self):
+        """排除规则 JSON 非法 → 回显错误且不落库（§7.3 不静默吞）。"""
+        code, result, _ = self._save(name="坏规则", exclusions="{bad json")
+        self.assertEqual(code, 302)
+        self.assertIn("错误", urllib.parse.unquote(result))
+        self.assertIn("排除", urllib.parse.unquote(result))
+        self.assertEqual(self._task_count(), 0)
+
+    def test_save_parses_binding_enabled(self):
+        """S10 UI：bind_enabled_<rid> 未勾选 → 该绑定停用（enabled=0）；
+        勾选或未显式提供 → 启用。"""
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO report_configs (id,name,sql_query,default_page_size,"
+            "pool_id,prefer_cache) VALUES (?,?,?,20,1,1)", (2, "报表B", "SELECT 2"))
+        conn.commit()
+        conn.close()
+        code, result, _ = self._save(report_ids="1,2", bind_enabled_1="1",
+                                     bind_enabled_2="1")
+        self.assertEqual(code, 302)
+        self.assertNotIn("错误", result)
+        sid = self._sched_row()["id"]
+        conn = _get_conn()
+        en = dict(conn.execute(
+            "SELECT report_id, enabled FROM schedule_reports "
+            "WHERE schedule_id=?", (sid,)).fetchall())
+        conn.close()
+        self.assertEqual(en, {1: 1, 2: 1})
+        # 编辑保存不勾 bind_enabled_2 → 绑定 2 停用，绑定 1 保留
+        code, result, _ = self._save(edit_id=str(sid), report_ids="1,2",
+                                     bind_enabled_1="1")
+        self.assertEqual(code, 302)
+        conn = _get_conn()
+        en = dict(conn.execute(
+            "SELECT report_id, enabled FROM schedule_reports "
+            "WHERE schedule_id=?", (sid,)).fetchall())
+        conn.close()
+        self.assertEqual(en, {1: 1, 2: 0})
+
+    def test_edit_link_targets_get_route(self):
+        """列表页编辑链接指向 GET /config/scheduler?edit=N（原指向 POST
+        端点 /config/scheduler/save，语义错误）。"""
+        self._add_schedule_row(name="链接检查")
+        _, body, _ = self._get("/config/scheduler")
+        self.assertIn('href="/config/scheduler?edit=', body)
+        self.assertNotIn('href="/config/scheduler/save?edit=', body)
+
+    def test_task_form_renders_exclusion_tree_editor(self):
+        """§7.3：排除规则为前端树编辑器骨架（增删规则/嵌套组/源码模式），
+        JSON 经隐藏域 name=exclusions 提交，不再暴露裸 textarea。"""
+        _, body, _ = self._get("/config/scheduler")
+        for fragment in ('id="excl-rules"', 'id="excl-json"',
+                         'name="exclusions"', "exclAddRule", "exclAddGroup",
+                         "exclToggleSource", "exclRebuild"):
+            self.assertIn(fragment, body)
+        # 可视化模式下不应再有可直接编辑提交的可见 exclusions 文本域
+        self.assertNotIn('<textarea name="exclusions"', body)
+
+    def test_task_form_prefills_exclusions_json(self):
+        """编辑态：既有排除树 JSON 转义后回填隐藏域供编辑器初始化。"""
+        import json as _json
+        tree = _json.dumps({"op": "OR", "children": [
+            {"type": "dow", "in": ["sat", "sun"]}]})
+        sid = self._add_schedule_row(name="带排除", exclusions=tree)
+        _, body, _ = self._get("/config/scheduler", f"edit={sid}")
+        self.assertIn("excl-json", body)
+        self.assertIn("sat", body)
 
 
 # ---------------------------------------------------------------------------
