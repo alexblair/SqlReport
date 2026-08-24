@@ -41,6 +41,7 @@ from render import (
     build_user_section_html,
     build_category_section_html,
     build_category_manage_section_html,
+    build_config_filter_box_html,
     render_page_header,
     render_page_footer,
     build_flash_html,
@@ -484,7 +485,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
   {hidden_id}
   <label>报表名称: <input type="text" name="name" value="{name}" required></label>
   <label class="span-full">SQL 查询语句:
-    <textarea name="sql_query" class="sql-textarea" placeholder="输入 MySQL 语句..." spellcheck="false" rows="8">{sql_query}</textarea>
+    <textarea name="sql_query" class="sql-textarea sql-editor" data-tab-indent="1" placeholder="输入 MySQL 语句..." spellcheck="false" rows="14">{sql_query}</textarea>
     <div class="sql-preview"></div>
     <div class="sql-toolbar">
       <button type="button" class="btn btn-outline btn-sm" onclick="formatSQL(this)">格式化 SQL</button>
@@ -718,13 +719,21 @@ def _render_category_section(conn) -> str:
 
 
 def render_reports_page(conn, flash: str = None) -> str:
-    """渲染报表管理独立页（PH-13：分类树 + 报表列表 + 批量操作；分类管理已并入本页）"""
+    """渲染报表管理独立页（PH-13：分类树 + 报表列表 + 批量操作；分类管理已并入本页）
+
+    批次5#15：页面主体包一层 id="sec-reports" 锚点，供移动/保存操作回跳定位。
+    批次6#21：flash 之下、第一个区块之上插入纯前端检索过滤框
+    （render.build_config_filter_box_html，公共 JS initConfigFilter 生效）。
+    """
     flash_html = build_flash_html(flash) if flash else ""
     return (render_page_header(title="Web 报表工具 - 报表管理", active_nav="config-reports",
                                 extra_css=_CONFIG_EXTRA_CSS)
             + flash_html
+            + build_config_filter_box_html()
             + '<h2 style="margin-bottom:0">报表管理</h2>'
+            + '<div id="sec-reports">'
             + _render_category_section(conn)
+            + '</div>'
             + render_page_footer())
 
 
@@ -783,10 +792,11 @@ def render_overview(conn, flash: str = None,
 <p style="color:#64748b;margin:0">共 {reports_count} 个报表，{categories_count} 个分类</p>
 </div>"""
     # PH-14 分类入口卡片：分类树/排序/CRUD 在独立页
+    # 批次6#27i：与「管理报表」按钮区分落点——分类按钮锚定合并页的分类区块
     categories_card = f"""<div class="card" style="margin-top:8px">
 <div class="section-title" style="font-size:16px;margin-bottom:8px">
   <span>📁 分类管理</span>
-  <span class="actions">{_link_btn("/config/reports", "管理分类", "btn btn-outline btn-sm")}</span>
+  <span class="actions">{_link_btn("/config/reports#sec-categories", "管理分类", "btn btn-outline btn-sm")}</span>
 </div>
 <p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
 </div>"""
@@ -966,16 +976,22 @@ def _parse_report_form(data: dict) -> dict:
 
 
 def _save_or_render(data: dict, render_fn, args: tuple, kwargs: dict,
-                    success_flash: str, redirect_url: str) -> tuple[int, str]:
+                    success_flash: str, redirect_url: str,
+                    anchor: str = None) -> tuple[int, str]:
     """统一「保存 / 保存并关闭」双按钮保存模式。
 
     - action=save       → 200 + 渲染表单页（flash=success_flash，留在当前页）
     - action=save_close → 302 + redirect_url?flash=success_flash（默认，返回上级）
+
+    anchor（批次5#16，spec ux-optimization）：可选锚点 id（如 report-3），
+    拼接在 query 之后（fragment 必须位于 URL 最末），供前端定位并高亮
+    刚保存的行。
     """
     action = data.get("action", "save_close")
     if action == "save":
         return 200, render_fn(*args, flash=success_flash, **kwargs)
-    return 302, f"{redirect_url}?flash={success_flash}"
+    fragment = f"#{anchor}" if anchor else ""
+    return 302, f"{redirect_url}?flash={success_flash}{fragment}"
 
 
 def _tolerant_int(value, default=None):
@@ -1169,7 +1185,7 @@ def handle_pool_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
         return _save_or_render(
             data, render_pool_form_page, (conn, pid), {},
             success_flash=f"连接池 {data['name']} 已创建 (id={pid})",
-            redirect_url="/config")
+            redirect_url="/config", anchor=f"pool-{pid}")
     except Exception as e:
         return 200, render_pool_form_page(conn, flash=f"错误: {e}",
                                           pool=_pool_from_form(data))
@@ -1193,7 +1209,7 @@ def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> t
             return _save_or_render(
                 data, render_pool_form_page, (conn, pool_id), {},
                 success_flash=f"连接池 {data['name']} 已更新",
-                redirect_url="/config")
+                redirect_url="/config", anchor=f"pool-{pool_id}")
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}",
@@ -1241,7 +1257,7 @@ def handle_user_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
     try:
         pw_hash = auth.hash_password(data["password"])
         uid = db.add_user(conn, data["username"], pw_hash, session_user=session_user)
-        return 302, f"/config?flash=用户 {data['username']} 已创建 (id={uid})"
+        return 302, f"/config?flash=用户 {data['username']} 已创建 (id={uid})#user-{uid}"
     except Exception as e:
         return 200, render_user_form_page(conn, flash=f"错误: {e}",
                                           user=_user_from_form(data))
@@ -1272,8 +1288,9 @@ def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> t
                 reason = ("其登录会话已全部注销，需重新登录"
                           if password_changed else
                           f"已改名为 {data['username']}，其登录会话已注销，需重新登录")
-                return 302, f"/config?flash=用户 {target['username']} 已更新，{reason}"
-            return 302, f"/config?flash=用户 {data['username']} 已更新"
+                return 302, (f"/config?flash=用户 {target['username']} 已更新，{reason}"
+                             f"#user-{user_id}")
+            return 302, f"/config?flash=用户 {data['username']} 已更新#user-{user_id}"
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_user_form_page(conn, user_id, flash=f"错误: {e}",
@@ -1323,7 +1340,7 @@ def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
             success_flash=f"报表 {data['name']} 已创建 (id={rid})",
-            redirect_url="/config/reports")
+            redirect_url="/config/reports", anchor=f"report-{rid}")
     except Exception as e:
         return 200, render_report_form_page(conn, flash=f"错误: {e}",
                                             report=_report_from_form(data))
@@ -1353,7 +1370,7 @@ def handle_report_edit(conn, report_id: int, form_body: str, session_user=None) 
             return _save_or_render(
                 data, render_report_form_page, (conn, report_id), {},
                 success_flash=f"报表 {data['name']} 已更新",
-                redirect_url="/config/reports")
+                redirect_url="/config/reports", anchor=f"report-{report_id}")
         return 302, "/config/reports?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}",
@@ -1389,7 +1406,7 @@ def handle_report_copy(conn, report_id: int, form_body: str, session_user=None) 
         return _save_or_render(
             data, render_report_form_page, (conn, rid), {},
             success_flash=f"报表 {data['name']} 已创建（复制自 id={report_id}）",
-            redirect_url="/config/reports")
+            redirect_url="/config/reports", anchor=f"report-{rid}")
     except Exception as e:
         return 200, render_report_form_page(conn, report_id, flash=f"错误: {e}", copy_mode=True,
                                             report=_report_from_form(data, report_id))
@@ -1950,9 +1967,19 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] == "delete" and route["id"]:
                 code, result = handle_pool_delete(conn, route["id"], session_user=session_user)
             elif route["action"] in ("move-up", "move-down") and route["id"]:
+                # 批次5#15（spec ux-optimization）：移动成功/失败均带 flash，
+                # 回跳附区块锚点定位原位（移动前查一次名称，查不到用 ID）
                 direction = "up" if route["action"] == "move-up" else "down"
-                db.move_pool(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config", {}
+                pool = db.get_pool(conn, route["id"])
+                # 找茬 L2：对象名经 quote 编码后拼 URL——含 # & 的名称
+                # 不再截断 flash 文案或锚点（parse_qs 回读时自动解码）
+                obj_name = urllib.parse.quote(
+                    pool["name"] if pool else str(route["id"]), safe="")
+                verb = "已上移" if direction == "up" else "已下移"
+                if db.move_pool(conn, route["id"], direction, session_user=session_user):
+                    return 302, f"/config?flash={verb} {obj_name}#sec-pools", {}
+                return 302, (f"/config?flash=错误: 移动失败（{obj_name}"
+                             f" 已在边界或不存在）#sec-pools"), {}
             else:
                 return 302, "/config", {}
             return _redirect_or_render(code, result)
@@ -1993,9 +2020,16 @@ def handle_request(conn, method: str, path: str, query: str,
                 code, result = handle_report_move_category(conn, route["id"], form_body or "", session_user=session_user)
                 return _redirect_or_render(code, result)
             elif route["action"] in ("move-up", "move-down") and route["id"]:
+                # 批次5#15：同连接池移动——flash + 锚点回跳
                 direction = "up" if route["action"] == "move-up" else "down"
-                db.move_report(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config/reports", {}
+                rpt = db.get_report(conn, route["id"])
+                obj_name = urllib.parse.quote(
+                    rpt["name"] if rpt else str(route["id"]), safe="")
+                verb = "已上移" if direction == "up" else "已下移"
+                if db.move_report(conn, route["id"], direction, session_user=session_user):
+                    return 302, f"/config/reports?flash={verb} {obj_name}#sec-reports", {}
+                return 302, (f"/config/reports?flash=错误: 移动失败（{obj_name}"
+                             f" 已在边界或不存在）#sec-reports"), {}
             else:
                 return 302, "/config/reports", {}
             return _redirect_or_render(code, result)
@@ -2008,9 +2042,16 @@ def handle_request(conn, method: str, path: str, query: str,
             elif route["action"] == "delete" and route["id"]:
                 code, result = handle_category_delete(conn, route["id"], session_user=session_user)
             elif route["action"] in ("move-up", "move-down") and route["id"]:
+                # 批次5#15：分类移动——flash + 锚点回跳
                 direction = "up" if route["action"] == "move-up" else "down"
-                db.move_category(conn, route["id"], direction, session_user=session_user)
-                return 302, "/config/reports", {}
+                cat = db.get_category(conn, route["id"])
+                obj_name = urllib.parse.quote(
+                    cat["name"] if cat else str(route["id"]), safe="")
+                verb = "已上移" if direction == "up" else "已下移"
+                if db.move_category(conn, route["id"], direction, session_user=session_user):
+                    return 302, f"/config/reports?flash={verb} {obj_name}#sec-categories", {}
+                return 302, (f"/config/reports?flash=错误: 移动失败（{obj_name}"
+                             f" 已在边界或不存在）#sec-categories"), {}
             else:
                 return 302, "/config/reports", {}
             return _redirect_or_render(code, result)
@@ -2489,15 +2530,21 @@ def _redirect_or_render(code: int, result: str) -> tuple[int, str, dict]:
 
     如果是 302 重定向，结果即为 Location；否则为 HTML 响应体。
     对 Location 中的 query 参数进行 URL 编码，确保非 ASCII 字符（如中文）正确传输。
+    fragment（#锚点，批次5#16）不参与编码，保持在 URL 最末。
     """
     if code == 302 and result.startswith("/"):
+        # 先分离 fragment，防止锚点被并入最后一个 query 参数值
+        fragment = ""
+        if "#" in result:
+            result, raw_fragment = result.split("#", 1)
+            fragment = f"#{raw_fragment}"
         # URL 编码 query 参数（flash 消息可能包含中文）
         if "?" in result:
             path, qs = result.split("?", 1)
             params = urllib.parse.parse_qs(qs, keep_blank_values=True)
             encoded_qs = urllib.parse.urlencode(params, doseq=True)
-            encoded_url = f"{path}?{encoded_qs}"
+            encoded_url = f"{path}?{encoded_qs}{fragment}"
         else:
-            encoded_url = result
+            encoded_url = result + fragment
         return 302, encoded_url, {"Location": encoded_url}
     return code, result, {}

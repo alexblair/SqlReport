@@ -27,6 +27,7 @@ import re
 import urllib.parse
 import time
 import threading
+import json
 import db
 from typing import Optional
 import redis_cache
@@ -61,7 +62,8 @@ from render import (
     build_sort_bar_html, build_table_header_html, build_table_body_html,
     build_controls_bar_html, build_field_settings_panel_html,
     build_sort_settings_panel_html, build_filter_form_html,
-    build_filter_action_html, build_report_switcher_html,
+    build_filter_action_html, build_clear_filters_href,
+    build_report_switcher_html,
     build_api_urls_section_html, build_flash_html,
     _MD_CSS,
 )
@@ -456,7 +458,12 @@ _DB_ERRNO_HINTS = {
     2003: "无法连接数据库：目标库暂时不可用，请稍后重试或联系管理员",
     2005: "数据库地址无法识别：请检查连接池主机配置",
     1205: "数据库锁等待超时：可能有其他任务占用该表，请稍后重试",
+    # 批次5#18（spec ux-optimization）：read_timeout 触发的查询超时
+    1969: "查询超时：数据量过大或数据库繁忙，请缩小筛选范围后重试",
 }
+
+# 消息文本命中即视为读取超时（部分驱动/包装异常不携带 errno 1969）
+_READ_TIMEOUT_MSG_MARKERS = ("Read timed out",)
 
 
 def humanize_db_error(e: Exception) -> tuple[str, str]:
@@ -464,6 +471,7 @@ def humanize_db_error(e: Exception) -> tuple[str, str]:
 
     返回 (friendly, raw)：friendly 为人话主文案；raw 为原始错误文本，
     供页面折叠展示与技术排查。未识别的异常原样返回（不制造虚假解释）。
+    批次5#18：errno 1969 或消息含 "Read timed out" 时映射为查询超时人话。
     """
     raw = str(e)
     errno = getattr(e, "errno", None)
@@ -471,6 +479,8 @@ def humanize_db_error(e: Exception) -> tuple[str, str]:
         m = re.search(r"\((\d{4})\)", raw) or re.match(r"^(\d{4})\s", raw)
         errno = int(m.group(1)) if m else None
     hint = _DB_ERRNO_HINTS.get(errno)
+    if not hint and any(marker in raw for marker in _READ_TIMEOUT_MSG_MARKERS):
+        hint = _DB_ERRNO_HINTS[1969]
     if not hint:
         return raw, raw
     return hint, raw
@@ -486,10 +496,26 @@ def render_sql_error_section(friendly: str, raw: str) -> str:
             f'margin:6px 0 0">{_escape(raw)}</pre></details></div>')
 
 
-def _render_page_header() -> str:
-    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 代码高亮 CSS + Markdown 排版 CSS + 导航高亮。"""
-    return render_page_header(title="Web 报表工具", active_nav="report",
+def _render_page_header(title: str = None) -> str:
+    """报表页头部：公共 CSS（render._COMMON_CSS）+ 报表页特有 CSS + 代码高亮 CSS + Markdown 排版 CSS + 导航高亮。
+
+    批次6#27a：title 可选传入（如报表名），默认保持站点标题。
+    """
+    return render_page_header(title=title or "Web 报表工具", active_nav="report",
                               extra_css=_CSS + markdown_render.codehilite_css() + _MD_CSS)
+
+
+def _js_string(s: str) -> str:
+    r"""把 Python 字符串安全内嵌进 <script> 的 JS 字符串字面量。
+
+    json.dumps 保证引号/控制字符转义；再对 HTML 敏感字符做 unicode 转义
+    （如 \u003c 形式），防止 </script>、<!-- 等序列提前闭合脚本上下文。
+    """
+    out = json.dumps(str(s), ensure_ascii=False)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
+                    ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        out = out.replace(ch, esc)
+    return out
 
 
 _FOOTER = r"""</div>
@@ -894,9 +920,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    report: Optional[dict] = None,
                    conn=None,
                    cache: "QueryCache" = None,
-                   force_rebuild: bool = False) -> ReportResult:
+                   force_rebuild: bool = False,
+                   read_timeout: Optional[int] = None) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
+
+    read_timeout: MySQL 读取超时秒数，仅 Web 交互路径传 30（批次5#18）；
+    调度器/API 默认 None 不限制（找茬 H1：超长报表定时任务不受 30s 截断）。
 
     集成 Redis 缓存层：
     - 若报表启用了 prefer_cache 且 Redis 可用，优先读取 Redis 快照
@@ -1048,7 +1078,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 if not redis_hit:
                     # ---- MySQL 查询 ----
                     clean_sql = sql_query.rstrip("; \t\n\r")
-                    conn = db.create_mysql_connection(pool_config)
+                    conn = db.create_mysql_connection(
+                        pool_config, read_timeout=read_timeout)
                     try:
                         all_results = db.execute_mysql_query(conn, clean_sql, transactional=True)
                     except Exception as e:
@@ -1288,7 +1319,11 @@ def render_report_selector(conn) -> str:
                      '<a href="/config" class="btn btn-primary btn-sm">前往配置管理</a>'
                      '</div>')
 
+    # 批次6#22：最近查看快捷卡片挂载点——服务端不感知 localStorage，
+    # 公共 JS initRecentReports 在 DOMContentLoaded 时读取并渲染；
+    # 无记录时保持空白，页面结构不受影响。
     body = _render_page_header() + """
+<div id="recent-reports-mount"></div>
 <div class="card">
   <h2>选择报表</h2>
   <div class="report-select">
@@ -1357,7 +1392,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
     try:
         result = execute_report(report_id, actual_sql, pool_config,
                                 page, page_size, sorts or [], filters or [], refresh,
-                                active_index, report, conn)
+                                active_index, report, conn,
+                                read_timeout=30)
     except Exception as e:
         logging.error("报表 %d 查询执行失败: %s", report_id, e, exc_info=True)
         pool_name = pool_config.get("name", "?")
@@ -1491,7 +1527,12 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     col_index_map = {name: idx for idx, name in enumerate(all_columns)}
     display_indices = [col_index_map[c] for c in display_columns]
-    tbody = build_table_body_html(result.rows, display_indices)
+    # 批次5#19：空态区分——有筛选时显示「没有符合筛选条件的行」+ 清除筛选链接
+    clear_filters_href = build_clear_filters_href(
+        report_id, qs_page_size, sorts, cols_param, result_param)
+    tbody = build_table_body_html(result.rows, display_indices,
+                                  filters=filters or None,
+                                  clear_filters_href=clear_filters_href)
 
     pagination = _build_pagination(report_id, result.page, result.total_pages,
                                    result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "")
@@ -1540,7 +1581,27 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         edit_btn = (f'<div style="margin-bottom:10px">'
                     f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
                     f'</div>')
-    body = (_render_page_header() +
+
+    # ---- 批次6 页内脚本（spec ux-optimization）----
+    # #25 列设置记忆：页面加载时按 URL cols 参数写 / 按 localStorage 读应用。
+    # #22 最近查看：正式查看（非预览）成功渲染后写 sqlreport_recent；
+    # 预览模式不记录（临时 SQL 不算「查看该报表」）。报表名经 _js_string
+    # 安全内嵌，防 </script> 提前闭合。report_id 为 0（无库报表预览）时不注入。
+    b6_scripts = ""
+    if report_id > 0:
+        recent_call = (f"    saveRecentVisit({int(report_id)}, "
+                       f"{_js_string(report['name'])});\n"
+                       if not sql_override else "")
+        b6_scripts = (
+            "<script>\n"
+            "document.addEventListener('DOMContentLoaded', function() {\n"
+            f"    applyStoredCols({int(report_id)});\n"
+            f"{recent_call}"
+            "});\n"
+            "</script>\n")
+
+    body = (_render_page_header(
+                title=f'{_escape(report["name"])} - Web 报表工具') +
             _build_report_switcher(conn, report_id) +
             f'<div class="card">'
             f'<h2>{_escape(report["name"])}</h2>' +
@@ -1569,6 +1630,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             pagination +
             '</div>' +
             mermaid_scripts +
+            b6_scripts +
             _FOOTER)
     return body
 
@@ -1622,7 +1684,8 @@ def _handle_refresh_cache(conn, form_data: dict) -> tuple[int, str, dict]:
             try:
                 execute_report(report_id, report["sql_query"], pool_config,
                                page, page_size, sorts, filters, True,
-                               active_index, report, conn)
+                               active_index, report, conn,
+                               read_timeout=30)
             except Exception as e:
                 logging.warning("refresh_cache 预填失败: %s", e)
                 refresh_ok = False

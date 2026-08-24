@@ -17,6 +17,9 @@ import html as html_mod
 import urllib.parse
 import time
 import json
+import hashlib
+import os
+import threading
 from decimal import Decimal
 import app_config
 import redis_cache
@@ -62,6 +65,15 @@ body {
 @media (min-width: 1700px) { .container { max-width: 1680px; } }
 @media (min-width: 2100px) { .container { max-width: 1920px; } }
 @media (min-width: 2600px) { .container { max-width: 2400px; } }
+/* 移动端适配（spec ux-optimization 批次6#26）：窄屏下导航允许换行、
+   链接间距缩小、页面容器 padding 收窄；表格横向滚动由全局 .table-wrap
+   规则（overflow-x:auto）统一保证，不在此重复声明。 */
+@media (max-width: 640px) {
+  .navbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 12px; }
+  .navbar a:not(.brand) { padding: 4px 8px; font-size: 13px; }
+  .navbar .spacer { flex: 1 1 100%; height: 0; }
+  .container { padding: 12px; }
+}
 .card {
   background: #fff; border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
@@ -103,7 +115,32 @@ tbody tr:last-child td { border-bottom: none; }
 .flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
 .flash-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
-.empty-state { text-align: center; color: #94a3b8; padding: 32px 14px; font-size: 14px; }
+/* 批次5#14：flash × 关闭按钮（flex 布局下 margin-left:auto 推至右侧）与淡出过渡 */
+.flash-close { cursor: pointer; margin-left: auto; font-size: 16px; line-height: 1; opacity: 0.6; user-select: none; }
+.flash-close:hover { opacity: 1; }
+.flash.fading-out { opacity: 0; transition: opacity 0.5s ease; }
+/* 批次5#16：锚点目标行高亮——背景淡黄 2 秒渐隐 */
+@keyframes rowHighlightFade { from { background: #fef9c3; } to { background: transparent; } }
+.row-highlight { animation: rowHighlightFade 2s ease forwards; }
+/* 批次5#18：慢查询 loading 全屏遮罩 + CSS 动画圆环 spinner */
+.query-loading-overlay {
+  position: fixed; inset: 0; background: rgba(255,255,255,0.7); z-index: 9999;
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; font-size: 15px; color: #475569;
+}
+.query-loading-overlay.show { display: flex; }
+.query-loading-overlay .spinner {
+  width: 42px; height: 42px; border: 4px solid #e2e8f0; border-top-color: #4f46e5;
+  border-radius: 50%; animation: querySpin 0.8s linear infinite;
+}
+@keyframes querySpin { to { transform: rotate(360deg); } }
+/* 批次5#17：批量操作条全局浮动（sticky 底部吸附，显隐由 JS 按选中数切换） */
+.batch-float {
+  position: sticky; bottom: 0; z-index: 50;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+  box-shadow: 0 -4px 12px rgba(15,23,42,0.08); padding: 10px 14px; margin-top: 16px;
+}
+.empty-state { text-align: center; color: #64748b; padding: 32px 14px; font-size: 14px; }
 .empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
 .sql-hl-keyword { font-weight:700; color:#7c3aed; }
 .sql-hl-string { color:#059669; }
@@ -139,6 +176,8 @@ _MINIBTN_CSS = """
 .btn-mini-success { background: #059669; color: #fff; }
 .btn-mini-disabled {
   padding: 4px 10px; background: #e2e8f0; color: #94a3b8;
+  /* 找茬 L4：禁用态保持浅色 #94a3b8 与可用态拉开对比度，
+     不参与批次6#27d 的辅助文字加深替换 */
   border: none; cursor: not-allowed;
 }
 .btn-mini-outline {
@@ -215,10 +254,35 @@ _MD_CSS = """
 .md-body th, .md-body td { border: 1px solid #e2e8f0; padding: 6px 12px; }
 .md-body th { background: #f8fafc; }
 .md-body tbody tr:hover { background: #f8fafc; }
-.md-body del { color: #94a3b8; }
+.md-body del { color: #64748b; }
 """
 
-_COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS
+_B6_CSS = """
+/* 合并页检索过滤框（spec ux-optimization 批次6#21） */
+.config-filter-box {
+  margin-bottom: 12px;
+}
+.config-filter-input {
+  width: 100%; padding: 9px 14px; font-size: 14px;
+  border: 2px solid #e2e8f0; border-radius: 8px; outline: none;
+  background: #fff; color: #1e293b; box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.config-filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
+/* 总览页「最近查看」快捷卡片（批次6#22） */
+.recent-reports { margin-bottom: 16px; }
+.recent-title { font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600; }
+.recent-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+.recent-card {
+  display: inline-block; max-width: 240px; padding: 6px 14px;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 999px;
+  color: #4f46e5; text-decoration: none; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recent-card:hover { border-color: #4f46e5; background: #eef2ff; }
+"""
+
+_COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS + _B6_CSS
 
 # ---------------------------------------------------------------------------
 # 公共 JavaScript（交互式 UI 组件）
@@ -406,17 +470,157 @@ function highlightMemMode(node, mode) {
     btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === mode);
   }
 }
+function showFlashWarn(msg) {
+  /* 行内警告提示条（spec ux-optimization 批次6#27e）：替代阻塞式弹窗。
+     复用 .flash-warn 样式，5 秒后自动隐藏；容器缺失时降级 console.warn。 */
+  var box = document.getElementById('js-flash-warn');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'js-flash-warn';
+    box.className = 'flash-warn';
+    box.setAttribute('role', 'alert');
+    var container = document.querySelector('.container');
+    if (!container) { console.warn(msg); return; }
+    container.insertBefore(box, container.firstChild);
+  }
+  box.textContent = msg;
+  box.style.display = '';
+  clearTimeout(showFlashWarn._timer);
+  showFlashWarn._timer = setTimeout(function() { box.style.display = 'none'; }, 5000);
+}
+function initConfigFilter() {
+  /* 合并页检索过滤框（spec ux-optimization 批次6#21）：纯前端 tr 文本
+     contains 匹配显隐；空查询恢复全部。表头行（含 th）不过滤，避免表头
+     被误藏破坏表格结构；分类树区块非 tr 不参与。 */
+  var input = document.getElementById('config-filter-input');
+  if (!input) return;
+  input.addEventListener('input', function() {
+    var q = input.value.trim().toLowerCase();
+    var rows = document.querySelectorAll('.section tr');
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      if (tr.querySelector('th')) continue;
+      if (!q) { tr.style.display = ''; continue; }
+      var text = (tr.innerText || tr.textContent || '').toLowerCase();
+      tr.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+    }
+  });
+}
+function saveRecentVisit(reportId, reportName) {
+  /* 最近查看记录（spec ux-optimization 批次6#22）：localStorage 去重保序，
+     最多保留 8 条；存储异常静默（隐私模式等场景不阻断页面）。 */
+  try {
+    var list = JSON.parse(localStorage.getItem('sqlreport_recent') || '[]');
+    if (!Array.isArray(list)) list = [];
+    list = list.filter(function(it) { return it && it.id !== reportId; });
+    list.unshift({id: reportId, name: String(reportName || ''), ts: Date.now()});
+    localStorage.setItem('sqlreport_recent', JSON.stringify(list.slice(0, 8)));
+  } catch (e) {}
+}
+function initRecentReports() {
+  /* 总览页「最近查看」快捷卡片（批次6#22）：无记录不插入任何内容。 */
+  var mount = document.getElementById('recent-reports-mount');
+  if (!mount) return;
+  var list;
+  try { list = JSON.parse(localStorage.getItem('sqlreport_recent') || '[]'); } catch (e) { list = []; }
+  if (!Array.isArray(list)) return;
+  var cards = '';
+  list.forEach(function(it) {
+    if (!it || !it.id) return;
+    var name = String(it.name || ('#' + it.id))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    cards += '<a class="recent-card" href="/report?id=' + encodeURIComponent(it.id)
+           + '" title="' + name + '">' + name + '</a>';
+  });
+  if (!cards) return;
+  mount.innerHTML = '<div class="recent-reports"><div class="recent-title">'
+                  + '\ud83d\udd52 \u6700\u8fd1\u67e5\u770b</div><div class="recent-cards">'
+                  + cards + '</div></div>';
+}
+function applyStoredCols(reportId) {
+  /* 列设置 localStorage 记忆（spec ux-optimization 批次6#25）：
+     URL 显式 cols 参数优先——存在即写入记忆并直接返回（分享语义不被覆盖）；
+     URL 无 cols 且有记忆时以记忆值前端隐藏 th/td（服务端仍渲染全列）。 */
+  var params = new URLSearchParams(window.location.search);
+  var colsParam = params.get('cols');
+  var key = 'sqlreport_cols_' + reportId;
+  if (colsParam) {
+    try { localStorage.setItem(key, colsParam); } catch (e) {}
+    return;
+  }
+  var stored = null;
+  try { stored = localStorage.getItem(key); } catch (e) {}
+  if (!stored) return;
+  var visible = {};
+  stored.split(',').forEach(function(c) { visible[c] = true; });
+  /* 找茬 M1：过期记忆自愈——记忆列名与页面现有 data-col 无任何交集时
+     （SQL 列结构已变更），清除记忆并放弃应用，避免全列被隐死局。 */
+  var wraps = document.querySelectorAll('.table-wrap');
+  if (!wraps.length) return;
+  var anyOverlap = false;
+  Array.prototype.forEach.call(wraps, function(wrap) {
+    Array.prototype.forEach.call(
+      wrap.querySelectorAll('thead tr [data-col]'), function(th) {
+        if (th.getAttribute('data-col') in visible) anyOverlap = true;
+      });
+  });
+  if (!anyOverlap) {
+    try { localStorage.removeItem(key); } catch (e) {}
+    return;
+  }
+  /* 找茬 L5：多结果集（result_mode=all）下逐表应用，不再只作用首表。 */
+  Array.prototype.forEach.call(wraps, function(wrap) {
+    applyStoredColsToTable(wrap, visible);
+  });
+}
+function applyStoredColsToTable(wrap, visible) {
+  var headRow = wrap.querySelector('thead tr');
+  if (!headRow) return;
+  var hideIdx = [];
+  Array.prototype.forEach.call(headRow.children, function(th, i) {
+    var col = th.getAttribute('data-col');
+    if (col !== null && !(col in visible)) { th.style.display = 'none'; hideIdx.push(i); }
+  });
+  if (!hideIdx.length) return;
+  var bodyRows = wrap.querySelectorAll('tbody tr');
+  Array.prototype.forEach.call(bodyRows, function(tr) {
+    if (tr.children.length === 1 && tr.children[0].colSpan) return;
+    hideIdx.forEach(function(i) {
+      var td = tr.children[i];
+      if (td) td.style.display = 'none';
+    });
+  });
+}
+function initSqlEditorTabIndent() {
+  /* SQL 编辑器 Tab 缩进（spec ux-optimization 批次6#23）：仅对带
+     data-tab-indent 标记的 sql-editor 生效；Tab 拦截后经 setRangeText
+     插入两空格（execCommand 已废弃，不使用）。 */
+  var tas = document.querySelectorAll('textarea.sql-editor[data-tab-indent="1"]');
+  Array.prototype.forEach.call(tas, function(ta) {
+    ta.addEventListener('keydown', function(e) {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end');
+    });
+  });
+}
 document.addEventListener('DOMContentLoaded', function() {
   initMemToggles();
+  initFlashMessages();
+  initAnchorRowHighlight();
+  initQueryLoadingOverlay();
+  initConfigFilter();
+  initRecentReports();
+  initSqlEditorTabIndent();
 });
 function applyRulesJson() {
   var ta = document.getElementById('current-rules-json');
   if (!ta) return;
   var text = ta.value.trim();
-  if (!text) { alert('请输入规则 JSON'); return; }
+  if (!text) { showFlashWarn('请输入规则 JSON'); return; }
   var rules;
   try { rules = JSON.parse(text); } catch (e) {
-    alert('JSON 格式错误: ' + e.message); return;
+    showFlashWarn('JSON 格式错误: ' + e.message); return;
   }
   var params = new URLSearchParams(window.location.search);
   var keysToRemove = [];
@@ -442,6 +646,72 @@ function applyRulesJson() {
   if (rules.columns) params.set('cols', rules.columns);
   params.set('page', '1');
   window.location.href = '?' + params.toString();
+}
+/* ---- 批次5#14：flash 自动消失 + × 关闭 + 剥 flash 参数 ---- */
+function initFlashMessages() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.has('flash')) {
+    params.delete('flash');
+    var qs = params.toString();
+    window.history.replaceState(null, '',
+      window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+  }
+  var flashes = document.querySelectorAll('.flash');
+  for (var i = 0; i < flashes.length; i++) {
+    (function(f) {
+      var closeBtn = f.querySelector('.flash-close');
+      if (closeBtn) closeBtn.addEventListener('click', function() { f.remove(); });
+      if (f.getAttribute('data-autohide') === '1') {
+        setTimeout(function() {
+          f.classList.add('fading-out');
+          setTimeout(function() { f.remove(); }, 600);
+        }, 6000);
+      }
+    })(flashes[i]);
+  }
+}
+/* ---- 批次5#16：锚点目标行高亮（#report-N / #pool-N / #user-N）---- */
+function initAnchorRowHighlight() {
+  var id = window.location.hash.substring(1);
+  if (!/^(report|pool|user)-\d+$/.test(id)) return;
+  var row = document.getElementById(id);
+  if (row) row.classList.add('row-highlight');
+}
+/* ---- 批次5#18：慢查询 loading 遮罩 ----
+   仅在触发查询的 form submit 与「重建缓存」按钮 click 时显示；
+   不用 beforeunload（会误伤导出下载），导出表单同样排除。 */
+function initQueryLoadingOverlay() {
+  var overlay = document.createElement('div');
+  overlay.id = 'query-loading-overlay';
+  overlay.className = 'query-loading-overlay';
+  overlay.innerHTML = '<div class="spinner"></div><div>查询中…请稍候</div>';
+  document.body.appendChild(overlay);
+  var showOverlay = function() { overlay.classList.add('show'); };
+  var forms = document.querySelectorAll('form');
+  for (var i = 0; i < forms.length; i++) {
+    var action = forms[i].getAttribute('action') || '';
+    if (action.indexOf('/export') !== -1) continue;
+    /* 仅同页提交与报表查询端点（精确匹配，防止 /config/reports/* 批量操作误伤） */
+    if (action === '' || action === '/report' || action.indexOf('/report?') === 0) {
+      forms[i].addEventListener('submit', showOverlay);
+    }
+  }
+  var refreshBtns = document.querySelectorAll('.btn-refresh[type="submit"]');
+  for (var j = 0; j < refreshBtns.length; j++) {
+    refreshBtns[j].addEventListener('click', showOverlay);
+  }
+}
+/* ---- 批次5#20：跳页钳制 + 回车原生提交 ---- */
+function goPage(evt, baseUrl, current, totalPages) {
+  evt.preventDefault();
+  var input = document.getElementById('jump_page');
+  var p = parseInt(input.value, 10);
+  if (isNaN(p)) p = current;
+  if (p < 1) p = 1;
+  if (p > totalPages) p = totalPages;
+  input.value = p;
+  window.location.href = baseUrl + '&page=' + p;
+  return false;
 }
 """
 
@@ -528,17 +798,99 @@ _PAGE_HEADER_TEMPLATE = string.Template("""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
-<style>${common_css}${extra_css}</style>
+$common_css_assets
+<style>${extra_css}</style>
 </head>
 <body>
 $navbar
 <div class="container">
 """)
 
-_PAGE_FOOTER = """</div>
-<script>""" + _COMMON_JS + """</script>
-</body>
-</html>"""
+# ---------------------------------------------------------------------------
+# 公共 CSS/JS 外链化（spec ux-optimization 批次6#28）
+#
+# 复用既有 /static/vendor/<name>@<version>/ 版本锁 + immutable 管线：
+# 首次调用（server.py 启动序列预热，或渲染兜底惰性触发）把 _COMMON_CSS /
+# _COMMON_JS 按内容 sha256 前 8 位写入 static/vendor/self@{hash8}/ 目录，
+# 页头输出 <link>、页尾输出 <script defer> 外链引用；浏览器侧 immutable
+# 缓存跨页复用。内容变化 → hash 变化 → 新目录自动生成，旧目录留存无害。
+# 写入失败（只读盘等）→ 回退内联 <style>/<script>，功能不降级。
+# ---------------------------------------------------------------------------
+
+_SELF_VENDOR_DIR = os.path.join("static", "vendor")
+_COMMON_ASSET_LOCK = threading.Lock()
+# 进程级缓存：(css_url, js_url)；空串元素表示内联回退模式。None=未初始化。
+_COMMON_ASSET_URLS = None
+
+
+def self_assets_root() -> str:
+    """返回 self 资产落点根目录（static/vendor 绝对路径）。"""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        *_SELF_VENDOR_DIR.split(os.sep))
+
+
+def content_hash8(content: str) -> str:
+    """内容 hash 前 8 位（sha256 hex），作为版本锁目录名。"""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
+
+
+def ensure_common_assets(root: str = None) -> tuple[str, str] | None:
+    """把公共 CSS/JS 写入 {root}/self@{hash8}/ 并返回 (css_url, js_url)。
+
+    幂等：同内容重复调用覆盖写同样字节；内容升级生成新目录。
+    root 参数供测试注入临时目录；默认写仓库 static/vendor/。
+    任一环节失败返回 None（调用方回退内联）。
+    """
+    try:
+        base = root or self_assets_root()
+        hash8 = content_hash8(_COMMON_CSS)
+        target_dir = os.path.join(base, f"self@{hash8}")
+        os.makedirs(target_dir, exist_ok=True)
+        for fname, payload in (("common.css", _COMMON_CSS),
+                               ("common.js", _COMMON_JS)):
+            path = os.path.join(target_dir, fname)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(payload)
+            if not os.path.isfile(path):
+                return None
+        return (f"/static/vendor/self@{hash8}/common.css",
+                f"/static/vendor/self@{hash8}/common.js")
+    except OSError:
+        return None
+
+
+def _get_common_asset_urls() -> tuple[str, str]:
+    """取公共资产 URL（带进程级缓存）；不可用时返回 ("", "") 表示内联。
+
+    找茬 M2a：测试环境下写入仓库真实目录会污染工作区——测试通过
+    patch self_assets_root 指向临时目录隔离（见 tests/test_render.py）。
+    """
+    global _COMMON_ASSET_URLS
+    if _COMMON_ASSET_URLS is None:
+        with _COMMON_ASSET_LOCK:
+            if _COMMON_ASSET_URLS is None:
+                urls = None
+                try:
+                    urls = ensure_common_assets()
+                except Exception:
+                    urls = None
+                _COMMON_ASSET_URLS = urls or ("", "")
+    return _COMMON_ASSET_URLS
+
+
+def reset_common_assets_cache() -> None:
+    """重置进程级资产缓存（测试隔离用）。"""
+    global _COMMON_ASSET_URLS
+    with _COMMON_ASSET_LOCK:
+        _COMMON_ASSET_URLS = None
+
+def _render_common_footer() -> str:
+    """生成页尾公共脚本段（批次6#28）：外链可用时输出 <script defer>，
+    否则回退内联公共 JS。"""
+    _, js_url = _get_common_asset_urls()
+    if js_url:
+        return f'</div>\n<script src="{js_url}" defer></script>\n</body>\n</html>'
+    return '</div>\n<script>' + _COMMON_JS + '</script>\n</body>\n</html>'
 
 # ---------------------------------------------------------------------------
 # 导航栏链接定义
@@ -604,6 +956,10 @@ def render_page_header(title: str = "Web 报表工具",
     """
     渲染页面头部（<head> + 导航栏 + container 开头）。
 
+    批次6#28：公共 CSS 优先外链（/static/vendor/self@{hash}/common.css，
+    immutable 缓存），资产写入失败时回退内联 <style>；extra_css 为页面
+    特有样式，始终内联。
+
     Args:
         title: 页面标题（显示在浏览器标签页）。
         active_nav: 当前活动页标识，传给导航栏用于高亮。
@@ -613,9 +969,14 @@ def render_page_header(title: str = "Web 报表工具",
         从 DOCTYPE 到 <div class="container"> 的完整头部 HTML。
     """
     navbar_html = _build_navbar_html(active_nav)
+    css_url, _ = _get_common_asset_urls()
+    if css_url:
+        common_css_assets = f'<link rel="stylesheet" href="{css_url}">'
+    else:
+        common_css_assets = f"<style>{_COMMON_CSS}</style>"
     return _PAGE_HEADER_TEMPLATE.substitute(
         title=title.replace("$", "$$"),
-        common_css=_COMMON_CSS,
+        common_css_assets=common_css_assets,
         extra_css=extra_css.replace("$", "$$"),
         navbar=navbar_html,
     )
@@ -625,10 +986,25 @@ def render_page_footer() -> str:
     """
     渲染页面尾部（container 闭合 + 脚本 + </body></html>）。
 
-    Returns:
-        从 </div> 到 </html> 的完整尾部 HTML。
+    批次6#28：公共 JS 优先外链（<script defer>），资产写入失败时回退内联。
     """
-    return _PAGE_FOOTER
+    return _render_common_footer()
+
+
+def build_config_filter_box_html() -> str:
+    """构建合并页顶部检索过滤框（spec ux-optimization 批次6#21）。
+
+    纯前端过滤：输入事件由公共 JS initConfigFilter 监听，对页面内各
+    配置区块的数据行（tr，跳过表头行）做文本 contains 显隐匹配；
+    空查询恢复全部显隐。服务端零状态。
+    """
+    return (
+        '<div class="config-filter-box" id="config-filter-box">'
+        '<input type="text" id="config-filter-input" class="config-filter-input"'
+        ' data-filter-scope="merge-tr" autocomplete="off"'
+        ' placeholder="\U0001f50d 输入关键字过滤当前页配置项（连接池 / 用户 / 报表 / 分类），清空恢复全部">'
+        '</div>'
+    )
 
 
 # ===================================================================
@@ -700,24 +1076,33 @@ def build_flash_html(flash: str, is_error: bool = None) -> str:
     默认自动判定错误样式：以"错误"开头，或冒号前缀段含"失败"
     （批次3#13 单点判定——此前仅识别"错误"前缀，「xx 失败」类文案
     会误用成功样式）。is_error 传入时显式指定。
+
+    批次5#14（spec ux-optimization）：data-autohide 标记供公共 JS 判定
+    自动淡出（错误提示不自动消失，需人工关闭）；× 关闭按钮点击移除
+    整条提示；URL 中的 flash 参数由前端 history.replaceState 剥除，
+    防刷新重现/复制分享陈旧提示。
     """
     if is_error is None:
         prefix = flash.split(":", 1)[0]
         is_error = flash.startswith("错误") or "失败" in prefix
     css_cls = " flash-error" if is_error else " flash-success"
-    return f'<div class="flash{css_cls}">{_escape(flash)}</div>'
+    autohide = ' data-autohide="0"' if is_error else ' data-autohide="1"'
+    return (f'<div class="flash{css_cls}"{autohide}>{_escape(flash)}'
+            f'<span class="flash-close" title="关闭">×</span></div>')
 
 
-def build_empty_row_html(colspan, text: str, with_icon: bool = False) -> str:
+def build_empty_row_html(colspan, text: str, with_icon: bool = False,
+                         icon: str = "📭") -> str:
     """构建表格空状态提示行 HTML。
 
-    with_icon=True 时输出带 📭 图标的变体（图标面板专用，colspan 固定 999）。
+    with_icon=True 时输出带图标面板变体（colspan 固定 999，图标默认 📭，
+    批次5#19 筛选空态可传 🔍）。
     其余为纯文字版 `<tr><td colspan="N" class="empty-state">text</td></tr>`。
     """
     if with_icon:
         return ('<tr class="empty-state-row">'
                 '<td colspan="999"><div class="empty-state">'
-                '<div class="icon">📭</div>' + text + '</div></td></tr>')
+                f'<div class="icon">{icon}</div>' + text + '</div></td></tr>')
     return f'<tr><td colspan="{colspan}" class="empty-state">{text}</td></tr>'
 
 
@@ -843,14 +1228,16 @@ def build_pagination_html(report_id: int, current: int, total_pages: int,
     else:
         parts.append('<span class="disabled">›</span>')
 
+    # 批次5#20：包一层 form 支持回车原生提交；goPage 内做 parseInt 钳制
+    # （NaN 回落当前页，越界收敛到 [1, total_pages]）
     jump = (
-        f'<span class="jump-box">跳转到: '
+        f'<form class="jump-box" onsubmit="return goPage(event, '
+        f"'{base_url}', {current}, {total_pages})\">"
+        f'跳转到: '
         f'<input type="number" id="jump_page" min="1" max="{total_pages}" '
         f'value="{current}"> '
-        f'<button class="btn btn-primary btn-sm" '
-        f'onclick="window.location.href=\'{base_url}&amp;page=\' + '
-        f"document.getElementById('jump_page').value\">GO</button>"
-        f'</span>'
+        f'<button type="submit" class="btn btn-primary btn-sm">GO</button>'
+        f'</form>'
     )
 
     return f'<div class="pagination">{" ".join(parts)}{jump}</div>'
@@ -976,7 +1363,7 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         '<button onclick="applyRulesJson()" class="btn-mini btn-mini-solid btn-mini-success">应用</button>'
         '</div>'
         '</div>'
-        '<div style="margin-top:6px;font-size:12px;color:#94a3b8">'
+        '<div style="margin-top:6px;font-size:12px;color:#64748b">'
         '提示: 在 API 接口配置中填入以上 JSON 规则，即可复用当前报表的筛选/排序/字段设置。'
         '</div>'
     )
@@ -988,16 +1375,14 @@ def build_memo_section_html(memo_raw: str, report_id: int = None) -> str:
 
     备注内容为 Markdown 源文本：经 render_markdown() 渲染为已消毒的 HTML
     （含 ```mermaid 时产出 <pre class="mermaid">，由前端按需渲染）。
-    折叠区展开/收起状态逻辑不变（非空展开、空折叠），即三态「自动」语义；
-    report_id 提供时启用三态记忆控件（api-desc-markdown T2），
-    记忆键 memo_fold_{report_id}；report_id 为 None 时保持现状输出。
+    批次6#24（spec ux-optimization）：默认态改为折叠——备注不再挤占表格首屏，
+    表格自然回归首屏。已有三态记忆的用户保持其选择：前端 applyMemMode 在
+    auto 态读取 data-default-hidden（现恒为折叠），open/fold 记忆照常覆盖。
+    report_id 提供时启用三态记忆控件，
+    记忆键 memo_fold_{report_id}；report_id 为 None 时无记忆控件。
     """
-    if memo_raw:
-        memo_btn_text = "▼ 备注"
-        memo_hidden = False
-    else:
-        memo_btn_text = "▶ 备注"
-        memo_hidden = True
+    memo_btn_text = "▶ 备注"
+    memo_hidden = True
     memo_html = markdown_render.render_markdown(memo_raw)
     # 内容外包 .md-body 排版容器（消费页 extra_css 末尾的 _MD_CSS 提供样式）
     memo_html = f'<div class="md-body">{memo_html}</div>' if memo_html else ""
@@ -1050,7 +1435,7 @@ def build_result_selector_html(report_id, qs_page_size, result_names,
         f' style="padding:4px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">'
         f'{opts}</select>'
         f'{badges_html}'
-        f'<span style="font-size:12px;color:#94a3b8">每个结果视图独立维护筛选/排序/分页状态</span>'
+        f'<span style="font-size:12px;color:#64748b">每个结果视图独立维护筛选/排序/分页状态</span>'
         f'</div>'
     )
 
@@ -1134,7 +1519,7 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
                 f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
                 f'font-size:12px;border:1px solid #c7d2fe">'
                 f'<span style="font-weight:700;font-size:11px">{prio}</span> {label}'
-                f'<a href="{rm_href}" style="text-decoration:none;color:#94a3b8;margin-left:2px" '
+                f'<a href="{rm_href}" style="text-decoration:none;color:#64748b;margin-left:2px" '
                 f'title="移除排序">✕</a>'
                 f'</span>'
             )
@@ -1222,7 +1607,8 @@ def build_table_header_html(columns, display_columns, sorts, filters,
         input_style = "display:none" if input_hidden else ""
         input_disabled = "disabled" if input_hidden else ""
 
-        thead_parts.append(f"""<th>
+        # 批次6#25：data-col 供前端列设置 localStorage 记忆定位列（th 隐藏 + 同索引 td 隐藏）
+        thead_parts.append(f"""<th data-col="{_escape(col)}">
   <div class="sort-links" style="display:inline-flex;align-items:center;gap:0">
     <a href="{asc_href}" class="sort-link" title="升序">{_escape(col)}</a>
     <a href="{asc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="升序"><span class="{asc_cls}">▲</span></a>
@@ -1243,11 +1629,26 @@ def build_table_header_html(columns, display_columns, sorts, filters,
     return "".join(thead_parts)
 
 
-def build_table_body_html(rows, display_indices) -> str:
-    """构建表格数据行 HTML。"""
+def build_table_body_html(rows, display_indices, filters=None,
+                          clear_filters_href: str = None) -> str:
+    """构建表格数据行 HTML。
+
+    批次5#19（spec ux-optimization）：空结果按是否有筛选区分文案——
+    filters 非空显示「🔍 没有符合筛选条件的行」+ 服务端构造好的
+    「清除筛选」链接（当前路径去掉 f_*/op_* 参数）；否则保持「暂无数据」。
+    """
     tbody = ""
     if not rows:
-        tbody = build_empty_row_html(999, "暂无数据", with_icon=True)
+        if filters:
+            link = ""
+            if clear_filters_href:
+                link = (f' <a href="{clear_filters_href}"'
+                        f' class="clear-filter">清除筛选</a>')
+            tbody = build_empty_row_html(
+                999, "没有符合筛选条件的行" + link,
+                with_icon=True, icon="🔍")
+        else:
+            tbody = build_empty_row_html(999, "暂无数据", with_icon=True)
     else:
         for row in rows:
             cells = "".join(f"<td>{_escape(row[i])}</td>" for i in display_indices)
@@ -1301,8 +1702,8 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
         <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
           字符集:
           <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-            <option value="gbk">GBK</option>
-            <option value="utf8">UTF8</option>
+            <option value="gbk">GBK（Excel 中文版推荐）</option>
+            <option value="utf8">UTF-8（通用 / 程序处理）</option>
           </select>
         </label>
         <div id="export-smart-panel" style="border-top:1px dashed #e2e8f0;padding-top:6px;font-size:12px;color:#475569;line-height:1.7">
@@ -1465,7 +1866,7 @@ def build_sort_settings_panel_html(sorts, all_columns) -> str:
         '</div>'
         '<div id="sortList" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:8px">'
         + ("".join(sort_settings_items) if sort_settings_items
-           else '<div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
+           else '<div style="color:#64748b;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
         '</div>'
         '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:#f8fafc;'
         'border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
@@ -1494,18 +1895,31 @@ def build_filter_form_html(form_id: str, form_hidden_str: str) -> str:
     return f'<form id="{form_id}" method="get" action="/report" style="display:none">\n  {form_hidden_str}\n</form>'
 
 
+def build_clear_filters_href(report_id, page_size, sorts, cols_param,
+                             result_param) -> str:
+    """构造「清除筛选」目标 URL：当前路径去掉 f_*/op_* 参数后的形态。
+
+    批次5#19（spec ux-optimization）：筛选空态与筛选操作条共用，
+    服务端单点构造，避免两处拼 URL 漂移。
+    """
+    sorts = sorts or []
+    href = f"/report?id={report_id}&amp;page_size={page_size}"
+    if sorts:
+        href += "&amp;" + build_sort_params(sorts)
+    if cols_param:
+        href += "&amp;" + cols_param
+    if result_param:
+        href += "&amp;" + result_param
+    return href
+
+
 def build_filter_action_html(report_id, page_size, sorts, cols_param,
                               result_param, filters) -> tuple:
     """构建筛选操作按钮和清除筛选提示 HTML。"""
     sorts = sorts or []
     filters = filters or []
-    clear_href = f"/report?id={report_id}&amp;page_size={page_size}"
-    if sorts:
-        clear_href += "&amp;" + build_sort_params(sorts)
-    if cols_param:
-        clear_href += "&amp;" + cols_param
-    if result_param:
-        clear_href += "&amp;" + result_param
+    clear_href = build_clear_filters_href(
+        report_id, page_size, sorts, cols_param, result_param)
 
     filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
@@ -1558,7 +1972,7 @@ def build_report_switcher_html(reports_data, all_cats, cat_tree,
                     html += _render_tree_switcher(node["children"], depth + 1)
                 html += "</optgroup>"
             else:
-                html += f'<option value="" disabled style="color:#94a3b8;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</option>'
+                html += f'<option value="" disabled style="color:#64748b;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</option>'
                 if node.get("children", []):
                     html += _render_tree_switcher(node["children"], depth + 1)
         return html
@@ -1688,7 +2102,7 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
     password = ""
     database = _escape(pool["database"] if pool else "")
     pw_required = "" if is_edit else "required"
-    pw_hint = (' <span style="color:#94a3b8;font-weight:400;font-size:13px">'
+    pw_hint = (' <span style="color:#64748b;font-weight:400;font-size:13px">'
                '留空则沿用当前密码</span>') if is_edit else ""
 
     if is_copy:
@@ -1728,7 +2142,7 @@ def build_user_form_html(user: dict = None, is_edit: bool = None) -> str:
     title = "编辑用户" if is_edit else "新增用户"
     username = _escape(user["username"] if is_edit else "")
     pw_required = "" if is_edit else "required"
-    pw_hint = ' <span style="color:#94a3b8;font-weight:400;font-size:13px">留空则不修改密码</span>' if is_edit else ""
+    pw_hint = ' <span style="color:#64748b;font-weight:400;font-size:13px">留空则不修改密码</span>' if is_edit else ""
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form">
@@ -1789,7 +2203,7 @@ def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
                             f"（报表保留但无法执行）")
         else:
             pool_confirm = f"确定删除连接池 {_escape(p['name'])}？"
-        rows += f"""<tr>
+        rows += f"""<tr id="pool-{p['id']}">
   <td><strong>{_escape(p['name'])}</strong></td>
   <td><span class="badge badge-pool">{_escape(p['host'])}:{p['port']}</span></td>
   <td>{_escape(p['user'])}</td>
@@ -1801,7 +2215,7 @@ def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
     {build_delete_form_html(f"/config/pools/{p['id']}/delete", pool_confirm)}
   </td>
 </tr>"""
-    return f"""<div class="section">
+    return f"""<div class="section" id="sec-pools">
 <div class="section-title">
   <span>📦 连接池配置</span>
   <span class="actions">{_link_btn("/config/pools/add", "新增连接池", "btn btn-primary btn-sm")}</span>
@@ -1832,14 +2246,14 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
                 f"/config/users/{u['id']}/delete",
                 f"确定删除用户 {_escape(u['username'])}？"
                 f"其全部登录会话将立即失效")
-        rows += f"""<tr>
+        rows += f"""<tr id="user-{u['id']}">
   <td><strong>{_escape(u['username'])}</strong></td>
   <td class="ops-cell">
     {_link_btn(f"/config/users/{u['id']}/edit", "编辑")}
     {delete_btn}
   </td>
 </tr>"""
-    return f"""<div class="section">
+    return f"""<div class="section" id="sec-users">
 <div class="section-title">
   <span>👤 用户配置</span>
   <span class="actions">{_link_btn("/config/users/add", "新增用户", "btn btn-primary btn-sm")}</span>
@@ -1867,7 +2281,7 @@ def build_category_manage_section_html(all_cats, cat_tree,
         idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
         n = len(siblings)
         move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
-        badge = (f'<span style="color:#94a3b8;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>'
+        badge = (f'<span style="color:#64748b;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>'
                  if has_children else "")
         icon = "📁" if has_children else "📄"
         name_style = ("font-size:14px;font-weight:600" if has_children
@@ -1901,11 +2315,11 @@ def build_category_manage_section_html(all_cats, cat_tree,
     cat_list_html = _render_tree(cat_tree)
 
     if not cat_list_html:
-        cat_list_html = '<div style="color:#94a3b8;font-size:14px;padding:12px 0">暂无分类</div>'
+        cat_list_html = '<div style="color:#64748b;font-size:14px;padding:12px 0">暂无分类</div>'
 
     report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")
                       if show_report_add else "")
-    return f"""<div class="section">
+    return f"""<div class="section" id="sec-categories">
 <div class="section-title">
   <button type="button" id="cat-tree-toggle" class="btn btn-outline btn-sm"
           onclick="toggleCatTree(this)">▼ 报表分类</button>
@@ -1944,10 +2358,13 @@ def build_category_section_html(cat_reports, unclassified_reports, all_cats,
         prefix = "　" * _get_cat_depth(c, all_cats)
         cat_opts += f'<option value="{c["id"]}">{prefix}{_escape(c["name"])}</option>'
     cat_opts += '<option value="-1">无分类</option>'
+    # 批次5#17（spec ux-optimization）：批量操作条从「未分类区块内联」改为
+    # 页面级单实例 sticky 底部浮动条——跨分类勾选后操作条可达；初始隐藏，
+    # 由 updateBatchCount 按选中数切换显隐；端点 action 保持不变。
     batch_bar = f"""
-<div class="batch-bar" style="display:flex;align-items:center;gap:12px;padding:10px 0;margin-bottom:8px;flex-wrap:wrap">
+<div class="batch-bar batch-float" id="batch-bar" style="display:none;position:sticky;bottom:0;align-items:center;gap:12px;flex-wrap:wrap;z-index:50">
   <span style="font-size:14px;color:#475569;font-weight:500">
-    <span id="batch_count">0</span> 项已选
+    已选 <span id="batch_count">0</span> 项
   </span>
   <select id="batch_pool_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
     {pool_opts}
@@ -1969,7 +2386,7 @@ def build_category_section_html(cat_reports, unclassified_reports, all_cats,
    <input type="number" id="batch_cache_ttl" value="0" min="0" step="1"
      style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;width:80px;opacity:0.5"
      disabled>
-   <span style="font-size:12px;color:#94a3b8">小时（0=永久）</span>
+   <span style="font-size:12px;color:#64748b">小时（0=永久）</span>
    <button type="button" class="btn btn-info btn-sm"
      onclick="batchUpdateCache()">批量更新缓存配置</button>
    <button type="button" class="btn btn-danger btn-sm"
@@ -1982,9 +2399,9 @@ function batchUpdatePool() {{
   for (var i = 0; i < checkboxes.length; i++) {{
     ids.push(checkboxes[i].value);
   }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
+  if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var poolId = document.getElementById('batch_pool_id').value;
-  if (!poolId) {{ alert('请选择目标连接池'); return; }}
+  if (!poolId) {{ showFlashWarn('请选择目标连接池'); return; }}
   submitBatchPost('/config/reports/batch-pool', ids, [{{name: 'pool_id', value: poolId}}]);
 }}
 function batchSetCategory() {{
@@ -1993,9 +2410,9 @@ function batchSetCategory() {{
   for (var i = 0; i < checkboxes.length; i++) {{
     ids.push(checkboxes[i].value);
   }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
+  if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var catId = document.getElementById('batch_cat_id').value;
-  if (!catId) {{ alert('请选择目标分类'); return; }}
+  if (!catId) {{ showFlashWarn('请选择目标分类'); return; }}
   submitBatchPost('/config/reports/batch-set-category', ids, [{{name: 'category_id', value: catId === '-1' ? '' : catId}}]);
 }}
 function toggleTtlInput() {{
@@ -2010,11 +2427,11 @@ function batchUpdateCache() {{
   for (var i = 0; i < checkboxes.length; i++) {{
     ids.push(checkboxes[i].value);
   }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
+  if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var cacheSwitch = document.getElementById('batch_cache_switch').value;
   var modifyTtl = document.getElementById('batch_modify_ttl').checked;
   if (cacheSwitch === '' && !modifyTtl) {{
-    alert('请选择缓存开关或勾选修改TTL');
+    showFlashWarn('请选择缓存开关或勾选修改TTL');
     return;
   }}
   if (!confirm(`确定批量更新 ${{ids.length}} 个报表的缓存配置？`)) return;
@@ -2031,13 +2448,15 @@ function batchDeleteReports() {{
   for (var i = 0; i < checkboxes.length; i++) {{
     ids.push(checkboxes[i].value);
   }}
-  if (ids.length === 0) {{ alert('请至少选择一项'); return; }}
+  if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   if (!confirm(`确定批量删除 ${{ids.length}} 个报表？该操作不可撤销`)) return;
   submitBatchPost('/config/reports/batch-delete', ids, []);
 }}
 function updateBatchCount() {{
   var n = document.querySelectorAll('.report-checkbox:checked').length;
   document.getElementById('batch_count').textContent = n;
+  var bar = document.getElementById('batch-bar');
+  if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
 }}
 </script>"""
 
@@ -2064,8 +2483,11 @@ function updateBatchCount() {{
                 memo_display = _escape(memo_raw[:15])
                 if len(memo_raw) > 15:
                     memo_display += "..."
+                # 批次6#27h：截断展示补 title 全文，悬浮可读完整备注
+                memo_title_attr = f' title="{_escape(memo_raw)}"'
             else:
                 memo_display = '<span style="color:#cbd5e1">—</span>'
+                memo_title_attr = ""
 
             prefer_cache = int(r.get("prefer_cache", 1))
             prefer_cache_display = (
@@ -2102,17 +2524,17 @@ function updateBatchCount() {{
             else:
                 api_cell = '<span style="color:#cbd5e1;font-size:13px">—</span>'
 
-            rows += f"""<tr>
+            rows += f"""<tr id="report-{rpt_id}">
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
    <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a>{build_schedule_flags_badge_html((schedules_map or {}).get(rpt_id, {}).get('enabled'), r.get('keepalive_enabled'))}</strong></td>
-  <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">
+  <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;" title="{_escape(r['sql_query'])}">
     <code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r['sql_query'][:80])}{'...' if len(r['sql_query']) > 80 else ''}</code>
   </td>
   <td>{r['default_page_size']}</td>
   <td>{pool_badge}</td>
   <td style="text-align:center">{prefer_cache_display}</td>
   <td style="text-align:center">{cache_ttl_display}</td>
-  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px">{memo_display}</td>
+  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px"{memo_title_attr}>{memo_display}</td>
   <td style="text-align:center;white-space:nowrap">{api_cell}</td>
   <td class="ops-cell">
     {move_btns}
@@ -2150,7 +2572,7 @@ function updateBatchCount() {{
             if has_children:
                 inner += _render_report_sections(node["children"], depth + 1)
             icon = "📁" if has_children else "📊"
-            count_html = (f' <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(reports)} 个报表)</span>'
+            count_html = (f' <span style="font-weight:400;font-size:14px;color:#64748b">({len(reports)} 个报表)</span>'
                           if reports else "")
             nest_style = ""
             if depth > 0:
@@ -2164,14 +2586,14 @@ function updateBatchCount() {{
         return html
 
     tab_html = _render_report_sections(cat_tree)
-
     uncat_rows = _render_report_rows(unclassified_reports)
+    # 批次5#17：未分类区块不再内联批量操作条（页面级单实例移至列表容器之后）
     uncat_section = f"""<div class="section">
+
 <div class="section-title">
-  <span>📋 未分类报表 <span style="font-weight:400;font-size:14px;color:#94a3b8">({len(unclassified_reports)} 个报表)</span></span>
+  <span>📋 未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
   <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
 </div>
-{batch_bar}
 <div class="table-wrap">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
@@ -2182,7 +2604,8 @@ function updateBatchCount() {{
 </div>
 </div>"""
 
-    return cat_areas + tab_html + uncat_section
+    # 批次5#17：浮动操作条渲染一次，置于全部列表区块之后（footer 之前）
+    return cat_areas + tab_html + uncat_section + batch_bar
 
 
 # ===================================================================
@@ -2288,13 +2711,13 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             ep_key_count = key_counts.get(ep_id, 0)
             if ep_key_count:
                 key_cell = (f'<td style="white-space:nowrap">'
-                            f'<code style="font-size:12px;color:#94a3b8">'
+                            f'<code style="font-size:12px;color:#64748b">'
                             f'{ep_key_count} 个 Key</code></td>')
             else:
-                key_cell = f'<td><code style="font-size:12px;color:#94a3b8">—</code></td>'
+                key_cell = f'<td><code style="font-size:12px;color:#64748b">—</code></td>'
         elif api_key_raw:
             key_cell = (f'<td style="white-space:nowrap">'
-                        f'<code style="font-size:12px;color:#94a3b8">{api_key_display}</code> '
+                        f'<code style="font-size:12px;color:#64748b">{api_key_display}</code> '
                         f'<code id="api-key-raw-{ep_id}" style="display:none">'
                         f'{_escape(api_key_raw)}</code>'
                         f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{ep_id}\')" '
@@ -2302,7 +2725,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                         f'class="btn-mini btn-mini-outline-key">复制</button>'
                         f'</td>')
         else:
-            key_cell = f'<td><code style="font-size:12px;color:#94a3b8">—</code></td>'
+            key_cell = f'<td><code style="font-size:12px;color:#64748b">—</code></td>'
         # 快捷启用/禁用：POST 到独立管理页 toggle 端点，回跳来源页（禁用需确认）
         toggle_label = "禁用" if enabled else "启用"
         if report_id is not None:
@@ -2352,7 +2775,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                      if report_id is not None else "")
     _sc_state = "开启" if _sc_enabled else "关闭"
     _sc_dir = _sc_cfg.get("dir", "static_cache")
-    _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#94a3b8">'
+    _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#64748b">'
                 f'静态文件缓存: 全局 {_sc_state} | 存储目录: <code>{_escape(str(_sc_dir))}</code>'
                 f'（通过 app_config.json 的 static_cache 段配置）</div>')
     return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
@@ -2451,7 +2874,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
     <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
       <input type="radio" name="result_mode" value="all"{all_checked} onchange="toggleResultIndex()">
       <span style="font-weight:600">输出全部结果集</span>
-      <span style="color:#94a3b8;font-size:12px;font-weight:400">— 每个结果集独立分页，API 返回 JSON 数组</span>
+      <span style="color:#64748b;font-size:12px;font-weight:400">— 每个结果集独立分页，API 返回 JSON 数组</span>
     </label>
     <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
       <input type="radio" name="result_mode" value="single"{single_checked} onchange="toggleResultIndex()">
@@ -2461,7 +2884,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
       </select>
     </label>
   </div>
-  <div style="font-size:12px;color:#94a3b8;margin-top:4px">
+  <div style="font-size:12px;color:#64748b;margin-top:4px">
     结果集名称在报表编辑页的「结果名称」中配置
   </div>
   <script>
@@ -2798,7 +3221,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
             f'<button type="button" id="preview-live-btn" data-url="{_api_endpoint_url(report_id, endpoint_id, "preview")}" '
             'onclick="previewWithRealData()" '
             'style="padding:6px 14px;cursor:pointer;border:1px solid #6366f1;border-radius:6px;background:#eef2ff;font-size:13px;color:#4338ca">用真实数据预览</button>'
-            '<span style="font-size:12px;color:#94a3b8;margin-left:8px">以当前表单未保存的模板/规则执行真实查询（最多 3 行数据），结果展示在下方预览区</span>'
+            '<span style="font-size:12px;color:#64748b;margin-left:8px">以当前表单未保存的模板/规则执行真实查询（最多 3 行数据），结果展示在下方预览区</span>'
             '</div>'
         )
     else:
@@ -3089,7 +3512,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   "page_size": {{{{page_size}}}},    // 每页条数
   "total_pages": {{{{total_pages}}}} // 总页数
 }}</pre>
-        <div style="margin-top:6px;font-size:12px;color:#94a3b8">注：原生默认输出在 fetch_all 时含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code>；如需这些字段，在模板中手动加对应键</div>
+        <div style="margin-top:6px;font-size:12px;color:#64748b">注：原生默认输出在 fetch_all 时含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code>；如需这些字段，在模板中手动加对应键</div>
       </div>
       <div id="tpl-default-all" style="display:none;margin-top:8px">
         <pre style="margin:0;padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;line-height:1.8;color:#334155;overflow:auto">{{
@@ -3098,14 +3521,14 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   "page": {{{{page}}}},         // 页码
   "page_size": {{{{page_size}}}} // 每页条数
 }}</pre>
-        <div style="margin-top:6px;font-size:12px;color:#94a3b8">注：fetch_all 时原生输出含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code></div>
+        <div style="margin-top:6px;font-size:12px;color:#64748b">注：fetch_all 时原生输出含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code></div>
       </div>
     </details>
 
     <div style="margin:10px 0">
       <button type="button" id="template-reset-btn" onclick="resetTemplateToDefault()"
         style="padding:6px 14px;cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:13px">还原为默认 JSON 格式</button>
-      <span style="font-size:12px;color:#94a3b8;margin-left:8px">还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
+      <span style="font-size:12px;color:#64748b;margin-left:8px">还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
     </div>
     {live_preview_html}
 
@@ -3144,7 +3567,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
       GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
       POST&nbsp; body: {{"fetch_all": true}}
     </div>
-    <div style="color:#94a3b8;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
+    <div style="color:#64748b;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
   </div>
 
   {api_key_block_html}
@@ -3215,7 +3638,7 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
             f'border-bottom:1px dashed #e2e8f0">'
             f'<span style="min-width:110px;font-size:13px;color:#1e293b;font-weight:600">'
             f'{kname}</span>'
-            f'<code style="font-size:12px;color:#94a3b8">{kdisp}</code>'
+            f'<code style="font-size:12px;color:#64748b">{kdisp}</code>'
             f'<code id="api-key-raw-{kid}" style="display:none">{_escape(kraw)}</code>'
             f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{kid}\')" '
             f'title="复制完整 API Key" class="btn-mini btn-mini-outline-key">复制</button>'
@@ -3223,7 +3646,7 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
             f'</div>')
     if not rows:
         rows = (
-            '<div style="padding:10px 0;font-size:13px;color:#94a3b8">'
+            '<div style="padding:10px 0;font-size:13px;color:#64748b">'
             '暂无 API Key——接口为公开访问（无需鉴权）。生成 Key 后立即生效。</div>')
     return (
         f'<div style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;'
@@ -3430,10 +3853,16 @@ def render_audit_page(
     """
 
     navbar_html = _build_navbar_html("audit")
+    # 批次6#28：公共 CSS 走外链管线，审计页特有样式并入 extra_css 段
+    audit_css_url, _ = _get_common_asset_urls()
+    if audit_css_url:
+        audit_common_assets = f'<link rel="stylesheet" href="{audit_css_url}">'
+    else:
+        audit_common_assets = f"<style>{_COMMON_CSS}</style>"
     html = _PAGE_HEADER_TEMPLATE.substitute(
         title="审计日志",
-        common_css=_COMMON_CSS + extra_css,
-        extra_css="",
+        common_css_assets=audit_common_assets,
+        extra_css=extra_css.replace("$", "$$"),
         navbar=navbar_html,
     )
 
@@ -3482,7 +3911,7 @@ def render_audit_page(
 </div>
 <script>{extra_js}</script>"""
 
-    html += _PAGE_FOOTER
+    html += _render_common_footer()
     return html
 
 
@@ -3572,7 +4001,7 @@ def _build_api_url_row(code_id: str, label: str, url_path: str,
     disabled=True 时行置灰：地址保留可见（用户能知道该能力存在但未启用）、
     复制按钮禁用、title 悬浮提示原因，并提供「去开启」链接（新窗口打开接口配置页）。
     """
-    code_style = ('font-size:12px;color:#94a3b8;text-decoration:line-through;'
+    code_style = ('font-size:12px;color:#64748b;text-decoration:line-through;'
                   if disabled else
                   'font-size:12px;background:#f1f5f9;padding:2px 6px;'
                   'border-radius:4px;color:#4f46e5')
@@ -3626,10 +4055,10 @@ def _build_api_admin_actions_html(ep: dict) -> str:
 def build_state_span(text: str, state: str = "ok", bold: bool = True) -> str:
     """构建状态文字徽章 span HTML。
 
-    state: ok=绿 #059669 / warn=红 #dc2626 / muted=灰 #94a3b8。
+    state: ok=绿 #059669 / warn=红 #dc2626 / muted=灰 #64748b（批次6#27d 对比度加深）。
     bold=False 时省略 font-weight（个别场景原样式无加粗，保持现状）。
     """
-    colors = {"ok": "#059669", "warn": "#dc2626", "muted": "#94a3b8"}
+    colors = {"ok": "#059669", "warn": "#dc2626", "muted": "#64748b"}
     color = colors.get(state, "#059669")
     weight = ";font-weight:600" if bold else ""
     return f'<span style="color:{color}{weight}">{text}</span>'
@@ -3731,7 +4160,7 @@ def _format_schedule_event_row(ev: dict) -> str:
         badge = ('<span style="color:#16a34a">✅ 成功</span>' if ok else
                  f'<span style="color:#dc2626;cursor:help" title="{error}">'
                  f'❌ 失败</span>')
-        dur = f' <span style="color:#94a3b8">{duration}ms</span>' \
+        dur = f' <span style="color:#64748b">{duration}ms</span>' \
             if duration is not None else ""
         trig_label = "手动" if trigger == "manual" else "自动"
         # 报表列：本次参与执行的报表清单（向后兼容缺键降级为「—」）
@@ -3755,7 +4184,7 @@ def _format_schedule_event_row(ev: dict) -> str:
         trig_label = "手动" if trigger == "manual" else "自动"
         return (f"<tr><td>{_escape(time_text)}</td><td>{task_link}</td>"
                 '<td>静默跳过</td>'
-                '<td style="color:#94a3b8">🔇 排除命中未执行</td>'
+                '<td style="color:#64748b">🔇 排除命中未执行</td>'
                 f'<td style="color:#64748b">{trig_label}</td><td>—</td></tr>')
     # scheduled_misfire
     policy = after.get("policy") or "?"
@@ -3812,7 +4241,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
         rows += f"""<tr>
   <td><a href="/config/scheduler?edit={sid}" style="color:#4f46e5;text-decoration:none">{task_name}</a>{badges}</td>
   <td>{reports_cell}</td>
-  <td>{_escape(_format_schedule_plan(s))}<span style="color:#94a3b8;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
+  <td>{_escape(_format_schedule_plan(s))}<span style="color:#64748b;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
   <td>{next_cell}</td>
   <td>{_format_schedule_last_run(s)}</td>
   <td>{_format_schedule_last_result(s)}</td>
@@ -3848,7 +4277,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
         events_block = (
             '<div class="section" style="margin-top:16px">'
             '<div class="section-title"><span>📜 最近执行记录</span>'
-            '<span style="color:#94a3b8;font-size:13px;font-weight:400">'
+            '<span style="color:#64748b;font-size:13px;font-weight:400">'
             '来自审计日志，最多显示 20 条</span></div>'
             '<div class="table-wrap"><table><thead><tr>'
             '<th>时间</th><th>任务</th><th>动作</th><th>结果</th>'
@@ -4117,7 +4546,7 @@ def build_scheduler_task_form_html(prefill: dict | None,
     excl_editor = f'''
     <div style="display:flex;gap:10px;align-items:flex-start">
       <label style="width:120px;padding-top:6px">排除规则<br>
-        <span style="color:#94a3b8;font-size:12px">静默窗口<br>任一规则命中即不执行</span></label>
+        <span style="color:#64748b;font-size:12px">静默窗口<br>任一规则命中即不执行</span></label>
       <div style="flex:1">
         <div id="excl-rules"></div>
         <div style="display:flex;gap:8px;margin-top:4px">

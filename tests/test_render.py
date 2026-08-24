@@ -141,11 +141,14 @@ class TestRenderPageFooter(unittest.TestCase):
         self.assertIn('</html>', result)
 
     def test_contains_javascript(self):
-        """输出包含 JavaScript 脚本"""
+        """输出包含 JavaScript 脚本（批次6#28 后为版本锁外链 <script defer>）
+
+        找茬 M2a：测试环境资产落点已重定向到临时目录（tests/__init__.py），
+        外链路径稳定可达，不再 or 内联双分支通吃——只钉住外链形式。
+        """
         result = render_page_footer()
-        self.assertIn('<script>', result)
-        self.assertIn('toggleSection', result)
-        self.assertIn('toggleFilterInput', result)
+        self.assertIn('src="/static/vendor/self@', result)
+        self.assertIn('common.js" defer></script>', result)
 
 
 class TestRenderNavbar(unittest.TestCase):
@@ -677,9 +680,10 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
     """build_memo_section_html 函数测试"""
 
     def test_with_memo(self):
-        """有备注内容时显示展开状态"""
+        """有备注内容时默认折叠（批次6#24），内容仍在 DOM 中"""
         result = build_memo_section_html("这是一段备注内容")
-        self.assertIn("▼ 备注", result)
+        self.assertIn("▶ 备注", result)
+        self.assertIn('class="debug-content hidden"', result)
         self.assertIn("这是一段备注内容", result)
         self.assertIn("debug-info", result)
 
@@ -730,11 +734,11 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         self.assertIn("background: #0f172a", _MD_CSS)
 
     def test_long_memo(self):
-        """长备注全部显示"""
+        """长备注全部渲染在 DOM 中（默认折叠，批次6#24）"""
         long_text = "A" * 1000
         result = build_memo_section_html(long_text)
         self.assertIn("A" * 1000, result)
-        self.assertIn("▼ 备注", result)
+        self.assertIn("▶ 备注", result)
 
 
 # ===================================================================
@@ -891,10 +895,11 @@ class TestBuildTableHeaderHtml(unittest.TestCase):
     """build_table_header_html 函数测试"""
 
     def test_basic_columns(self):
-        """基础列生成 th 元素"""
+        """基础列生成 th 元素（批次6#25 起携带 data-col 定位属性）"""
         cols = ["id", "name"]
         result = build_table_header_html(cols, cols, [], [], 1, 20, "", "")
-        self.assertIn("<th>", result)
+        self.assertIn('<th data-col="id">', result)
+        self.assertIn('<th data-col="name">', result)
         self.assertIn("id", result)
         self.assertIn("name", result)
 
@@ -1062,8 +1067,8 @@ class TestBuildControlsBarHtml(unittest.TestCase):
                                           "", 100, 5)
         self.assertIn("CSV", result)
         self.assertIn("JSON", result)
-        self.assertIn("GBK", result)
-        self.assertIn("UTF8", result)
+        self.assertIn("GBK（Excel 中文版推荐）", result)
+        self.assertIn("UTF-8（通用 / 程序处理）", result)
 
     def test_cache_badge_in_controls(self):
         """缓存标签出现在控制栏"""
@@ -1825,9 +1830,13 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         self.assertIn('.hidden { display: none !important; }', _COMMON_CSS)
 
     def test_page_style_emits_hidden_rule(self):
-        """render_page_header 输出的 <style> 应包含 .hidden 规则（折叠端到端生效）"""
+        """页面公共资产应包含 .hidden 规则（折叠端到端生效；批次6#28 后经外链引用）"""
         header = render_page_header("t")
-        self.assertIn(".hidden { display: none !important; }", header)
+        # 外链模式：<link> 引用 _COMMON_CSS；内联回退模式：<style> 直含规则。
+        linked = '<link rel="stylesheet"' in header and (
+            ".hidden { display: none !important; }" in _COMMON_CSS)
+        inline = ".hidden { display: none !important; }" in header
+        self.assertTrue(linked or inline)
 
     def test_pool_badge(self):
         """报表显示连接池名称"""
@@ -2532,14 +2541,14 @@ class TestMemoSectionMemKey(unittest.TestCase):
     """build_memo_section_html 的 report_id 三态接入（矩阵 M2）。"""
 
     def test_nonempty_with_report_id(self):
-        """非空备注 + report_id=3：▼ 备注 + data-mem-key + 三态 + .md-body 渲染。"""
+        """非空备注 + report_id=3：默认折叠（批次6#24）+ data-mem-key + 三态 + .md-body。"""
         html = build_memo_section_html("这是备注", 3)
-        self.assertIn("▼ 备注", html)
+        self.assertIn("\u25b6 备注", html)
         self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn('data-default-hidden="0"', html)
+        self.assertIn('data-default-hidden="1"', html)
         self.assertIn("mem-mode", html)
         self.assertIn('<div class="md-body"><p>这是备注</p></div>', html)
-        self.assertNotIn('class="debug-content hidden"', html)
+        self.assertIn('class="debug-content hidden"', html)
 
     def test_empty_with_report_id(self):
         """空备注 + report_id=3：▶ 备注 + data-mem-key + 三态（折叠区仍渲染）。"""
@@ -2551,9 +2560,10 @@ class TestMemoSectionMemKey(unittest.TestCase):
         self.assertIn('class="debug-content hidden"', html)
 
     def test_nonempty_without_report_id_unchanged(self):
-        """非空备注 + report_id=None：现状输出，无三态、无 data-mem-key。"""
+        """非空备注 + report_id=None：无三态、无 data-mem-key，默认折叠（批次6#24）。"""
         html = build_memo_section_html("这是备注")
-        self.assertIn("▼ 备注", html)
+        self.assertIn("\u25b6 备注", html)
+        self.assertIn('class="debug-content hidden"', html)
         self.assertNotIn("data-mem-key", html)
         self.assertNotIn("data-default-hidden", html)
         self.assertNotIn("mem-mode", html)
@@ -2564,7 +2574,7 @@ class TestMemoSectionMemKey(unittest.TestCase):
         self.assertIn('data-mem-key="memo_fold_3"', html)
         self.assertIn("mem-mode", html)
         self.assertIn('<pre class="mermaid">', html)
-        self.assertIn("▼ 备注", html)
+        self.assertIn("\u25b6 备注", html)
 
 
 # ===================================================================

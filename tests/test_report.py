@@ -362,7 +362,9 @@ class TestReportExecution(unittest.TestCase):
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("这是报表备注说明", body)
-        self.assertIn("▼ 备注", body)  # 有内容时默认展开
+        # 批次6#24：有内容也默认折叠，内容保留在 DOM
+        self.assertIn("\u25b6 备注", body)
+        self.assertIn('class="debug-content hidden"', body)
 
     @patch("report.execute_report")
     def test_report_hides_memo_when_empty(self, mock_exec):

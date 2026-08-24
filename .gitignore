@@ -27,6 +27,8 @@ audit.db
 
 # 运行时缓存
 static_cache/
+# 公共 CSS/JS 外链化产物（内容 hash 版本锁目录，启动时生成）
+static/vendor/self@*/
 
 # 系统
 .DS_Store

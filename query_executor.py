@@ -189,6 +189,7 @@ def _connect_mysql_config() -> _MySQLConnection:
         # 使 rowcount 返回匹配行数而非实际修改行数（与 SQLite 行为一致）
         "client_flags": [ClientFlag.FOUND_ROWS],
     }
+    # 找茬 H1：配置库查询皆短平快，无需 read_timeout（批次5 曾误加 30s）
     if cfg.get("socket"):
         config["unix_socket"] = cfg["socket"]
     elif config["host"] == "localhost":
@@ -202,11 +203,16 @@ def _connect_mysql_config() -> _MySQLConnection:
 # ---------------------------------------------------------------------------
 
 
-def create_mysql_connection(pool_config: dict) -> object:
+def create_mysql_connection(pool_config: dict,
+                            read_timeout: int | None = None) -> object:
     """
     根据连接池配置创建 MySQL 连接。
 
     参数 pool_config 需包含 host、port、user、password、database 字段。
+    read_timeout: 读取超时秒数；None = 不设置（连接可用至查询自然结束）。
+    找茬 H1（批次5/6 审查）：仅 Web 交互报表查询路径传 30——调度器后台
+    任务复用本工厂，超时硬编码会把超 30s 的合法重报表定时任务变成必然
+    失败，故默认不限制、由调用方按场景声明。
     返回 mysql.connector 的 connection 对象。
 
     注意：
@@ -224,6 +230,9 @@ def create_mysql_connection(pool_config: dict) -> object:
         "connection_timeout": 10,
         "charset": "utf8mb4",
     }
+    if read_timeout is not None:
+        # 批次5#18：Web 交互查询防慢查询黑洞；默认 None 不限制（找茬 H1）
+        config["read_timeout"] = read_timeout
 
     # 使用 127.0.0.1 强制走 TCP，避免 Unix socket auth 插件不匹配
     if config["host"] == "localhost":

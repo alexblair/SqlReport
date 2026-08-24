@@ -76,7 +76,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     text-align: center; color: #1e293b; margin-bottom: 8px;
     font-size: 24px; font-weight: 700; letter-spacing: -0.5px;
   }
-  .login-subtitle { text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 32px; }
+  .login-subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 32px; }
   .login-box label { display: block; margin-bottom: 6px; font-weight: 600; color: #475569; font-size: 14px; }
   .login-box input[type=text], .login-box input[type=password] {
     width: 100%; padding: 10px 14px; margin-bottom: 20px;
@@ -103,7 +103,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     color: #92400e; text-align: center; margin-bottom: 20px; font-size: 14px;
     padding: 10px; background: #fffbeb; border-radius: 8px; border: 1px solid #fde68a;
   }
-  .login-footer { text-align: center; margin-top: 24px; color: #94a3b8; font-size: 12px; }
+  .login-footer { text-align: center; margin-top: 24px; color: #64748b; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -113,10 +113,10 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   {error}
   <form method="post" action="/login">
     {next_field}
-    <label>用户名</label>
-    <input type="text" name="username" required autofocus>
-    <label>密码</label>
-    <input type="password" name="password" required>
+    <label for="login_username">用户名</label>
+    <input type="text" id="login_username" name="username" required autofocus autocomplete="username">
+    <label for="login_password">密码</label>
+    <input type="password" id="login_password" name="password" required autocomplete="current-password">
     <button type="submit">登 录</button>
   </form>
   <p class="login-footer">Web 报表工具 v1.0</p>
@@ -202,6 +202,35 @@ body {{ display:flex; justify-content:center; align-items:center; min-height:100
 </html>"""
 
 
+def _build_favicon_bytes() -> bytes:
+    """生成 16x16 内置图标并包装为 ICO 字节流（spec ux-optimization 批次6#27b）。
+
+    纯标准库构造：RGBA PNG（品牌紫 #4f46e5 单色块）经 ICONDIR+ICONDIRENTRY
+    包装为合法 .ico，消除浏览器默认请求 /favicon.ico 的 404 噪音。
+    """
+    import struct as _struct
+    import zlib as _zlib
+
+    width = height = 16
+
+    def _chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return (_struct.pack(">I", len(data)) + body
+                + _struct.pack(">I", _zlib.crc32(body) & 0xFFFFFFFF))
+
+    raw = b"".join(b"\x00" + b"\x4f\x46\xe5\xff" * width for _ in range(height))
+    ihdr = _struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    png = (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
+           + _chunk(b"IDAT", _zlib.compress(raw)) + _chunk(b"IEND", b""))
+    ico = (_struct.pack("<HHH", 0, 1, 1)
+           + _struct.pack("<BBBBHHII", width, height, 0, 0, 1, 32,
+                          len(png), 6 + 16))
+    return ico + png
+
+
+_FAVICON_BYTES = _build_favicon_bytes()
+
+
 class RouteEntry:
     """路由条目。
 
@@ -236,6 +265,7 @@ class RouteEntry:
 
 # 路由表 — 顺序优先，首次匹配即生效
 ROUTES = [
+    RouteEntry(r"^/favicon\.ico$", "GET", False, False, "_handle_favicon"),
     RouteEntry(r"^/login$", "GET", False, False, "_handle_login_get"),
     RouteEntry(r"^/login$", "POST", False, False, "_handle_login"),
     RouteEntry(r"^/health$", "GET", False, False, "_handle_health"),
@@ -374,10 +404,21 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     # ---- 路由 ----
 
     def do_GET(self):
+        # 找茬 L1：入口显式复位 _suppress_body——当前 HTTP/1.0 每请求
+        # 新建实例无泄漏风险，但未来升 keep-alive 时同连接复用实例，
+        # HEAD 标志残留会吞掉后续 GET 的响应体。
+        self._suppress_body = False
         self._handle("GET")
 
     def do_POST(self):
+        self._suppress_body = False
         self._handle("POST")
+
+    def do_HEAD(self):
+        """HEAD 支持（spec ux-optimization 批次6#27c）：按 GET 路由分发，
+        响应头照常返回、仅省略响应体（_write_body 统一拦截）。"""
+        self._suppress_body = True
+        self._handle("GET")
 
     def do_OPTIONS(self):
         self._handle("OPTIONS")
@@ -497,7 +538,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(json.dumps({
+        self._write_body(json.dumps({
             "status": "ok",
             "uptime": uptime,
         }).encode("utf-8"))
@@ -622,14 +663,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         for key, val in headers.items():
             self.send_header(key, val)
         self.end_headers()
-        try:
-            if isinstance(body, bytes):
-                self.wfile.write(body)
-            else:
-                self.wfile.write(body.encode("utf-8"))
-        except (BrokenPipeError, ConnectionResetError):
-            # 客户端已断开连接，放弃发送响应（与 _handle_api/_send_html 一致）
-            logging.info("导出响应发送失败（客户端已断开）")
+        if isinstance(body, bytes):
+            self._write_body(body)
+        else:
+            self._write_body(body.encode("utf-8"))
 
     def _handle_api(self, method: str, path: str, query: str, conn=None):
         """
@@ -677,18 +714,37 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         if not found_content_type:
             self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        try:
-            if isinstance(resp_body, str):
-                self.wfile.write(resp_body.encode("utf-8"))
-            elif isinstance(resp_body, bytes):
-                self.wfile.write(resp_body)
-            else:
-                self.wfile.write(str(resp_body).encode("utf-8"))
-        except (BrokenPipeError, ConnectionResetError):
-            # 客户端已断开连接，放弃发送响应（常见于全量输出等大响应场景）
-            logging.info("API 响应发送失败（客户端已断开）: %s %s", path, method)
+        # 客户端断开由 _write_body 统一静默处理（常见于全量输出等大响应）
+        if isinstance(resp_body, str):
+            self._write_body(resp_body.encode("utf-8"))
+        elif isinstance(resp_body, bytes):
+            self._write_body(resp_body)
+        else:
+            self._write_body(str(resp_body).encode("utf-8"))
 
     # ---- 辅助方法 ----
+
+    def _write_body(self, payload: bytes):
+        """写出响应体（spec ux-optimization 批次6#27c）。
+
+        HEAD 请求（_suppress_body=True）时仅发送头、跳过 body；
+        客户端断开（BrokenPipe/ConnectionReset）静默放弃。
+        """
+        if getattr(self, "_suppress_body", False):
+            return
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _handle_favicon(self, method, path, query, conn=None):
+        """内置 favicon（spec ux-optimization 批次6#27b）：避免 404 噪音。"""
+        self.send_response(200)
+        self.send_header("Content-Type", "image/x-icon")
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(_FAVICON_BYTES)))
+        self.end_headers()
+        self._write_body(_FAVICON_BYTES)
 
     def _write_audit_log(self, *, log_type, session_user, action, entity_type,
                          entity_name, http_method, http_path, http_status,
@@ -782,7 +838,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             for key, val in headers.items():
                 self.send_header(key, val)
             self.end_headers()
-            self.wfile.write(body)
+            self._write_body(body)
         else:
             self._send_html(code, body, headers)
 
@@ -822,10 +878,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        try:
-            self.wfile.write(payload)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        self._write_body(payload)
 
     def _send_html(self, status: int, body: str, extra_headers: dict = None):
         """发送 HTML 响应
@@ -843,10 +896,7 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             if k.lower() != "content-type":
                 self.send_header(k, v)
         self.end_headers()
-        try:
-            self.wfile.write(body.encode("utf-8"))
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        self._write_body(body.encode("utf-8"))
 
     def _send_redirect(self, location: str):
         """发送 302 重定向"""
@@ -931,6 +981,17 @@ def setup_logging():
 
 def main():
     setup_logging()
+    # 公共 CSS/JS 外链化预热（spec ux-optimization 批次6#28）：
+    # 启动时按内容 hash 写入 static/vendor/self@{hash8}/，页头/页尾输出
+    # 版本锁外链；写入失败时渲染层自动回退内联，功能不降级。
+    try:
+        asset_urls = render.ensure_common_assets()
+        if asset_urls:
+            logging.info("公共静态资产已就绪: %s", asset_urls[0])
+        else:
+            logging.warning("公共静态资产写入失败，公共 CSS/JS 回退内联模式")
+    except Exception as e:
+        logging.warning("公共静态资产生成异常（回退内联）: %s", e)
     # 初始化运行时文件权限（仅 static_cache 缓存落点 {dir}/api）：
     # 启动时对缓存目录树整树刷新属主/权限，覆盖历史遗留 root:root 文件。
     # 以 {dir}/api 为起点而非 {dir}：dir 可能指向包含其他程序的目录，

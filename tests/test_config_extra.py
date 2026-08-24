@@ -498,11 +498,14 @@ class TestSortingConfig(BaseConfigTest):
         db.add_report(self.conn, "报表2", "SELECT 1", 20, 1, category_id=1)
 
     def test_report_move_up_handler(self):
-        """POST /config/reports/{id}/move-up 应交换同分类内 sort_order 并 302"""
+        """POST /config/reports/{id}/move-up 应交换同分类内 sort_order 并 302
+
+        批次5#15 起 302 附带 flash 与锚点（#sec-reports），此处仅断言路径前缀。
+        """
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/2/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/reports")
+        self.assertTrue(body.startswith("/config/reports"))
         order = [r["id"] for r in db.get_reports(self.conn, 1)]
         self.assertEqual(order, [2, 1])
 
@@ -513,11 +516,14 @@ class TestSortingConfig(BaseConfigTest):
         self.assertEqual(order, [2, 1])
 
     def test_category_move_up_handler(self):
-        """POST /config/categories/{id}/move-up 应交换分类排序并 302 到报表页"""
+        """POST /config/categories/{id}/move-up 应交换分类排序并 302 到报表页
+
+        批次5#15 起 302 附带 flash 与锚点（#sec-categories），此处仅断言路径前缀。
+        """
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/2/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/reports")
+        self.assertTrue(body.startswith("/config/reports"))
         order = [c["id"] for c in db.get_all_categories(self.conn)]
         self.assertEqual(order, [2, 1])
 
@@ -526,7 +532,7 @@ class TestSortingConfig(BaseConfigTest):
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/categories/1/move-down", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/reports")
+        self.assertTrue(body.startswith("/config/reports"))
         order = [c["id"] for c in db.get_all_categories(self.conn)]
         self.assertEqual(order, [2, 1])
 
@@ -537,11 +543,13 @@ class TestSortingConfig(BaseConfigTest):
         self.assertEqual(order, [2, 1])
 
     def test_move_missing_object_redirects(self):
-        """移动不存在的报表仍返回 302（db 层返回 False，handler 不感知）"""
+        """移动不存在的报表仍返回 302（批次5#15 起带「错误:」flash 与锚点）"""
         code, body, headers = config.handle_request(
             self.conn, "POST", "/config/reports/999/move-up", "", "")
         self.assertEqual(code, 302)
-        self.assertEqual(body, "/config/reports")
+        self.assertIn("错误:", body)
+        self.assertTrue(body.startswith("/config/reports"))
+        self.assertIn("#sec-reports", body)
 
     def test_batch_unknown_action_redirects(self):
         """batch 类未知动作（order 缺字段场景的兜底）回退 302 /config"""
@@ -970,14 +978,14 @@ class TestBatchJsInteraction(BaseConfigTest):
     def test_batch_update_pool_js(self):
         """批量修改连接池：无选择时 alert，提交到 batch-pool 路由"""
         self.assertIn("function batchUpdatePool()", self.body)
-        self.assertIn("alert('请至少选择一项')", self.body)
-        self.assertIn("alert('请选择目标连接池')", self.body)
+        self.assertIn("showFlashWarn('请至少选择一项')", self.body)
+        self.assertIn("showFlashWarn('请选择目标连接池')", self.body)
         self.assertIn("submitBatchPost('/config/reports/batch-pool'", self.body)
 
     def test_batch_set_category_js(self):
         """批量设置分类：无选择时 alert，-1 映射为空值提交到 batch-set-category"""
         self.assertIn("function batchSetCategory()", self.body)
-        self.assertIn("alert('请选择目标分类')", self.body)
+        self.assertIn("showFlashWarn('请选择目标分类')", self.body)
         self.assertIn("catId === '-1' ? '' : catId", self.body)
         self.assertIn("submitBatchPost('/config/reports/batch-set-category'", self.body)
 
@@ -985,7 +993,7 @@ class TestBatchJsInteraction(BaseConfigTest):
         """批量更新缓存：需确认对话框，未选开关/勾选时 alert"""
         self.assertIn("function batchUpdateCache()", self.body)
         self.assertIn("confirm(`确定批量更新", self.body)
-        self.assertIn("alert('请选择缓存开关或勾选修改TTL')", self.body)
+        self.assertIn("showFlashWarn('请选择缓存开关或勾选修改TTL')", self.body)
 
     def test_batch_cache_ttl_input_toggle(self):
         """修改 TTL 复选框联动输入框 disabled 状态"""
@@ -995,10 +1003,17 @@ class TestBatchJsInteraction(BaseConfigTest):
         self.assertIn('id="batch_cache_ttl"', self.body)
 
     def test_submit_batch_post_builds_hidden_form(self):
-        """submitBatchPost 应动态构建 POST 表单提交 report_ids 与扩展字段"""
-        self.assertIn("function submitBatchPost(actionUrl, ids, extraFields)", self.body)
-        self.assertIn("inp.type = 'hidden'; inp.name = 'report_ids'", self.body)
-        self.assertIn("form.submit()", self.body)
+        """submitBatchPost 应动态构建 POST 表单提交 report_ids 与扩展字段
+
+        批次6#28：定义外链至公共 JS（render._COMMON_JS），页面断言调用点。
+        """
+        self.assertIn("submitBatchPost('/config/reports/batch-pool'", self.body)
+        self.assertIn(
+            "function submitBatchPost(actionUrl, ids, extraFields)",
+            render._COMMON_JS)
+        self.assertIn("inp.type = 'hidden'; inp.name = 'report_ids'",
+                      render._COMMON_JS)
+        self.assertIn("form.submit()", render._COMMON_JS)
 
     def test_update_batch_count_wired_to_checkbox(self):
         """复选框 onchange 应联动更新选中计数"""
@@ -1006,9 +1021,12 @@ class TestBatchJsInteraction(BaseConfigTest):
         self.assertIn("function updateBatchCount()", self.body)
 
     def test_select_all_in_section_present(self):
-        """表头全选复选框联动 section 内全部复选框"""
+        """表头全选复选框联动 section 内全部复选框
+
+        批次6#28：定义外链至公共 JS（render._COMMON_JS），页面断言挂载点。
+        """
         self.assertIn('onchange="selectAllInSection(this)"', self.body)
-        self.assertIn("function selectAllInSection(el)", self.body)
+        self.assertIn("function selectAllInSection(el)", render._COMMON_JS)
 
 
 # ---------------------------------------------------------------------------
@@ -1217,7 +1235,8 @@ class TestCategoriesPage(BaseConfigTest):
         self.assertIn('id="cat-tree-toggle"', body)
         self.assertIn('onclick="toggleCatTree(this)"', body)
         self.assertIn('id="cat-tree-content"', body)
-        self.assertIn("cat_tree_collapsed", body)
+        # 批次6#28：记忆逻辑随公共 JS 外链，键名改在 _COMMON_JS 断言
+        self.assertIn("cat_tree_collapsed", render._COMMON_JS)
 
     def test_reports_page_renders_tree_with_badge(self):
         """分类树应渲染子分类数量角标"""

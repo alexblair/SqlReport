@@ -326,8 +326,13 @@ class BaseStateMachineTest(unittest.TestCase):
 
     def _get_hrefs(self, html, must_contain="/report?"):
         """从 HTML 中提取所有 href 链接。"""
+        # 找茬 M3：先剥离 <script> 块（JS 模板串里的 href="..." 会被
+        # 正则误捕获为伪链接），再提取真实 HTML 属性——比原「含单引号
+        # 即排除」精准，不会掩盖真实链接回归
+        html_no_script = re.sub(r"<script\b.*?</script>", "", html,
+                                flags=re.S | re.I)
         pattern = re.compile(r'href="([^"]*)"')
-        hrefs = pattern.findall(html)
+        hrefs = pattern.findall(html_no_script)
         if must_contain:
             hrefs = [h for h in hrefs if must_contain in h]
         return hrefs

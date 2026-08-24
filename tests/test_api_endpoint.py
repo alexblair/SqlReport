@@ -1451,6 +1451,9 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         handler.client_address = ("127.0.0.1", 12345)
         handler.wfile = unittest.mock.Mock()
         handler.wfile.write.side_effect = ConnectionResetError("Connection reset by peer")
+        # 批次6#27c：写 body 收口到 _write_body，绑定真实实现保证异常吞掉路径被覆盖
+        handler._suppress_body = False
+        handler._write_body = srv.ReportHandler._write_body.__get__(handler)
         # 不抛异常即通过（修复前 ConnectionResetError 会冒泡到 _handle 并二次写失败）
         srv.ReportHandler._handle_api(
             handler, "GET", "/api/reset-test", "", conn)
@@ -1466,6 +1469,9 @@ class TestApiEndpointIntegration(MockMySQLMixin, unittest.TestCase):
         handler.client_address = ("127.0.0.1", 12345)
         handler.wfile = unittest.mock.Mock()
         handler.wfile.write.side_effect = BrokenPipeError("Broken pipe")
+        # 批次6#27c：写 body 收口到 _write_body，绑定真实实现保证异常吞掉路径被覆盖
+        handler._suppress_body = False
+        handler._write_body = srv.ReportHandler._write_body.__get__(handler)
         srv.ReportHandler._handle_api(
             handler, "GET", "/api/broken-pipe-test", "", conn)
         conn.close()
