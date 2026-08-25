@@ -30,6 +30,7 @@ import redis_cache
 import static_cache
 import api_handler
 import app_config
+import preset_cases
 import html as html_mod
 from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
 from query_executor import sql_contains_write
@@ -117,6 +118,10 @@ def parse_config_path(path: str) -> dict:
         # 站点标识保存（spec site-branding）
         if path == "/config/site-branding":
             return {"section": "site-branding", "action": "save", "id": None,
+                    "report_id": None, "endpoint_id": None}
+        # 新增测试用例（预设数据夹具一键导入；仅 DEBUG 模式可用）
+        if path == "/config/test-cases/import":
+            return {"section": "test-cases", "action": "import", "id": None,
                     "report_id": None, "endpoint_id": None}
         return {"section": None, "action": None, "id": None,
                 "report_id": None, "endpoint_id": None}
@@ -296,6 +301,12 @@ _CONFIG_EXTRA_CSS = """
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 13px; color: #a5b4fc; white-space: pre; user-select: none;
   }
+  /* 连接池表单「测试连接」结果（批次：ajax 不刷新，内联提示） */
+  .config-form .form-actions .test-result {
+    font-size: 13px; font-weight: 500; align-self: center;
+  }
+  .config-form .form-actions .test-result.ok { color: #16a34a; }
+  .config-form .form-actions .test-result.err { color: #dc2626; }
 """
 
 # 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
@@ -851,6 +862,49 @@ def handle_site_branding_save(form_body: str,
     return 302, f"/config?flash={urllib.parse.quote(flash)}", {}
 
 
+def handle_import_test_cases(conn, session_user=None) -> tuple[int, str, dict]:
+    """【新增测试用例】按钮后端：将预设数据夹具 upsert 导入当前配置库。
+
+    仅 DEBUG 模式可用（app_config.debug.json 激活时）。非 DEBUG 模式直接
+    拒绝，避免污染生产配置库。导入采用「按名称 upsert」语义：同名覆盖更新，
+    不同名新增；不对库内未出现在夹具中的数据做删除。
+    """
+    if not app_config.is_debug_mode():
+        msg = "错误: 新增测试用例仅在 DEBUG 模式下可用"
+        return 302, f"/config?flash={urllib.parse.quote(msg)}", {}
+    # DEBUG 专属测试 MySQL（enable 且配置了 host 才返回非空）
+    test_mysql = app_config.get_test_mysql_config()
+    try:
+        result = preset_cases.import_preset_from_file(
+            conn, test_mysql_cfg=test_mysql)
+    except FileNotFoundError:
+        msg = "错误: 未找到预设测试用例文件 tests/preset_test_cases.json"
+        return 302, f"/config?flash={urllib.parse.quote(msg)}", {}
+    except Exception as e:  # noqa: BLE001
+        msg = f"错误: 导入预设测试用例失败: {e}"
+        return 302, f"/config?flash={urllib.parse.quote(msg)}", {}
+
+    added = result["added"]
+    updated = result["updated"]
+    errs = result.get("errors") or []
+    parts = [f"已新增 {added} 条、覆盖更新 {updated} 条配置数据"]
+    mysql = result.get("test_mysql")
+    if mysql:
+        if mysql.get("ok"):
+            tbls = mysql.get("tables") or []
+            parts.append(
+                f"测试 MySQL 库 {mysql.get('database') or '(默认)'} "
+                f"已建表 {len(tbls)} 张并初始化")
+        else:
+            parts.append("测试 MySQL 初始化未完成（详见日志）")
+    if errs:
+        parts.append(f"{len(errs)} 条警告（详见日志）")
+        for e in errs[:20]:
+            logging.warning("[preset_cases] %s", e)
+    flash = "成功: " + "，".join(parts)
+    return 302, f"/config?flash={urllib.parse.quote(flash)}", {}
+
+
 def render_overview(conn, flash: str = None,
                     current_username: str = None) -> str:
     """渲染配置总览页，包含三个配置段
@@ -914,11 +968,23 @@ def render_overview(conn, flash: str = None,
 </div>
 <p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
 </div>"""
+    # 新增测试用例：DEBUG 模式专属，将预设数据夹具一键导入当前配置库（按名称覆盖）
+    test_cases_card = ""
+    if app_config.is_debug_mode():
+        test_cases_card = f"""<div class="card" style="margin-top:8px;border:1px dashed #c7d2fe;background:#f5f7ff">
+<div class="section-title" style="font-size:16px;margin-bottom:8px">
+  <span>🧪 测试数据</span>
+</div>
+<p style="color:#475569;margin:0 0 10px">将预设测试用例（连接池 / 分类 / 报表 / API 接口 / Key / 定时任务）按名称 upsert 导入当前 DEBUG 配置库，用于功能验收与脚本测试。</p>
+<form method="post" action="/config/test-cases/import" onsubmit="return confirm('确认将预设测试用例导入当前 DEBUG 配置库？同名数据将被覆盖更新。')">
+  <button type="submit" class="btn btn-primary">新增测试用例</button>
+</form>
+</div>"""
     body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + onboarding_html + _render_pool_section(conn)
             + _render_user_section(conn, current_username=current_username)
             + reports_card + categories_card + api_card
-            + _render_branding_section() + render_page_footer())
+            + _render_branding_section() + test_cases_card + render_page_footer())
     return body
 
 
@@ -1230,6 +1296,10 @@ def handle_pool_test(conn, form_body: str, session_user=None) -> tuple[int, str]
     结果以 flash 回跳回来源页。编辑态密码留空时沿用库中旧密码
     （与 handle_pool_edit 的空值语义一致——否则「没改密码」的池
     永远测不通）。驱动未安装 / 参数缺失同样返回 flash 而非 500。
+
+    批次(本次): 若请求为 AJAX（前端「测试连接」按钮经 fetch 提交，
+    携带 test_ajax=1），则返回 JSON 且**不跳转、不刷新页面**，
+    表单已填内容得以保留；否则仍走 302 回跳表单页（兼容无 JS 环境）。
     """
     data = _parse_form_data(form_body)
     host = (data.get("host") or "").strip()
@@ -1243,24 +1313,33 @@ def handle_pool_test(conn, form_body: str, session_user=None) -> tuple[int, str]
     except (TypeError, ValueError):
         pool_id = None
 
+    is_ajax = (data.get("test_ajax") or "").strip() == "1"
+    back_url = f"/config/pools/{pool_id}/edit" if pool_id else "/config/pools/add"
+
+    def _respond(flash_msg: str, ok: bool) -> tuple[int, str, dict]:
+        if is_ajax:
+            import json
+            return (200, json.dumps({"ok": ok, "flash": flash_msg}, ensure_ascii=False),
+                    {"Content-Type": "application/json; charset=utf-8"})
+        return 302, f"{back_url}?flash={urllib.parse.quote(flash_msg)}", {}
+
     # 编辑态留空密码 → 取库中旧值补齐（与保存语义一致）
     if not password and pool_id:
         stored = db.get_pool(conn, pool_id)
         if stored:
             password = stored["password"]
 
-    back_url = f"/config/pools/{pool_id}/edit" if pool_id else "/config/pools/add"
     if not host or not user:
-        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 主机地址和用户名不能为空')}"
+        return _respond("错误: 主机地址和用户名不能为空", False)
     try:
         port = int(port_raw)
     except (TypeError, ValueError):
-        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 端口必须是数字')}"
+        return _respond("错误: 端口必须是数字", False)
 
     try:
         import mysql.connector
     except ImportError:
-        return 302, f"{back_url}?flash={urllib.parse.quote('错误: 未安装 MySQL 驱动（mysql-connector-python），无法测试连接')}"
+        return _respond("错误: 未安装 MySQL 驱动（mysql-connector-python），无法测试连接", False)
 
     try:
         test_conn = mysql.connector.connect(
@@ -1270,12 +1349,12 @@ def handle_pool_test(conn, form_body: str, session_user=None) -> tuple[int, str]
             test_conn.close()
         except Exception:
             pass
-        return 302, f"{back_url}?flash={urllib.parse.quote('连接成功：数据库可达，账号密码正确')}"
+        return _respond("连接成功：数据库可达，账号密码正确", True)
     except Exception as e:
         logging.warning("测试连接失败 (%s:%s/%s): %s", host, port, database, e)
         friendly, _ = _pool_test_error_hint(e)
         msg = f"错误: 连接失败——{friendly}"
-        return 302, f"{back_url}?flash={urllib.parse.quote(msg)}"
+        return _respond(msg, False)
 
 
 def _pool_test_error_hint(e: Exception) -> tuple[str, str]:
@@ -2046,6 +2125,11 @@ def handle_request(conn, method: str, path: str, query: str,
         return handle_site_branding_save(conn, form_body or "",
                                          session_user=session_user)
 
+    # 新增测试用例：预设数据夹具一键导入（仅 DEBUG 模式；needs_auth 已拦截未登录）
+    if (method == "POST" and route["section"] == "test-cases"
+            and route["action"] == "import"):
+        return handle_import_test_cases(conn, session_user=session_user)
+
     # API 端点 POST 处理（放在 reports section 中匹配前先拦截）
     if method == "POST" and route["section"] == "reports" and route["report_id"]:
         if route["action"] == "api_new" and route["report_id"]:
@@ -2075,10 +2159,11 @@ def handle_request(conn, method: str, path: str, query: str,
         if route["section"] == "pools":
             if route["action"] == "test":
                 # 批次3#12：测试连接（不保存配置，仅验证连通性）；
-                # handler 返回 (302, Location)，补空 headers 对齐分支约定
-                code, location = handle_pool_test(conn, form_body or "",
-                                                  session_user=session_user)
-                return code, location, {}
+                # handler 返回 (code, body, headers)：AJAX 时为 JSON（不跳转），
+                # 非 AJAX 时为 302 跳转回表单页（兼容无 JS 环境）
+                code, body, headers = handle_pool_test(conn, form_body or "",
+                                                        session_user=session_user)
+                return code, body, headers
             if route["action"] == "add":
                 code, result = handle_pool_add(conn, form_body or "", session_user=session_user)
             elif route["action"] == "edit" and route["id"]:

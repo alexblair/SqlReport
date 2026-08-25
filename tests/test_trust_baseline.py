@@ -385,6 +385,43 @@ class TestPoolTestConnection(BaseConfigTest):
         self.assertEqual(code, 302)
         self.assertIn("错误:", urllib.parse.unquote(body))
 
+    def test_ajax_returns_json_not_redirect(self):
+        """AJAX 测试连接应返回 JSON 且不跳转（保留表单已填内容）"""
+        fake_conn = MagicMock()
+        with patch("mysql.connector.connect", return_value=fake_conn):
+            code, body, headers = self._post(
+                "name=x&host=10.0.0.5&port=3306&user=root"
+                "&password=pw&database=d&test_ajax=1")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("Content-Type"), "application/json; charset=utf-8")
+        import json
+        payload = json.loads(body)
+        self.assertTrue(payload["ok"])
+        self.assertIn("连接成功", payload["flash"])
+
+    def test_ajax_failure_returns_json_error(self):
+        err = Exception("1045 (28000): Access denied")
+        with patch("mysql.connector.connect", side_effect=err):
+            code, body, headers = self._post(
+                "name=x&host=10.0.0.5&port=3306&user=root"
+                "&password=bad&database=d&test_ajax=1")
+        self.assertEqual(code, 200)
+        import json
+        payload = json.loads(body)
+        self.assertFalse(payload["ok"])
+        self.assertIn("错误:", payload["flash"])
+
+
+class TestPoolTestButtonMarkup(BaseConfigTest):
+    def test_test_button_is_ajax_not_submit(self):
+        """「测试连接」按钮必须为 type=button（ajax），避免提交刷新丢数据"""
+        html = render_mod.build_pool_form_html()
+        self.assertIn('data-test-conn', html)
+        self.assertIn('type="button"', html)
+        self.assertNotIn('formaction="/config/pools/test"', html)
+        self.assertIn('testPoolConnection(this.form)', html)
+        self.assertIn('id="pool-test-result"', html)
+
 
 # ---------------------------------------------------------------------------
 # 缺口 TB-13：flash 错误样式判定单点化

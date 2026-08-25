@@ -2124,7 +2124,7 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
             name = _escape(pool["name"] + " (副本)")
         # 复制模式同样不回显密码：留空则需重新输入
 
-    return f"""<div class="card">
+    form_html = f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form">
   <input type="hidden" name="pool_id" value="{_escape(pool['id']) if pool and pool.get('id') else ''}">
@@ -2136,12 +2136,52 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
   <label>数据库: <input type="text" name="database" value="{database}" required></label>
   <div class="form-actions span-full">
     <button type="submit" class="btn btn-primary">保存</button>
-    <button type="submit" class="btn btn-outline" formaction="/config/pools/test"
-            formnovalidate title="用当前表单填写的连接信息试连数据库（不保存）">测试连接</button>
+    <button type="button" class="btn btn-outline" data-test-conn
+            formnovalidate title="用当前表单填写的连接信息试连数据库（不保存）"
+            onclick="testPoolConnection(this.form)">测试连接</button>
+    <span id="pool-test-result" class="test-result"></span>
     <a href="/config" class="cancel">取消</a>
   </div>
 </form>
 </div>"""
+    # 「测试连接」脚本独立于 f-string：内含 JS 大括号，不能进入 f-string 字面量，
+    # 否则会被当作格式占位符解析而语法报错。脚本仅绑定 data-test-conn 按钮，
+    # 经 fetch 提交且返回 JSON，不刷新页面、保留表单已填内容。
+    test_script = """
+<script>
+function testPoolConnection(form) {
+  var btn = form.querySelector('button[data-test-conn]');
+  var result = document.getElementById('pool-test-result');
+  if (!form || !btn) return;
+  btn.disabled = true;
+  var old = btn.textContent;
+  btn.textContent = '测试中...';
+  if (result) { result.textContent = ''; result.className = 'test-result'; }
+  var fd = new URLSearchParams(new FormData(form));
+  fd.set('test_ajax', '1');
+  fetch('/config/pools/test', { method: 'POST', body: fd })
+    .then(function(r) {
+      return r.json().catch(function() {
+        return { ok: false, flash: '响应解析失败（HTTP ' + r.status + '）' };
+      });
+    })
+    .then(function(data) {
+      if (result) {
+        var msg = (data && data.flash) || '未知错误';
+        result.textContent = msg;
+        result.className = 'test-result ' + ((data && data.ok) ? 'ok' : 'err');
+      }
+    })
+    .catch(function(e) {
+      if (result) { result.textContent = '请求失败: ' + e; result.className = 'test-result err'; }
+    })
+    .finally(function() {
+      btn.disabled = false;
+      btn.textContent = old;
+    });
+}
+</script>"""
+    return form_html + test_script
 
 
 def build_user_form_html(user: dict = None, is_edit: bool = None) -> str:

@@ -38,6 +38,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG_PATH = "app_config.json"
+DEFAULT_DEBUG_CONFIG_PATH = "app_config.debug.json"
 _DEFAULT_HOST = "0.0.0.0"
 _DEFAULT_PORT = 8080
 
@@ -58,15 +59,69 @@ _config: dict[str, Any] | None = None
 # ---------------------------------------------------------------------------
 
 
-def _load_config() -> dict[str, Any]:
-    """从文件加载配置，文件不存在或格式错误时返回默认配置（SQLite + config.db）。"""
-    path = os.environ.get("CONFIG_FILE", DEFAULT_CONFIG_PATH)
+def _deep_merge(base: dict, override: dict) -> dict:
+    """深层合并两个配置 dict：dict 值递归合并，list/标量整体覆盖。
+
+    返回新 dict，不修改入参。用于 DEBUG 配置覆盖基础配置时继承未覆盖段。
+    """
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _load_debug_config() -> dict[str, Any] | None:
+    """读取 DEBUG 配置文件（默认 app_config.debug.json，可用 DEBUG_CONFIG_FILE 覆盖）。
+
+    文件不存在时返回 None；存在但解析失败时打印警告并返回 None（不阻断启动）。
+    """
+    path = os.environ.get("DEBUG_CONFIG_FILE", DEFAULT_DEBUG_CONFIG_PATH)
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[app_config] 警告: DEBUG 配置文件 {path} 解析失败 ({e})，忽略覆盖")
+        return None
+
+
+def _apply_debug_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """若存在 DEBUG 配置文件，则深层合并覆盖并返回合并结果；否则原样返回。
+
+    合并语义：任意配置段可被覆盖（config_db/redis/static_cache/scheduler 等），
+    dict 递归合并继承未覆盖键，list/标量整体替换。
+
+    生效条件：仅当配置文件使用默认路径（未显式设置 CONFIG_FILE 环境变量），
+    或显式设置了 DEBUG_CONFIG_FILE 时叠加。若调用方用 CONFIG_FILE 显式指定
+    配置文件（如测试注入临时配置），视为已完全掌控配置，跳过 debug 覆盖，
+    避免测试隔离被意外破坏。
+    """
+    if os.environ.get("CONFIG_FILE") is not None \
+            and os.environ.get("DEBUG_CONFIG_FILE") is None:
+        return cfg
+    debug_cfg = _load_debug_config()
+    if debug_cfg is None:
+        return cfg
+    print(f"[app_config] ⚠️ DEBUG 模式激活: 已加载覆盖配置 {os.environ.get('DEBUG_CONFIG_FILE', DEFAULT_DEBUG_CONFIG_PATH)}")
+    return _deep_merge(cfg, debug_cfg)
+
+
+def _load_config() -> dict[str, Any]:
+    """从文件加载配置，文件不存在或格式错误时返回默认配置（SQLite + config.db）。
+
+    加载完成后若有 DEBUG 配置文件，则对其做深层合并覆盖。
+    """
+    path = os.environ.get("CONFIG_FILE", DEFAULT_CONFIG_PATH)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
         print(f"[app_config] 警告: 配置文件 {path} 不存在，使用默认配置")
-        return {
+        cfg = {
             "config_db": [
                 {
                     "enable": True,
@@ -77,7 +132,7 @@ def _load_config() -> dict[str, Any]:
         }
     except json.JSONDecodeError as e:
         print(f"[app_config] 警告: 配置文件 {path} 格式错误 ({e})，使用默认配置")
-        return {
+        cfg = {
             "config_db": [
                 {
                     "enable": True,
@@ -86,6 +141,19 @@ def _load_config() -> dict[str, Any]:
                 }
             ]
         }
+    return _apply_debug_config(cfg)
+
+
+def is_debug_mode() -> bool:
+    """DEBUG 配置覆盖是否激活。
+
+    与 _apply_debug_config 的生效条件一致：显式设置 CONFIG_FILE 且未显式
+    设置 DEBUG_CONFIG_FILE 时返回 False（该场景跳过 debug 覆盖）。
+    """
+    if os.environ.get("CONFIG_FILE") is not None \
+            and os.environ.get("DEBUG_CONFIG_FILE") is None:
+        return False
+    return _load_debug_config() is not None
 
 
 def get_config() -> dict[str, Any]:
@@ -470,6 +538,35 @@ def get_file_permissions_config() -> dict:
     缺失或未启用时返回 {"enable": False}。
     """
     return get_config().get("file_permissions", {"enable": False})
+
+
+def get_test_mysql_config() -> dict:
+    """解析 test_mysql 配置段（DEBUG 专用于测试用例的 MySQL）。
+
+    该段提供一份**真实可写**的测试 MySQL 连接与测试表定义，供「新增测试用例」
+    导入时建表并灌入测试数据，使导入的报表定义能真正查询到存在的表与字段。
+
+    配置文件示例:
+        "test_mysql": {
+            "enable": true,
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "test_rw",
+            "password": "test_pass",
+            "database": "sqlreport_test",
+            "tables": [
+                {"name": "orders", "ddl": "CREATE TABLE IF NOT EXISTS ...",
+                 "seed": ["INSERT INTO orders ...", ...]},
+                ...
+            ]
+        }
+
+    未启用或缺失时返回 {}（调用方据此跳过测试 MySQL 初始化）。
+    """
+    cfg = get_config().get("test_mysql", {})
+    if not cfg.get("enable") or not cfg.get("host"):
+        return {}
+    return cfg
 
 
 def get_audit_db_config() -> dict:

@@ -20,6 +20,9 @@ run.log
 
 # 配置（含密码）
 app_config.json
+app_config.debug.json
+*.debug.db
+*.debug.log
 
 # 数据库
 config.db

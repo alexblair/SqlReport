@@ -4,8 +4,6 @@
     "read": "allow",
     "edit": "allow",
     "external_directory": {
-      "/root/.agents/skills/**": "allow",
-      "/tmp/**": "allow",
       "*": "ask"
     }
   }
