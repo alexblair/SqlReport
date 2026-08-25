@@ -762,6 +762,8 @@ def _render_branding_section() -> str:
         mode = "default"
     color = settings.get("favicon_color") or ""
     prefix = settings.get("title_prefix") or ""
+    color_norm = branding.normalize_color(color)
+    picker_value = "#%02X%02X%02X" % color_norm if color_norm else "#4F46E5"
     return f"""<div class="card" style="margin-top:8px">
 <div class="section-title" style="font-size:16px;margin-bottom:8px"><span>🏷️ 站点标识</span></div>
 <p style="color:#64748b;margin:0 0 10px">favicon 图标与标签页环境前缀，全站生效（保存后刷新页面立即生效）</p>
@@ -774,7 +776,9 @@ def _render_branding_section() -> str:
     </select>
   </label>
   <label id="row-color" style="display:{'' if mode == 'color' else 'none'}">颜色 (#RGB / #RRGGBB):
-    <input type="text" name="favicon_color" value="{_escape(color)}" placeholder="#FF0000">
+    <input type="color" id="favcolor" value="{picker_value}" title="鼠标点选颜色">
+    <input type="text" name="favicon_color" id="favcolor-text" value="{_escape(color)}" placeholder="#FF0000" style="width:140px">
+    <span id="recent-colors" style="display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px"></span>
   </label>
   <label id="row-file" style="display:{'' if mode == 'custom' else 'none'}">上传图片 (PNG / ICO, ≤256KB):
     <input type="file" id="favfile" accept=".png,.ico,image/png,image/x-icon">
@@ -792,6 +796,7 @@ function brandingModeChanged() {{
   var m = document.getElementById('favmode').value;
   document.getElementById('row-color').style.display = m === 'color' ? '' : 'none';
   document.getElementById('row-file').style.display = m === 'custom' ? '' : 'none';
+  if (m === 'color') renderRecentColors();
 }}
 (function () {{
   var file = document.getElementById('favfile');
@@ -806,6 +811,62 @@ function brandingModeChanged() {{
     r.onload = function () {{ data.value = r.result; }};
     r.readAsDataURL(f);
   }});
+}})();
+(function () {{
+  var picker = document.getElementById('favcolor');
+  var text = document.getElementById('favcolor-text');
+  if (!picker || !text) return;
+  picker.addEventListener('input', function () {{ text.value = picker.value; }});
+  text.addEventListener('input', function () {{
+    var rgb = window.__normalizeColor ? window.__normalizeColor(text.value) : null;
+    if (rgb) picker.value = '#' + rgb;
+  }});
+  window.__normalizeColor = function (v) {{
+    if (typeof v !== 'string') return null;
+    var t = v.trim();
+    if (t[0] !== '#') return null;
+    var h = t.slice(1);
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    else if (h.length !== 6) return null;
+    if (!/^[0-9a-fA-F]{{6}}$/.test(h)) return null;
+    return h.toLowerCase();
+  }};
+  function getRecent() {{
+    try {{ return JSON.parse(localStorage.getItem('recent_colors') || '[]'); }}
+    catch (e) {{ return []; }}
+  }}
+  function addRecentColor(hex) {{
+    hex = (hex || '').toLowerCase();
+    if (!/^#[0-9a-f]{{6}}$/.test(hex)) return;
+    var list = getRecent().filter(function (c) {{ return c !== hex; }});
+    list.unshift(hex);
+    if (list.length > 10) list = list.slice(0, 10);
+    localStorage.setItem('recent_colors', JSON.stringify(list));
+  }}
+  window.renderRecentColors = function () {{
+    var box = document.getElementById('recent-colors');
+    if (!box) return;
+    var list = getRecent();
+    if (!list.length) {{ box.style.display = 'none'; box.innerHTML = ''; return; }}
+    box.style.display = 'inline-flex';
+    box.innerHTML = '';
+    list.forEach(function (c) {{
+      var sw = document.createElement('span');
+      sw.title = '点击使用 ' + c;
+      sw.style.cssText = 'width:18px;height:18px;border-radius:4px;cursor:pointer;border:1px solid #cbd5e1;display:inline-block';
+      sw.style.background = c;
+      sw.addEventListener('click', function () {{ text.value = c; picker.value = c; }});
+      box.appendChild(sw);
+    }});
+  }};
+  var params = new URLSearchParams(location.search);
+  if (params.get('saved_brand') === '1') {{
+    var cur = window.__normalizeColor(text.value);
+    if (cur) addRecentColor('#' + cur);
+    params.delete('saved_brand');
+    history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash);
+  }}
+  renderRecentColors();
 }})();
 </script>
 </div>"""
@@ -859,7 +920,11 @@ def handle_site_branding_save(form_body: str,
     flash = "站点标识已更新"
     if mode == "custom" and not new_image and not branding.load_custom_favicon():
         flash += "（提示：尚未上传自定义图片，当前显示默认图标）"
-    return 302, f"/config?flash={urllib.parse.quote(flash)}", {}
+    target = f"/config?flash={urllib.parse.quote(flash)}"
+    # 纯色模式保存生效：带标记，前端据标记把生效色写入最近 10 色
+    if mode == "color":
+        target += "&saved_brand=1"
+    return 302, target, {}
 
 
 def handle_import_test_cases(conn, session_user=None) -> tuple[int, str, dict]:

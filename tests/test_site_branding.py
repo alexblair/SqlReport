@@ -561,5 +561,72 @@ class TestSiteSettingsStore(unittest.TestCase):
             self.assertEqual(branding.read_site_settings(), {})
 
 
+class TestSaveBrandSignal(BrandingSettingsMixin, BaseConfigTest):
+    """保存成功信号 saved_brand=1（T80）：仅纯色保存生效才带标记。"""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="branding-sig-")
+        self.root_patcher = patch(
+            "branding.custom_favicon_root", return_value=self.tmp)
+        self.root_patcher.start()
+
+    def tearDown(self):
+        self.root_patcher.stop()
+        super().tearDown()
+
+    def _save(self, **kw):
+        body = urllib.parse.urlencode(dict(
+            favicon_mode=kw.get("mode", "color"),
+            favicon_color=kw.get("color", "#FF0000"),
+            title_prefix=kw.get("prefix", ""),
+            favicon_data=kw.get("data", "")))
+        return config.handle_site_branding_save(body, session_user="admin")
+
+    def test_color_save_carries_saved_brand(self):
+        code, location, _ = self._save(mode="color")
+        self.assertEqual(code, 302)
+        self.assertIn("saved_brand=1", location)
+
+    def test_default_save_no_saved_brand(self):
+        code, location, _ = self._save(mode="default", color="whatever")
+        self.assertEqual(code, 302)
+        self.assertNotIn("saved_brand", location)
+
+    def test_custom_save_no_saved_brand(self):
+        code, location, _ = self._save(mode="custom", data="")
+        self.assertEqual(code, 302)
+        self.assertNotIn("saved_brand", location)
+
+
+class TestColorPickerRender(BrandingSettingsMixin, unittest.TestCase):
+    """颜色取色器与最近色面板渲染接线（T77/T78/T79）。"""
+
+    def _render(self, mode, color):
+        self._swap_db(favicon_mode=mode, favicon_color=color)
+        return config._render_branding_section()
+
+    def test_color_picker_and_recent_panel_wired(self):
+        html = self._render("color", "#FF0000")
+        self.assertIn('type="color"', html)
+        self.assertIn('id="recent-colors"', html)
+        self.assertIn('id="favcolor-text"', html)
+        self.assertIn("addRecentColor", html)
+        self.assertIn("renderRecentColors", html)
+
+    def test_picker_value_normalizes_3digit(self):
+        html = self._render("color", "#0f0")
+        self.assertIn('id="favcolor" value="#00FF00"', html)
+
+    def test_picker_value_invalid_color_falls_to_brand_default(self):
+        html = self._render("color", "#GGG")
+        self.assertIn('id="favcolor" value="#4F46E5"', html)
+
+    def test_color_row_hidden_unless_color_mode(self):
+        html = self._render("default", "")
+        self.assertIn('id="row-color" style="display:none"', html)
+
+
 if __name__ == "__main__":
     unittest.main()
