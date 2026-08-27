@@ -59,3 +59,4 @@ CONTEXT.md
 
 # 长期记忆归档（本地使用，不提交）
 .lcm/
+tests/regression/
