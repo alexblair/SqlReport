@@ -1,0 +1,120 @@
+{
+    "server": {
+        "host": "127.0.0.1",
+        "port": 8080
+    },
+
+    "log": {
+        "enable": true,
+        "path": "run.debug.log"
+    },
+
+    "redis": {
+        "enable": false,
+        "host": "127.0.0.1",
+        "port": 6379,
+        "db": 0,
+        "password": "",
+        "key_prefix": "sr_debug",
+        "default_ttl_hours": 24,
+        "socket_timeout": 5
+    },
+
+    "static_cache": {
+        "enable": true,
+        "dir": "static_cache_debug"
+    },
+
+    "file_permissions": {
+        "enable": false,
+        "user": "nobody",
+        "group": "nobody",
+        "dir_mode": "0755",
+        "file_mode": "0644"
+    },
+
+    "audit_db": {
+        "path": "audit.debug.db"
+    },
+
+    "config_db": [
+        {
+            "enable": true,
+            "engine": "sqlite3",
+            "path": "config.debug.db"
+        },
+        {
+            "enable": false,
+            "engine": "mysql",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "sqlreport_config",
+            "password": "change_me",
+            "database": "sqlreport_config_test"
+        }
+    ],
+
+    "scheduler": {
+        "enable": false,
+        "tick_seconds": 10
+    },
+
+    "test_mysql": {
+        "enable": false,
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "sqlreport_test",
+        "password": "change_me",
+        "database": "sqlreport_test",
+        "tables": [
+            {
+                "name": "orders",
+                "ddl": "CREATE TABLE IF NOT EXISTS `orders` (`id` INT PRIMARY KEY, `customer` VARCHAR(64) NOT NULL, `amount` DECIMAL(10,2) NOT NULL DEFAULT 0, `status` VARCHAR(16) NOT NULL DEFAULT 'pending', `created_at` DATETIME)",
+                "seed": [
+                    "INSERT INTO `orders` (`id`,`customer`,`amount`,`status`,`created_at`) VALUES (1,'Alice',100.00,'pending','2026-01-01 09:00:00')",
+                    "INSERT INTO `orders` (`id`,`customer`,`amount`,`status`,`created_at`) VALUES (2,'Bob',250.50,'done','2026-01-02 10:30:00')",
+                    "INSERT INTO `orders` (`id`,`customer`,`amount`,`status`,`created_at`) VALUES (3,'Carol',80.00,'pending','2026-01-03 14:15:00')"
+                ]
+            },
+            {
+                "name": "sales",
+                "ddl": "CREATE TABLE IF NOT EXISTS `sales` (`region` VARCHAR(32) NOT NULL, `category` VARCHAR(32) NOT NULL, `amount` DECIMAL(12,2) NOT NULL DEFAULT 0)",
+                "seed": [
+                    "INSERT INTO `sales` (`region`,`category`,`amount`) VALUES ('华东','电子',1200.00)",
+                    "INSERT INTO `sales` (`region`,`category`,`amount`) VALUES ('华东','服饰',800.00)",
+                    "INSERT INTO `sales` (`region`,`category`,`amount`) VALUES ('华北','电子',950.00)",
+                    "INSERT INTO `sales` (`region`,`category`,`amount`) VALUES ('华南','食品',430.00)",
+                    "INSERT INTO `sales` (`region`,`category`,`amount`) VALUES ('华北','食品',610.00)"
+                ]
+            },
+            {
+                "name": "cache_stats",
+                "ddl": "CREATE TABLE IF NOT EXISTS `cache_stats` (`id` INT PRIMARY KEY, `name` VARCHAR(64), `hit_rate` DECIMAL(5,2))",
+                "seed": [
+                    "INSERT INTO `cache_stats` (`id`,`name`,`hit_rate`) VALUES (1,'orders',98.50)",
+                    "INSERT INTO `cache_stats` (`id`,`name`,`hit_rate`) VALUES (2,'sales',87.20)",
+                    "INSERT INTO `cache_stats` (`id`,`name`,`hit_rate`) VALUES (3,'big',12.00)"
+                ]
+            },
+            {
+                "name": "big_table",
+                "ddl": "CREATE TABLE IF NOT EXISTS `big_table` (`id` INT PRIMARY KEY, `name` VARCHAR(64), `val` INT)",
+                "seed": [
+                    "INSERT INTO `big_table` (`id`,`name`,`val`) VALUES (1,'a',10)",
+                    "INSERT INTO `big_table` (`id`,`name`,`val`) VALUES (2,'b',20)",
+                    "INSERT INTO `big_table` (`id`,`name`,`val`) VALUES (3,'c',30)",
+                    "INSERT INTO `big_table` (`id`,`name`,`val`) VALUES (4,'d',40)",
+                    "INSERT INTO `big_table` (`id`,`name`,`val`) VALUES (5,'e',50)"
+                ]
+            },
+            {
+                "name": "memos",
+                "ddl": "CREATE TABLE IF NOT EXISTS `memos` (`id` INT PRIMARY KEY, `note` TEXT)",
+                "seed": [
+                    "INSERT INTO `memos` (`id`,`note`) VALUES (1,'首个备注：支持 **Markdown** 渲染')",
+                    "INSERT INTO `memos` (`id`,`note`) VALUES (2,'第二个备注：含 `行内代码` 与列表')"
+                ]
+            }
+        ]
+    }
+}

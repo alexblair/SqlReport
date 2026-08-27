@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+
+# 环境变量
+.env
+
+# 临时文件
+.tmp/
+# 工单产物（本地使用，不提交；备份由 docs 子仓 mirror 脚本负责）
+.scratch/
+
+# 运行日志
+run.log
+
+# 配置（含密码）
+app_config.json
+app_config.debug.json
+*.debug.db
+*.debug.log
+
+# 数据库
+config.db
+audit.db
+
+# 运行时缓存
+static_cache/
+static_cache_debug/
+.opdev/
+# 公共 CSS/JS 外链化产物（内容 hash 版本锁目录，启动时生成）
+static/vendor/self@*/
+
+# 系统
+.DS_Store
+Thumbs.db
+.opencode
+
+# CodeGraph
+.codegraph/
+
+# 知识文档（本地使用，不提交；版本备份走 docs/ 独立子仓库，主仓保持可安全推送 GitHub）
+docs/
+SPEC.md
+spec.md
+CONTEXT.md
+
+# flow 治理资产（本地使用，不提交；知识库主 SPEC/模块分卷/机器索引/访谈记录/flow 状态，主仓保持可安全推送 GitHub）
+.adocs/
+
+# 会话记忆系统（本地使用，不提交）
+.sessions/
+.state/
+
+# 长期记忆归档（本地使用，不提交）
+.lcm/

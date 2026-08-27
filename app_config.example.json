@@ -1,0 +1,64 @@
+{
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080
+    },
+
+    "log": {
+        "enable": true,
+        "path": "run.log"
+    },
+
+    "redis": {
+        "enable": false,
+        "host": "127.0.0.1",
+        "port": 6379,
+        "db": 0,
+        "password": "",
+        "key_prefix": "sr",
+        "default_ttl_hours": 24,
+        "socket_timeout": 5
+    },
+
+    "static_cache": {
+        "enable": true,
+        "dir": "static_cache"
+    },
+
+    "file_permissions": {
+        "enable": false,
+        "user": "nginx",
+        "group": "nginx",
+        "dir_mode": "0755",
+        "file_mode": "0644"
+    },
+
+    "audit_db": {
+        "path": "audit.db"
+    },
+
+    "config_db": [
+        {
+            "enable": true,
+            "engine": "mysql",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "root",
+            "password": "your_password",
+            "database": "sqlreport_config"
+        },
+        {
+            "enable": false,
+            "engine": "mysql",
+            "socket": "/var/run/mysqld/mysqld.sock",
+            "user": "root",
+            "password": "your_password",
+            "database": "sqlreport_config"
+        },
+        {
+            "enable": false,
+            "engine": "sqlite3",
+            "path": "config.db"
+        }
+    ]
+}

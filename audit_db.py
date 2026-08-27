@@ -1,0 +1,342 @@
+"""
+audit_db.py — 审计数据库模块
+
+管理独立的 audit.db，存储四种类型的审计日志：
+  - operation: 用户对配置的 CRUD 操作（连接池/用户/报表/分类）
+  - scheduler: 定时任务执行情况（scheduled_run / scheduled_skip / scheduled_misfire）
+  - web_access: 用户页面访问
+  - api: API 端点调用
+
+提供插入、分页查询、筛选、统计、删除、导出功能。
+"""
+
+import sqlite3
+import os
+import logging
+from datetime import datetime
+from typing import Any, Optional
+
+from app_config import serialize_json
+from result_transform import parse_filter_expr
+
+
+# ---------------------------------------------------------------------------
+# 连接
+# ---------------------------------------------------------------------------
+
+
+def get_audit_db_path() -> str:
+    """获取审计数据库文件路径（公开接口）。"""
+    from app_config import get_audit_db_config
+    return get_audit_db_config().get("path", "audit.db")
+
+
+def _get_audit_db_path() -> str:
+    """从 app_config 获取 audit.db 路径，默认为 audit.db。"""
+    from app_config import get_config
+    cfg = get_config().get("audit_db", {})
+    return cfg.get("path", "audit.db")
+
+
+def _connect_audit_db() -> sqlite3.Connection:
+    """连接审计数据库，自动创建目录并启用 WAL 模式。"""
+    db_path = _get_audit_db_path()
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def get_audit_db():
+    """获取审计数据库连接（兼容 db.py 转发层）。"""
+    return _connect_audit_db()
+
+
+# ---------------------------------------------------------------------------
+# DDL
+# ---------------------------------------------------------------------------
+
+
+AUDIT_SCHEMA_SQLITE = """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp       TEXT    NOT NULL,
+        type            TEXT    NOT NULL,
+        session_user    TEXT,
+
+        -- operation 类型专用字段
+        action          TEXT,
+        entity_type     TEXT,
+        entity_id       INTEGER,
+        entity_name     TEXT,
+        before_value    TEXT,
+        after_value     TEXT,
+
+        -- web_access / api 类型专用字段
+        http_method     TEXT,
+        http_path       TEXT,
+        http_status     INTEGER,
+        ip_address      TEXT,
+        user_agent      TEXT,
+        duration_ms     INTEGER,
+        request_body    TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(type);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(session_user);
+"""
+
+
+def init_audit_db(conn) -> None:
+    """幂等地创建 audit_logs 表和索引。"""
+    conn.executescript(AUDIT_SCHEMA_SQLITE)
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 插入
+# ---------------------------------------------------------------------------
+
+
+def record_operation(session_user, action, entity_type, entity_id=None,
+                     entity_name=None, before_value=None, after_value=None,
+                     details=None, log_type="operation") -> None:
+    """写入一条审计日志（业务操作审计的统一入口）。
+
+    签名覆盖既有两处实现（auth._record_auth_event 与 config_db._write_audit_log）
+    的参数集；session_user 为空时跳过（不写日志）；异常降级为
+    logging.warning，避免审计失败影响业务操作（符合 conv 降级约定）。
+
+    log_type: 审计类型，默认 operation（操作日志）；调度器自动执行
+    传 scheduler（定时任务），见 scheduler.py 的 scheduled_run/scheduled_skip/scheduled_misfire。
+
+    details: 预留扩展字段（当前未写入审计表，仅保持签名一致）。
+    """
+    if not session_user:
+        return
+    try:
+        audit_conn = get_audit_db()
+        try:
+            insert_audit_log(
+                audit_conn,
+                type=log_type,
+                session_user=session_user,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                entity_name=entity_name,
+                before_value=before_value,
+                after_value=after_value,
+            )
+        finally:
+            audit_conn.close()
+    except Exception as e:
+        logging.warning("审计日志写入失败: %s", e)
+
+
+def insert_audit_log(
+    conn,
+    *,
+    type: str,
+    session_user: Optional[str] = None,
+    action: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    entity_name: Optional[str] = None,
+    before_value: Any = None,
+    after_value: Any = None,
+    http_method: Optional[str] = None,
+    http_path: Optional[str] = None,
+    http_status: Optional[int] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    request_body: Optional[str] = None,
+    timestamp: Optional[str] = None,
+) -> int:
+    """插入一条审计日志，返回自增 id。
+
+    参数：
+      type — 审计类型（'operation' / 'scheduler' / 'web_access' / 'api'）
+      before_value / after_value — dict 或 JSON 字符串，自动序列化
+      request_body — 字符串（WEB/API 请求的完整内容）
+      timestamp — ISO 8601 格式，缺省时自动填充当前时间
+    """
+    ts = timestamp or datetime.now().isoformat()
+
+    sv = serialize_json(before_value) if before_value is not None and not isinstance(before_value, str) else before_value
+    av = serialize_json(after_value) if after_value is not None and not isinstance(after_value, str) else after_value
+    rb = request_body
+
+    cur = conn.execute(
+        """INSERT INTO audit_logs
+           (timestamp,type,session_user,action,entity_type,entity_id,entity_name,
+            before_value,after_value,http_method,http_path,http_status,
+            ip_address,user_agent,duration_ms,request_body)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (ts, type, session_user, action, entity_type, entity_id, entity_name,
+         sv, av, http_method, http_path, http_status,
+         ip_address, user_agent, duration_ms, rb),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+# ---------------------------------------------------------------------------
+# 查询与删除
+# ---------------------------------------------------------------------------
+
+
+def _keyword_to_like_patterns(keyword: str) -> list:
+    """统一匹配表达式 → SQL LIKE 模式列表（多值 OR 语义）。
+
+    消费 result_transform.parse_filter_expr（全系统唯一语法解析落点）：
+    - `*` 通配 → SQL `%`
+    - 字面 `%` / `_`（用户输入）→ 转义为字面量（ESCAPE '\\'），
+      修正旧行为把它们当 SQL 通配符的隐患（与报表侧纯文本语义对齐）
+    - 段 strip / 空段忽略 / `\\*` `\\,` `\\\\` 转义由解析层完成
+
+    返回空列表表示 keyword 条件应忽略（如全空多值）。
+    每段为子串语义（首尾补 %，与旧 %keyword% 行为一致）；用户输入中的
+    `*` 通配翻译为 `%`，故 *abc → %abc%，等价子串匹配。
+    """
+    patterns = []
+    for tokens in parse_filter_expr(keyword):
+        parts = []
+        for tok in tokens:
+            if tok[0] == "wild":
+                parts.append("%")
+            else:
+                ch = tok[1]
+                if ch == "%":
+                    parts.append("\\%")
+                elif ch == "_":
+                    parts.append("\\_")
+                elif ch == "\\":
+                    parts.append("\\\\")
+                else:
+                    parts.append(ch)
+        patterns.append("%" + "".join(parts) + "%")
+    return patterns
+
+
+def _build_where(filters: dict) -> tuple[str, list]:
+    """根据筛选条件构建 WHERE 子句和参数列表。"""
+    clauses = []
+    params: list = []
+
+    if filters.get("type"):
+        clauses.append("type=?")
+        params.append(filters["type"])
+
+    if filters.get("date_from"):
+        clauses.append("timestamp>=?")
+        params.append(filters["date_from"])
+
+    if filters.get("date_to"):
+        clauses.append("timestamp<=?")
+        params.append(filters["date_to"])
+
+    if filters.get("session_user"):
+        clauses.append("session_user=?")
+        params.append(filters["session_user"])
+
+    if filters.get("keyword"):
+        patterns = _keyword_to_like_patterns(filters["keyword"])
+        if patterns:
+            fields = ("action", "entity_name", "http_path", "session_user")
+            field_expr = " OR ".join(
+                f"{f} LIKE ? ESCAPE '\\'" for f in fields
+            )
+            group = "(" + field_expr + ")"
+            or_group = " OR ".join([group] * len(patterns))
+            for pat in patterns:
+                params.extend([pat] * len(fields))
+            clauses.append("(" + or_group + ")")
+
+    where_sql = " AND ".join(clauses) if clauses else "1=1"
+    return where_sql, params
+
+
+def query_audit_logs(
+    conn, filters: dict, page: int = 1, page_size: int = 20
+) -> list[dict]:
+    """分页查询审计日志，page 从 1 开始，按 id 降序返回最新在前。"""
+    where_sql, params = _build_where(filters)
+    offset = (page - 1) * page_size
+    rows = conn.execute(
+        f"SELECT * FROM audit_logs WHERE {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+        params + [page_size, offset],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_audit_logs(conn, filters: dict) -> int:
+    """统计符合条件的审计日志总数（用于分页）。"""
+    where_sql, params = _build_where(filters)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS cnt FROM audit_logs WHERE {where_sql}", params
+    ).fetchone()
+    return row[0]
+
+
+def export_audit_logs(conn, filters: dict) -> list[dict]:
+    """导出符合条件的全部审计日志（不分页，用于 CSV 导出）。"""
+    where_sql, params = _build_where(filters)
+    rows = conn.execute(
+        f"SELECT * FROM audit_logs WHERE {where_sql} ORDER BY id DESC", params
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_recent_schedule_events(conn, schedule_id=None, limit: int = 20
+                               ) -> list[dict]:
+    """查询最近的定时执行事件（scheduled_run / scheduled_skip / scheduled_misfire）。
+
+    schedule_id 为 None 时返回全部任务的最近事件，否则仅该任务；
+    按 id 降序（最新在前），供 /config/scheduler 管理页"最近执行记录"展示。
+    """
+    sql = ("SELECT * FROM audit_logs "
+           "WHERE action IN ('scheduled_run','scheduled_skip','scheduled_misfire') "
+           "AND entity_type='schedule'")
+    params: list = []
+    if schedule_id is not None:
+        sql += " AND entity_id=?"
+        params.append(schedule_id)
+    rows = conn.execute(sql + " ORDER BY id DESC LIMIT ?",
+                        params + [int(limit)]).fetchall()
+    return [dict(r) for r in rows]
+
+
+def rotate_audit_logs(conn, retention_days: int) -> int:
+    """
+    自动清理超过保留天数的审计日志。
+
+    Args:
+        conn: 审计数据库连接
+        retention_days: 保留天数（0 = 不清理）
+
+    Returns:
+        删除的记录数
+    """
+    if retention_days <= 0:
+        return 0
+    import time
+    cutoff = time.time() - retention_days * 86400
+    from datetime import datetime
+    cutoff_iso = datetime.fromtimestamp(cutoff).isoformat()
+    cur = conn.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff_iso,))
+    conn.commit()
+    return cur.rowcount
+
+
+def delete_audit_logs(conn, filters: dict) -> int:
+    """删除符合条件的审计日志，返回影响行数。"""
+    where_sql, params = _build_where(filters)
+    cur = conn.execute(f"DELETE FROM audit_logs WHERE {where_sql}", params)
+    conn.commit()
+    return cur.rowcount
