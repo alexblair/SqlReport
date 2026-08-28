@@ -36,7 +36,8 @@ import app_config
 import config_db
 from result_transform import (filter_rows, sort_rows, select_columns,
                               calc_total_pages, invalid_numeric_filters,
-                              NUMERIC_FILTER_OPS, filter_rows_nested)
+                              NUMERIC_FILTER_OPS, filter_rows_nested,
+                              validate_nested_filter)
 from query_executor import sql_contains_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
@@ -211,6 +212,39 @@ def parse_filters(qs):
 
 
 _parse_filters = parse_filters  # 向后兼容别名
+
+
+def parse_nested_filter(qs) -> dict | None:
+    """从 URL 参数解析嵌套筛选（report 页 / 导出共用，FR-005/FR-007/FR-013）。
+
+    qs 为 parse_qs 结果；读取 nested_filter（URL 编码 JSON），urllib.parse.unquote
+    解码后 json.loads。解析后调用 validate_nested_filter() 校验；校验失败抛 ValueError，
+    荷载为结构化错误 JSON（{valid:false, errors:[...]}）。无参数或空（{}）返回 None。
+    """
+    raw_list = qs.get("nested_filter")
+    if not raw_list:
+        return None
+    raw = raw_list[0]
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(urllib.parse.unquote(raw))
+    except (json.JSONDecodeError, ValueError):
+        raise ValueError(json.dumps({
+            "valid": False,
+            "errors": [{
+                "path": "nested_filter",
+                "message": "nested_filter 不是合法 JSON",
+                "suggestion": "请传入 URL 编码的 JSON 条件树，例如 "
+                              '{"op":"and","conditions":[{"col":"姓名","op":"contains","value":"张"}]}',
+            }],
+        }, ensure_ascii=False))
+    if not parsed:
+        return None
+    res = validate_nested_filter(parsed)
+    if not res.get("valid"):
+        raise ValueError(json.dumps(res, ensure_ascii=False))
+    return parsed
 
 
 def parse_sorts(qs):
@@ -1356,7 +1390,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
                        active_index: int = 0,
                        result_names_override: str = None,
                        flash: str = None,
-                       report_override: dict = None) -> str:
+                       report_override: dict = None,
+                       nested_filter: dict = None) -> str:
     """
     渲染报表数据展示页，支持多字段排序/筛选/自定义列/多结果集。
     cols_raw: 原始 cols 参数字符串（如 "id,name,age"），由 execute_report 结果中的列名解析。
@@ -1397,7 +1432,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
         result = execute_report(report_id, actual_sql, pool_config,
                                 page, page_size, sorts or [], filters or [], refresh,
                                 active_index, report, conn,
-                                read_timeout=30)
+                                read_timeout=30, nested_filter=nested_filter)
     except Exception as e:
         logging.error("报表 %d 查询执行失败: %s", report_id, e, exc_info=True)
         pool_name = pool_config.get("name", "?")
@@ -1431,7 +1466,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
                               sorts or [], filters or [], refresh,
                               display_columns, sql_override, active_index,
                               result_names_override=result_names_override,
-                              flash=flash)
+                              flash=flash, nested_filter=nested_filter)
 
 
 # ===================================================================
@@ -1447,7 +1482,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                        sql_override: str = None,
                        active_index: int = 0,
                        result_names_override: str = None,
-                       flash: str = None) -> str:
+                       flash: str = None,
+                       nested_filter: dict = None) -> str:
     """
     构建完整的报表 HTML，支持多结果集下拉切换。
     sorts/filters 均为列表。
@@ -1521,25 +1557,32 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         form_hidden.append(f'<input type="hidden" name="dir" value="{_escape(dir_)}">')
     if cols_param:
         form_hidden.append(f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">')
+    if nested_filter:
+        # 保留嵌套筛选参数（FR-005）：随筛选表单提交原样带回
+        nf_val = urllib.parse.quote(json.dumps(nested_filter, ensure_ascii=False), safe='')
+        form_hidden.append(f'<input type="hidden" name="nested_filter" value="{_escape(nf_val)}">')
     form_hidden_str = "\n    ".join(form_hidden)
 
     # ---- 排序栏、表头、数据行、缓存标记、控制栏、面板均由 render.py 渲染 ----
     sort_bar_html = build_sort_bar_html(
-        report_id, qs_page_size, sorts, filters, cols_param, result_param)
+        report_id, qs_page_size, sorts, filters, cols_param, result_param,
+        nested_filter=nested_filter)
     thead_str = build_table_header_html(
-        all_columns, display_columns, sorts, filters, report_id, qs_page_size, cols_param, result_param)
+        all_columns, display_columns, sorts, filters, report_id, qs_page_size, cols_param, result_param,
+        nested_filter=nested_filter)
 
     col_index_map = {name: idx for idx, name in enumerate(all_columns)}
     display_indices = [col_index_map[c] for c in display_columns]
     # 批次5#19：空态区分——有筛选时显示「没有符合筛选条件的行」+ 清除筛选链接
     clear_filters_href = build_clear_filters_href(
-        report_id, qs_page_size, sorts, cols_param, result_param)
+        report_id, qs_page_size, sorts, cols_param, result_param, nested_filter=nested_filter)
     tbody = build_table_body_html(result.rows, display_indices,
                                   filters=filters or None,
                                   clear_filters_href=clear_filters_href)
 
     pagination = _build_pagination(report_id, result.page, result.total_pages,
-                                   result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "")
+                                    result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "",
+                                    nested_filter=nested_filter)
 
     cache_badge = build_cache_badge_html(result.cache_info,
         prefer_cache=bool(report.get("prefer_cache")),
@@ -1548,10 +1591,11 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     controls = build_controls_bar_html(
         report_id, qs_page_size, sorts, filters, cols_param, display_columns,
         active_index, cache_badge, result.total, result.total_pages,
-        result_param=result_param, page=result.page)
+        result_param=result_param, page=result.page, nested_filter=nested_filter)
 
     filter_action_html, clear_html = build_filter_action_html(
-        report_id, qs_page_size, sorts, cols_param, result_param, filters)
+        report_id, qs_page_size, sorts, cols_param, result_param, filters,
+        nested_filter=nested_filter)
 
     field_settings_html = build_field_settings_panel_html(all_columns, display_columns)
     sort_settings_html = build_sort_settings_panel_html(sorts, all_columns)
@@ -1760,10 +1804,15 @@ def handle_request(conn, method: str, path: str, query: str,
             if report_cfg is not None and "allow_write" in form_data:
                 report_cfg = dict(report_cfg)
                 report_cfg["allow_write"] = int(_last("allow_write", "0") or "0")
+            try:
+                preview_nested = parse_nested_filter(form_data)
+            except ValueError:
+                preview_nested = None
             return 200, render_report_page(conn, preview_id, sql_override=sql_override,
                                              report_override=report_cfg,
                                              active_index=preview_result,
-                                             result_names_override=preview_names or None), {}
+                                             result_names_override=preview_names or None,
+                                             nested_filter=preview_nested), {}
         # 无 id：新建预览（缺少 pool_id 或 SQL 时回退报表选择页，兼容历史行为）
         pool_id_raw = _last("pool_id", "") or ""
         if not pool_id_raw or not sql_override:
@@ -1785,10 +1834,15 @@ def handle_request(conn, method: str, path: str, query: str,
             "cache_ttl_hours": 0,
             "allow_write": int(_last("allow_write", "0") or "0"),
         }
+        try:
+            preview_nested = parse_nested_filter(form_data)
+        except ValueError:
+            preview_nested = None
         return 200, render_report_page(conn, 0, sql_override=sql_override,
                                          report_override=preview_report,
                                          active_index=preview_result,
-                                         result_names_override=preview_names or None), {}
+                                         result_names_override=preview_names or None,
+                                         nested_filter=preview_nested), {}
 
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
 
@@ -1822,6 +1876,20 @@ def handle_request(conn, method: str, path: str, query: str,
     # 多字段筛选
     filters = _parse_filters(qs)
 
+    # 嵌套筛选（FR-005/FR-007）：解析并校验，非法则忽略并提示，不阻断渲染
+    flash_msg = _filter_warning_flash(filters, _qs_val(qs, "flash"))
+    nested_filter = None
+    try:
+        nested_filter = parse_nested_filter(qs)
+    except ValueError as ve:
+        try:
+            _err = json.loads(ve.args[0])
+            _msg = _err.get("errors", [{}])[0].get("message", "嵌套筛选格式有误")
+        except Exception:
+            _msg = "嵌套筛选格式有误"
+        flash_msg = (flash_msg + "；" if flash_msg else "") + "嵌套筛选格式有误，已忽略：" + _msg
+        nested_filter = None
+
     # 自定义列顺序/可见性（原始参数字符串，推迟到 render_report_page 中解析）
     cols_raw = _qs_val(qs, "cols")
 
@@ -1830,6 +1898,6 @@ def handle_request(conn, method: str, path: str, query: str,
 
     html = render_report_page(conn, report_id, page, page_size, pool_override,
                               sorts, filters, False, cols_raw,
-                              active_index=active_index, flash=_filter_warning_flash(
-                                  filters, _qs_val(qs, "flash")))
+                              active_index=active_index, flash=flash_msg,
+                              nested_filter=nested_filter)
     return 200, html, {}

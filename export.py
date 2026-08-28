@@ -44,9 +44,10 @@ from typing import Optional, Union
 import db
 import app_config
 from render import format_cell
-from report import parse_filters, parse_sorts, parse_result_index, WRITE_DENIED_MESSAGE
+from report import (parse_filters, parse_sorts, parse_result_index,
+                   WRITE_DENIED_MESSAGE, parse_nested_filter)
 from query_executor import sql_contains_write
-from result_transform import filter_rows, sort_rows, select_columns, column_indices
+from result_transform import filter_rows, sort_rows, select_columns, column_indices, filter_rows_nested
 
 
 def _load_and_transform(sql_query: str, pool_config: dict,
@@ -54,7 +55,8 @@ def _load_and_transform(sql_query: str, pool_config: dict,
                         columns: list[str] = None,
                         result_index: int = 0,
                         sorts=None,
-                        max_rows: int = None) -> tuple:
+                        max_rows: int = None,
+                        nested_filter=None) -> tuple:
     """
     执行查询并应用内存变换，返回导出所需的数据。
 
@@ -86,7 +88,10 @@ def _load_and_transform(sql_query: str, pool_config: dict,
 
     # 应用内存筛选（与报表页面的筛选逻辑一致）
     filtered = filter_rows(rows, all_columns, filters or [])
-    # 应用排序（与报表页面一致）
+    # 嵌套筛选（FR-013）：在普通筛选之上叠加 AND/OR 条件树
+    if nested_filter:
+        filtered = filter_rows_nested(filtered, all_columns, nested_filter)
+    # 应用排序（与报表页面的筛选逻辑一致）
     if sorts:
         filtered = sort_rows(filtered, all_columns, sorts)
 
@@ -133,7 +138,8 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
                          result_index: int = 0,
                          sorts=None,
                          max_rows: int = None,
-                         _truncated_out: list = None) -> str:
+                         _truncated_out: list = None,
+                         nested_filter=None) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
@@ -175,7 +181,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                           result_index: int = 0,
                           sorts=None,
                           max_rows: int = None,
-                          _truncated_out: list = None) -> str:
+                          _truncated_out: list = None,
+                          nested_filter=None) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
@@ -207,7 +214,7 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
-        max_rows=max_rows)
+        max_rows=max_rows, nested_filter=nested_filter)
     if truncated and _truncated_out is not None:
         _truncated_out.append(True)
 
@@ -356,6 +363,18 @@ def handle_export(conn, query: str,
     # 解析排序参数（与报表页面共享 parse_sorts）
     sorts = parse_sorts(qs)
 
+    # 解析嵌套筛选参数（FR-013）：URL 编码 JSON 条件树；非法格式返回 400
+    nested_filter = None
+    try:
+        nested_filter = parse_nested_filter(qs)
+    except ValueError as ve:
+        try:
+            _err = json.loads(ve.args[0])
+            _msg = _err.get("errors", [{}])[0].get("message", "嵌套筛选格式有误")
+        except Exception:
+            _msg = "嵌套筛选格式有误"
+        return 400, f"嵌套筛选格式有误：{_msg}", {}
+
     # 解析自定义列参数
     custom_columns = None
     use_custom_cols = qs.get("use_custom_cols", [None])[0] == "1"
@@ -430,12 +449,13 @@ def handle_export(conn, query: str,
                 smart_quote_flags=smart_quote_flags,
                 columns=custom_columns, result_index=result_index,
                 sorts=sorts, max_rows=export_limit,
-                _truncated_out=truncated_sink)
+                _truncated_out=truncated_sink, nested_filter=nested_filter)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,
                 custom_columns, result_index, sorts=sorts,
-                max_rows=export_limit, _truncated_out=truncated_sink)
+                max_rows=export_limit, _truncated_out=truncated_sink,
+                nested_filter=nested_filter)
     except Exception as e:
         return 500, f"导出失败: {e}", {}
 

@@ -1177,6 +1177,13 @@ def build_cols_param(display_columns: list[str], all_columns: list[str]) -> str:
     return "cols=" + urllib.parse.quote(",".join(display_columns), safe='')
 
 
+def build_nested_filter_param(nf) -> str:
+    """将嵌套筛选条件树编码为 URL 查询字符串片段（不含前导 &；空时返回空串）。"""
+    if not nf:
+        return ""
+    return "nested_filter=" + urllib.parse.quote(json.dumps(nf, ensure_ascii=False), safe='')
+
+
 # ===================================================================
 # HTML 渲染函数（从 report.py 移入）
 # ===================================================================
@@ -1186,7 +1193,8 @@ def build_pagination_html(report_id: int, current: int, total_pages: int,
                           page_size: int, total_rows: int,
                           sorts=None, filters=None, cols_param: str = '',
                           result_param: str = '',
-                          page_url_base: str = None) -> str:
+                          page_url_base: str = None,
+                          nested_filter=None) -> str:
     """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数。
 
     当提供 page_url_base 时，直接以此为基 URL（须已含 &amp; 转义），
@@ -1211,6 +1219,8 @@ def build_pagination_html(report_id: int, current: int, total_pages: int,
         if result_param:
             base_url += "&amp;" + result_param
             base_url += "&amp;" + cols_param
+        if nested_filter:
+            base_url += "&amp;" + build_nested_filter_param(nested_filter)
 
     parts = []
 
@@ -1506,7 +1516,7 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
 
 
 def build_sort_bar_html(report_id, page_size, sorts, filters,
-                         cols_param, result_param) -> str:
+                         cols_param, result_param, nested_filter=None) -> str:
     """构建排序栏（显示当前排序列及其优先级）HTML。"""
     sorts = sorts or []
     filters = filters or []
@@ -1527,6 +1537,8 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
                 rm_href += "&amp;" + cols_param
             if result_param:
                 rm_href += "&amp;" + result_param
+            if nested_filter:
+                rm_href += "&amp;" + build_nested_filter_param(nested_filter)
             sort_bar_parts.append(
                 f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
                 f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
@@ -1541,7 +1553,8 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
 
 
 def build_table_header_html(columns, display_columns, sorts, filters,
-                             report_id, page_size, cols_param, result_param) -> str:
+                             report_id, page_size, cols_param, result_param,
+                             nested_filter=None) -> str:
     """构建表头 HTML（含排序双箭头 + 筛选操作符下拉框 + 筛选输入框）。"""
     sorts = sorts or []
     filters = filters or []
@@ -1573,6 +1586,8 @@ def build_table_header_html(columns, display_columns, sorts, filters,
             asc_href += "&amp;" + cols_param
         if result_param:
             asc_href += "&amp;" + result_param
+        if nested_filter:
+            asc_href += "&amp;" + build_nested_filter_param(nested_filter)
         asc_cls = "sort-arrow active" if current_dir == "asc" else "sort-arrow"
 
         desc_sorts = list(sorts)
@@ -1592,6 +1607,8 @@ def build_table_header_html(columns, display_columns, sorts, filters,
             desc_href += "&amp;" + cols_param
         if result_param:
             desc_href += "&amp;" + result_param
+        if nested_filter:
+            desc_href += "&amp;" + build_nested_filter_param(nested_filter)
         desc_cls = "sort-arrow active" if current_dir == "desc" else "sort-arrow"
 
         priority_badge = ""
@@ -1672,7 +1689,7 @@ def build_table_body_html(rows, display_indices, filters=None,
 def build_controls_bar_html(report_id, page_size, sorts, filters,
                              cols_param, display_columns, active_index,
                              cache_badge, total_rows, total_pages,
-                             result_param='', page=1) -> str:
+                             result_param='', page=1, nested_filter=None) -> str:
     """构建控制栏 HTML（分页控件、导出表单、缓存状态等）。
     result_param: 多结果集时的 URL 参数字符串（如 "result=0"），仅当 num_results > 1 时非空。
     page: 当前页码（重建缓存 POST 表单随附，回跳保持分页位置）。
@@ -1680,6 +1697,9 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     sorts = sorts or []
     filters = filters or []
     cols_hidden = f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">' if cols_param else ""
+    nf_hidden = (f'<input type="hidden" name="nested_filter" value="'
+                 f'{_escape(urllib.parse.quote(json.dumps(nested_filter, ensure_ascii=False), safe=""))}">'
+                 ) if nested_filter else ""
     return f"""
 <div class="controls">
   <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
@@ -1688,6 +1708,7 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
+    {nf_hidden}
     <label>每页行数:
       <select name="page_size" onchange="this.form.submit()">
         {''.join(f'<option value="{s}"{" selected" if page_size == s else ""}>{s}</option>'
@@ -1702,6 +1723,7 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
+    {nf_hidden}
     <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
       格式:
       <select name="format" id="export-format-select" onchange="updateExportSmartState()" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
@@ -1758,6 +1780,7 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
+    {nf_hidden}
     {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
     <button type="submit" class="btn-refresh">⟳ 重建缓存</button>
    </form>
@@ -1909,7 +1932,7 @@ def build_filter_form_html(form_id: str, form_hidden_str: str) -> str:
 
 
 def build_clear_filters_href(report_id, page_size, sorts, cols_param,
-                             result_param) -> str:
+                             result_param, nested_filter=None) -> str:
     """构造「清除筛选」目标 URL：当前路径去掉 f_*/op_* 参数后的形态。
 
     批次5#19（spec ux-optimization）：筛选空态与筛选操作条共用，
@@ -1923,16 +1946,19 @@ def build_clear_filters_href(report_id, page_size, sorts, cols_param,
         href += "&amp;" + cols_param
     if result_param:
         href += "&amp;" + result_param
+    if nested_filter:
+        href += "&amp;" + build_nested_filter_param(nested_filter)
     return href
 
 
 def build_filter_action_html(report_id, page_size, sorts, cols_param,
-                              result_param, filters) -> tuple:
+                            result_param, filters, nested_filter=None) -> tuple:
     """构建筛选操作按钮和清除筛选提示 HTML。"""
     sorts = sorts or []
     filters = filters or []
     clear_href = build_clear_filters_href(
-        report_id, page_size, sorts, cols_param, result_param)
+        report_id, page_size, sorts, cols_param, result_param,
+        nested_filter=nested_filter)
 
     filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
