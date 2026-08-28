@@ -159,7 +159,7 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
-        max_rows=max_rows)
+        max_rows=max_rows, nested_filter=nested_filter)
     if truncated and _truncated_out is not None:
         _truncated_out.append(True)
 

@@ -7,8 +7,8 @@ tags:
 - 缓存
 - 查询
 version: '1.0'
-last_reviewed_commit: 78895ce
-last_reviewed_at: 2026-08-28
+last_reviewed_commit: 15c88ccd1b263c66a5491991d0aad7569425e7b2
+last_reviewed_at: 2026-08-29
 ---
 
 # report.py 模块节点
@@ -17,7 +17,7 @@ last_reviewed_at: 2026-08-28
 
 ## 职责概述
 
-`report.py`（1831 行，39 个 def/类）——**报表页面处理模块**。是 Web 报表功能的核心编排层：负责报表查询的执行（含多级缓存）、结果集筛选/排序/分页、报表页 HTML 渲染、报表选择页、多结果集切换、预览模式与缓存重建。被 `server.py` 的 `_handle_report` 直接委托，同时被 `api_handler.py`（API 查询）、`scheduler.py`（定时任务）复用 `execute_report`。
+`report.py`（1903 行，40 个 def/类）——**报表页面处理模块**。是 Web 报表功能的核心编排层：负责报表查询的执行（含多级缓存）、结果集筛选/排序/分页、报表页 HTML 渲染、报表选择页、多结果集切换、预览模式与缓存重建。被 `server.py` 的 `_handle_report` 直接委托，同时被 `api_handler.py`（API 查询）、`scheduler.py`（定时任务）复用 `execute_report`。
 
 ## 公开 API 契约
 
@@ -42,6 +42,7 @@ last_reviewed_at: 2026-08-28
 ### 2.2 参数解析函数
 
 - `parse_filters(qs)` -> list：从 `parse_qs` 结果解析多字段筛选（`f_<col>` 列名 + `op_<col>` 操作符，`_parse_filters` 为其内部实现）。
+- `parse_nested_filter(qs) -> dict | None`：从 `parse_qs` 结果解析**嵌套筛选**（FR-005/FR-007/FR-013）。读取 `nested_filter`（URL 编码 JSON），`urllib.parse.unquote` 解码后 `json.loads`；空/缺失返回 `None`；解析或结构校验（`validate_nested_filter`）失败抛 `ValueError`，荷载为结构化错误 JSON（`{valid:false, errors:[...]}`）。报表页 `handle_request` 捕获后忽略并 flash 提示（不阻断渲染）；导出 `handle_export` 捕获后返回 400。
 - `parse_sorts(qs)` -> list：解析多字段排序（`sort`/`dir` 重复键）。
 - `_parse_cols(qs, all_columns)` -> list：解析自定义列顺序（`cols` 参数，仅保留存在列）。
 - `_qs_val(qs, key, default=None)`：安全取 parse_qs 首个值。
@@ -72,7 +73,7 @@ last_reviewed_at: 2026-08-28
 ### 2.5 页面渲染函数
 
 - `render_report_selector(conn)` -> str：渲染报表选择页（按分类层级树状呈现）。
-- `render_report_page(conn, report_id, page=1, page_size=None, pool_override=None, sorts=None, filters=None, refresh=False, cols=None, sql_override=None, report_override=None, active_index=0, result_names_override=None, flash="")` -> str：渲染报表数据展示页（多字段排序/筛选/自定义列/多结果集/预览）。
+- `render_report_page(conn, report_id, page=1, page_size=None, pool_override=None, sorts=None, filters=None, refresh=False, cols=None, sql_override=None, report_override=None, active_index=0, result_names_override=None, flash="", nested_filter=None) -> str`：渲染报表数据展示页（多字段排序/筛选/自定义列/多结果集/预览）。`nested_filter` 非空时随筛选表单隐藏 input 与分页/排序/清除筛选链接保留（FR-005/FR-007），并透传 `execute_report` 在内存行上应用（FR-006）。
 - `_build_report_html(conn, report, result, pool_config=None, sorts=None, filters=None)` -> str：构建完整报表 HTML（多结果集下拉切换）。
 - `_build_report_switcher(conn, current_id=None)` -> str：构建报表切换下拉框（分类树）。
 - `_handle_refresh_cache(conn, form_data) -> (302, url, {})`：处理「重建缓存」POST，回跳保留视图状态 + flash。
