@@ -15,11 +15,7 @@ engine patcher 管理和建表代码。
 
 import unittest
 from unittest.mock import patch
-import os
 import sqlite3
-import tempfile
-
-import branding
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +175,6 @@ class BaseConfigTest(unittest.TestCase):
     职责：
     - setUp：自动创建 :memory: SQLite 连接、patch db._get_engine 返回 'sqlite3'、
             初始化所有配置表。
-    - setUp：站点标识实例本地库隔离——branding._SITE_DB_PATH 默认指向工作
-            目录的 config.db（宿主实例真实库），宿主保存过的标题前缀/取色
-            会污染页面级断言（如 <title>【开发】… 回归）；此处注入临时空库
-            并失效进程缓存，保证测试与宿主状态解耦。
     - tearDown：自动停止 patcher、关闭连接。
 
     使用方式：
@@ -198,26 +190,10 @@ class BaseConfigTest(unittest.TestCase):
         self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
         self.engine_patcher.start()
         init_test_db(self.conn)
-        fd, site_db = tempfile.mkstemp(suffix=".db", prefix="branding-base-")
-        os.close(fd)
-        self._site_db_path = site_db
-        self.branding_patcher = patch.object(
-            branding, "_SITE_DB_PATH", site_db)
-        self.branding_patcher.start()
-        with branding._LOCK:
-            branding._BRANDING_CACHE = None
 
     def tearDown(self):
         """停止 engine patcher 并关闭连接。"""
         self.engine_patcher.stop()
-        self.branding_patcher.stop()
-        with branding._LOCK:
-            branding._BRANDING_CACHE = None
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self._site_db_path + suffix)
-            except OSError:
-                pass
         self.conn.close()
 
 

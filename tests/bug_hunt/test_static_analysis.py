@@ -15,13 +15,10 @@ from tests.bug_hunt.static_analyzer import run_all_checkers
 
 
 _KNOWN_FALSE_POSITIVES: set[str] = {
-    # tests/__init__.py 使用相对导入 `from .test_base import ...`，
-    # importlib 在包外无法解析，但运行时通过 unittest 包发现机制正常工作。
-    # 使用通配前缀匹配，避免行号变动导致误报
-    "tests/__init__.py:: - 无法导入模块 'test_base'",
+    "tests/__init__.py:6:0 - 无法导入模块 'test_base'",
     # tests/integration/__init__.py 同样使用包内相对导入，unittest 包发现
     # 机制可正常解析，静态分析在包外解析时误报
-    "tests/integration/__init__.py:: - 无法导入模块 'base'",
+    "tests/integration/__init__.py:8:0 - 无法导入模块 'base'",
 }
 """已知误报集合。因模块路径、相对导入等静态分析无法消除的合法模式。
 格式为 finding 字符串中 `[ERROR]` 之后的部分。
