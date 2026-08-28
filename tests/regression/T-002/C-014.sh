@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# C-014 FR-009：知识库文档不直接地址引用 copy 目录内具体文件
-! grep -rE '/opdev/SqlReport copy/[A-Za-z0-9_.-]+' .adocs/specs/ 2>/dev/null
+# C-014 FR-004 GET 通道解析 nested_filter（URL 编码 JSON）
+cd "$(git rev-parse --show-toplevel)"
+venv/bin/python -m pytest tests/test_api_nested_filter.py::TestResolveNestedFilter::test_get_nested_filter_parsed -q

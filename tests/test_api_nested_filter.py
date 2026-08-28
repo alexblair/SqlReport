@@ -71,6 +71,29 @@ class TestResolveParamsNested(unittest.TestCase):
         with self.assertRaises(ValueError):
             api_handler._resolve_params(self._endpoint(), "GET", "", qp)
 
+    def test_coexist_with_preset_filters(self):
+        """嵌套筛选与端点预设 filters 并存：二者均被解析且不互相覆盖（FR-005）。"""
+        endpoint = self._endpoint()
+        endpoint["filters"] = json.dumps(
+            [{"col": "status", "op": "eq", "val": "1"}])
+        payload = {"op": "and", "conditions": [
+            {"col": "name", "op": "contains", "value": "a"}]}
+        qp = {"nested_filter": [json.dumps(payload)]}
+        (filters, _sorts, _page, _ps, _rl, _fmt, _cols, _bom, _fa, nf) = \
+            api_handler._resolve_params(endpoint, "GET", "", qp)
+        self.assertEqual(filters, [("status", "eq", "1")])
+        self.assertEqual(nf, payload)
+
+    def test_malformed_json_raises_valueerror(self):
+        """GET nested_filter 非合法 JSON → 抛 ValueError 且荷载含修正建议（FR-012）。"""
+        qp = {"nested_filter": ["{op:and"]}  # 非法 JSON
+        with self.assertRaises(ValueError) as ctx:
+            api_handler._resolve_nested_filter("GET", "", qp, {})
+        err = json.loads(ctx.exception.args[0])
+        self.assertFalse(err["valid"])
+        self.assertTrue(any("JSON" in e["message"] for e in err["errors"]))
+        self.assertTrue(any(e.get("suggestion") for e in err["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()
