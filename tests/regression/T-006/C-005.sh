@@ -1,3 +1,6 @@
 #!/usr/bin/env bash
-# C-005 FR-009：不引用 copy 目录
-! grep -rE '/opdev/SqlReport copy/[A-Za-z0-9_.-]+' .adocs/specs/modules/ 2>/dev/null
+# C-005 FR-010：各分卷 last_reviewed_commit 有效
+for f in .adocs/specs/modules/*.md; do
+  ref=$(grep '^last_reviewed_commit: ' "$f" | sed 's/.*: //' | xargs)
+  [ -n "$ref" ] || exit 1; git cat-file -e "$ref^{commit}" || exit 1
+done; exit 0

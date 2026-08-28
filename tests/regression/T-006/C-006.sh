@@ -1,8 +1,3 @@
 #!/usr/bin/env bash
-# C-006 FR-010：各分卷 last_reviewed_commit 有效
-for f in .adocs/specs/modules/*.md; do
-  ref=$(grep '^last_reviewed_commit: ' "$f" | sed 's/.*: //' | xargs)
-  [ -n "$ref" ] || exit 1
-  git cat-file -e "$ref^{commit}" || exit 1
-done
-exit 0
+# C-006 FR-001：主 SPEC 九章节 + contract-json + CONTRACT_v1.json
+[ "$(grep -cE '^## ' .adocs/specs/SPEC_v1.md)" = "9" ] && grep -q 'contract-json' .adocs/specs/SPEC_v1.md && [ -f .adocs/contracts/CONTRACT_v1.json ]

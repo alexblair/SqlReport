@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
-# C-007 FR-001：主 SPEC 九章节 + contract-json + CONTRACT_v1.json
-[ "$(grep -cE '^## ' .adocs/specs/SPEC_v1.md)" = "9" ] && grep -q 'contract-json' .adocs/specs/SPEC_v1.md && [ -f .adocs/contracts/CONTRACT_v1.json ]
+# C-007 FR-004：契约权威声明 specs/index.json
+python3 -c "import json;print(any(f['id']=='FR-004' for f in json.load(open('.adocs/contracts/CONTRACT_v1.json'))['FR']))" | grep -q True && grep -q 'specs/index.json' .adocs/specs/SPEC_v1.md
