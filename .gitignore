@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.coverage
 
 # 虚拟环境
 venv/
@@ -39,7 +40,6 @@ static/vendor/self@*/
 # 系统
 .DS_Store
 Thumbs.db
-.opencode
 
 # CodeGraph
 .codegraph/
