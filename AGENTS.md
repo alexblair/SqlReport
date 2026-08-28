@@ -4,6 +4,16 @@
 >
 > **思考过程（thinking/reasoning）同样必须使用简体中文**——所有内部思考、推理、分析一律用简体中文完成，不得使用英文。
 
+## 开发环境约束
+
+**所有运行、测试操作必须在项目 VENV 中执行**，禁止使用系统 Python。VENV 路径：`venv/`。
+
+- 运行：`venv/bin/python <脚本>`
+- 测试：`venv/bin/python -m pytest tests/`
+- 安装依赖：`venv/bin/pip install -r requirements.txt`
+
+`requirements.txt` 是依赖的唯一来源（Single Source of Truth），新增/删除依赖时必须同步更新该文件。
+
 ## 项目知识入口
 
 **`docs/MAP.yaml`** — 按层级组织所有项目知识，session 启动时：
