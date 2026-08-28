@@ -19,6 +19,8 @@ result_transform.py — 结果集变换模块（纯函数，无 IO）
 
 import math
 import re
+import datetime
+import calendar
 
 # ---------------------------------------------------------------------------
 
@@ -169,82 +171,18 @@ def filter_rows(rows: list[tuple], columns: list[str],
       notcontains — contains 的取反：不区分大小写的 NOT LIKE '%val%'
       eq        — 字符串精确相等
       neq       — 字符串不相等
-      gt / lt / gte / lte — 数值比较（尝试转 float）
+      gt / lt / gte / lte — 数值比较（尝试转 float，或 ISO 日期比较）
       isempty   — IS NULL OR = ''
       notempty  — IS NOT NULL AND != ''
+
+    注：单一条件匹配逻辑抽取至 _apply_single_filter，供嵌套筛选（filter_rows_nested）
+    复用，保证两套入口语义一致（复用优先，FR-014）。
     """
     if not filters:
         return rows
     result = list(rows)
     for col_name, op, q in filters:
-        if col_name not in columns:
-            continue
-        col_idx = columns.index(col_name)
-
-        if op in ("contains", "notcontains", "eq", "neq"):
-            segments = parse_filter_expr(q)
-            if not segments:
-                continue
-            regexes = _compile_segments(
-                segments, ignorecase=(op in ("contains", "notcontains")))
-            if op == "contains":
-                result = [
-                    r for r in result
-                    if any(rx.search(_cell_str(r[col_idx])) for rx in regexes)
-                ]
-            elif op == "notcontains":
-                result = [
-                    r for r in result
-                    if not any(rx.search(_cell_str(r[col_idx])) for rx in regexes)
-                ]
-            elif op == "eq":
-                result = [
-                    r for r in result
-                    if any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)
-                ]
-            else:
-                result = [
-                    r for r in result
-                    if not any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)
-                ]
-        elif op in ("gt", "lt", "gte", "lte"):
-            try:
-                q_num = float(q)
-            except (ValueError, TypeError):
-                continue
-            if not math.isfinite(q_num):
-                # 条件值为 NaN/Inf：与非法值同路——跳过条件而非静默清空结果集
-                continue
-            if op == "gt":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) > q_num
-                ]
-            elif op == "lt":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) < q_num
-                ]
-            elif op == "gte":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) >= q_num
-                ]
-            elif op == "lte":
-                result = [
-                    r for r in result
-                    if _try_float(r[col_idx]) is not None and _try_float(r[col_idx]) <= q_num
-                ]
-        elif op == "isempty":
-            result = [
-                r for r in result
-                if r[col_idx] is None or str(r[col_idx]).strip() == ""
-            ]
-        elif op == "notempty":
-            result = [
-                r for r in result
-                if r[col_idx] is not None and str(r[col_idx]).strip() != ""
-            ]
+        result = _apply_single_filter(result, columns, col_name, op, q)
     return result
 
 
@@ -346,6 +284,312 @@ def select_columns(all_columns: list[str], requested=None) -> list[str]:
             result.append(c)
             seen.add(c)
     return result if result else list(all_columns)
+
+
+# ---------------------------------------------------------------------------
+# 嵌套筛选（NestedFilter）— T-001
+# 在现有 filter_rows 的单一条件匹配基础上，支持 and/or 递归条件树，
+# 并在 value 字段支持表达式语法（now()/today()/date_add()/...）。
+# 全部为纯函数、无 IO、无外部依赖，并复用既有操作符语义（FR-014）。
+# ---------------------------------------------------------------------------
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_numeric_or_date(s):
+    """将值解析为 (num, date)：可转 float → (float, None)；ISO 日期 → (None, date)。
+
+    用于数值/日期操作的统一比较入口；两者皆不可解析 → (None, None)。
+    """
+    if s is None:
+        return (None, None)
+    if isinstance(s, bool):
+        return (None, None)
+    if isinstance(s, (int, float)):
+        num = float(s)
+        return (num, None) if math.isfinite(num) else (None, None)
+    s = str(s).strip()
+    if _DATE_RE.match(s):
+        try:
+            return (None, datetime.date.fromisoformat(s))
+        except ValueError:
+            return (None, None)
+    try:
+        num = float(s)
+    except (ValueError, TypeError):
+        return (None, None)
+    return (num, None) if math.isfinite(num) else (None, None)
+
+
+def _apply_single_filter(result, columns, col_name, op, q):
+    """对 result 应用单一筛选条件（与 filter_rows 既有语义一致），返回新列表。
+
+    q 应为已解析的「字面量」——嵌套筛选调用方需先经 resolve_expression 解析
+    value 表达式。未知列 / 无法比较的值 → 条件静默跳过（保持 filter_rows 行为）。
+    """
+    if col_name not in columns:
+        return result
+    col_idx = columns.index(col_name)
+
+    if op in ("contains", "notcontains", "eq", "neq"):
+        segments = parse_filter_expr(q)
+        if not segments:
+            return result
+        regexes = _compile_segments(
+            segments, ignorecase=(op in ("contains", "notcontains")))
+        if op == "contains":
+            return [r for r in result
+                    if any(rx.search(_cell_str(r[col_idx])) for rx in regexes)]
+        if op == "notcontains":
+            return [r for r in result
+                    if not any(rx.search(_cell_str(r[col_idx])) for rx in regexes)]
+        if op == "eq":
+            return [r for r in result
+                    if any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)]
+        # neq
+        return [r for r in result
+                if not any(rx.fullmatch(_cell_str(r[col_idx])) for rx in regexes)]
+
+    if op in ("gt", "lt", "gte", "lte"):
+        q_num, q_date = _parse_numeric_or_date(q)
+        if q_num is None and q_date is None:
+            return result
+        out = []
+        for r in result:
+            cell = r[col_idx]
+            cell_num, cell_date = _parse_numeric_or_date(cell)
+            if q_date is not None and cell_date is not None:
+                cmp = (cell_date > q_date) - (cell_date < q_date)
+            elif q_num is not None and cell_num is not None:
+                cmp = (cell_num > q_num) - (cell_num < q_num)
+            else:
+                continue  # 类型不可比，跳过该行
+            if (op == "gt" and cmp > 0) or (op == "lt" and cmp < 0) \
+               or (op == "gte" and cmp >= 0) or (op == "lte" and cmp <= 0):
+                out.append(r)
+        return out
+
+    if op == "isempty":
+        return [r for r in result
+                if r[col_idx] is None or str(r[col_idx]).strip() == ""]
+    if op == "notempty":
+        return [r for r in result
+                if r[col_idx] is not None and str(r[col_idx]).strip() != ""]
+    # 未知操作符：静默跳过（与 filter_rows 历史行为一致）
+    return result
+
+
+def resolve_expression(value):
+    """解析 value 字段中的表达式语法 → 字面量字符串。不区分大小写（统一转小写）。
+
+    支持：
+      now() / today()              → 今日日期 YYYY-MM-DD
+      yesterday() / tomorrow()    → 昨/明日期
+      date_add(base, n, unit)     → 在 base 上偏移 n 个单位
+      date_sub(base, n, unit)     → 在 base 上反向偏移 n 个单位
+      date('YYYY-MM-DD')          → 字面日期
+    base 可为 now()/today()/yesterday()/tomorrow() 或 'YYYY-MM-DD'。
+    unit ∈ day/week/month/year（可带 s 复数）。
+    非表达式或无法识别 → 原样返回（不报错），交由后续匹配/校验处理。
+    """
+    if not isinstance(value, str):
+        return value
+    s = value.strip().lower()
+    if s in ("now()", "today()"):
+        return datetime.date.today().isoformat()
+    if s == "yesterday()":
+        return (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    if s == "tomorrow()":
+        return (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+
+    m = re.match(r"date\(\s*'(\d{4}-\d{2}-\d{2})'\s*\)", s)
+    if m:
+        return m.group(1)
+
+    m = re.match(r"date_add\(\s*(.+?)\s*,\s*(-?\d+)\s*,\s*(\w+)\s*\)", s)
+    if m:
+        base = _parse_date_base(m.group(1))
+        return _shift_date(base, int(m.group(2)), m.group(3)).isoformat()
+
+    m = re.match(r"date_sub\(\s*(.+?)\s*,\s*(-?\d+)\s*,\s*(\w+)\s*\)", s)
+    if m:
+        base = _parse_date_base(m.group(1))
+        return _shift_date(base, -int(m.group(2)), m.group(3)).isoformat()
+
+    return value  # 字面量或无法识别，原样返回
+
+
+def _parse_date_base(base):
+    """解析 date_add/date_sub 的 base 参数 → date。"""
+    base = base.strip().strip("'\"").strip()
+    if base in ("now()", "today()"):
+        return datetime.date.today()
+    if base == "yesterday()":
+        return datetime.date.today() - datetime.timedelta(days=1)
+    if base == "tomorrow()":
+        return datetime.date.today() + datetime.timedelta(days=1)
+    m = re.match(r"date\(\s*'(\d{4}-\d{2}-\d{2})'\s*\)", base)
+    if m:
+        try:
+            return datetime.date.fromisoformat(m.group(1))
+        except ValueError:
+            pass
+    try:
+        return datetime.date.fromisoformat(base)
+    except ValueError:
+        return datetime.date.today()
+
+
+def _shift_date(d, n, unit):
+    """在日期 d 上偏移 n 个 unit（unit∈day/week/month/year，可带 s）。"""
+    unit = unit.rstrip("s")
+    if unit == "day":
+        return d + datetime.timedelta(days=n)
+    if unit == "week":
+        return d + datetime.timedelta(weeks=n)
+    if unit == "month":
+        total = (d.year * 12 + (d.month - 1)) + n
+        y, m = divmod(total, 12)
+        m += 1
+        last = calendar.monthrange(y, m)[1]
+        return d.replace(year=y, month=m, day=min(d.day, last))
+    if unit == "year":
+        return d.replace(year=d.year + n)
+    return d
+
+
+def filter_rows_nested(rows, columns, nested_filter):
+    """按嵌套筛选条件树（and/or 递归）在内存中筛选，返回新列表（不修改入参）。
+
+    nested_filter 结构：
+      {"op": "and"|"or", "conditions": [节点, ...]}
+      节点可为：分组节点（含 op+conditions）或叶节点 {"col", "op", "value"}。
+    空 dict / None / 空 conditions → 视为 no-op，返回原全部行（不污染缓存，FR-006）。
+    """
+    if nested_filter is None or (isinstance(nested_filter, dict) and not nested_filter):
+        return list(rows)
+    return _eval_node(list(rows), columns, nested_filter)
+
+
+def _eval_node(rows, columns, node):
+    """递归求值单个条件节点。rows 为本节点作用域内的候选行。"""
+    if not isinstance(node, dict):
+        return list(rows)
+    op = (node.get("op") or "").lower()
+    if op in ("and", "or"):
+        conditions = node.get("conditions")
+        if not isinstance(conditions, list) or not conditions:
+            return list(rows)  # 空分组：no-op
+        if op == "and":
+            result = list(rows)
+            for c in conditions:
+                result = _eval_node(result, columns, c)
+            return result
+        # or：对原始候选行分别求值后取并集（按对象身份去重）
+        seen = set()
+        out = []
+        for c in conditions:
+            for r in _eval_node(list(rows), columns, c):
+                if id(r) not in seen:
+                    seen.add(id(r))
+                    out.append(r)
+        return out
+    # 叶节点：具体筛选条件
+    col = node.get("col")
+    cop = node.get("op")
+    val = node.get("value")
+    if col is None or cop is None:
+        return list(rows)
+    resolved = resolve_expression(val) if isinstance(val, str) else val
+    return _apply_single_filter(list(rows), columns, col, cop, resolved)
+
+
+# 嵌套筛选支持的叶节点操作符集合
+_NESTED_LEAF_OPS = ("contains", "notcontains", "eq", "neq",
+                    "gt", "lt", "gte", "lte", "isempty", "notempty")
+
+
+def validate_nested_filter(nested_filter, available_columns=None):
+    """校验嵌套筛选 JSON 结构，返回 {'valid': bool, 'errors': [...]}。
+
+    errors 每项：{'path', 'message', 'suggestion'}——指明问题条件位置、原因，
+    并基于实际输入给出修正建议（FR-012，假设用户无编程基础）。
+    available_columns：可选列名白名单；提供时检测非法列名并给出可用列名建议。
+    """
+    errors = []
+
+    def walk(node, path):
+        if not isinstance(node, dict):
+            errors.append({
+                "path": path,
+                "message": "条件节点必须是对象（{...}）",
+                "suggestion": "请检查该条件是否为合法 JSON 对象，例如 {\"col\":\"姓名\",\"op\":\"contains\",\"value\":\"张\"}",
+            })
+            return
+        op = node.get("op")
+        if op in ("and", "or"):
+            conds = node.get("conditions")
+            if not isinstance(conds, list) or not conds:
+                errors.append({
+                    "path": path + ".conditions",
+                    "message": f"\"{op}\" 分组必须包含非空的 conditions 数组",
+                    "suggestion": f"请在 \"{op}\" 下至少添加一个条件，例如 \"conditions\": [{{\"col\":\"姓名\",\"op\":\"contains\",\"value\":\"张\"}}]",
+                })
+                return
+            for i, c in enumerate(conds):
+                walk(c, f"{path}.conditions[{i}]")
+            return
+        # 叶节点
+        col = node.get("col")
+        if col is None or (isinstance(col, str) and col.strip() == ""):
+            errors.append({
+                "path": path,
+                "message": "筛选条件缺少必填字段 col（列名）",
+                "suggestion": "请添加 \"col\": \"列名\"；" + (
+                    "可用列名：" + ", ".join(available_columns) if available_columns
+                    else "列名即报表中的字段名，如「姓名」「年龄」"),
+            })
+        elif available_columns is not None and col not in available_columns:
+            errors.append({
+                "path": path + ".col",
+                "message": f"列名不存在：{col}",
+                "suggestion": "请使用报表中真实存在的列名；可用列名：" + ", ".join(available_columns),
+            })
+        cop = node.get("op")
+        if cop is None or (isinstance(cop, str) and cop.strip() == ""):
+            errors.append({
+                "path": path,
+                "message": "筛选条件缺少必填字段 op（操作符）",
+                "suggestion": "请添加 \"op\": \"contains\"；支持的操作符：" + ", ".join(_NESTED_LEAF_OPS),
+            })
+        elif cop not in _NESTED_LEAF_OPS:
+            errors.append({
+                "path": path + ".op",
+                "message": f"不支持的操作符：{cop}",
+                "suggestion": "请使用支持的操作符：" + ", ".join(_NESTED_LEAF_OPS),
+            })
+        else:
+            # 校验 value（isempty/notempty 无需 value）
+            if cop not in ("isempty", "notempty"):
+                val = node.get("value")
+                resolved = resolve_expression(val) if isinstance(val, str) else val
+                if val is None or (isinstance(val, str) and val.strip() == ""):
+                    errors.append({
+                        "path": path + ".value",
+                        "message": "筛选条件缺少必填字段 value（值）",
+                        "suggestion": f"请为操作符 {cop} 提供 value，例如 \"value\": \"张\" 或 \"value\": \"date_add(now(),7,day)\"",
+                    })
+                elif cop in ("gt", "lt", "gte", "lte") \
+                        and _parse_numeric_or_date(resolved) == (None, None):
+                    errors.append({
+                        "path": path + ".value",
+                        "message": f"数值/日期操作符 {cop} 的值无法解析为数字或日期：{val}",
+                        "suggestion": "请改为数字（如 30）或日期表达式（如 date_add(now(),7,day) / date('2026-02-01')）",
+                    })
+                # contains/eq/neq 接受任意字符串值，无需数值校验
+
+    walk(nested_filter, "$")
+    return {"valid": len(errors) == 0, "errors": errors}
 
 
 def column_indices(display_cols: list[str], all_columns: list[str]) -> list[int]:
