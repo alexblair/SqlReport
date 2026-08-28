@@ -1,11 +1,13 @@
 {
-  "version": "1",
-  "generated_at": "2026-08-28T15:45:00+08:00",
+  "version": "2",
+  "architecture": "knowledge-graph",
+  "generated_at": "2026-08-28T23:55:00+08:00",
   "last_reviewed_commit": "8e3a6e7bb6f8946cb29dc53b1256d6b33c26820d",
   "specs": [
     {
       "name": "spec",
-      "doc_path": ".adocs/specs/SPEC_v1.md",
+      "doc_path": ".adocs/specs/总纲规格.md",
+      "type": "spec",
       "contract_id": "SPEC-MAIN",
       "fr_refs": [
         "FR-001",
@@ -25,7 +27,8 @@
     },
     {
       "name": "api_handler",
-      "doc_path": ".adocs/specs/modules/api_handler.md",
+      "doc_path": ".adocs/modules/api_handler.md",
+      "type": "module",
       "contract_id": "MOD-API_HANDLER",
       "fr_refs": [
         "FR-002",
@@ -49,7 +52,8 @@
     },
     {
       "name": "app_config",
-      "doc_path": ".adocs/specs/modules/app_config.md",
+      "doc_path": ".adocs/modules/app_config.md",
+      "type": "module",
       "contract_id": "MOD-APP_CONFIG",
       "fr_refs": [
         "FR-002",
@@ -62,7 +66,8 @@
     },
     {
       "name": "audit_db",
-      "doc_path": ".adocs/specs/modules/audit_db.md",
+      "doc_path": ".adocs/modules/audit_db.md",
+      "type": "module",
       "contract_id": "MOD-AUDIT_DB",
       "fr_refs": [
         "FR-002",
@@ -78,7 +83,8 @@
     },
     {
       "name": "audit_page",
-      "doc_path": ".adocs/specs/modules/audit_page.md",
+      "doc_path": ".adocs/modules/audit_page.md",
+      "type": "module",
       "contract_id": "MOD-AUDIT_PAGE",
       "fr_refs": [
         "FR-002",
@@ -96,7 +102,8 @@
     },
     {
       "name": "auth",
-      "doc_path": ".adocs/specs/modules/auth.md",
+      "doc_path": ".adocs/modules/auth.md",
+      "type": "module",
       "contract_id": "MOD-AUTH",
       "fr_refs": [
         "FR-002",
@@ -112,7 +119,8 @@
     },
     {
       "name": "branding",
-      "doc_path": ".adocs/specs/modules/branding.md",
+      "doc_path": ".adocs/modules/branding.md",
+      "type": "module",
       "contract_id": "MOD-BRANDING",
       "fr_refs": [
         "FR-002",
@@ -125,7 +133,8 @@
     },
     {
       "name": "config",
-      "doc_path": ".adocs/specs/modules/config.md",
+      "doc_path": ".adocs/modules/config.md",
+      "type": "module",
       "contract_id": "MOD-CONFIG",
       "fr_refs": [
         "FR-002",
@@ -156,6 +165,7 @@
     {
       "name": "config_db",
       "doc_path": ".adocs/specs/modules/config_db.md",
+      "type": "module",
       "contract_id": "MOD-CONFIG_DB",
       "fr_refs": [
         "FR-002",
@@ -169,12 +179,13 @@
         "query_executor",
         "static_cache"
       ],
-      "version": "1.0",
-      "last_reviewed_commit": "9652dab"
+      "version": "2.0",
+      "last_reviewed_commit": "8b76e7e"
     },
     {
       "name": "db",
-      "doc_path": ".adocs/specs/modules/db.md",
+      "doc_path": ".adocs/modules/db.md",
+      "type": "module",
       "contract_id": "MOD-DB",
       "fr_refs": [
         "FR-002",
@@ -191,7 +202,8 @@
     },
     {
       "name": "export",
-      "doc_path": ".adocs/specs/modules/export.md",
+      "doc_path": ".adocs/modules/export.md",
+      "type": "module",
       "contract_id": "MOD-EXPORT",
       "fr_refs": [
         "FR-002",
@@ -211,7 +223,8 @@
     },
     {
       "name": "file_permissions",
-      "doc_path": ".adocs/specs/modules/file_permissions.md",
+      "doc_path": ".adocs/modules/file_permissions.md",
+      "type": "module",
       "contract_id": "MOD-FILE_PERMISSIONS",
       "fr_refs": [
         "FR-002",
@@ -226,7 +239,8 @@
     },
     {
       "name": "filter_help",
-      "doc_path": ".adocs/specs/modules/filter_help.md",
+      "doc_path": ".adocs/modules/filter_help.md",
+      "type": "module",
       "contract_id": "MOD-FILTER_HELP",
       "fr_refs": [
         "FR-002",
@@ -239,7 +253,8 @@
     },
     {
       "name": "json_template",
-      "doc_path": ".adocs/specs/modules/json_template.md",
+      "doc_path": ".adocs/modules/json_template.md",
+      "type": "module",
       "contract_id": "MOD-JSON_TEMPLATE",
       "fr_refs": [
         "FR-002",
@@ -254,7 +269,8 @@
     },
     {
       "name": "markdown_render",
-      "doc_path": ".adocs/specs/modules/markdown_render.md",
+      "doc_path": ".adocs/modules/markdown_render.md",
+      "type": "module",
       "contract_id": "MOD-MARKDOWN_RENDER",
       "fr_refs": [
         "FR-002",
@@ -267,7 +283,8 @@
     },
     {
       "name": "preset_cases",
-      "doc_path": ".adocs/specs/modules/preset_cases.md",
+      "doc_path": ".adocs/modules/preset_cases.md",
+      "type": "module",
       "contract_id": "MOD-PRESET_CASES",
       "fr_refs": [
         "FR-002",
@@ -280,7 +297,8 @@
     },
     {
       "name": "query_executor",
-      "doc_path": ".adocs/specs/modules/query_executor.md",
+      "doc_path": ".adocs/modules/query_executor.md",
+      "type": "module",
       "contract_id": "MOD-QUERY_EXECUTOR",
       "fr_refs": [
         "FR-002",
@@ -296,7 +314,8 @@
     },
     {
       "name": "redis_cache",
-      "doc_path": ".adocs/specs/modules/redis_cache.md",
+      "doc_path": ".adocs/modules/redis_cache.md",
+      "type": "module",
       "contract_id": "MOD-REDIS_CACHE",
       "fr_refs": [
         "FR-002",
@@ -311,7 +330,8 @@
     },
     {
       "name": "render",
-      "doc_path": ".adocs/specs/modules/render.md",
+      "doc_path": ".adocs/modules/render.md",
+      "type": "module",
       "contract_id": "MOD-RENDER",
       "fr_refs": [
         "FR-002",
@@ -331,7 +351,8 @@
     },
     {
       "name": "report",
-      "doc_path": ".adocs/specs/modules/report.md",
+      "doc_path": ".adocs/modules/report.md",
+      "type": "module",
       "contract_id": "MOD-REPORT",
       "fr_refs": [
         "FR-002",
@@ -354,7 +375,8 @@
     },
     {
       "name": "result_transform",
-      "doc_path": ".adocs/specs/modules/result_transform.md",
+      "doc_path": ".adocs/modules/result_transform.md",
+      "type": "module",
       "contract_id": "MOD-RESULT_TRANSFORM",
       "fr_refs": [
         "FR-002",
@@ -367,7 +389,8 @@
     },
     {
       "name": "scheduler",
-      "doc_path": ".adocs/specs/modules/scheduler.md",
+      "doc_path": ".adocs/modules/scheduler.md",
+      "type": "module",
       "contract_id": "MOD-SCHEDULER",
       "fr_refs": [
         "FR-002",
@@ -388,7 +411,8 @@
     },
     {
       "name": "server",
-      "doc_path": ".adocs/specs/modules/server.md",
+      "doc_path": ".adocs/modules/server.md",
+      "type": "module",
       "contract_id": "MOD-SERVER",
       "fr_refs": [
         "FR-002",
@@ -416,7 +440,8 @@
     },
     {
       "name": "static_cache",
-      "doc_path": ".adocs/specs/modules/static_cache.md",
+      "doc_path": ".adocs/modules/static_cache.md",
+      "type": "module",
       "contract_id": "MOD-STATIC_CACHE",
       "fr_refs": [
         "FR-002",
@@ -432,7 +457,8 @@
     },
     {
       "name": "config_system",
-      "doc_path": ".adocs/specs/config_system.md",
+      "doc_path": "rules/config_system.md",
+      "type": "business-rule",
       "contract_id": "SPEC-CONFIG",
       "fr_refs": [
         "FR-002",
@@ -448,7 +474,8 @@
     },
     {
       "name": "db_schemas",
-      "doc_path": ".adocs/specs/db_schemas.md",
+      "doc_path": "rules/db_schemas.md",
+      "type": "business-rule",
       "contract_id": "SPEC-DB-SCHEMAS",
       "fr_refs": [
         "FR-002",
@@ -464,7 +491,8 @@
     },
     {
       "name": "ops_scripts",
-      "doc_path": ".adocs/specs/ops_scripts.md",
+      "doc_path": "conventions/ops_scripts.md",
+      "type": "dev-convention",
       "contract_id": "SPEC-OPS-SCRIPTS",
       "fr_refs": [
         "FR-002",
@@ -481,6 +509,7 @@
     {
       "name": "static_assets",
       "doc_path": ".adocs/specs/static_assets.md",
+      "type": "module",
       "contract_id": "SPEC-STATIC-ASSETS",
       "fr_refs": [
         "FR-002",
@@ -491,12 +520,13 @@
       "depends_on": [
         "T-002"
       ],
-      "version": "1",
-      "last_reviewed_commit": "b690f8d"
+      "version": "2",
+      "last_reviewed_commit": "a579d19"
     },
     {
       "name": "readme_reconciliation",
-      "doc_path": ".adocs/specs/readme_reconciliation.md",
+      "doc_path": "decisions/readme_reconciliation.md",
+      "type": "adr",
       "contract_id": "SPEC-README-RECON",
       "fr_refs": [
         "FR-002",

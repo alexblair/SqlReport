@@ -1,60 +1,114 @@
 ---
 module: static-assets
 contract_id: SPEC-STATIC-ASSETS
-version: 1
+version: 2
 depends_on: [T-002]
-last_reviewed_commit: b690f8d
-last_reviewed_at: 2026-08-28T15:30:00+08:00
+last_reviewed_commit: a579d19
+last_reviewed_at: 2026-08-28T18:30:00+08:00
 ---
 
 ## 1. 职责概述
 
-SqlReport 的静态资源目录 `static/` 存放前端 JS/CSS 库。当前结构极简：仅含 `vendor/` 子目录，无自定义静态资源（HTML/CSS/JS 均内联在 Python 模块中生成）。
+SqlReport 的静态资源目录 `static/` 存放前端 JS/CSS 库。当前结构：仅含 `vendor/` 子目录，无自定义静态资源（HTML/CSS/JS 均内联在 Python 模块中生成）。
 
 **目录结构**：
 ```
 static/
 └── vendor/
-    └── self@ea63d909/   # session 产物（非标准 vendor 库）
+    └── mermaid@11.16.1/   # Mermaid.js 流程图渲染库
+        └── mermaid.min.js # 3.5MB，版本锁定11.16.1
 ```
 
 ## 2. 公开 API 契约
 
-### 2.1 static/vendor/ 目录
+### 2.1 static/vendor/mermaid@11.16.1/
 
-当前 `vendor/` 目录仅含一个 session 产物目录 `self@ea63d909/`，不是标准的第三方 JS/CSS 库。
+| 属性 | 值 |
+|------|-----|
+| 文件 | `mermaid.min.js` |
+| 大小 | ~3.5MB |
+| 版本 | 11.16.1（内容 hash 版本锁目录） |
+| 来源 | CDN 下载后本地托管 |
+| 用途 | 渲染 Markdown 中的 mermaid 流程图 |
 
-**预期用途**：存放前端第三方库（如 DataTables、jQuery 等），但当前项目将前端资源内联在 Python 生成的 HTML 中，无需外部 vendor 库。
+**设计原则**：
+- **版本锁目录**：目录名包含版本号 `@11.16.1`，升级时创建新目录，确保缓存失效
+- **本地托管**：不依赖外部 CDN，离线可用，内网部署友好
+- **渐进增强**：JS 加载失败时显示 `<pre class="mermaid">` 源码，不阻断页面
 
-### 2.2 static_cache 配合
+### 2.2 mermaid 集成架构
 
-`static_cache.py` 管理的静态文件缓存目录由 `app_config.json` 的 `static_cache.dir` 配置决定，与 `static/` 目录独立。
+```
+用户输入 Markdown（含 ```mermaid 块）
+        ↓
+markdown_render.py → _render_with_mermaid()
+    ↓ 提取 mermaid 块 → 占位符
+    ↓ 其他 Markdown 渲染
+    ↓ 替换占位符 → <pre class="mermaid">…</pre>
+        ↓
+HTML 输出
+        ↓
+浏览器加载 /static/vendor/mermaid@11.16.1/mermaid.min.js
+        ↓
+mermaid.initialize({ startOnLoad: false, securityLevel: "strict" })
+mermaid.run({ nodes: document.querySelectorAll('.mermaid') })
+        ↓
+流程图渲染到 SVG
+```
+
+### 2.3 关键配置常量
+
+```python
+# markdown_render.py
+MERMAID_VENDOR_VERSION = "11.16.1"
+MERMAID_JS_URL = f"/static/vendor/mermaid@{MERMAID_VENDOR_VERSION}/mermaid.min.js"
+```
 
 ## 3. 数据流
 
 ```
-static/ → 前端资源（当前仅 vendor/）
-    ↓
-server.py → /static/ 路由 → 直接文件服务
-    ↓
-browser → 加载 JS/CSS
+static/vendor/mermaid@11.16.1/mermaid.min.js
+        ↓
+server.py → /static/vendor/mermaid@11.16.1/mermaid.min.js
+        ↓
+browser → 加载 mermaid.min.js
+        ↓
+mermaid.run() → 渲染 <pre class="mermaid"> 元素
 ```
 
 ## 4. 依赖关系
 
-- **server.py**：注册 `/static/` 路由，直接文件服务
-- **static_cache.py**：独立的缓存目录（非 `static/`）
+| 依赖方 | 依赖方式 | 说明 |
+|--------|----------|------|
+| `markdown_render.py` | 输出 `<pre class="mermaid">` | 渲染流程图占位符 |
+| `config.py` | 备注预览页加载 mermaid | 表单预览渲染流程图 |
+| `render.py` | 报表页加载 mermaid | 报表渲染流程图 |
+| `report.py` | 注入 mermaid 脚本标签 | 按需加载 mermaid |
+| `server.py` | 注册 `/static/` 路由 | 静态文件服务 |
 
 ## 5. 边界与异常
 
 | 场景 | 处理方式 |
 |------|----------|
-| `static/vendor/` 为空 | 无影响（前端内联） |
-| `self@ea63d909/` 是 session 产物 | 非标准 vendor，可清理 |
+| mermaid.min.js 加载失败 | 显示 `<pre class="mermaid">` 源码，不阻断 |
+| mermaid 块语法错误 | mermaid.run() 跳过该元素，控制台报错 |
+| 无 mermaid 内容 | 不注入 `<script>` 标签，零请求 |
+| 版本升级 | 创建新目录 `mermaid@12.x.x/`，更新 `MERMAID_VENDOR_VERSION` |
 
-## 6. 保鲜核对提交点
+## 6. 测试覆盖
+
+| 测试文件 | 覆盖场景 |
+|----------|----------|
+| `tests/test_markdown_render.py` | mermaid 块渲染、转义、多块处理、`contains_mermaid()` 判定 |
+| `tests/test_config.py` | 备注预览页 mermaid 渲染 |
+| `tests/test_report.py` | 报表页 mermaid 脚本注入 |
+| `tests/test_server.py` | mermaid 静态文件服务、路径安全校验 |
+
+## 7. 保鲜核对提交点
 
 | 核对点 | 描述 | 提交锚定 |
 |--------|------|----------|
-| CP-001 | static/ 目录结构（仅 vendor/） | last_reviewed_commit |
-| CP-002 | vendor/ 内容为 session 产物 | last_reviewed_commit |
+| CP-001 | static/vendor/mermaid@11.16.1/ 目录存在 | a579d19 |
+| CP-002 | mermaid.min.js 文件完整性 | a579d19 |
+| CP-003 | markdown_render.py mermaid 渲染逻辑 | a579d19 |
+| CP-004 | 测试覆盖 mermaid 场景 | a579d19 |

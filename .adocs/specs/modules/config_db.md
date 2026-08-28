@@ -1,9 +1,9 @@
 ---
 module: config_db.py
 contract_id: MOD-CONFIG_DB
-version: 1.0
+version: 2.0
 depends_on: [app_config, audit_db, db, query_executor, static_cache]
-last_reviewed_commit: 9652dab
+last_reviewed_commit: 8b76e7e
 last_reviewed_at: 2026-08-28
 ---
 
@@ -13,7 +13,16 @@ last_reviewed_at: 2026-08-28
 
 ## 1. 职责概述
 
-`config_db.py`（2498 行，86 个 def）——**配置数据库 CRUD 操作**（SQLite/MySQL 双引擎）。是项目配置数据的持久层单一来源：负责连接池、用户、报表、分类、API 端点、API Key、定时任务、session 的增删改查，以及双引擎（sqlite3/mysql）的连接创建、建表 DDL 与迁移。被 `db.py` 适配层转发，间接被 server/report/config/api_handler/scheduler 等使用。
+`config_db.py`（2498 行，86 个 def）——**配置数据库 CRUD 操作 + 双引擎自动迁移**（SQLite/MySQL 双引擎）。是项目配置数据的持久层单一来源：负责连接池、用户、报表、分类、API 端点、API Key、定时任务、session 的增删改查，以及双引擎（sqlite3/mysql）的连接创建、建表 DDL 与**每次启动时自动执行的 schema 迁移**。
+
+### 1.1 核心设计：双引擎无感升级
+
+系统支持 SQLite 和 MySQL 两种后端配置数据库，**任意旧版数据库覆盖新版本代码后，启动时自动执行迁移，无需人工干预**。这是系统的核心特性之一——用户始终可以直接 `git pull` + 重启，数据库 schema 自动对齐最新版本。
+
+- **幂等保护**：每个迁移段通过 `if "column_name" not in table_cols` 守卫，已执行过的迁移自动跳过
+- **异常回滚**：每个迁移段包裹 `try/except Exception: conn.rollback()`，失败不影响启动
+- **留痕日志**：关键迁移（如迁移 17 表重建）失败时 `logging.exception` 写日志，便于排查卡死的升级路径
+- **双引擎独立实现**：SQLite 使用 `PRAGMA table_info`，MySQL 使用 `SHOW COLUMNS`，迁移逻辑各自独立
 
 ## 2. 公开 API 契约（按域分组，逐函数）
 
@@ -24,9 +33,16 @@ last_reviewed_at: 2026-08-28
 - `_connect_sqlite()`：根据 app_config 或环境变量创建 SQLite 连接。
 - `get_config_db()`：创建并返回 config_db 连接（按引擎分支）。
 - `_get_schema_sql(engine)`：返回对应引擎的建表 DDL。
-- `init_db(conn)`：初始化表结构并执行迁移。
-- `_init_sqlite_migrations(conn)`：SQLite 专属迁移（PRAGMA table_info）。
-- `_init_mysql_migrations(conn)`：MySQL 专属迁移（SHOW COLUMNS 替代 PRAGMA）。
+- `init_db(conn)`：初始化表结构并执行迁移（调用 `_init_sqlite_migrations` 或 `_init_mysql_migrations`）。
+- `_init_sqlite_migrations(conn)`：SQLite 专属迁移（17 个迁移段，使用 `PRAGMA table_info` 探测列）。
+  - 迁移 1：report_configs pool_id NOT NULL → 改为可空 + 表重建
+  - 迁移 2-10：ALTER TABLE ADD COLUMN（category_id, memo, result_names, prefer_cache, cache_ttl_hours, allow_write, allow_all_output, max_rows, updated_at）
+  - 迁移 11：api_endpoints 表创建
+  - 迁移 12-14：api_endpoints/api_keys 列探测
+  - 迁移 15：report_schedules/exclusions/audit_enabled 列探测
+  - 迁移 16：schedule_reports 表创建
+  - 迁移 17：report_schedules 表重建（去掉 report_id 列，创建 schedule_reports 关联表）——最复杂的迁移段，涉及 5 步事务
+- `_init_mysql_migrations(conn)`：MySQL 专属迁移（使用 `SHOW COLUMNS` 替代 `PRAGMA`，逻辑与 SQLite 对应）。
 - `_placeholders(n)` -> str：生成 n 个 `?` 占位符（IN (...) 子句）。
 - `_write_audit_log(...)`：写审计日志到 audit.db。
 
@@ -125,7 +141,17 @@ AST import 实测：`app_config, audit_db, db, query_executor, static_cache`。
 
 ## 5. 边界与异常
 
-- 双引擎：SQLite（PRAGMA）与 MySQL（SHOW COLUMNS）迁移差异独立实现；`get_config_db` 按 `_get_engine()` 分支。
+### 5.1 双引擎自动迁移（核心机制）
+
+- **幂等保证**：每个迁移段以 `if "col" not in table_cols` 守卫，旧库触发迁移、新库自动跳过
+- **事务隔离**：每个迁移段独立事务，失败时 `conn.rollback()` 不影响其他段
+- **留痕日志**：关键迁移（迁移 17 表重建）失败时 `logging.exception` 写日志，防止卡死升级路径
+- **表重建策略**：SQLite 迁移 17 采用 `CREATE TABLE _new → INSERT SELECT → DROP old → RENAME new` 模式，保留数据不丢失
+- **双引擎独立**：SQLite 使用 `PRAGMA table_info`，MySQL 使用 `SHOW COLUMNS`，迁移逻辑各自实现
+
+### 5.2 CRUD 边界
+
+- 双引擎：`get_config_db` 按 `_get_engine()` 分支创建连接。
 - 级联删除：删报表 → 定时任务行 + API 端点 + 静态缓存失效；删分类 → 报表 category_id 置 NULL。
 - 幂等失效：静态缓存失效幂等（删除文件不报错）。
 - 会话：过期（>24h）session 由 `delete_expired_sessions` 清理。
@@ -133,6 +159,6 @@ AST import 实测：`app_config, audit_db, db, query_executor, static_cache`。
 
 ## 6. 保鲜核对提交点
 
-- last_reviewed_commit: 9652dab（T-003 后主仓 HEAD）
+- last_reviewed_commit: 8b76e7e
 - last_reviewed_at: 2026-08-28
 - 后续代码改动 config_db.py 时，须同步更新本分卷并更新 last_reviewed_commit/at（FR-005）。

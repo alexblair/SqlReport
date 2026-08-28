@@ -1,27 +1,31 @@
 ---
 module: render
 contract_id: MOD-RENDER
-version: 1.0
+version: 2.0
 depends_on: [app_config, branding, redis_cache, static_cache, filter_help, markdown_render]
-last_reviewed_commit: b690f8d
+last_reviewed_commit: 8b76e7e
 last_reviewed_at: 2026-08-28
 ---
 
 # render.py 模块分卷
 
-> 本分卷由 T-006 逆向产出，内容以主仓还原后代码真实为准（FR-010）。
+> 本分卷由覆盖率补全阶段逆向产出，内容以主仓代码真实为准。
 
 ## 1. 职责概述
 
 `render.py`（~2000 行，60+ def）——**HTML 渲染模板层**。基于 `string.Template` 的公共 HTML 渲染函数库：统一页面头/尾/导航栏/CSS/JS 资源、构建表格/分页/筛选/排序/控制栏/字段设置/报表切换/定时任务等 UI 组件、管理公共 CSS/JS 外链化（sha256 哈希版本锁）。被 report/config/audit_page/scheduler 等模块共享。
+
+### 1.1 核心架构：公共资产外链化
+
+页面头/尾模板优先从 `/static/vendor/self@{hash8}/` 加载外链 CSS/JS（immutable 缓存），写入失败时回退内联 `<style>`/`<script>`。`_COMMON_CSS` = `_BASE_CSS` + 导航栏/按钮/Flash 等公共样式；`_COMMON_JS` = 折叠区三态记忆 + 字段拖拽等交互组件。
 
 ## 2. 公开 API 契约（按功能域分组）
 
 ### 2.1 页面骨架
 
 - `render_navbar(active="")` → str：导航栏 HTML（active 指定高亮页）。
-- `render_page_header(title, active_nav="", extra_css="")` → str：`<head>` + 导航栏 + container 开头。
-- `render_page_footer()` → str：页面尾部（container 闭合 + 脚本）。
+- `render_page_header(title, active_nav="", extra_css="")` → str：`<head>` + 导航栏 + container 开头。外链优先，回退内联。
+- `render_page_footer()` → str：页面尾部（container 闭合 + 脚本）。外链优先，回退内联。
 
 ### 2.2 表格与数据展示
 
@@ -101,10 +105,22 @@ last_reviewed_at: 2026-08-28
 - `ensure_common_assets(root=None)` → (css_url, js_url)：公共 CSS/JS 写入 `self@{hash8}/` 目录。
 - `reset_common_assets_cache()`：重置进程级资产缓存（测试隔离）。
 
+### 2.12 内部辅助函数
+
+| 函数 | 说明 |
+|------|------|
+| `_get_branding_prefix()` | 站点标识标题前缀（已 HTML 转义） |
+| `_build_navbar_html(active)` | 导航栏内部实现 |
+| `_collect_all_sections(conn)` | 收集全部配置区块（用于导航栏节锚点） |
+| `_render_common_footer()` | 公共页脚内部实现 |
+| `_get_common_asset_urls()` | 获取公共 CSS/JS 外链 URL（写入失败返回空） |
+| `_escape(s)` | HTML 转义 |
+
 ## 3. 数据流
 
 ```
 report.handle_request → render.render_page_header/footer (页面骨架)
+  → _get_common_asset_urls()（外链 CSS/JS，失败回退内联）
   → build_controls_bar_html (分页+导出+缓存+字段+排序)
   → build_table_header_html + build_table_body_html (表格)
   → build_pagination_html (分页)
@@ -120,22 +136,28 @@ config.handle_request → build_pool_section/user_section/category_section (配�
 ## 4. 依赖关系
 
 AST import 实测：`app_config, branding, redis_cache, static_cache, filter_help, markdown_render`。
-- `app_config`：`format_local_time`/`strip_api_prefix`。
-- `branding`：`get_site_branding`（标题前缀/favicon 模式）。
-- `redis_cache`：`redis_available`（Redis 可用性检查）。
-- `static_cache`：`get_static_cache_config`/`JSON_SUFFIX`。
-- `filter_help`：`render_filter_help`/`FILTER_HINT_SUFFIX`。
-- `markdown_render`：`render_markdown`/`MERMAID_JS_URL`。
+
+| 依赖方 | 使用的 API | 说明 |
+|--------|-----------|------|
+| `app_config` | `format_local_time`, `strip_api_prefix` | 时间格式化、URL 前缀剥离 |
+| `branding` | `get_site_branding` | 标题前缀/favicon 模式 |
+| `redis_cache` | `redis_available` | Redis 可用性检查 |
+| `static_cache` | `get_static_cache_config`, `JSON_SUFFIX` | 静态缓存配置 |
+| `filter_help` | `render_filter_help`, `FILTER_HINT_SUFFIX` | 筛选帮助提示 |
+| `markdown_render` | `render_markdown`, `MERMAID_JS_URL` | Markdown 渲染 |
 
 ## 5. 边界与异常
 
-- 零外部 HTML 依赖：模板为内联字符串常量（`string.Template`）。
-- 公共资产外链化：sha256 哈希版本锁，写入失败回退内联。
-- 三态记忆控件：折叠区 localStorage 持久化（自动/展开/折叠）。
-- 页面特有 CSS/JS 通过参数传入，不包含在公共模板中。
+| 场景 | 处理方式 |
+|------|----------|
+| 零外部 HTML 依赖 | 模板为内联字符串常量（`string.Template`） |
+| 公共资产外链化 | sha256 哈希版本锁，写入失败回退内联 |
+| 三态记忆控件 | 折叠区 localStorage 持久化（自动/展开/折叠） |
+| 页面特有 CSS/JS | 通过参数传入，不包含在公共模板中 |
+| `ensure_common_assets` 写入失败 | 返回 (None, None)，`_get_common_asset_urls()` 回退内联 |
 
 ## 6. 保鲜核对提交点
 
-- last_reviewed_commit: b690f8d（T-004 后主仓 HEAD）
+- last_reviewed_commit: 8b76e7e
 - last_reviewed_at: 2026-08-28
 - 后续代码改动 render.py 时，须同步更新本分卷并更新 last_reviewed_commit/at（FR-005）。

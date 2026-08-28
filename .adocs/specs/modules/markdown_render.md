@@ -55,6 +55,10 @@ AST import 实测：**无内部模块依赖**。
 - 外部依赖：`markdown`（Python-Markdown 库）、`pygments.formatters.HtmlFormatter`（延迟导入，仅 `codehilite_css`）。
 - 被调用方：render（备注折叠区/接口说明）、config（备注预览/描述预览）。
 
+### 4.1 mermaid 集成
+
+mermaid 静态资源托管于 `static/vendor/mermaid@11.16.1/mermaid.min.js`（~3.5MB），版本锁定目录设计。详见 `static_assets.md`（SPEC-STATIC-ASSETS）。
+
 ## 5. 边界与异常
 
 - 白名单消毒：28 个标签 + 每标签允许属性 + URL 协议白名单，非白名单标签/属性被剥离。
