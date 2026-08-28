@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+[ "$(grep -cE '^## ' .adocs/specs/总纲规格.md)" = "9" ] && grep -q 'contract-json' .adocs/specs/总纲规格.md && [ -f .adocs/contracts/总纲契约.json ] && python3 -c "import json;print(any(f['id']=='FR-006' for f in json.load(open('.adocs/contracts/总纲契约.json'))['FR']))" | grep -q True && python3 -c "import json;print(any(f['id']=='FR-007' for f in json.load(open('.adocs/contracts/总纲契约.json'))['FR']))" | grep -q True && python3 -c "import json;print(sum(1 for f in json.load(open('.adocs/contracts/总纲契约.json'))['FR'] if f['id']=='FR-004')==1)" | grep -q True

@@ -53,10 +53,15 @@ CONTEXT.md
 # flow 治理资产（本地使用，不提交；知识库主 SPEC/模块分卷/机器索引/访谈记录/flow 状态，主仓保持可安全推送 GitHub）
 .adocs/
 
+# Agent 指引（本地使用，不提交）
+AGENTS.md
+
+# opencode 配置（本地使用，不提交）
+.opencode/
+
 # 会话记忆系统（本地使用，不提交）
 .sessions/
 .state/
 
 # 长期记忆归档（本地使用，不提交）
 .lcm/
-tests/regression/
