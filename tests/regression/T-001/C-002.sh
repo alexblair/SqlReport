@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# C-002 FR-008：.gitignore 含 .adocs/ 排除规则，未跟踪的 .adocs 新路径仍被忽略（不随默认 add 公开）
-grep -qE '^\.adocs/$' .gitignore && git check-ignore -q .adocs/untracked-probe.tmp
+# C-002 FR-001 嵌套 AND/OR 混合
+cd "$(git rev-parse --show-toplevel)"
+venv/bin/python -m pytest tests/test_nested_filter.py::TestFilterRowsNested::test_nested_and_or -q

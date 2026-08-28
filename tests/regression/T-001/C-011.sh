@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# C-011 FR-004：契约权威声明 specs/index.json 机器索引
-python3 -c "import json;print(any(f['id']=='FR-004' for f in json.load(open('.adocs/contracts/总纲契约.json'))['FR']))" | grep -q True && grep -q 'specs/index.json' .adocs/specs/总纲规格.md
+# C-011 FR-012 缺 col 空值
+cd "$(git rev-parse --show-toplevel)"
+venv/bin/python -m pytest tests/test_nested_filter.py::TestValidateNestedFilter::test_missing_col -q

@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# C-012 FR-005：契约权威声明保鲜机制
-python3 -c "import json;print(any(f['id']=='FR-005' for f in json.load(open('.adocs/contracts/总纲契约.json'))['FR']))" | grep -q True && grep -q '保鲜' .adocs/specs/总纲规格.md
+# C-012 FR-012 非数字值
+cd "$(git rev-parse --show-toplevel)"
+venv/bin/python -m pytest tests/test_nested_filter.py::TestValidateNestedFilter::test_numeric_op_non_numeric -q
