@@ -36,7 +36,7 @@ import app_config
 import config_db
 from result_transform import (filter_rows, sort_rows, select_columns,
                               calc_total_pages, invalid_numeric_filters,
-                              NUMERIC_FILTER_OPS)
+                              NUMERIC_FILTER_OPS, filter_rows_nested)
 from query_executor import sql_contains_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
@@ -921,7 +921,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                    conn=None,
                    cache: "QueryCache" = None,
                    force_rebuild: bool = False,
-                   read_timeout: Optional[int] = None) -> ReportResult:
+                   read_timeout: Optional[int] = None,
+                   nested_filter=None) -> ReportResult:
     """
     执行报表查询（优先使用缓存），支持多字段排序/筛选/分页。
 
@@ -1159,6 +1160,9 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         all_rows = res["rows"]
 
         filtered = filter_rows(all_rows, columns, filters or [])
+        if nested_filter:
+            # 嵌套筛选（FR-005 与既有 filters 并存；FR-006 纯函数不污染缓存）
+            filtered = filter_rows_nested(filtered, columns, nested_filter)
         sorted_rows = sort_rows(filtered, columns, sorts or [])
 
         total = len(sorted_rows)

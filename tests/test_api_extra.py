@@ -517,8 +517,9 @@ class TestApiExtra(MockMySQLMixin, unittest.TestCase):
             "sorts": "", "row_limit": 0, "columns": None,
             "output_format": "json", "allow_fetch_all": 1,
         }
-        filters, _sorts, _page, _ps, _rl, _fmt, _cols, _bom, _fa = \
+        filters, _sorts, _page, _ps, _rl, _fmt, _cols, _bom, _fa, _nf = \
             api_handler._resolve_params(endpoint, "GET", "", {})
+        self.assertIsNone(_nf, "无 nested_filter 参数时应返回 None")
         self.assertEqual(filters[0], ("a", "contains", "100"))
         self.assertEqual(filters[1], ("b", "eq", ""))
         self.assertEqual(filters[2], ("c", "neq", ""))

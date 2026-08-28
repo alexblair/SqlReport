@@ -20,6 +20,7 @@ import time
 import logging
 import secrets
 import hmac
+import urllib.parse
 
 import db
 import app_config
@@ -28,7 +29,8 @@ from report import execute_report, parse_result_names, WRITE_DENIED_MESSAGE
 from query_executor import sql_contains_write
 import static_cache
 from json_template import is_template_enabled, render_template
-from result_transform import select_columns, column_indices, calc_total_pages
+from result_transform import (select_columns, column_indices, calc_total_pages,
+                              validate_nested_filter)
 from redis_cache import _md5_hex
 from export import rows_to_csv
 
@@ -411,8 +413,16 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
         body, err_headers = _error_response("连接池配置不存在", "INTERNAL_ERROR", headers)
         return 500, body, err_headers
 
-    filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all = \
-        _resolve_params(endpoint, method, body, query_params, headers)
+    try:
+        (filters, sorts, page, page_size, row_limit, output_format, columns,
+         add_bom, fetch_all, nested_filter) = \
+            _resolve_params(endpoint, method, body, query_params, headers)
+    except ValueError as ve:
+        # 嵌套筛选校验失败（FR-012/FR-015）：荷载为结构化错误 JSON，转 400
+        body_str = ve.args[0] if ve.args else json.dumps(
+            {"valid": False, "errors": [{"message": "嵌套筛选格式错误"}]})
+        return 400, body_str, {
+            "Content-Type": "application/json; charset=utf-8"}
 
     # 端点「智能去引号」位图：1=十进制数字（含正负号）、2=科学计数法、
     # 4=千分位数字，默认 0 = 标准 JSON（与报表导出共用
@@ -449,6 +459,7 @@ def _execute_api_query(conn, endpoint: dict, method: str, body: str,
             page_size=ps,
             sorts=sorts,
             filters=filters,
+            nested_filter=nested_filter,
             refresh=refresh,
             active_index=active_index,
             report=report,
@@ -859,13 +870,66 @@ def _resolve_fetch_all(endpoint: dict, method: str, body: str,
     return _resolve_flag(query_params, method, body, headers, "fetch_all")
 
 
+def _resolve_nested_filter(method: str, body: str,
+                           query_params: dict, headers: dict) -> dict | None:
+    """解析并校验嵌套筛选参数（FR-004/FR-005/FR-007/FR-012/FR-015）。
+
+    GET 通道：从 query string 的 nested_filter（URL 编码 JSON 字符串）读取；
+    POST 通道：从请求体（JSON/form）的 nested_filter 字段读取（dict 或 JSON 字符串）。
+    解析后交给 T-001 的 validate_nested_filter() 校验；校验失败抛出 ValueError，
+    荷载为结构化错误 JSON 字符串，由 _execute_api_query 转 400。
+    未提供或为空（{}）时返回 None——等同于无嵌套筛选，与既有三种筛选方式并存。
+    """
+    raw = None
+    if method == "POST" and body:
+        post_data = _parse_post_body(body, headers or {})
+        if post_data and "nested_filter" in post_data:
+            raw = post_data["nested_filter"]
+    elif query_params:
+        nf_list = query_params.get("nested_filter")
+        if nf_list:
+            raw = urllib.parse.unquote(nf_list[0])
+
+    if raw is None:
+        return None
+    # POST 通道已可能是 dict；GET 通道为字符串需 json.loads
+    if isinstance(raw, str):
+        if raw.strip() == "":
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            raise ValueError(json.dumps({
+                "valid": False,
+                "errors": [{
+                    "path": "nested_filter",
+                    "message": "nested_filter 不是合法 JSON",
+                    "suggestion": "请传入 URL 编码的 JSON 条件树，例如 "
+                                  '{"op":"and","conditions":[{"col":"name","op":"contains","value":"a"}]}',
+                }],
+            }, ensure_ascii=False))
+    else:
+        parsed = raw
+
+    if not parsed:  # 空 dict/空结构视为无嵌套筛选，不校验、不报错
+        return None
+
+    res = validate_nested_filter(parsed)
+    if not res.get("valid"):
+        raise ValueError(json.dumps(res, ensure_ascii=False))
+    return parsed
+
+
 def _resolve_params(endpoint: dict, method: str, body: str,
                     query_params: dict, headers: dict = None) -> tuple:
     """
     解析请求参数：预设规则 + POST/GET 覆盖。
 
     返回:
-        (filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all)
+        (filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all, nested_filter)
+        nested_filter: 解析并校验通过的嵌套筛选条件树(dict)，无则 None。
+            校验失败（非法列/操作符/格式）时直接抛出 ValueError，荷载为
+            validate_nested_filter() 的结构化错误 JSON 字符串，由调用方转 400。
     """
     preset_filters, preset_sorts, row_limit, columns, output_format = \
         _parse_preset_rules(endpoint)
@@ -891,7 +955,11 @@ def _resolve_params(endpoint: dict, method: str, body: str,
     sorts = [(s["col"], s.get("dir", "asc"))
              for s in preset_sorts if "col" in s]
 
-    return filters, sorts, page, page_size, row_limit, output_format, columns, add_bom, fetch_all
+    # 嵌套筛选参数解析（FR-004/FR-005/FR-007）：解析+校验，非法抛 ValueError
+    nested_filter = _resolve_nested_filter(method, body, query_params, headers)
+
+    return (filters, sorts, page, page_size, row_limit, output_format,
+            columns, add_bom, fetch_all, nested_filter)
 
 
 def _format_json_response(data_rows: list[dict], total: int, page: int,
