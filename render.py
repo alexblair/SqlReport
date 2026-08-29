@@ -25,7 +25,8 @@ import app_config
 import branding
 import redis_cache
 import static_cache
-from filter_help import render_filter_help, FILTER_HINT_SUFFIX
+from filter_help import (render_filter_help, FILTER_HINT_SUFFIX,
+                       render_nested_filter_help_popup, nested_filter_help_content)
 import markdown_render
 
 # ---------------------------------------------------------------------------
@@ -1324,8 +1325,164 @@ def build_debug_section_html(pool_config, actual_sql, active_index,
     return debug_html
 
 
+# 嵌套筛选叶节点运算符 → 中文标签（与 result_transform._NESTED_LEAF_OPS 对齐）
+_NF_OP_LABELS = [
+    ("contains", "包含"),
+    ("notcontains", "不包含"),
+    ("eq", "等于"),
+    ("neq", "不等于"),
+    ("gt", "大于"),
+    ("lt", "小于"),
+    ("gte", "大于等于"),
+    ("lte", "小于等于"),
+    ("isempty", "为空"),
+    ("notempty", "不为空"),
+]
+
+
+def build_nested_filter_builder_html(all_columns: list[str], nested_filter=None) -> str:
+    """构建嵌套筛选条件构建器 UI（FR-003/FR-008/FR-009/FR-010/FR-016，禁止新建模块）。
+
+    vanilla JS 实现（FR-008），不引入任何第三方依赖：
+    - 可视化编辑 AND/OR 条件树，支持无限嵌套（FR-001 递归结构的前端呈现）；
+    - 字段下拉来自报表列配置（含中文列名，FR-016）；
+    - 操作符下拉（10 种，与后端 _NESTED_LEAF_OPS 对齐）；
+    - 值输入框支持静态文本与表达式（now()/today()/date_add/date_sub）；
+    - 表达式模板面板（FR-003）：now()/today() 点击即插入；date_add/date_sub 弹出输入表单后插入；
+    - 每个值输入框旁内嵌悬浮提示与示例（FR-009），完整帮助来自 filter_help 模块（FR-010）；
+    - UI 与 JSON 双向同步：树编辑实时写回 JSON 文本框；亦支持「从 JSON 载入」回写树；
+    - 「应用嵌套筛选」把 JSON 写入筛选表单 ff 的 hidden input 并提交（与现有筛选并存，FR-005）。
+    """
+    all_columns = all_columns or []
+    init_state = nested_filter if nested_filter else {"op": "and", "conditions": []}
+    cols_json = json.dumps(all_columns, ensure_ascii=False)
+    op_list_json = json.dumps(_NF_OP_LABELS, ensure_ascii=False)
+    init_json = json.dumps(init_state, ensure_ascii=False)
+
+    # JS 主逻辑（普通字符串，花括号为字面量；动态数据用 + 拼接注入）
+    js = (
+        "var NF_COLS = " + cols_json + ";\n"
+        "var NF_OPLIST = " + op_list_json + ";\n"
+        "var nfState = " + init_json + ";\n"
+        "var nfActiveVal = null;\n"
+        "var nfDateKind = 'add';\n"
+        "function escAttr(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}\n"
+        "function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}\n"
+        "function nfGetNode(path){if(path==='')return nfState;var node=nfState;var ps=path.split('.');for(var i=0;i<ps.length;i++){node=node.conditions[parseInt(ps[i],10)];}return node;}\n"
+        "function nfLeafHtml(c,path){"
+        "var colOpts='<option value=\"\">— 选择列 —</option>';"
+        "NF_COLS.forEach(function(col){colOpts+='<option value=\"'+escAttr(col)+'\"'+(c.col===col?' selected':'')+'>'+escHtml(col)+'</option>';});"
+        "var opOpts='';NF_OPLIST.forEach(function(o){opOpts+='<option value=\"'+o[0]+'\"'+(c.op===o[0]?' selected':'')+'>'+o[1]+'</option>';});"
+        "var emptyOp=(c.op==='isempty'||c.op==='notempty');"
+        "var h='<div class=\"nf-leaf\" data-path=\"'+path+'\">';"
+        "h+='<select class=\"nf-col\" onchange=\"nfSetCol(this)\">'+colOpts+'</select>';"
+        "h+='<select class=\"nf-op\" onchange=\"nfSetOp(this)\">'+opOpts+'</select>';"
+        "h+='<input class=\"nf-val\" type=\"text\" value=\"'+escAttr(c.value||'')+'\" placeholder=\"值，可填 张* 或 now()\" '+(emptyOp?'disabled':'')+' oninput=\"nfSetVal(this)\" onfocus=\"nfActiveVal=this\">';"
+        "h+='<span class=\"nf-example\">例：张* 或 now()</span>';"
+        "h+='<button type=\"button\" class=\"nf-help-btn\" onclick=\"toggleNestedHelp(this)\" title=\"表达式帮助\">?</button>';"
+        "h+='<button type=\"button\" class=\"nf-rm\" onclick=\"nfRemoveNode(this)\" title=\"删除条件\">✕</button>';"
+        "h+='</div>';return h;}\n"
+        "function nfNodeHtml(node,isRoot,path){"
+        "var h='<div class=\"nf-group\" data-path=\"'+path+'\">';"
+        "h+='<div class=\"nf-group-head\">';"
+        "h+='<select class=\"nf-andor\" onchange=\"nfSetAndOr(this)\">'+"
+        "'<option value=\"and\"'+(node.op==='and'?' selected':'')+'>且 (AND)</option>'+"
+        "'<option value=\"or\"'+(node.op==='or'?' selected':'')+'>或 (OR)</option>'+'</select>';"
+        "h+='<button type=\"button\" onclick=\"nfAddCond(this)\">+ 条件</button>';"
+        "h+='<button type=\"button\" onclick=\"nfAddGroup(this)\">+ 分组</button>';"
+        "if(!isRoot)h+='<button type=\"button\" onclick=\"nfRemoveNode(this)\">删除组</button>';"
+        "h+='</div><div class=\"nf-children\">';"
+        "node.conditions.forEach(function(ch,i){var cp=path===''?String(i):path+'.'+i;"
+        "if(ch.op==='and'||ch.op==='or'){h+=nfNodeHtml(ch,false,cp);}else{h+=nfLeafHtml(ch,cp);}});"
+        "h+='</div></div>';return h;}\n"
+        "function nfRender(){var root=document.getElementById('nf-tree');if(root)root.innerHTML=nfNodeHtml(nfState,true,'');nfSyncJson();}\n"
+        "function nfSyncJson(){var ta=document.getElementById('nf-json');if(ta)ta.value=JSON.stringify(nfState,null,2);nfValidate();}\n"
+        "function nfSetAndOr(sel){var n=nfGetNode(sel.closest('[data-path]').dataset.path);n.op=sel.value;nfSyncJson();}\n"
+        "function nfSetCol(sel){var n=nfGetNode(sel.closest('[data-path]').dataset.path);n.col=sel.value;nfSyncJson();}\n"
+        "function nfSetOp(sel){var n=nfGetNode(sel.closest('[data-path]').dataset.path);n.op=sel.value;"
+        "if(n.op==='isempty'||n.op==='notempty'){n.value='';nfRender();}else{nfSyncJson();}}\n"
+        "function nfSetVal(inp){var n=nfGetNode(inp.closest('[data-path]').dataset.path);n.value=inp.value;nfSyncJson();}\n"
+        "function nfAddCond(btn){var n=nfGetNode(btn.closest('[data-path]').dataset.path);n.conditions.push({col:'',op:'contains',value:''});nfRender();}\n"
+        "function nfAddGroup(btn){var n=nfGetNode(btn.closest('[data-path]').dataset.path);n.conditions.push({op:'and',conditions:[]});nfRender();}\n"
+        "function nfRemoveNode(btn){var el=btn.closest('[data-path]');var path=el.dataset.path;if(path==='')return;"
+        "var idx=parseInt(path.slice(path.lastIndexOf('.')+1),10);"
+        "var parent=nfGetNode(path.indexOf('.')>=0?path.slice(0,path.lastIndexOf('.')):'');"
+        "parent.conditions.splice(idx,1);nfRender();}\n"
+        "function nfValidate(){var msg=document.getElementById('nf-msg');var errs=[];"
+        "function walk(node){if(node.op==='and'||node.op==='or'){if(!node.conditions||!node.conditions.length)errs.push('存在空分组，请补充条件');node.conditions.forEach(walk);}"
+        "else{if(!node.col)errs.push('存在未选择列的条件');if(node.op!=='isempty'&&node.op!=='notempty'&&!String(node.value).trim())errs.push('存在未填值的条件');}}"
+        "walk(nfState);if(msg)msg.textContent=errs.join('；');return errs.length?errs.join('；'):null;}\n"
+        "function applyNestedFilter(){var err=nfValidate();if(err){alert('请先修正：'+err);return;}"
+        "var ff=document.getElementById('ff');if(!ff){alert('筛选表单不存在');return;}"
+        "var inp=ff.querySelector('input[name=\"nested_filter\"]');if(!inp){inp=document.createElement('input');inp.type='hidden';inp.name='nested_filter';ff.appendChild(inp);}"
+        "inp.value=JSON.stringify(nfState);ff.submit();}\n"
+        "function clearNestedFilter(){var ff=document.getElementById('ff');if(!ff)return;"
+        "var inp=ff.querySelector('input[name=\"nested_filter\"]');if(!inp){inp=document.createElement('input');inp.type='hidden';inp.name='nested_filter';ff.appendChild(inp);}"
+        "inp.value='';ff.submit();}\n"
+        "function nfLoadFromJson(){var ta=document.getElementById('nf-json');try{var obj=JSON.parse(ta.value);"
+        "if(!obj||typeof obj!=='object'||(obj.op!=='and'&&obj.op!=='or'))throw new Error('顶层需为 op:and/or');"
+        "nfState=obj;nfRender();}catch(e){alert('JSON 解析失败：'+e.message);}}\n"
+        "function insertExpr(text){if(!nfActiveVal){alert('请先点击要填入的值输入框');return;}"
+        "var el=nfActiveVal;var s=el.selectionStart,e=el.selectionEnd;var v=el.value;"
+        "el.value=v.slice(0,s)+text+v.slice(e);el.focus();el.selectionStart=el.selectionEnd=s+text.length;"
+        "var n=nfGetNode(el.closest('[data-path]').dataset.path);n.value=el.value;nfSyncJson();}\n"
+        "function nfToggleDateForm(kind){nfDateKind=kind;document.getElementById('nf-date-form').style.display='inline-block';}\n"
+        "function nfInsertDate(){var n=document.getElementById('nf-date-n').value;var u=document.getElementById('nf-date-u').value;"
+        "var text=(nfDateKind==='add'?'date_add':'date_sub')+'(now(),'+n+',\\''+u+'\\')';insertExpr(text);"
+        "document.getElementById('nf-date-form').style.display='none';}\n"
+        "window.addEventListener('DOMContentLoaded', nfRender);\n"
+    )
+
+    help_popup = render_nested_filter_help_popup()
+
+    return (
+        '<div class="nf-builder" style="margin-bottom:10px;border:1px solid #e2e8f0;'
+        'border-radius:8px;padding:12px;background:#f8fafc">'
+        '<div style="font-weight:700;margin-bottom:6px">嵌套筛选条件构建器（AND/OR 组合，支持无限嵌套）</div>'
+        '<div id="nf-tree"></div>'
+        '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">'
+        '<button type="button" class="btn btn-sm btn-primary" onclick="applyNestedFilter()">应用嵌套筛选</button>'
+        '<button type="button" class="btn btn-sm" onclick="clearNestedFilter()">清除嵌套筛选</button>'
+        '<button type="button" class="btn btn-sm" onclick="nfLoadFromJson()">从 JSON 载入</button>'
+        '</div>'
+        '<div style="margin-top:8px" id="nf-expr-panel">'
+        '<span style="font-size:12px;color:#475569">表达式模板：</span>'
+        '<button type="button" class="btn btn-sm" onclick="insertExpr(\'now()\')">now()</button>'
+        '<button type="button" class="btn btn-sm" onclick="insertExpr(\'today()\')">today()</button>'
+        '<button type="button" class="btn btn-sm" onclick="nfToggleDateForm(\'add\')">date_add…</button>'
+        '<button type="button" class="btn btn-sm" onclick="nfToggleDateForm(\'sub\')">date_sub…</button>'
+        '<span id="nf-date-form" style="display:none">数量'
+        '<input id="nf-date-n" type="number" value="7" style="width:64px">'
+        '单位<select id="nf-date-u"><option value="day">天</option>'
+        '<option value="month">月</option><option value="year">年</option></select>'
+        '<button type="button" class="btn btn-sm btn-primary" onclick="nfInsertDate()">确定</button></span>'
+        '</div>'
+        '<div style="margin-top:8px">'
+        '<textarea id="nf-json" style="width:100%;min-height:72px;font-family:monospace;font-size:12px;'
+        'border:1px solid #cbd5e1;border-radius:6px;padding:8px" spellcheck="false"></textarea>'
+        '<div id="nf-msg" style="color:#b91c1c;font-size:12px;min-height:16px"></div>'
+        '</div>'
+        + help_popup +
+        '<style>'
+        '.nf-group{margin:6px 0;padding:8px;border:1px dashed #cbd5e1;border-radius:6px;background:#fff}'
+        '.nf-group-head{display:flex;gap:6px;align-items:center;margin-bottom:6px}'
+        '.nf-children{margin-left:14px}'
+        '.nf-leaf{display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap}'
+        '.nf-leaf select,.nf-group-head select{padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px}'
+        '.nf-leaf input.nf-val{padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;flex:1;min-width:140px}'
+        '.nf-example{font-size:11px;color:#94a3b8;white-space:nowrap}'
+        '.nf-help-btn{width:22px;height:22px;border-radius:50%;border:1px solid #cbd5e1;background:#fff;'
+        'color:#475569;font-weight:700;cursor:pointer}'
+        '.nf-rm{border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:13px}'
+        '</style>'
+        '<script>' + js + '</script>'
+        '</div>'
+    )
+
+
 def build_current_rules_section_html(filters, sorts, display_columns: list[str],
-                                     all_columns: list[str]) -> str:
+                                      all_columns: list[str],
+                                      nested_filter=None) -> str:
     """
     构建当前规则输出折叠区 HTML。
     展示当前报表使用的筛选/排序/字段规则为 JSON 格式，提供复制按钮，
@@ -1390,6 +1547,10 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         '提示: 在 API 接口配置中填入以上 JSON 规则，即可复用当前报表的筛选/排序/字段设置。'
         '</div>'
     )
+    builder_html = build_nested_filter_builder_html(all_columns, nested_filter)
+    content = (builder_html
+               + '<hr style="margin:10px 0;border:none;border-top:1px solid #e2e8f0">'
+               + content)
     return build_collapse_section_html("当前规则", content, extra_style="margin-top:8px")
 
 

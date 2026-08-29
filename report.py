@@ -1516,7 +1516,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     debug_html = build_debug_section_html(
         pool_config, actual_sql, active_index, num_results, result_names, filters, sorts)
     current_rules_html = build_current_rules_section_html(
-        filters, sorts, display_columns, all_columns)
+        filters, sorts, display_columns, all_columns, nested_filter=nested_filter)
     memo_html = build_memo_section_html(report.get("memo") or "", report_id)
 
     # ---- API URL 区域 ----

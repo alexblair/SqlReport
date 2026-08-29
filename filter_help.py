@@ -68,6 +68,140 @@ _FILTER_HELP_NOTES = [
 FILTER_HINT_SUFFIX = "（*通配,多值）"
 
 
+# ---------------------------------------------------------------------------
+# 嵌套筛选表达式帮助（FR-010：面向非技术用户，通俗易懂 + 具体场景举例）
+# ---------------------------------------------------------------------------
+
+_NESTED_FILTER_EXPR_SECTIONS = [
+    {
+        "title": "当前时间 now()",
+        "desc": "表示“此刻这一秒”，不需要填任何参数。常用于比较时间是否晚于现在（如“过期时间晚于现在”）。",
+        "examples": [
+            ("只看比现在晚的数据", "now()", "相当于“此刻”这一个时间点"),
+            ("开始时间晚于现在", "now()", "now() 作为比较基准"),
+        ],
+    },
+    {
+        "title": "今天零点 today()",
+        "desc": "表示“今天 00:00”，不需要填参数。常用于按自然日比较（如“创建日期不早于今天”）。",
+        "examples": [
+            ("创建日期是今天或之后", "today()", "今天 00:00 这一时刻"),
+        ],
+    },
+    {
+        "title": "往后加一段时间 date_add(基准, 数量, '单位')",
+        "desc": "在基准时间上往后加。基准填 now() 或 today()；数量填数字（可为负表示往前）；"
+                "单位填 'day'（天）/ 'month'（月）/ 'year'（年）。",
+        "examples": [
+            ("7 天之后的数据", "date_add(now(),7,'day')", "现在往后推 7 天"),
+            ("3 个月前之后", "date_add(now(),-3,'month')", "支持负数表示往前推"),
+        ],
+    },
+    {
+        "title": "往前减一段时间 date_sub(基准, 数量, '单位')",
+        "desc": "在基准时间上往前减，参数与 date_add 相同。",
+        "examples": [
+            ("30 天前的数据", "date_sub(now(),30,'day')", "现在往前推 30 天"),
+            ("1 年前之前", "date_sub(today(),1,'year')", "今天往前推 1 年"),
+        ],
+    },
+    {
+        "title": "文本模糊匹配",
+        "desc": "值里直接写文字即可“包含”匹配；在文字前后加 * 可当作通配符（* 代替任意内容）。",
+        "examples": [
+            ("姓名里含“张”", "张", "包含“张”字即命中"),
+            ("姓名以“李”开头", "李*", "“李”后面接任意内容"),
+            ("状态以“已发货”结尾", "*已发货", "任意内容 + “已发货”"),
+        ],
+    },
+    {
+        "title": "比较大小（数字/日期）",
+        "desc": "操作符选“大于/小于/大于等于/小于等于”时，值填数字或日期（如 2026-01-01），"
+                "也可填 now()/date_add(...) 等表达式做时间比较。",
+        "examples": [
+            ("金额大于 1000", "1000", "配合“大于”操作符"),
+            ("到期日晚于 7 天后", "date_add(now(),7,'day')", "动态日期比较"),
+        ],
+    },
+]
+
+
+def nested_filter_help_content() -> dict:
+    """返回嵌套筛选表达式帮助的结构化内容（单一来源，渲染与测试共用）。"""
+    return {
+        "sections": _NESTED_FILTER_EXPR_SECTIONS,
+    }
+
+
+def render_nested_filter_help_popup() -> str:
+    """渲染嵌套筛选表达式帮助的“共享弹窗”（FR-009/FR-010）。
+
+    仅返回弹窗本体（id=nf-help-popup）+ 开关函数 toggleNestedHelp(btn)；
+    条件构建器中每个值输入框旁的「?」按钮调用 toggleNestedHelp 打开此同一弹窗，
+    避免重复渲染多份大段 HTML。默认收起，点击页面其他区域自动关闭。
+    """
+    sections_html = ""
+    for sec in _NESTED_FILTER_EXPR_SECTIONS:
+        table_rows = ""
+        for row in sec["examples"]:
+            table_rows += "<tr>"
+            for col_idx, val in enumerate(row):
+                if col_idx == 1:
+                    table_rows += (f"<td><code style=\"font-family:monospace;background:#f1f5f9;"
+                                   f"padding:1px 6px;border-radius:4px;white-space:nowrap\">{val}</code></td>")
+                else:
+                    table_rows += f"<td>{val}</td>"
+            table_rows += "</tr>"
+        sections_html += (
+            f'<div style="margin-top:10px">'
+            f'<div style="font-weight:600;color:#334155">{sec["title"]}</div>'
+            f'<div style="color:#64748b;margin:2px 0 4px">{sec["desc"]}</div>'
+            f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            f'<tr style="color:#94a3b8;text-align:left"><th style="padding:2px 4px;font-weight:600">想筛选</th>'
+            f'<th style="padding:2px 4px;font-weight:600">填写</th>'
+            f'<th style="padding:2px 4px;font-weight:600">含义</th></tr>'
+            f'{table_rows}'
+            f'</table>'
+            f'</div>'
+        )
+
+    return f"""
+<div id="nf-help-popup" style="display:none;position:absolute;z-index:999;
+  width:380px;max-width:85vw;background:#fff;border:1px solid #e2e8f0;border-radius:8px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15);padding:14px 16px;margin-top:6px;
+  text-align:left;font-size:13px;line-height:1.6">
+  <div style="font-weight:700;margin-bottom:4px">表达式填写帮助（无编程基础也能用）</div>
+  <div style="color:#64748b;margin-bottom:6px">值输入框可直接填文字做模糊匹配，或填下列动态表达式。</div>
+  {sections_html}
+  <div style="text-align:right;margin-top:8px">
+    <button type="button" class="btn btn-sm btn-primary" onclick="toggleNestedHelp(this)">知道了</button>
+  </div>
+</div>
+<style>
+.nf-help-btn:hover {{ border-color:#4f46e5; color:#4f46e5; }}
+</style>
+<script>
+function toggleNestedHelp(btn) {{
+  var pop = document.getElementById('nf-help-popup');
+  if (!pop) return;
+  // 把弹窗挂到触发按钮所在容器，保证定位正确
+  if (pop.parentNode !== btn.parentNode) btn.parentNode.appendChild(pop);
+  if (pop.style.display === 'none' || !pop.style.display) {{
+    pop.style.display = 'block';
+  }} else {{
+    pop.style.display = 'none';
+  }}
+}}
+document.addEventListener('click', function (e) {{
+  var pop = document.getElementById('nf-help-popup');
+  if (pop && !e.target.closest('.nf-help-btn') && !e.target.closest('#nf-help-popup')) {{
+    pop.style.display = 'none';
+  }}
+}});
+</script>"""
+
+
+
 def filter_help_content() -> dict:
     """返回结构化帮助内容（单一来源，渲染与测试共用）。"""
     return {
