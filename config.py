@@ -1326,18 +1326,21 @@ def _normalize_api_url_path(path: str) -> str:
     return app_config.ensure_api_prefix(path)
 
 
-def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
+def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str, str]:
     """
-    解析规则 JSON 字符串，拆出 columns/filters/sorts 三个字段。
+    解析规则 JSON 字符串，拆出 columns/filters/sorts/nested_filter 四个字段。
 
     返回:
-        (columns, filters_json_str, sorts_json_str)
+        (columns, filters_json_str, sorts_json_str, nested_filter_json_str)
+        nested_filter_json_str 为嵌套筛选规则 JSON 字符串（不含 key 包装），
+        空规则为 ""。
     """
     columns = ""
     filters_str = ""
     sorts_str = ""
+    nested_filter_str = ""
     if not rule_json_str or not rule_json_str.strip():
-        return columns, filters_str, sorts_str
+        return columns, filters_str, sorts_str, nested_filter_str
     try:
         rules = json.loads(rule_json_str)
     except json.JSONDecodeError:
@@ -1351,7 +1354,10 @@ def _parse_rule_json(rule_json_str: str) -> tuple[str, str, str]:
     s_raw = rules.get("sorts")
     if s_raw:
         sorts_str = json.dumps(s_raw, ensure_ascii=False) if isinstance(s_raw, list) else str(s_raw)
-    return columns, filters_str, sorts_str
+    nf_raw = rules.get("nested_filter")
+    if nf_raw:
+        nested_filter_str = json.dumps(nf_raw, ensure_ascii=False) if isinstance(nf_raw, (dict, list)) else str(nf_raw)
+    return columns, filters_str, sorts_str, nested_filter_str
 
 
 def handle_pool_test(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -2404,11 +2410,12 @@ def _validate_json_template(raw: str, result_mode: str,
 def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
     """从表单数据构造临时端点 dict（保存失败时表单回显用户原输入）。"""
     try:
-        columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+        columns, filters_str, sorts_str, nested_filter_str = _parse_rule_json(data.get("rule_json", ""))
     except ValueError:
         columns = ""
-        filters_str = data.get("rule_json", "") or ""
+        filters_str = ""
         sorts_str = ""
+        nested_filter_str = ""
     return {
         "name": data.get("name", ""),
         "description": data.get("description", "") or "",
@@ -2417,6 +2424,7 @@ def _endpoint_from_form(data: dict, url_path: str, result_mode: str) -> dict:
         "columns": columns,
         "filters": filters_str,
         "sorts": sorts_str,
+        "nested_filter": nested_filter_str,
         "row_limit": _echo_int(data.get("row_limit"), 0),
         "api_key": data.get("api_key") or "",
         "allowed_origins": data.get("allowed_origins") or "",
@@ -2439,7 +2447,7 @@ def _parse_endpoint_form(data: dict) -> dict:
     """
     output_format = data.get("output_format", "json")
     result_mode = data.get("result_mode", "single")
-    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    columns, filters_str, sorts_str, nested_filter_str = _parse_rule_json(data.get("rule_json", ""))
     return {
         "name": data["name"],
         "url_path": _normalize_api_url_path(data["url_path"]),
@@ -2447,6 +2455,7 @@ def _parse_endpoint_form(data: dict) -> dict:
         "columns": columns,
         "filters_str": filters_str,
         "sorts_str": sorts_str,
+        "nested_filter": nested_filter_str,
         "row_limit": int(data.get("row_limit", 0) or 0),
         "enabled": int(data.get("enabled", 0) or 0),
         "allow_fetch_all": int(data.get("allow_fetch_all", 1) or 0),
@@ -2544,6 +2553,7 @@ def handle_api_endpoint_add(conn, report_id: int,
             columns=pf["columns"] or None,
             filters=pf["filters_str"] or None,
             sorts=pf["sorts_str"] or None,
+            nested_filter=pf["nested_filter"] or None,
             row_limit=pf["row_limit"],
             allowed_origins=pf["allowed_origins"],
             result_mode=pf["result_mode"],
@@ -2607,6 +2617,7 @@ def handle_api_endpoint_edit(conn, report_id: int, endpoint_id: int,
             columns=pf["columns"] or None,
             filters=pf["filters_str"] or None,
             sorts=pf["sorts_str"] or None,
+            nested_filter=pf["nested_filter"] or None,
             row_limit=pf["row_limit"],
             api_key=pf["api_key"],
             allowed_origins=pf["allowed_origins"],
@@ -2703,10 +2714,11 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
     tmp["result_mode"] = result_mode
     tmp["result_index"] = int(data.get("result_index", 0) or 0)
     tmp["smart_quote_flags"] = smart_quote_flags
-    columns, filters_str, sorts_str = _parse_rule_json(data.get("rule_json", ""))
+    columns, filters_str, sorts_str, nested_filter_str = _parse_rule_json(data.get("rule_json", ""))
     tmp["columns"] = columns or None
     tmp["filters"] = filters_str or None
     tmp["sorts"] = sorts_str or None
+    tmp["nested_filter"] = nested_filter_str or None
     form_row_limit = int(data.get("row_limit", 0) or 0)
     tmp["row_limit"] = min(form_row_limit, _PREVIEW_MAX_ROWS) if form_row_limit > 0 else _PREVIEW_MAX_ROWS
 

@@ -1,4 +1,4 @@
-"""
+r"""
 result_transform.py — 结果集变换模块（纯函数，无 IO）
 
 职责：

@@ -207,7 +207,8 @@ class TestReportCRUD(unittest.TestCase):
                 report_id        INTEGER NOT NULL,
                 name             TEXT    NOT NULL,
                 url_path         TEXT    NOT NULL,
-                output_format    TEXT    NOT NULL DEFAULT 'json'
+                output_format    TEXT    NOT NULL DEFAULT 'json',
+        nested_filter    TEXT
             );
         """)
         # 插入一个连接池供报表引用

@@ -197,6 +197,7 @@ _SQLITE_SCHEMA = """
         smart_quote_flags INTEGER NOT NULL DEFAULT 0,
         json_template    TEXT,
         description      TEXT,
+        nested_filter    TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     );
 
@@ -284,6 +285,7 @@ _MYSQL_SCHEMA = """
         smart_quote_flags TINYINT NOT NULL DEFAULT 0,
         json_template    TEXT,
         description      TEXT,
+        nested_filter    TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -512,6 +514,16 @@ def _init_sqlite_migrations(conn) -> None:
     if "description" not in api_cols:
         try:
             conn.execute("ALTER TABLE api_endpoints ADD COLUMN description TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 15: 添加 nested_filter 列到 api_endpoints（嵌套筛选规则 JSON，与 filters/sorts 并列）
+    cursor = conn.execute("PRAGMA table_info(api_endpoints)")
+    api_cols = {row[1] for row in cursor.fetchall()}
+    if "nested_filter" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN nested_filter TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -916,6 +928,19 @@ def _init_mysql_migrations(conn) -> None:
     if "description" not in api_cols:
         try:
             conn.execute("ALTER TABLE api_endpoints ADD COLUMN description TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # 迁移 15: 添加 nested_filter 列到 api_endpoints（嵌套筛选规则 JSON，与 filters/sorts 并列）
+    try:
+        cursor = conn.execute("SHOW COLUMNS FROM api_endpoints")
+        api_cols = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        api_cols = set()
+    if "nested_filter" not in api_cols:
+        try:
+            conn.execute("ALTER TABLE api_endpoints ADD COLUMN nested_filter TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1760,9 +1785,10 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
                      static_cache: int = 1,
                      json_no_quotes: int = 0,
                      smart_quote_flags: int = 0,
-                     json_template: str = None,
-                     description: str = None,
-                     session_user=None) -> int:
+                      json_template: str = None,
+                      description: str = None,
+                      nested_filter: str = None,
+                      session_user=None) -> int:
     """
     新增 API 端点配置，返回自增 id。
 
@@ -1794,12 +1820,14 @@ def add_api_endpoint(conn, report_id: int, name: str, url_path: str,
            (report_id, name, url_path, output_format, columns, filters,
             sorts, row_limit, api_key, allowed_origins, enabled,
             result_mode, result_index, allow_fetch_all, static_cache,
-            json_no_quotes, smart_quote_flags, json_template, description)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            json_no_quotes, smart_quote_flags, json_template, description,
+            nested_filter)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (report_id, name, url_path, output_format, columns, filters,
          sorts, row_limit, api_key, allowed_origins, enabled,
          result_mode, result_index, allow_fetch_all, static_cache,
-         json_no_quotes, smart_quote_flags, json_template, description),
+         json_no_quotes, smart_quote_flags, json_template, description,
+         nested_filter),
     )
     conn.commit()
     _write_audit_log(session_user, "create_api_endpoint", "api_endpoint",
@@ -1919,7 +1947,7 @@ def _CACHE_AFFECTING_ENDPOINT_FIELDS() -> frozenset:
     """
     return frozenset((
         "name", "url_path", "output_format", "columns", "filters", "sorts",
-        "row_limit", "api_key", "allowed_origins", "enabled",
+        "nested_filter", "row_limit", "api_key", "allowed_origins", "enabled",
         "result_mode", "result_index", "allow_fetch_all", "static_cache",
         "json_no_quotes", "smart_quote_flags", "json_template",
     ))
@@ -1941,6 +1969,7 @@ def update_api_endpoint(conn, endpoint_id: int,
                         smart_quote_flags: int = _UNSET,
                         json_template: str = _UNSET,
                         description: str = _UNSET,
+                        nested_filter: str = _UNSET,
                         session_user=None) -> bool:
     """
     更新 API 端点配置。仅更新非 _UNSET 的字段，影响行数 >0 返回 True。
@@ -2005,6 +2034,9 @@ def update_api_endpoint(conn, endpoint_id: int,
     if description is not _UNSET:
         sets.append("description=?")
         params.append(description)
+    if nested_filter is not _UNSET:
+        sets.append("nested_filter=?")
+        params.append(nested_filter)
     if not sets:
         return False
     engine = _get_engine()

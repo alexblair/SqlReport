@@ -98,6 +98,7 @@ _SQL_CREATE_API_ENDPOINTS = """CREATE TABLE IF NOT EXISTS api_endpoints (
     smart_quote_flags INTEGER NOT NULL DEFAULT 0,
     json_template   TEXT,
     description     TEXT,
+    nested_filter    TEXT,
     created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE

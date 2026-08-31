@@ -9,6 +9,8 @@
 
 import unittest
 import urllib.parse
+import json
+import re
 from datetime import datetime
 from decimal import Decimal
 import report as report_mod
@@ -364,7 +366,7 @@ class TestFilterHiddenInputs(unittest.TestCase):
 
 
 class TestFilterUrlRoundtrip(unittest.TestCase):
-    """筛选值 URL 回路往返：输入 → build_filter_params → parse_qs → parse_filters → 原值
+    r"""筛选值 URL 回路往返：输入 → build_filter_params → parse_qs → parse_filters → 原值
 
     匹配表达式语法（`*`、逗号多值、`\` 转义）使值含特殊字符成为常态，
     往返必须不丢字符、不被误解（HTML 转义与 URL 编码互不冲突）。
@@ -2728,3 +2730,61 @@ class TestDeletionSafetyRender(unittest.TestCase):
         users = [{"id": 2, "username": "bob"}]
         result = build_user_section_html(users, current_username="admin")
         self.assertIn("登录会话将立即失效", result)
+
+
+class TestCurrentRulesIncludeNestedFilter(unittest.TestCase):
+    """「当前规则」文本框必须是含 nested_filter 的完整 JSON（FR-005 与 filters 并列）。
+
+    确保用户在报表页复制后可整体粘贴到 API 配置「规则 JSON」并完整生效，
+    不丢失嵌套筛选。
+    """
+
+    NF = {"op": "and", "conditions": [{"col": "age", "op": "gt", "value": 18}]}
+
+    def _render_rules_json(self, nested_filter=NF):
+        html = build_current_rules_section_html(
+            filters=[("name", "contains", "a")],
+            sorts=[("id", "asc")],
+            display_columns=["id", "name"],
+            all_columns=["id", "name", "x"],
+            nested_filter=nested_filter,
+        )
+        m = re.search(
+            r'<textarea id="current-rules-json"[^>]*>(.*?)</textarea>', html, re.S)
+        self.assertIsNotNone(m, "当前规则未渲染 JSON 文本框")
+        import html as _html
+        return json.loads(_html.unescape(m.group(1))), html
+
+    def test_nested_filter_present_in_rules_json(self):
+        rules, _ = self._render_rules_json()
+        self.assertIn("nested_filter", rules, "导出 JSON 漏写 nested_filter")
+        self.assertEqual(rules["nested_filter"]["op"], "and")
+        # 普通筛选/排序/字段仍并存
+        self.assertEqual(rules["filters"][0]["col"], "name")
+        self.assertEqual(rules["sorts"][0]["col"], "id")
+        self.assertEqual(rules["columns"], "id,name")
+
+    def test_no_nested_filter_key_when_absent(self):
+        rules, _ = self._render_rules_json(nested_filter=None)
+        self.assertNotIn("nested_filter", rules)
+
+    def test_rules_json_roundtrips_to_api_config(self):
+        """导出 JSON 能被 API 配置解析器拆出 nested_filter（端到端闭环）。"""
+        import config
+        rules, _ = self._render_rules_json()
+        cols, f_str, s_str, nf_str = config._parse_rule_json(
+            json.dumps(rules, ensure_ascii=False))
+        self.assertTrue(nf_str, "API 配置解析器未拆出 nested_filter")
+        self.assertEqual(json.loads(nf_str)["op"], "and")
+        # 普通筛选/排序同步拆出
+        self.assertEqual(json.loads(f_str)[0]["col"], "name")
+        self.assertEqual(json.loads(s_str)[0]["col"], "id")
+
+    def test_apply_rules_json_js_handles_nested_filter(self):
+        """applyRulesJson() 必须写回 nested_filter 参数，否则复制→应用往返丢规则。"""
+        import re as _re, pathlib
+        src = pathlib.Path("render.py").read_text(encoding="utf-8")
+        m = _re.search(r'function applyRulesJson\(\)\s*\{(.*?)\n\}', src, _re.S)
+        self.assertIsNotNone(m, "未找到 applyRulesJson 函数")
+        body = m.group(1)
+        self.assertIn("nested_filter", body, "applyRulesJson 未处理 nested_filter")

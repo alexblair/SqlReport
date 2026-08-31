@@ -92,6 +92,7 @@ def _set_up_db():
             json_template TEXT,
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
+            nested_filter TEXT,
             updated_at TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS api_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint_id INTEGER NOT NULL,

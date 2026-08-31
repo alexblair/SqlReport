@@ -74,6 +74,7 @@ def _make_conn():
             description     TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        nested_filter    TEXT,
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
         );
         CREATE TABLE api_keys (
@@ -150,6 +151,7 @@ def _make_conn2():
             description     TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+        nested_filter    TEXT,
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
         );
         CREATE TABLE api_keys (

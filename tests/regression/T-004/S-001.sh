@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# S-001 场景：FR-002 配置与认证分卷覆盖
-for c in C-001 C-002 C-003 C-004; do
-  bash "tests/regression/T-004/$c.sh" >/dev/null 2>&1 || { echo "S-001 FAIL at $c"; exit 1; }
-done
-echo "S-001 PASS"
+# S-001 场景：条件构建器 UI 全能力串联
+set -e
+cd "$(dirname "$0")/../../.."
+bash tests/regression/T-004/C-001.sh
+bash tests/regression/T-004/C-002.sh
+bash tests/regression/T-004/C-003.sh
+bash tests/regression/T-004/C-004.sh
+bash tests/regression/T-004/C-006.sh
+bash tests/regression/T-004/C-007.sh
+bash tests/regression/T-004/C-005.sh
+bash tests/regression/T-004/C-008.sh
+echo "PASS S-001 条件构建器 UI 全能力"

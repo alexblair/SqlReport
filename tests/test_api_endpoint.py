@@ -114,6 +114,7 @@ def _set_up_db():
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
+        nested_filter    TEXT,
             FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS api_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint_id INTEGER NOT NULL,

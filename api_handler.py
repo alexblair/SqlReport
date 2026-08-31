@@ -774,16 +774,29 @@ def _parse_preset_rules(endpoint: dict) -> tuple:
     从端点配置解析预设规则。
 
     返回:
-        (preset_filters, preset_sorts, row_limit, columns, output_format)
+        (preset_filters, preset_sorts, row_limit, columns, output_format, preset_nested_filter)
+        preset_nested_filter: 端点规则 JSON 中嵌套筛选预设(dict)，非法或空则为 None。
     """
     filters_raw = endpoint.get("filters", "") or ""
     sorts_raw = endpoint.get("sorts", "") or ""
+    nested_raw = endpoint.get("nested_filter", "") or ""
+    preset_nested = None
+    if nested_raw:
+        try:
+            parsed = json.loads(nested_raw)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed:
+            # 预设需经校验，非法视为无（配置期应已校验，运行期不阻断请求）
+            if validate_nested_filter(parsed).get("valid"):
+                preset_nested = parsed
     return (
         _parse_json_field(filters_raw),
         _parse_json_field(sorts_raw),
         int(endpoint.get("row_limit", 0) or 0),
         endpoint.get("columns") or None,
         endpoint.get("output_format", "json"),
+        preset_nested,
     )
 
 
@@ -931,8 +944,8 @@ def _resolve_params(endpoint: dict, method: str, body: str,
             校验失败（非法列/操作符/格式）时直接抛出 ValueError，荷载为
             validate_nested_filter() 的结构化错误 JSON 字符串，由调用方转 400。
     """
-    preset_filters, preset_sorts, row_limit, columns, output_format = \
-        _parse_preset_rules(endpoint)
+    (preset_filters, preset_sorts, row_limit, columns, output_format,
+     preset_nested) = _parse_preset_rules(endpoint)
 
     page = 1
     page_size = row_limit if row_limit > 0 else 20
@@ -956,7 +969,9 @@ def _resolve_params(endpoint: dict, method: str, body: str,
              for s in preset_sorts if "col" in s]
 
     # 嵌套筛选参数解析（FR-004/FR-005/FR-007）：解析+校验，非法抛 ValueError
-    nested_filter = _resolve_nested_filter(method, body, query_params, headers)
+    req_nested = _resolve_nested_filter(method, body, query_params, headers)
+    # 端点规则 JSON 预设的 nested_filter 作为缺省，请求参数优先覆盖（见 R5）
+    nested_filter = req_nested if req_nested is not None else preset_nested
 
     return (filters, sorts, page, page_size, row_limit, output_format,
             columns, add_bom, fetch_all, nested_filter)

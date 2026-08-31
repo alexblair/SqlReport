@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# C-007 FR-003：contract_id 遵循 MOD- 命名规范
-grep -q '^contract_id: MOD-CONFIG_DB$' .adocs/specs/modules/config_db.md || exit 1
-grep -q '^contract_id: MOD-CONFIG$' .adocs/specs/modules/config.md || exit 1
-grep -q '^contract_id: MOD-APP_CONFIG$' .adocs/specs/modules/app_config.md || exit 1
-grep -q '^contract_id: MOD-AUTH$' .adocs/specs/modules/auth.md || exit 1
-exit 0
+# C-007 FR-016：构建器 UI 与 JSON 双向同步
+set -e
+cd "$(dirname "$0")/../../.."
+venv/bin/python - <<'PY'
+from render import build_nested_filter_builder_html
+html=build_nested_filter_builder_html(["姓名","状态"], None)
+assert 'id="nf-json"' in html, "缺少 JSON 文本框（UI→JSON）"
+assert "nfSyncJson" in html, "树编辑未实时同步 JSON"
+assert "nfLoadFromJson" in html, "缺少 从 JSON 载入（JSON→UI）"
+assert "JSON.parse" in html, "从 JSON 载入未解析"
+print("PASS C-007 FR-016 UI 与 JSON 双向同步")
+PY

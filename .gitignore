@@ -33,6 +33,7 @@ audit.db
 static_cache/
 static_cache_debug/
 .opdev/
+.pytest_cache/
 
 # 公共 CSS/JS 外链化产物（内容 hash 版本锁目录，启动时生成）
 static/vendor/self@*/
@@ -65,3 +66,4 @@ AGENTS.md
 
 # 长期记忆归档（本地使用，不提交）
 .lcm/
+tests/regression/

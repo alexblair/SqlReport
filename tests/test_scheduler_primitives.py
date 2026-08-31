@@ -174,6 +174,7 @@ def _set_up_db():
             smart_quote_flags INTEGER NOT NULL DEFAULT 0,
             json_template TEXT, description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
+        nested_filter    TEXT,
             updated_at TEXT NOT NULL DEFAULT '');
     """)
     conn.execute(

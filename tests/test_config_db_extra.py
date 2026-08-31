@@ -73,6 +73,7 @@ def _make_conn() -> sqlite3.Connection:
         row_limit   INTEGER,
         output_format TEXT,
         api_key     TEXT,
+        nested_filter TEXT,
         FOREIGN KEY (report_id) REFERENCES report_configs(id) ON DELETE CASCADE
     )""")
 

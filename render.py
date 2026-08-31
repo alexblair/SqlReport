@@ -626,12 +626,13 @@ function applyRulesJson() {
   }
   var params = new URLSearchParams(window.location.search);
   var keysToRemove = [];
-  params.forEach(function(_, k) {
-    if (k.startsWith('f_') || k.startsWith('op_') || k.startsWith('s_')
-        || k === 'sort' || k === 'dir' || k === 'cols' || k === 'page') {
-      keysToRemove.push(k);
-    }
-  });
+    params.forEach(function(_, k) {
+      if (k.startsWith('f_') || k.startsWith('op_') || k.startsWith('s_')
+          || k === 'sort' || k === 'dir' || k === 'cols' || k === 'page'
+          || k === 'nested_filter') {
+        keysToRemove.push(k);
+      }
+    });
   keysToRemove.forEach(function(k) { params.delete(k); });
   if (rules.filters && rules.filters.length) {
     rules.filters.forEach(function(f) {
@@ -646,6 +647,10 @@ function applyRulesJson() {
     });
   }
   if (rules.columns) params.set('cols', rules.columns);
+  if (rules.nested_filter && typeof rules.nested_filter === 'object'
+      && Object.keys(rules.nested_filter).length) {
+    params.set('nested_filter', encodeURIComponent(JSON.stringify(rules.nested_filter)));
+  }
   params.set('page', '1');
   window.location.href = '?' + params.toString();
 }
@@ -1507,6 +1512,10 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         rules["columns"] = ",".join(display_columns)
     else:
         rules["columns"] = ""
+    # 嵌套筛选（FR-005 与 filters/sorts 并列）：并入同一份规则 JSON，
+    # 使「当前规则」成为可整体复制、粘贴到 API 配置的唯一完整来源
+    if nested_filter:
+        rules["nested_filter"] = nested_filter
 
     rules_json = json.dumps(rules, indent=2, ensure_ascii=False)
 
@@ -1544,7 +1553,7 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         '</div>'
         '</div>'
         '<div style="margin-top:6px;font-size:12px;color:#64748b">'
-        '提示: 在 API 接口配置中填入以上 JSON 规则，即可复用当前报表的筛选/排序/字段设置。'
+        '提示: 以上 JSON 同时包含筛选/排序/字段/嵌套筛选，粘贴到 API 接口配置的「规则 JSON」即可完整复用当前报表规则。'
         '</div>'
     )
     builder_html = build_nested_filter_builder_html(all_columns, nested_filter)
@@ -3426,12 +3435,13 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     result_mode = (endpoint or {}).get("result_mode", "single")
     result_index = int((endpoint or {}).get("result_index", 0))
 
-    # 从三个 DB 字段拼合规则 JSON
+    # 从三个 DB 字段拼合规则 JSON（含 nested_filter 嵌套筛选规则）
     if endpoint:
         rules = {}
         cols_val = endpoint.get("columns") or ""
         filters_raw_db = endpoint.get("filters") or ""
         sorts_raw_db = endpoint.get("sorts") or ""
+        nested_raw_db = endpoint.get("nested_filter") or ""
         if cols_val:
             rules["columns"] = cols_val
         if filters_raw_db:
@@ -3444,6 +3454,11 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
                 rules["sorts"] = json.loads(sorts_raw_db)
             except (json.JSONDecodeError, TypeError):
                 rules["sorts"] = sorts_raw_db
+        if nested_raw_db:
+            try:
+                rules["nested_filter"] = json.loads(nested_raw_db)
+            except (json.JSONDecodeError, TypeError):
+                rules["nested_filter"] = nested_raw_db
         rule_json = json.dumps(rules, indent=2, ensure_ascii=False) if rules else ""
     else:
         rule_json = ""

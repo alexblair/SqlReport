@@ -11,6 +11,9 @@
 等于操作符下通配仍生效、多列 AND）。
 """
 
+# 表头首列标签：普通筛选帮助与嵌套筛选帮助共用的单一来源，避免两处硬编码
+_HEADER_FILTER_COL = "想筛选"
+
 _FILTER_HELP_SECTIONS = [
     {
         "title": "多值匹配（或）",
@@ -157,7 +160,7 @@ def render_nested_filter_help_popup() -> str:
             f'<div style="font-weight:600;color:#334155">{sec["title"]}</div>'
             f'<div style="color:#64748b;margin:2px 0 4px">{sec["desc"]}</div>'
             f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
-            f'<tr style="color:#94a3b8;text-align:left"><th style="padding:2px 4px;font-weight:600">想筛选</th>'
+            f'<tr style="color:#94a3b8;text-align:left"><th style="padding:2px 4px;font-weight:600">{_HEADER_FILTER_COL}</th>'
             f'<th style="padding:2px 4px;font-weight:600">填写</th>'
             f'<th style="padding:2px 4px;font-weight:600">含义</th></tr>'
             f'{table_rows}'
@@ -233,7 +236,7 @@ def render_filter_help() -> str:
             f'<div style="font-weight:600;color:#334155">{sec["title"]}</div>'
             f'<div style="color:#64748b;margin:2px 0 4px">{sec["desc"]}</div>'
             f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
-            f'<tr style="color:#94a3b8;text-align:left"><th style="padding:2px 4px;font-weight:600">想筛选</th>'
+            f'<tr style="color:#94a3b8;text-align:left"><th style="padding:2px 4px;font-weight:600">{_HEADER_FILTER_COL}</th>'
             f'<th style="padding:2px 4px;font-weight:600">输入</th>'
             f'<th style="padding:2px 4px;font-weight:600">效果</th></tr>'
             f'{table_rows}'

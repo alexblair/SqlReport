@@ -51,6 +51,7 @@ def _mk_conn():
             json_template TEXT,
             description TEXT,
             created_at TEXT NOT NULL DEFAULT '',
+        nested_filter    TEXT,
             updated_at TEXT NOT NULL DEFAULT '');
         CREATE TABLE api_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint_id INTEGER NOT NULL,
