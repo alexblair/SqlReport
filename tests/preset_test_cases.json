@@ -1,0 +1,323 @@
+{
+  "_meta": {
+    "description": "SqlReport 预设测试用例夹具（DEBUG 模式一键导入）。覆盖连接池/分类/报表/API端点/API Key/定时任务六类实体，用于功能验收与脚本化测试。同名按名称 upsert 覆盖。",
+    "generated_by": "preset-test-cases skill",
+    "version": "1.0"
+  },
+  "connection_pools": [
+    {
+      "name": "主库-交易",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "app_rw",
+      "password": "rw_secret_2024",
+      "database": "trade_db"
+    },
+    {
+      "name": "从库-报表",
+      "host": "127.0.0.1",
+      "port": 3307,
+      "user": "app_ro",
+      "password": "ro_secret_2024",
+      "database": "report_db"
+    }
+  ],
+  "report_categories": [
+    { "name": "经营分析", "parent": null },
+    { "name": "区域销售", "parent": "经营分析" },
+    { "name": "财务核算", "parent": null }
+  ],
+  "report_configs": [
+    {
+      "name": "订单概览",
+      "sql_query": "SELECT id, customer, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 100",
+      "default_page_size": 20,
+      "pool": "主库-交易",
+      "category": "经营分析",
+      "memo": "# 订单概览\n基础单结果集报表示例，用于验收分页/筛选/排序。",
+      "result_names": "",
+      "prefer_cache": 1,
+      "cache_ttl_hours": 1,
+      "allow_write": 0,
+      "allow_all_output": 0,
+      "max_rows": 5000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    },
+    {
+      "name": "销售多维统计",
+      "sql_query": "SELECT region, SUM(amount) AS total FROM sales GROUP BY region; SELECT category, COUNT(*) AS cnt FROM sales GROUP BY category",
+      "default_page_size": 50,
+      "pool": "从库-报表",
+      "category": "区域销售",
+      "memo": "多结果集报表：验收 result_names 与多结果集切换。",
+      "result_names": "按区域,按品类",
+      "prefer_cache": 0,
+      "cache_ttl_hours": 0,
+      "allow_write": 0,
+      "allow_all_output": 0,
+      "max_rows": 100000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    },
+    {
+      "name": "缓存命中率报表",
+      "sql_query": "SELECT * FROM cache_stats ORDER BY hit_rate DESC",
+      "default_page_size": 20,
+      "pool": "从库-报表",
+      "category": "经营分析",
+      "memo": "验收缓存优先 + 缓存保活（keepalive）。",
+      "result_names": "",
+      "prefer_cache": 1,
+      "cache_ttl_hours": 24,
+      "allow_write": 0,
+      "allow_all_output": 0,
+      "max_rows": 100000,
+      "keepalive_enabled": 1,
+      "keepalive_ahead_seconds": 60
+    },
+    {
+      "name": "数据维护-写入示例",
+      "sql_query": "UPDATE orders SET status = 'done' WHERE id = 1; SELECT id, customer, status FROM orders WHERE id = 1",
+      "default_page_size": 20,
+      "pool": "主库-交易",
+      "category": "经营分析",
+      "memo": "验收写护栏（allow_write=1）放行写语句：先 UPDATE 再回查受影响的行。",
+      "result_names": "",
+      "prefer_cache": 0,
+      "cache_ttl_hours": 0,
+      "allow_write": 1,
+      "allow_all_output": 1,
+      "max_rows": 100000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    },
+    {
+      "name": "全量导出报表",
+      "sql_query": "SELECT * FROM big_table",
+      "default_page_size": 100,
+      "pool": "从库-报表",
+      "category": null,
+      "memo": "验收全量输出（allow_all_output=1）与 max_rows 上限。",
+      "result_names": "",
+      "prefer_cache": 0,
+      "cache_ttl_hours": 0,
+      "allow_write": 0,
+      "allow_all_output": 1,
+      "max_rows": 200000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    },
+    {
+      "name": "临时查询",
+      "sql_query": "SELECT 1 AS ok",
+      "default_page_size": 20,
+      "pool": "主库-交易",
+      "category": null,
+      "memo": "无分类归属报表，验收未分类分支。",
+      "result_names": "",
+      "prefer_cache": 0,
+      "cache_ttl_hours": 0,
+      "allow_write": 0,
+      "allow_all_output": 0,
+      "max_rows": 100000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    },
+    {
+      "name": "Markdown备注报表",
+      "sql_query": "SELECT id, note FROM memos",
+      "default_page_size": 20,
+      "pool": "从库-报表",
+      "category": "财务核算",
+      "memo": "## 备注说明\n- 支持 **加粗**\n- 支持 `行内代码`\n- 支持列表",
+      "result_names": "",
+      "prefer_cache": 1,
+      "cache_ttl_hours": 0,
+      "allow_write": 0,
+      "allow_all_output": 0,
+      "max_rows": 100000,
+      "keepalive_enabled": 0,
+      "keepalive_ahead_seconds": 0
+    }
+  ],
+  "api_endpoints": [
+    {
+      "report": "订单概览",
+      "name": "订单概览API",
+      "url_path": "/api/orders",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 1,
+      "result_mode": "single",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 1,
+      "json_template": "",
+      "description": "# 订单概览接口\n返回订单列表，支持全量获取与静态缓存。",
+      "json_no_quotes": 0,
+      "smart_quote_flags": 0
+    },
+    {
+      "report": "销售多维统计",
+      "name": "销售多维API",
+      "url_path": "/api/sales/multi",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 1,
+      "result_mode": "multi",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 0,
+      "json_template": "",
+      "description": "多结果集接口，验收 result_mode=multi。",
+      "json_no_quotes": 0,
+      "smart_quote_flags": 0
+    },
+    {
+      "report": "全量导出报表",
+      "name": "全量导出API",
+      "url_path": "/api/export/big",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 1,
+      "result_mode": "single",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 0,
+      "json_template": "",
+      "description": "全量输出接口示例。",
+      "json_no_quotes": 0,
+      "smart_quote_flags": 0
+    },
+    {
+      "report": "缓存命中率报表",
+      "name": "缓存命中率API",
+      "url_path": "/api/cache/stats",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 1,
+      "result_mode": "single",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 1,
+      "json_template": "",
+      "description": "缓存统计接口，开启静态缓存。",
+      "json_no_quotes": 0,
+      "smart_quote_flags": 0
+    },
+    {
+      "report": "订单概览",
+      "name": "订单概览-智能去引号",
+      "url_path": "/api/orders/noquote",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 1,
+      "result_mode": "single",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 0,
+      "json_template": "",
+      "description": "验收智能去引号（smart_quote_flags=7）。",
+      "json_no_quotes": 1,
+      "smart_quote_flags": 7
+    },
+    {
+      "report": "临时查询",
+      "name": "临时查询API",
+      "url_path": "/api/ping",
+      "output_format": "json",
+      "columns": "",
+      "filters": "",
+      "sorts": "",
+      "row_limit": 0,
+      "allowed_origins": "",
+      "enabled": 0,
+      "result_mode": "single",
+      "result_index": 0,
+      "allow_fetch_all": 1,
+      "static_cache": 0,
+      "json_template": "",
+      "description": "演示禁用端点（enabled=0）。",
+      "json_no_quotes": 0,
+      "smart_quote_flags": 0
+    }
+  ],
+  "api_keys": [
+    {
+      "endpoint": "/api/orders",
+      "name": "内部服务Key",
+      "api_key": "sk_internal_2024_001",
+      "enabled": 1
+    },
+    {
+      "endpoint": "/api/orders",
+      "name": "测试Key",
+      "api_key": "sk_test_2024_002",
+      "enabled": 1
+    },
+    {
+      "endpoint": "/api/sales/multi",
+      "name": "BI系统Key",
+      "api_key": "sk_bi_2024_003",
+      "enabled": 1
+    },
+    {
+      "endpoint": "/api/export/big",
+      "name": "导出专用Key",
+      "api_key": "sk_export_2024_004",
+      "enabled": 0
+    }
+  ],
+  "report_schedules": [
+    {
+      "name": "订单概览每5分钟",
+      "schedule_type": "interval",
+      "interval_minutes": 5,
+      "daily_time": "08:00",
+      "misfire_policy": "skip",
+      "enabled": 1,
+      "exclusions": { "op": "OR", "rules": [] },
+      "audit_enabled": 1,
+      "next_run_at": null,
+      "reports": ["订单概览"]
+    },
+    {
+      "name": "销售日报",
+      "schedule_type": "daily",
+      "interval_minutes": 60,
+      "daily_time": "08:00",
+      "misfire_policy": "skip",
+      "enabled": 1,
+      "exclusions": {
+        "op": "OR",
+        "rules": [
+          { "op": "AND", "rules": [ { "type": "dow", "values": ["6", "7"] } ] }
+        ]
+      },
+      "audit_enabled": 0,
+      "next_run_at": null,
+      "reports": ["销售多维统计", "全量导出报表"]
+    }
+  ]
+}
