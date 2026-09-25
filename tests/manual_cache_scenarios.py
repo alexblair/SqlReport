@@ -326,14 +326,16 @@ def scenario_4():
           "4a Redis快照含写后新值", f"snapshot_row={got}")
     check(rr.results[0]["rows"][0][2] == "done", "4a 本次返回写后结果")
 
-    # 4b 热快照行为固化：二次执行命中缓存、不再触发写（观测记录，非缺陷判定）
+    # 4b 写报表护栏：热快照存在时写 SQL 仍须真实执行（禁止缓存短路，
+    #    否则用户误以为写已执行）
     set_sqlite_status(1, "pending")             # 人为还原库值作对照
+    _DB_HITS["n"] = 0
     rr2 = run_exec(9904, write_rep, fresh_cache())
-    check(rr2.cache_info and rr2.cache_info.get("source") == "redis",
-          "4b 二次请求命中快照", str(rr2.cache_info))
-    check(sqlite_status(1) == "pending",
-          "4b 热快照下写语句未再执行(设计行为，靠prefer_cache控制)",
+    check(sqlite_status(1) == "done",
+          "4b 热快照下写仍真实执行落库(护栏生效)",
           f"sqlite status={sqlite_status(1)}")
+    check(_DB_HITS["n"] == 1, "4b 数据源真实执行1次", f"hits={_DB_HITS['n']}")
+    check(rr2.results[0]["rows"][0][2] == "done", "4b 返回写后结果")
 
     # 4c refresh=True（页面「刷新缓存」语义）：先失效再执行写 → 快照更新
     rr3 = run_exec(9904, write_rep, fresh_cache(), refresh=True)

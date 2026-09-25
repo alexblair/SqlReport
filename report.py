@@ -1028,7 +1028,9 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     # 保活强制重建：跳过全部缓存读取（进程缓存 + Redis 快照 + 锁等待），
     # 直接进入 MySQL 查询分支；写路径（进程缓存/快照回填）保持生效。
-    skip_cache_read = bool(force_rebuild)
+    # 写报表护栏：含写语句的 SQL 禁止被任何缓存层短路——热快照会让页面
+    # 显示写后结果而数据库实际未执行（场景4b），故每次真实执行写 SQL。
+    skip_cache_read = bool(force_rebuild) or sql_contains_write(sql_query)
 
     # PH-05 写操作护栏：实际 SQL 含写语句且报表未开启 allow_write → 拒绝执行。
     # 拦截置于缓存读取之前，防止已缓存结果绕过拦截；裸调用（report=None，测试等）
