@@ -84,12 +84,12 @@ class TestMoveFeedback(BaseConfigTest):
         return urllib.parse.unquote_plus(location)
 
     def test_pool_move_up_redirects_with_flash_and_anchor(self):
-        """连接池上移应回跳 /config 带「已上移」flash 与 #sec-pools 锚点"""
+        """连接池上移应回跳 /config/pools 带「已上移」flash 与 #sec-pools 锚点（T7.5）"""
         code, body, _ = config.handle_request(
             self.conn, "POST", "/config/pools/2/move-up", "", "")
         self.assertEqual(code, 302)
         text = self._decoded(body)
-        self.assertTrue(text.startswith("/config?"))
+        self.assertTrue(text.startswith("/config/pools?"))
         self.assertIn("已上移 池B", text)
         self.assertIn("#sec-pools", text)
 
@@ -133,9 +133,10 @@ class TestMoveFeedback(BaseConfigTest):
 
     def test_section_anchor_ids_rendered(self):
         """各配置区块标题应携带 sec-* 锚点 id"""
-        overview = config.render_overview(self.conn)
-        self.assertIn('id="sec-pools"', overview)
-        self.assertIn('id="sec-users"', overview)
+        pools_page = config.render_pools_page(self.conn)
+        self.assertIn('id="sec-pools"', pools_page)
+        users_page = config.render_users_page(self.conn)
+        self.assertIn('id="sec-users"', users_page)
         reports_page = config.render_reports_page(self.conn)
         self.assertIn('id="sec-reports"', reports_page)
         self.assertIn('id="sec-categories"', reports_page)
@@ -184,9 +185,10 @@ class TestSaveAnchorRedirect(BaseConfigTest):
 
     def test_row_ids_rendered_in_sections(self):
         """连接池/用户/报表行 <tr> 应携带 pool-/user-/report- 行 id"""
-        overview = config.render_overview(self.conn)
-        self.assertIn(f'id="pool-{self.pid}"', overview)
-        self.assertIn('id="user-1"', overview)
+        pools_page = config.render_pools_page(self.conn)
+        self.assertIn(f'id="pool-{self.pid}"', pools_page)
+        users_page = config.render_users_page(self.conn)
+        self.assertIn('id="user-1"', users_page)
         reports_page = config.render_reports_page(self.conn)
         self.assertIn(f'id="report-{self.rid}"', reports_page)
 

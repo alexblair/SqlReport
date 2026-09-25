@@ -32,6 +32,11 @@ _VOID_ELEMENTS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
 }
+# SVG 图形元素允许自闭合写法（<path/> 等，HTML5 内联 SVG 合法）
+_SVG_SELF_CLOSING_OK = {
+    "path", "rect", "circle", "line", "polyline", "polygon",
+    "ellipse", "stop", "use", "image",
+}
 
 _FORM_START_RE = re.compile(r"<form\b[^>]*>")
 _FORM_END_RE = re.compile(r"</form>")
@@ -100,7 +105,7 @@ def check_tag_balance(html: str) -> list[str]:
             self.stack.append((tag, self.getpos()))
 
         def handle_startendtag(self, tag, attrs):
-            if tag in _VOID_ELEMENTS:
+            if tag in _VOID_ELEMENTS or tag in _SVG_SELF_CLOSING_OK:
                 return
             self.sink.append(f"自闭合非空元素 <{tag}/> （位置 {self.getpos()}）缺少配对闭合标签")
 

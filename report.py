@@ -52,6 +52,7 @@ from render import (
     _SQL_HIGHLIGHT_JS,
     _SQL_FORMATTER_JS,
     render_page_header,
+    render_page_footer,
     _OP_MAP, DEFAULT_OP, _escape, format_cell,
     build_filter_params as _build_filter_params,
     build_cols_param as _build_cols_param,
@@ -61,7 +62,8 @@ from render import (
     build_current_rules_section_html,
     build_result_selector_html, build_cache_badge_html,
     build_sort_bar_html, build_table_header_html, build_table_body_html,
-    build_controls_bar_html, build_field_settings_panel_html,
+    build_controls_bar_html, build_export_modal_html,    filter_hidden_inputs,
+    build_field_settings_panel_html,
     build_sort_settings_panel_html, build_filter_form_html,
     build_filter_action_html, build_clear_filters_href,
     build_report_switcher_html,
@@ -333,18 +335,19 @@ _CSS = """
   th .sort-link:hover { color: #4f46e5; }
   th .sort-arrow { font-size: 12px; color: #94a3b8; }
   th .sort-arrow.active { color: #4f46e5; }
-  th .filter-input {
-    display: block; width: 100%; margin-top: 6px; padding: 4px 8px;
+  /* R2-D：筛选输入已从 th 迁到表头下独立 qf-row，样式选择器随之下沉 */
+  .qf-row .filter-input {
+    display: block; width: 100%; margin-top: 0; padding: 4px 8px;
     border: 1px solid #e2e8f0; border-radius: 4px; font-size: 12px;
     font-weight: 400; text-transform: none; letter-spacing: 0;
     outline: none; transition: border-color 0.2s; background: #fff;
     box-sizing: border-box;
   }
-  th .filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.12); }
-  th .filter-input::placeholder { color: #cbd5e1; }
+  .qf-row .filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.12); }
+  .qf-row .filter-input::placeholder { color: #cbd5e1; }
   /* 05 工单：表头列保守 min-width 保证筛选输入框可用；聚焦展开为固定宽度（桌面） */
   th { min-width: 100px; }
-  th .filter-input:focus { width: 220px; }
+  .qf-row .filter-input:focus { width: 220px; }
   .debug-info {
     background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
     margin-bottom: 16px; font-size: 13px; color: #64748b;
@@ -367,19 +370,7 @@ _CSS = """
   .debug-toggle:hover { color:#475569; background:#f1f5f9; }
   .debug-content { padding: 0 16px 12px; }
   .debug-content.hidden { display: none; }
-  .debug-info[data-mem-key] { position: relative; }
-  .mem-toggle {
-    position: absolute; top: 6px; right: 12px;
-    display: inline-flex; align-items: center; gap: 4px;
-  }
-  .mem-mode {
-    border: 1px solid #e2e8f0; background: #fff; color: #94a3b8;
-    border-radius: 4px; padding: 1px 6px; cursor: pointer; font-size: 12px;
-    line-height: 1.6;
-  }
-  .mem-mode:hover { color: #475569; border-color: #cbd5e1; }
-  .mem-mode.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
-  .controls {
+            .controls {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 14px 16px; background: #f8fafc; border-radius: 8px; margin-bottom: 16px;
     border: 1px solid #e2e8f0;
@@ -535,7 +526,7 @@ def _render_page_header(title: str = None) -> str:
 
     批次6#27a：title 可选传入（如报表名），默认保持站点标题。
     """
-    return render_page_header(title=title or "Web 报表工具", active_nav="report",
+    return render_page_header(title=title or "SqlReport", active_nav="report",
                               extra_css=_CSS + markdown_render.codehilite_css() + _MD_CSS)
 
 
@@ -552,8 +543,48 @@ def _js_string(s: str) -> str:
     return out
 
 
-_FOOTER = r"""</div>
-<script>
+# 报表页胶水 JS（字段面板/排序/结果切换/调试格式化/触屏筛选）。
+# ui-redesign C16：不再内联 _COMMON_JS（公共 JS 统一外链单轨）；
+# SQL 高亮/格式化仍按需随页面 defer 加载（C12）。
+_FOOTER_GLUE = r"""
+function openPanel(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('on');
+  var bd = document.getElementById('report-backdrop');
+  if (bd) bd.classList.add('on');
+  var f = el.querySelector('button, input, select, textarea');
+  if (f) { try { f.focus(); } catch (e) {} }
+}
+function closePanel(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.remove('on');
+  var bd = document.getElementById('report-backdrop');
+  if (bd) bd.classList.remove('on');
+}
+function closeAllPanels() {
+  document.querySelectorAll('.side-panel.on, .modal.on').forEach(function (el) {
+    el.classList.remove('on');
+  });
+  var bd = document.getElementById('report-backdrop');
+  if (bd) bd.classList.remove('on');
+}
+function gotoTab(key) {
+  document.querySelectorAll('.tabs .tab').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute('data-tab') === key);
+  });
+  document.querySelectorAll('.tabpanel').forEach(function (p) {
+    p.classList.toggle('active', p.getAttribute('data-panel') === key);
+  });
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeAllPanels();
+});
+document.addEventListener('click', function (e) {
+  if (e.target && e.target.id === 'report-backdrop') closeAllPanels();
+});
+"""
+_FOOTER_GLUE += r"""
 function toggleFieldItem(checkbox) {
   var label = checkbox.closest('.field-item');
   if (label) {
@@ -784,14 +815,18 @@ function applySortSettings() {
   if (cols) url += '&cols=' + encodeURIComponent(cols);
   window.location.href = url;
 }
-function switchResult(sel) {
-  var rid = sel.dataset.reportId;
-  var currIdx = parseInt(sel.dataset.activeIndex);
-  var targetIdx = parseInt(sel.value);
-  var swi = sel.dataset.swi;
-  var ps = sel.dataset.pageSize;
-  var so = sel.dataset.sqlOverride;
-  if (targetIdx === currIdx) return;
+function switchResult(btn) {
+  /* R2-D：结果集切换改为 segment 按钮；协议不变（result=N + 会话记忆回跳）。
+     数据属性挂在 .result-selector 容器上，btn.dataset.index 为目标结果集。 */
+  var seg = btn && btn.closest ? btn.closest('.result-selector') : null;
+  if (!seg) return;
+  var rid = seg.dataset.reportId;
+  var currIdx = parseInt(seg.dataset.activeIndex, 10);
+  var targetIdx = parseInt(btn.dataset.index, 10);
+  var swi = seg.dataset.swi;
+  var ps = seg.dataset.pageSize;
+  var so = seg.dataset.sqlOverride;
+  if (isNaN(targetIdx) || targetIdx === currIdx) return;
   var key = 'rstate_' + rid;
   sessionStorage.setItem(key + '_' + currIdx, window.location.href);
   var saved = sessionStorage.getItem(key + '_' + targetIdx);
@@ -814,7 +849,7 @@ function formatDebugSQL() {
   });
 }
 document.addEventListener('DOMContentLoaded', formatDebugSQL);
-""" + _SQL_HIGHLIGHT_JS + _SQL_FORMATTER_JS + _COMMON_JS + r"""
+""" + _SQL_HIGHLIGHT_JS + _SQL_FORMATTER_JS + r"""
 var filterTouchInit = (function () {
   var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   if (!coarse) return;
@@ -861,8 +896,12 @@ var filterTouchInit = (function () {
   });
   if (vv) vv.addEventListener('resize', recalc);
 })();
-</script>
-</body></html>"""
+"""
+
+
+def _footer() -> str:
+    """报表页页脚：公共页脚（外链 common.js）+ 页面胶水 defer 追加。"""
+    return render_page_footer(extra_js=_FOOTER_GLUE)
 
 
 # ===================================================================
@@ -1264,9 +1303,31 @@ def _apply_max_rows(all_results: list[dict], max_rows: int,
 
 
 def render_report_selector(conn) -> str:
-    """渲染报表选择页面（按分类层级树状呈现）"""
+    """报表中心：页头搜索 + 最近查看 + 左分类树 + 右报表卡片网格。
+
+    ui-redesign T7.3：替代旧「下拉 + 链接树」选择页；URL/跳转协议不变。
+    """
     reports = db.get_all_reports(conn)
-    # 按分类分组
+    all_cats = db.get_all_categories(conn)
+    cat_tree = db.get_category_tree(conn)
+    cat_names = {c["id"]: c["name"] for c in all_cats}
+
+    # 徽标数据：API 数、定时、保活（与报表配置页同语义；表缺失时降级为空）
+    api_count: dict[int, int] = {}
+    sched_report_ids: set[int] = set()
+    try:
+        for ep in db.get_all_api_endpoints(conn):
+            rid = ep.get("report_id")
+            if rid is not None:
+                api_count[rid] = api_count.get(rid, 0) + 1
+        for s in db.get_all_schedules(conn):
+            if not s.get("enabled"):
+                continue
+            for row in db.get_schedule_reports(conn, s["id"]):
+                sched_report_ids.add(row["report_id"])
+    except Exception:
+        pass
+
     cat_reports: dict[int, list] = {}
     uncategorized: list = []
     for r in reports:
@@ -1276,107 +1337,193 @@ def render_report_selector(conn) -> str:
         else:
             uncategorized.append(r)
 
-    all_cats = db.get_all_categories(conn)
-    cat_tree = db.get_category_tree(conn)
+    def _badge(kind: str) -> str:
+        m = {
+            "sched": '<span class="badge badge-warn">定时</span>',
+            "keep": '<span class="badge badge-ok">保活</span>',
+            "write": '<span class="badge badge-danger">写护栏</span>',
+        }
+        return m.get(kind, "")
 
-    def _cat_depth(cat_id: int) -> int:
-        d = 0
-        seen = set()
-        c = next((x for x in all_cats if x["id"] == cat_id), None)
-        while c and c.get("parent_id") is not None:
-            if c["parent_id"] in seen:
-                break
-            seen.add(c["parent_id"])
-            d += 1
-            c = next((x for x in all_cats if x["id"] == c["parent_id"]), None)
-        return d
+    def _card(r: dict) -> str:
+        rid = r["id"]
+        cid = r.get("category_id")
+        cname = cat_names.get(cid, "未分类") if cid is not None else "未分类"
+        memo = (r.get("memo") or "").strip()
+        memo_short = _escape(memo[:60] + ("…" if len(memo) > 60 else ""))
+        kw = _escape((r.get("name") or "") + " " + memo).lower()
+        tags = []
+        if rid in sched_report_ids:
+            tags.append(_badge("sched"))
+        if r.get("keepalive_enabled"):
+            tags.append(_badge("keep"))
+        if not r.get("allow_write", 1):
+            tags.append(_badge("write"))
+        n_api = api_count.get(rid, 0)
+        if n_api:
+            tags.append(f'<span class="badge badge-info">{n_api} 个 API</span>')
+        return (
+            f'<a class="report-card" href="/report?id={rid}" '
+            f'data-cat="{_escape(cname)}" data-kw="{kw}">'
+            f'<div class="t">{_escape(r["name"])}</div>'
+            f'<div class="meta">{_escape(cname)}</div>'
+            + (f'<div class="desc">{memo_short}</div>' if memo_short else "")
+            + f'<div class="tags">{"".join(tags)}</div></a>'
+        )
 
-    # ── 下拉框选项（按分类树层级） ──
-    def _render_tree_options(nodes: list[dict], depth: int = 0) -> str:
+    def _tree(nodes: list[dict], depth: int = 0) -> str:
         html = ""
         for node in nodes:
-            indent = "　" * depth
             cid = node["id"]
-            rpts = cat_reports.get(cid, [])
-            # 如果分类有报表或是父分类，显示为 optgroup
-            if rpts or node["children"]:
-                label = f"{indent}{node['name']}"
-                html += f'<optgroup label="{_escape(label)}">'
-                for r in rpts:
-                    html += f'<option value="{r["id"]}">{_escape(r["name"])}</option>'
-                if node["children"]:
-                    html += _render_tree_options(node["children"], depth + 1)
-                html += "</optgroup>"
-            else:
-                # 空分类（无报表无子分类）只显示占位行
-                html += f'<option value="" disabled style="color:#94a3b8;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</option>'
-                if node["children"]:
-                    html += _render_tree_options(node["children"], depth + 1)
+            n = len(cat_reports.get(cid, []))
+            kids = node.get("children") or []
+            pad = "padding-left:%dpx" % (8 + depth * 16)
+            chevron = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.5" data-chevron><path d="m9 6 6 6-6 6"/></svg>'
+                if kids else ""
+            )
+            html += (
+                f'<div class="cat" data-cat="{_escape(node["name"])}" style="{pad}" '
+                f'data-has-kids="{"1" if kids else "0"}">'
+                f'{chevron}<span>{_escape(node["name"])}</span>'
+                f'<span class="cnt">{n}</span></div>'
+            )
+            if kids:
+                html += '<div class="kids">' + _tree(kids, depth + 1) + "</div>"
+        n_un = len(uncategorized)
         return html
 
-    options = _render_tree_options(cat_tree)
+    tree_html = (
+        '<div class="cat active" data-cat="all">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">'
+        '<path d="M4 6h16M4 12h16M4 18h10"/></svg>'
+        f'<span>全部报表</span><span class="cnt">{len(reports)}</span></div>'
+        + _tree(cat_tree)
+        + (
+            '<div class="cat" data-cat="未分类">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>'
+            f'<span>未分类</span><span class="cnt">{len(uncategorized)}</span></div>'
+            if uncategorized else ""
+        )
+    )
 
-    # 未分类报表
-    for r in uncategorized:
-        options += f'<option value="{r["id"]}">(未分类) {_escape(r["name"])}</option>'
-
-    # ── 列表视图（按分类树层级） ──
-    def _render_tree_list(nodes: list[dict], depth: int = 0) -> str:
-        html = ""
-        for node in nodes:
-            indent = "　" * depth
-            cid = node["id"]
-            rpts = cat_reports.get(cid, [])
-            if rpts or node["children"]:
-                html += f'<li class="cat-header" style="list-style:none;font-weight:600;color:#4f46e5;padding:6px 0 2px {8 + depth * 20}px;font-size:14px">{indent}📁 {_escape(node["name"])}</li>'
-                for r in rpts:
-                    html += f'<li style="padding:4px 0 4px {28 + depth * 20}px"><a href="/report?id={r["id"]}">{_escape(r["name"])}</a></li>'
-                if node["children"]:
-                    html += _render_tree_list(node["children"], depth + 1)
-            else:
-                html += f'<li style="list-style:none;padding:4px 0 2px {8 + depth * 20}px;color:#94a3b8;font-size:13px;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</li>'
-                if node["children"]:
-                    html += _render_tree_list(node["children"], depth + 1)
-        return html
-
-    report_list = _render_tree_list(cat_tree)
-    for r in uncategorized:
-        report_list += f'<li style="padding:4px 0"><a href="/report?id={r["id"]}">(未分类) {_escape(r["name"])}</a></li>'
-
-    # PH-09 空状态引导：无任何报表时整个列表卡片替换为三步指引
-    list_card = ('<div class="card">'
-                 '<h3>可用报表列表</h3>'
-                 f'<ul class="report-list" style="padding-left:0">{report_list}</ul>'
-                 '</div>')
+    cards = "".join(_card(r) for r in reports)
     if not reports:
-        list_card = ('<div class="card" style="border:1px dashed #c7d2fe;'
-                     'background:#f5f7ff;padding:16px 20px;margin-top:12px">'
-                     '<h3 style="margin:0 0 8px">🚀 开始使用</h3>'
-                     '<p style="margin:0 0 12px;color:#475569;font-size:14px">'
-                     '三步开始：① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</p>'
-                     '<a href="/config" class="btn btn-primary btn-sm">前往配置管理</a>'
-                     '</div>')
+        # PH-09 空状态引导：无报表时以三步指引替代网格与空态文案
+        right_html = (
+            '<div class="card" style="border:1px dashed #c7d2fe;'
+            'background:#f5f7ff;padding:16px 20px">'
+            '<h3 style="margin:0 0 8px">🚀 开始使用</h3>'
+            '<p style="margin:0 0 12px;color:#475569;font-size:14px">'
+            '三步开始：① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</p>'
+            '<a href="/config" class="btn btn-primary btn-sm">前往配置管理</a>'
+            '</div>'
+        )
+    else:
+        right_html = (
+            '<div class="card-grid" id="rc-grid">' + cards + "</div>"
+            '<div class="card empty" id="rc-empty" style="display:none;'
+            'text-align:center;padding:40px">'
+            '<div style="font-weight:600;margin-bottom:6px">没有匹配的报表</div>'
+            '<div class="muted" style="margin-bottom:14px">换个关键词，或清除筛选查看全部</div>'
+            '</div>'
+        )
 
-    # 批次6#22：最近查看快捷卡片挂载点——服务端不感知 localStorage，
-    # 公共 JS initRecentReports 在 DOMContentLoaded 时读取并渲染；
-    # 无记录时保持空白，页面结构不受影响。
-    body = _render_page_header() + """
-<div id="recent-reports-mount"></div>
-<div class="card">
-  <h2>选择报表</h2>
-  <div class="report-select">
-    <form method="get" action="/report">
-      <label>请选择要查看的报表：</label>
-      <select name="id" onchange="this.form.submit()" style="width:100%">
-        <option value="">-- 请选择 --</option>
-""" + options + """
-      </select>
-      <noscript><button type="submit" class="btn btn-primary btn-sm" style="margin-top:10px">查看</button></noscript>
-    </form>
+    body = render_page_header(title="报表中心", active_nav="report")
+    body += """
+<div class="page-head">
+  <div>
+    <h1>报表中心</h1>
+    <div class="sub">按分类浏览，或搜索报表名称与备注</div>
+  </div>
+  <div class="actions">
+    <div class="search-box" style="width:280px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input class="input" id="rc-search" placeholder="搜索报表…">
+    </div>
+    <a class="btn btn-primary" href="/config/reports/add">+ 新建报表</a>
   </div>
 </div>
-""" + list_card + """
-""" + _FOOTER
+"""
+    # 批次6#22：最近查看挂载点（公共 JS initRecentReports 渲染）
+    body += """
+<div class="card">
+  <div class="card-head"><h2>最近查看</h2></div>
+  <div id="recent-reports-mount"><div class="muted" id="rc-recent-empty">暂无最近查看记录</div></div>
+</div>
+"""
+    body += (
+        '<div class="split">'
+        '<aside class="card" style="padding:12px">'
+        '<div class="card-head" style="margin-bottom:6px"><h2 style="font-size:14px">分类</h2></div>'
+        f'<div class="tree" id="rc-tree">{tree_html}</div>'
+        "</aside>"
+        "<div>" + right_html + "</div>"
+        "</div>"
+    )
+    body += """
+<script>
+(function () {
+  var kw = "", cat = "all";
+  var search = document.getElementById('rc-search');
+  var empty = document.getElementById('rc-empty');
+  var grid = document.getElementById('rc-grid');
+  function apply() {
+    if (!grid) return;
+    var shown = 0;
+    Array.prototype.forEach.call(grid.querySelectorAll('.report-card'), function (a) {
+      var okCat = (cat === 'all') || (a.getAttribute('data-cat') === cat);
+      var okKw = !kw || (a.getAttribute('data-kw') || '').indexOf(kw) >= 0;
+      var show = okCat && okKw;
+      a.style.display = show ? '' : 'none';
+      if (show) shown++;
+    });
+    grid.style.display = shown ? '' : 'none';
+    if (empty) empty.style.display = shown ? 'none' : 'block';
+  }
+  if (search) search.addEventListener('input', function () {
+    kw = this.value.trim().toLowerCase(); apply();
+  });
+  var tree = document.getElementById('rc-tree');
+  if (tree) {
+    tree.addEventListener('click', function (e) {
+      var node = e.target.closest('.cat, .leaf');
+      if (!node || !tree.contains(node)) return;
+      if (e.target.closest('[data-chevron]')) {
+        var kids = node.nextElementSibling;
+        if (kids && kids.classList.contains('kids')) kids.classList.toggle('on');
+        var chev = node.querySelector('[data-chevron]');
+        if (chev) chev.style.transform = kids && kids.classList.contains('on') ? 'rotate(90deg)' : '';
+        e.preventDefault();
+        return;
+      }
+      Array.prototype.forEach.call(tree.querySelectorAll('.cat, .leaf'), function (x) {
+        x.classList.remove('active');
+      });
+      node.classList.add('active');
+      cat = node.getAttribute('data-cat') || 'all';
+      apply();
+      if (node.getAttribute('data-has-kids') === '1') {
+        var k = node.nextElementSibling;
+        if (k && k.classList.contains('kids')) k.classList.toggle('on');
+      }
+    });
+  }
+  // 最近查看挂载点：有记录时隐藏占位
+  var mount = document.getElementById('recent-reports-mount');
+  if (mount) {
+    var mo = new MutationObserver(function () {
+      var ph = document.getElementById('rc-recent-empty');
+      if (ph && mount.querySelectorAll('.report-card').length) ph.remove();
+    });
+    mo.observe(mount, {childList: true, subtree: true});
+  }
+})();
+</script>
+"""
+    body += _footer()
     return body
 
 
@@ -1407,7 +1554,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
     else:
         report = db.get_report(conn, report_id)
     if not report:
-        return _render_page_header() + '<div class="flash flash-error">错误: 报表不存在</div>' + _FOOTER
+        return _render_page_header() + '<div class="flash flash-error">错误: 报表不存在</div>' + _footer()
 
     if page_size is None or page_size < 1:
         page_size = report["default_page_size"]
@@ -1420,12 +1567,12 @@ def render_report_page(conn, report_id: int, page: int = 1,
             return (_render_page_header() +
                     f'<div class="flash flash-error">该报表 "{_escape(report["name"])}" 关联的连接池已被删除。'
                     f' 请前往 <a href="/config" style="color:#4f46e5;font-weight:600">配置管理</a> 重新指定连接池。</div>' +
-                    _FOOTER)
+                    _footer())
         pool_config = db.get_pool(conn, pool_id)
         if not pool_config:
             return (_render_page_header() +
                     f'<div class="flash flash-error">错误: 报表 "{_escape(report["name"])}" 关联的连接池不存在</div>' +
-                    _FOOTER)
+                    _footer())
 
     actual_sql = sql_override or report["sql_query"]
     try:
@@ -1444,7 +1591,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
                 render_sql_error_section(friendly, raw) +
                 f'<div class="flash flash-error">连接池: {_escape(str(pool_name))}'
                 f' ({_escape(str(pool_host))}:{pool_port}, 用户: {_escape(str(pool_user))})'
-                f'</div>' + _FOOTER)
+                f'</div>' + _footer())
 
     # 越界/空结果集安全：以执行结果为准对 active_index 做上界 clamp（保留 -1 哨兵），
     # 防止调用方构造越界 ReportResult 时 result.columns 等属性抛 IndexError 导致 500。
@@ -1580,18 +1727,22 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                                   filters=filters or None,
                                   clear_filters_href=clear_filters_href)
 
+    # R2-D：详情页表格下方恒显分页条（单页/空结果也显示 ‹ 1 › + 跳转）
     pagination = _build_pagination(report_id, result.page, result.total_pages,
                                     result.page_size, result.total, sorts, filters, cols_param, result_param if num_results > 1 else "",
-                                    nested_filter=nested_filter)
+                                    nested_filter=nested_filter, always=True)
 
     cache_badge = build_cache_badge_html(result.cache_info,
         prefer_cache=bool(report.get("prefer_cache")),
         cache_ttl_hours=int(report.get("cache_ttl_hours") or 0))
 
+    # R2-D：结果集 segment 并入工具行（多结果集时；build_controls_bar_html
+    # 的 result_html 槽位），不再单独占一行
     controls = build_controls_bar_html(
         report_id, qs_page_size, sorts, filters, cols_param, display_columns,
         active_index, cache_badge, result.total, result.total_pages,
-        result_param=result_param, page=result.page, nested_filter=nested_filter)
+        result_param=result_param, page=result.page, nested_filter=nested_filter,
+        result_html=result_selector_html)
 
     filter_action_html, clear_html = build_filter_action_html(
         report_id, qs_page_size, sorts, cols_param, result_param, filters,
@@ -1648,39 +1799,155 @@ def _build_report_html(conn, report: dict, result: ReportResult,
             "});\n"
             "</script>\n")
 
+    # ---- 页头 + 横幅 + 备注摘要 + Tab 分组（T7.4 详情重构）----
+    pool_name_esc = _escape(str((pool_config or {}).get("name") or ""))
+    compact_switch = _build_compact_switcher(conn, report_id)
+    edit_action = ""
+    if report_id > 0:
+        edit_action = (
+            f'<a href="/config/reports/{report_id}/edit" class="btn btn-secondary" '
+            f'target="_blank" rel="noopener">编辑</a>')
+    page_head = f'''
+<div class="page-head">
+  <div>
+    <div class="crumb"><a href="/report">报表中心</a></div>
+    <h1>{_escape(report["name"])}{compact_switch}</h1>
+    <div class="sub">连接池：{pool_name_esc}</div>
+  </div>
+  <div class="actions">
+    <span class="summary-line" style="margin:0">{cache_badge}</span>
+    {edit_action}
+    <button type="button" class="btn btn-secondary" onclick="openPanel('modal-export')">导出</button>
+    <form method="post" action="/report" style="display:inline">
+      <input type="hidden" name="action" value="refresh_cache">
+      <input type="hidden" name="id" value="{report_id}">
+      <input type="hidden" name="page" value="{result.page}">
+      <input type="hidden" name="page_size" value="{qs_page_size}">
+      {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
+      {filter_hidden_inputs(filters or []) if filters else ""}
+      {f'<input type="hidden" name="cols" value="{_escape(",".join(display_columns))}">' if cols_param else ""}
+      {f'<input type="hidden" name="nested_filter" value="{_escape(urllib.parse.quote(json.dumps(nested_filter, ensure_ascii=False), safe=""))}">' if nested_filter else ""}
+      {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ""}
+      <button type="submit" class="btn btn-primary">刷新数据</button>
+    </form>
+  </div>
+</div>
+'''
+    preview_banner = (
+        '<div class="flash flash-warn" style="' + _BANNER_STYLE + '">'
+        '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
+        '</div>' if sql_override else '')
+
+    memo_text = (report.get("memo") or "").strip()
+    memo_bar = ""
+    if memo_text:
+        memo_one = _escape(memo_text.replace("\n", " ")[:80] + ("…" if len(memo_text) > 80 else ""))
+        memo_bar = (
+            '<div class="memo-bar"><strong style="flex:0 0 auto">备注</strong>'
+            f'<span class="txt">{memo_one}</span>'
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="gotoTab(\'memo\')">查看全文</button>'
+            '</div>')
+
+    def _tab(key: str, label: str, active: bool = False, badge: str = "") -> str:
+        cls = "tab active" if active else "tab"
+        return f'<button type="button" class="{cls}" role="tab" data-tab="{key}" onclick="gotoTab(\'{key}\')">{label}{badge}</button>'
+
+    api_badge = (f'<span class="badge badge-info" style="margin-left:6px">'
+                 f'{len(api_endpoints)}</span>') if api_endpoints else ""
+    tabs_nav = ('<div class="tabs" role="tablist">'
+                + _tab("data", "数据", True)
+                + _tab("rules", "规则")
+                + _tab("api", "接口", badge=api_badge)
+                + _tab("debug", "调试")
+                + _tab("memo", "备注")
+                + "</div>")
+
+    data_panel = (
+        '<div class="tabpanel active" data-panel="data">'
+        + controls
+        + filter_action_html + clear_html
+        + sort_bar_html
+        + filter_form_html
+        + '<div class="table-wrap"><table>' + thead_str + tbody + "</table></div>"
+        + pagination
+        + "</div>"
+    )
+    rules_panel = ('<div class="tabpanel" data-panel="rules">' + current_rules_html + "</div>")
+    # R2-D（原型 page-detail「接口」页签）：card + card-head 标题/入口按钮，
+    # 内容为与列表页同一实现的 api-row 卡片行（build_api_urls_section_html
+    # 委托 build_api_endpoints_list_html，禁止复制第二套实现）。
+    # 入口按钮：「新增 API 接口」（本报表上下文，report_id>0 才有新建表单）
+    # +「管理全部接口」；空态同样给出新增入口。
+    api_new_btn = (
+        f'<a class="btn btn-sm btn-primary" '
+        f'href="/config/reports/{report_id}/api_endpoints/new">新增 API 接口</a>'
+        if report_id > 0 else "")
+    api_actions = (f'<div class="actions">{api_new_btn}'
+                   '<a class="btn btn-sm btn-outline" href="/config/api-endpoints">管理全部接口</a>'
+                   '</div>')
+    api_panel_inner = (
+        '<div class="card"><div class="card-head">'
+        '<h2>本报表的 API 接口</h2>'
+        + api_actions +
+        '</div>'
+        + (api_urls_html or '<div class="muted">本报表尚未发布 API 接口。</div>')
+        + '</div>')
+    api_panel = ('<div class="tabpanel" data-panel="api">' + api_panel_inner + "</div>")
+    debug_panel = '<div class="tabpanel" data-panel="debug">' + debug_html + "</div>"
+    memo_panel = '<div class="tabpanel" data-panel="memo">' + memo_html + "</div>"
+
+    backdrop = '<div class="backdrop" id="report-backdrop"></div>'
+
     body = (_render_page_header(
-                title=f'{_escape(report["name"])} - Web 报表工具') +
-            _build_report_switcher(conn, report_id) +
-            f'<div class="card">'
-            f'<h2>{_escape(report["name"])}</h2>' +
-            ('<div class="preview-badge flash-warn" style="'
-             + _BANNER_STYLE + '">'
-             '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
-             '</div>' if sql_override else '') +
+                title=f'{_escape(report["name"])} - SqlReport') +
+            page_head +
+            preview_banner +
             write_banner +
             trunc_banner +
-            edit_btn +
             flash_html +
-            memo_html +
-            api_urls_html +
-            debug_html +
-            current_rules_html +
-            result_selector_html +
             _build_redis_banners(result.cache_info) +
-            controls +
+            memo_bar +
+            tabs_nav +
+            data_panel +
+            rules_panel +
+            api_panel +
+            debug_panel +
+            memo_panel +
             field_settings_html +
             sort_settings_html +
-            sort_bar_html +
-            filter_action_html +
-            clear_html +
-            filter_form_html +
-            '<div class="table-wrap"><table>' + thead_str + tbody + '</table></div>' +
-            pagination +
-            '</div>' +
+            build_export_modal_html(
+                report_id, sorts, filters, cols_param, display_columns,
+                active_index, result_param=result_param,
+                nested_filter=nested_filter) +
+            backdrop +
             mermaid_scripts +
             b6_scripts +
-            _FOOTER)
+            _footer())
     return body
+
+
+
+def _build_compact_switcher(conn, current_id: int = None) -> str:
+    """详情页头部紧凑报表切换 select（T7.4，替代整宽切换卡）。"""
+    if not current_id:
+        return ""
+    reports = db.get_all_reports(conn)
+    all_cats = db.get_all_categories(conn)
+    cat_names = {c["id"]: c["name"] for c in all_cats}
+    opts = []
+    for r in reports:
+        cid = r.get("category_id")
+        label = (f"{cat_names.get(cid, '')}/" if cid in cat_names else "") + r["name"]
+        sel = " selected" if r["id"] == current_id else ""
+        opts.append(f'<option value="{r["id"]}"{sel}>{_escape(label)}</option>')
+    if not any(r["id"] == current_id for r in reports):
+        opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
+    return (
+        '<select class="select" style="width:auto;height:28px;font-size:13px;'
+        'font-weight:500;display:inline-block;margin-left:8px;vertical-align:middle;max-width:280px" '
+        "onchange=\"if(this.value)location.href='/report?id='+this.value\" "
+        'aria-label="切换报表">' + "".join(opts) + "</select>"
+    )
 
 
 def _build_report_switcher(conn, current_id: int = None) -> str:

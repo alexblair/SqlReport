@@ -72,23 +72,21 @@ class TestCacheUIDisplay(unittest.TestCase):
         )
 
     def test_redis_cache_badge_shows_redis_source(self):
-        """基线：Redis 快照模式应显示 'Redis 快照' 标签"""
+        """基线：缓存快照模式应显示 '缓存快照' 标签（术语表 T7.11）"""
         result = self._make_result(cache_info={"source": "redis", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "报表X", "sql_query": "SELECT 1", "memo": "", "result_names": ""},
             result)
-        self.assertIn("Redis 快照", body)
+        self.assertIn("缓存快照", body)
 
     def test_cache_badge_missing_redis_cache_indicator(self):
-        """FAIL: prefer_cache=1 时未显示 Redis 缓存已启用标记"""
+        """prefer_cache=1 时显示「已启用缓存」人话标记（T7.11 术语表）"""
         result = self._make_result(cache_info={"source": "redis", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "报表X", "sql_query": "SELECT 1", "memo": "",
              "result_names": "", "prefer_cache": 1, "cache_ttl_hours": 24},
             result)
-        # 期望显示 prefer_cache 或"Redis 缓存已启用"
-        # FAIL: 目前 cache-badge 仅显示"Redis 快照 (Xs 前)"，不包含 prefer_cache 状态
-        self.assertIn("prefer_cache", body)
+        self.assertIn("已启用缓存", body)
 
     def test_cache_badge_missing_ttl_display(self):
         """FAIL: cache_ttl_hours=24 时未显示 TTL 信息"""
@@ -114,22 +112,22 @@ class TestCacheUIDisplay(unittest.TestCase):
         self.assertTrue(has_abs_time, "页面应包含 YYYY-MM-DD HH:MM:SS 格式的缓存建立时间")
 
     def test_process_cache_badge_shows_process_source(self):
-        """基线：进程缓存模式显示 '进程缓存'"""
+        """基线：本地缓存模式显示 '本地缓存'（T7.11 术语表）"""
         result = self._make_result(cache_info={"source": "process", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "报表P", "sql_query": "SELECT 1", "memo": "",
              "result_names": ""},
             result)
-        self.assertIn("进程缓存", body)
+        self.assertIn("本地缓存", body)
 
     def test_mysql_direct_badge(self):
-        """基线：直连 MySQL 模式显示 '直连 MySQL'"""
+        """基线：实时查询模式显示 '实时查询'（T7.11 术语表）"""
         result = self._make_result(cache_info={"source": "mysql", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "报表M", "sql_query": "SELECT 1", "memo": "",
              "result_names": ""},
             result)
-        self.assertIn("直连 MySQL", body)
+        self.assertIn("实时查询", body)
 
     def test_no_cache_info(self):
         """基线：无缓存信息显示 '未缓存'"""
@@ -286,7 +284,7 @@ class TestRebuildCacheButton(unittest.TestCase):
     @patch("report.db.create_mysql_connection")
     @patch("report.redis_cache.get_redis_manager")
     def test_rebuild_shows_redis_cache_info(self, mock_get_mgr, mock_create_conn, mock_exec_q):
-        """验证：重建缓存后页面上显示 Redis 快照信息而非'直连 MySQL'"""
+        """验证：重建缓存后页面上显示缓存快照来源（非实时查询）"""
         mock_exec_q.return_value = [{"columns": ["id"], "rows": [(1,)]}]
         mock_conn = MagicMock()
         mock_create_conn.return_value = mock_conn
@@ -345,13 +343,13 @@ class TestCacheBadgeExpiry(unittest.TestCase):
             {"source": "redis", "timestamp": time.time()}, 24)
         self.assertNotIn("已过期", body)
         self.assertIn("cache-badge fresh", body)
-        self.assertIn("TTL=24h", body)
+        self.assertIn("缓存 24 小时", body)
 
     def test_expired_shows_warning(self):
         """已过期（ts + ttl*3600 < now）→ flash-warn 样式 + 过期文案"""
         body = self._body(
             {"source": "redis", "timestamp": time.time() - 25 * 3600}, 24)
-        self.assertIn("已过期（下次请求自动刷新）", body)
+        self.assertIn("已过期，下次访问自动刷新", body)
         self.assertIn("cache-badge flash-warn", body)
 
     def test_ttl_zero_never_expires(self):
@@ -365,13 +363,13 @@ class TestCacheBadgeExpiry(unittest.TestCase):
         """process 快照同样按 TTL 计算过期"""
         body = self._body(
             {"source": "process", "timestamp": time.time() - 25 * 3600}, 24)
-        self.assertIn("已过期（下次请求自动刷新）", body)
+        self.assertIn("已过期，下次访问自动刷新", body)
 
     def test_direct_mysql_no_expiry_text(self):
         """直连 MySQL 分支不附加过期文案（直连即最新）"""
         body = self._body(
             {"source": "mysql"}, 24)
-        self.assertIn("直连 MySQL", body)
+        self.assertIn("实时查询", body)
         self.assertNotIn("已过期", body)
 
 

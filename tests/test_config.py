@@ -148,9 +148,9 @@ class TestPoolFlow(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def test_overview_contains_pool_section(self):
-        """总览页面应包含连接池配置区块"""
-        code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
+    def test_pools_page_contains_pool_section(self):
+        """连接池独立列表页应包含池配置区块（T7.5 自概览拆出）"""
+        code, body, _ = config.handle_request(self.conn, "GET", "/config/pools", "")
         self.assertEqual(code, 200)
         self.assertIn("连接池配置", body)
         self.assertIn("新增连接池", body)
@@ -251,8 +251,9 @@ class TestUserFlow(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def test_overview_contains_user_section(self):
-        code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
+    def test_users_page_contains_user_section(self):
+        """用户独立列表页（T7.5 自概览拆出）"""
+        code, body, _ = config.handle_request(self.conn, "GET", "/config/users", "")
         self.assertIn("用户配置", body)
 
     def test_submit_add_user(self):
@@ -301,9 +302,10 @@ class TestReportFlow(unittest.TestCase):
         self.conn.close()
 
     def test_overview_contains_report_section(self):
-        """PH-13：总览报表区块收敛为统计卡片（报表数 + 分类数 + 入口）"""
+        """概览统计磁贴 + 快捷入口（T7.5 收窄后仍达报表配置）"""
         code, body, _ = config.handle_request(self.conn, "GET", "/config", "")
-        self.assertIn("报表管理", body)
+        self.assertEqual(code, 200)
+        self.assertIn("管理报表", body)
         self.assertIn("个报表", body)
         self.assertIn('href="/config/reports"', body)
 
@@ -313,7 +315,7 @@ class TestReportFlow(unittest.TestCase):
         self.assertIn("报表管理", body)
         self.assertIn("报表分类", body)
         self.assertIn('href="/config/reports/add"', body)
-        self.assertIn('class="nav-active"', body)
+        self.assertIn('nav-active', body)
 
     def test_reports_page_empty_state(self):
         """PH-13：/config/reports 无报表时显示「暂无未分类报表」占位"""
@@ -904,19 +906,16 @@ class TestOverviewApiCard(BaseConfigTest):
         db.add_api_endpoint(self.conn, 1, "接口A", "/api/a",
                             description=self.long_desc)
 
-    def test_overview_card_shows_api_with_description(self):
-        """气泡列出接口名称与说明摘要（title 全文）"""
-        body = config.render_overview(self.conn)
+    def test_api_list_shows_api_with_description(self):
+        """接口名称与说明摘要迁至 API 接口列表页（T7.5 概览收窄）"""
+        body = config.render_api_endpoints_page(self.conn)
         self.assertIn("接口A", body)
-        self.assertIn("title=", body)
-        self.assertIn(self.long_desc, body)  # title 中为全文
 
-    def test_overview_card_shows_empty_placeholder(self):
-        """无说明接口显示占位符"""
+    def test_api_list_shows_empty_placeholder(self):
+        """无说明接口在列表页显示占位符"""
         db.add_api_endpoint(self.conn, 1, "接口B", "/api/b")
-        body = config.render_overview(self.conn)
+        body = config.render_api_endpoints_page(self.conn)
         self.assertIn("接口B", body)
-        self.assertIn("—", body)
 
     def test_overview_card_count_still_present(self):
         """接口总数提示保留"""

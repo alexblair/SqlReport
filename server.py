@@ -61,56 +61,59 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Web 报表工具 - 登录</title>
+<title>SqlReport - 登录</title>
 <style>""" + render._BASE_CSS + """
   body {
     display: flex; justify-content: center; align-items: center;
     min-height: 100vh; margin: 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 55%, #312e81 100%);
   }
   .login-box {
-    background: #fff; padding: 40px; border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.15); width: 380px;
+    background: #fff; padding: 36px 32px; border-radius: 14px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.35); width: 380px;
     animation: fadeUp 0.4s ease-out;
   }
   .login-box h1 {
-    text-align: center; color: #1e293b; margin-bottom: 8px;
-    font-size: 24px; font-weight: 700; letter-spacing: -0.5px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    color: #0f172a; margin-bottom: 6px;
+    font-size: 17px; font-weight: 700; letter-spacing: -0.2px;
   }
-  .login-subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 32px; }
-  .login-box label { display: block; margin-bottom: 6px; font-weight: 600; color: #475569; font-size: 14px; }
+  .login-box h1 .logo {
+    width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-size: 13px; font-weight: 800;
+  }
+  .login-subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 24px; }
+  .login-box label { display: block; margin-bottom: 6px; font-weight: 600; color: #475569; font-size: 13px; }
   .login-box input[type=text], .login-box input[type=password] {
-    width: 100%; padding: 10px 14px; margin-bottom: 20px;
-    border: 2px solid #e2e8f0; border-radius: 8px;
-    font-size: 15px; color: #1e293b; transition: border-color 0.2s, box-shadow 0.2s;
-    outline: none; background: #f8fafc;
+    width: 100%; padding: 9px 12px; margin-bottom: 16px;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 14px; color: #0f172a; transition: border-color .15s, box-shadow .15s;
+    outline: none; background: #fff;
   }
   .login-box input[type=text]:focus, .login-box input[type=password]:focus {
-    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); background: #fff;
+    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.35); background: #fff;
   }
   .login-box button {
-    width: 100%; padding: 12px; background: linear-gradient(135deg, #4f46e5, #6366f1);
-    color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;
-    cursor: pointer; transition: transform 0.15s, box-shadow 0.2s;
-    box-shadow: 0 4px 14px rgba(79,70,229,0.35);
+    width: 100%; padding: 11px; background: #4f46e5; color: #fff;
+    border: none; border-radius: 6px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: background .15s;
   }
-  .login-box button:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(79,70,229,0.4); }
-  .login-box button:active { transform: translateY(0); }
+  .login-box button:hover { background: #4338ca; }
   .login-box .error {
-    color: #dc2626; text-align: center; margin-bottom: 20px; font-size: 14px;
-    padding: 10px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca;
+    color: #b91c1c; text-align: center; margin-bottom: 16px; font-size: 13px;
+    padding: 10px; background: #fef2f2; border-radius: 6px; border: 1px solid #fecaca;
   }
   .login-box .notice {
-    color: #92400e; text-align: center; margin-bottom: 20px; font-size: 14px;
-    padding: 10px; background: #fffbeb; border-radius: 8px; border: 1px solid #fde68a;
+    color: #92400e; text-align: center; margin-bottom: 16px; font-size: 13px;
+    padding: 10px; background: #fffbeb; border-radius: 6px; border: 1px solid #fde68a;
   }
-  .login-footer { text-align: center; margin-top: 24px; color: #64748b; font-size: 12px; }
+  .login-footer { text-align: center; margin-top: 18px; color: #64748b; font-size: 12px; }
 </style>
 </head>
 <body>
 <div class="login-box">
-  <h1>Web 报表工具</h1>
-  <p class="login-subtitle">请登录以访问系统</p>
+  <h1><span class="logo">SR</span> SqlReport</h1>
+  <p class="login-subtitle">登录以访问报表工作台</p>
   {error}
   <form method="post" action="/login">
     {next_field}
@@ -118,9 +121,9 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     <input type="text" id="login_username" name="username" required autofocus autocomplete="username">
     <label for="login_password">密码</label>
     <input type="password" id="login_password" name="password" required autocomplete="current-password">
-    <button type="submit">登 录</button>
+    <button type="submit">登录</button>
   </form>
-  <p class="login-footer">Web 报表工具 v1.0</p>
+  <p class="login-footer">SqlReport · 报表与 API 工作台</p>
 </div>
 </body>
 </html>"""
@@ -183,13 +186,13 @@ def _render_error_page(status: int, title: str) -> str:
 <title>{status} - {title}</title>
 <style>
 body {{ display:flex; justify-content:center; align-items:center; min-height:100vh;
-       margin:0; background:#f1f5f9; font-family:system-ui,-apple-system,sans-serif; }}
-.err-box {{ background:#fff; padding:48px 56px; border-radius:16px;
-            box-shadow:0 4px 24px rgba(0,0,0,0.08); text-align:center; max-width:420px; }}
+       margin:0; background:#f3f4f8; font-family:system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif; }}
+.err-box {{ background:#fff; padding:48px 56px; border-radius:10px;
+            box-shadow:0 1px 2px rgba(15,23,42,.06); text-align:center; max-width:420px; }}
 .err-code {{ font-size:56px; font-weight:700; color:#4f46e5; margin:0; }}
-.err-title {{ color:#334155; font-size:18px; margin:12px 0 24px; }}
+.err-title {{ color:#475569; font-size:18px; margin:12px 0 24px; }}
 .err-back {{ display:inline-block; padding:10px 22px; background:#4f46e5; color:#fff;
-             border-radius:8px; text-decoration:none; font-size:14px; }}
+             border-radius:6px; text-decoration:none; font-size:14px; }}
 .err-back:hover {{ background:#4338ca; }}
 </style>
 </head>

@@ -70,3 +70,6 @@ AGENTS.md
 # 长期记忆归档（本地使用，不提交）
 .lcm/
 tests/regression/
+
+# Playwright CLI 本地产物（日志/会话，不提交）
+.playwright-cli/

@@ -239,12 +239,12 @@ class TestDebugVisibility(unittest.TestCase):
 
     def test_button_visible_in_debug(self):
         html = self._overview(True)
-        self.assertIn("新增测试用例", html)
+        self.assertIn("导入演示数据", html)
         self.assertIn("/config/test-cases/import", html)
 
     def test_button_hidden_without_debug(self):
         html = self._overview(False)
-        self.assertNotIn("新增测试用例", html)
+        self.assertNotIn("导入演示数据", html)
         self.assertNotIn("/config/test-cases/import", html)
 
 

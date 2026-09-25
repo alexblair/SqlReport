@@ -329,7 +329,7 @@ class TestPreviewWithoutId(BaseConfigTest):
         code, body, _ = report.handle_request(
             self.conn, "POST", "/report/preview", "", "sql_query=SELECT+1")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     def test_preview_invalid_pool_returns_selector(self):
         """无 id 且 pool_id 非法 → 回退报表选择页（不崩溃）"""
@@ -337,7 +337,7 @@ class TestPreviewWithoutId(BaseConfigTest):
             self.conn, "POST", "/report/preview", "",
             "pool_id=abc&sql_query=SELECT+1")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     @patch("report.execute_report")
     def test_preview_without_id_pool_missing_shows_error(self, mock_exec):

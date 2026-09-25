@@ -789,14 +789,14 @@ class TestPreviewEndpointExtended(BaseReportTest):
         code, body, _ = report.handle_request(
             self.conn, "POST", "/report/preview", "", "sql_query=SELECT+1")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     def test_preview_invalid_id_returns_selector(self):
         """23. 预览 id=abc → 返回报表选择页（不崩溃）"""
         code, body, _ = report.handle_request(
             self.conn, "POST", "/report/preview", "", "id=abc&sql_query=SELECT+1")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     @patch("report.execute_report")
     def test_preview_id_not_exist_renders_error(self, mock_exec):
@@ -931,7 +931,7 @@ class TestCategoryTreeSelector(BaseReportTest):
         config_db.update_category(self.conn, b, "环B", parent_id=a)
         code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     def test_selector_category_report_links_escaped(self):
         """20. 分类报表跳转链接 href 正确；特殊字符分类名被 HTML 转义"""
@@ -976,7 +976,7 @@ class TestOnboardingGuide(BaseReportTest):
         code, body, _ = report.handle_request(self.conn, "GET", "/report", "")
         self.assertEqual(code, 200)
         self.assertNotIn("三步开始", body)
-        self.assertIn("可用报表列表", body)
+        self.assertIn("报表中心", body)
 
 
 # ===================================================================

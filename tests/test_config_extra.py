@@ -1239,12 +1239,15 @@ class TestCategoriesPage(BaseConfigTest):
         self.assertIn("cat_tree_collapsed", render._COMMON_JS)
 
     def test_reports_page_renders_tree_with_badge(self):
-        """分类树应渲染子分类数量角标"""
+        """R2-A：分类树渲染嵌套子分类容器（.kids 逐级缩进，替代子分类数文字角标）"""
         db.add_category(self.conn, "根")
         db.add_category(self.conn, "子", parent_id=1)
         body = config.render_reports_page(self.conn)
         self.assertIn("根", body)
-        self.assertIn("1 子分类", body)
+        self.assertIn("子", body)
+        self.assertIn('id="cat-kids-1"', body)
+        self.assertIn('class="kids on"', body)
+        self.assertNotIn("子分类)", body)
 
     def test_reports_page_empty_state(self):
         """无分类时应显示暂无分类占位"""
@@ -1344,9 +1347,9 @@ class TestReportFormSpanFull(unittest.TestCase):
         self.assertIn('class="flash-warn span-full"', html)
 
     def test_form_actions_span_full(self):
-        """操作按钮行应跨整行"""
+        """报表表单操作行改为 sticky 底栏且跨整行（T7.7）"""
         html = self._form_html()
-        self.assertIn('<div class="form-actions span-full">', html)
+        self.assertIn('<div class="formbar span-full">', html)
 
     def test_short_fields_have_no_span_full(self):
         """报表名称/分页大小等短字段不应跨整行"""
@@ -1417,7 +1420,7 @@ class TestEndpointFormSpanFull(unittest.TestCase):
         for token in ["id=\"fetch-all-url-row\" class=\"span-full\"",
                       "id=\"static-url-row\" class=\"span-full\"",
                       "id=\"template-section\" class=\"span-full\"",
-                      "class=\"form-actions span-full\""]:
+                      "class=\"form-actions span-full formbar\""]:
             self.assertIn(token, self.html, token)
 
 

@@ -35,84 +35,268 @@ import markdown_render
 
 # 基础片段（reset + body 字体栈 + fadeUp 关键帧），供登录页等独立页面复用
 _BASE_CSS = """
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#ffffff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#ffffff;
+  --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+  --danger:#dc2626; --danger-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --r-sm:6px; --r-md:10px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12);
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 """
 
 _COMMON_CSS = """
+/* ===== 侧栏页壳（ui-redesign T7.1） ===== */
+.app { display:flex; min-height:100vh; }
+.sidebar {
+  width:240px; flex:0 0 240px; background:var(--sidebar-bg); color:var(--sidebar-ink);
+  position:fixed; inset:0 auto 0 0; display:flex; flex-direction:column; z-index:40;
+}
+.main { margin-left:240px; flex:1; min-width:0; display:flex; flex-direction:column; }
+.sidebar .brand {
+  display:flex; align-items:center; gap:10px; padding:18px 18px 14px;
+  color:#fff; font-weight:700; font-size:16px; letter-spacing:-.2px; text-decoration:none;
+}
+.sidebar .brand:hover { text-decoration:none; }
+.sidebar .brand .logo {
+  width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:13px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:800;
+}
+.nav-group { padding:10px 12px 4px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
+.nav-item {
+  display:flex; align-items:center; gap:10px; margin:2px 10px; padding:8px 12px;
+  border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
+  border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
+}
+.nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
+.nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
+.nav-item.nav-active::before {
+  content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
+}
+.nav-item svg { width:16px; height:16px; flex:0 0 16px; opacity:.9; }
+.nav-badge {
+  margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
+  padding:0 6px; border-radius:var(--r-full);
+}
+.sidebar .spacer { flex:1; }
+.account {
+  border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
+  display:flex; align-items:center; gap:8px; font-size:13px;
+}
+.account .avatar {
+  width:28px; height:28px; border-radius:50%; background:#334155; display:grid; place-items:center;
+  color:#e2e8f0; font-size:12px; font-weight:700;
+}
+.account .who { color:#e2e8f0; font-weight:600; }
+.account .out {
+  margin-left:auto; color:#94a3b8; font-size:12px; text-decoration:none;
+}
+.account .out:hover { color:#fff; }
+@media (max-width: 1024px) {
+  .sidebar { width:64px; flex-basis:64px; }
+  .sidebar .brand .name, .sidebar .nav-group, .sidebar .nav-item span,
+  .sidebar .nav-badge, .account .who, .account .out { display:none; }
+  .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+  .main { margin-left:64px; }
+}
 body {
-  background: #f1f5f9; color: #1e293b; min-height: 100vh;
+  background: var(--bg-app); color: #1e293b; min-height: 100vh;
 }
-.navbar {
-  background: linear-gradient(135deg, #1e293b, #334155);
-  padding: 0 24px; height: 60px; display: flex; align-items: center; gap: 24px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12); position: sticky; top: 0; z-index: 100;
-}
-.navbar .brand { color: #fff; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; text-decoration: none; }
-.navbar .brand span { color: #818cf8; }
-.navbar a:not(.brand) {
-  color: #cbd5e1; text-decoration: none; font-size: 14px; font-weight: 500;
-  padding: 6px 14px; border-radius: 6px; transition: background 0.2s, color 0.2s;
-}
-.navbar a:not(.brand):hover { background: rgba(255,255,255,0.1); color: #fff; }
-.navbar .nav-active { color: #fff !important; background: rgba(255,255,255,0.12); }
-.navbar .spacer { flex: 1; }
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-/* 宽屏利用率：视口越宽容器越宽（1200 → 1440 → 1680 → 1920 → 2400），
-   窄屏保持 1200px 现状；表格类页面在宽屏下避免左右横移 */
-@media (min-width: 1400px) { .container { max-width: 1440px; } }
+.container { width:100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
+/* 宽屏利用率：视口越宽容器越宽（1440 → 1680 → 1920 → 2400） */
 @media (min-width: 1700px) { .container { max-width: 1680px; } }
 @media (min-width: 2100px) { .container { max-width: 1920px; } }
 @media (min-width: 2600px) { .container { max-width: 2400px; } }
-/* 移动端适配（spec ux-optimization 批次6#26）：窄屏下导航允许换行、
-   链接间距缩小、页面容器 padding 收窄；表格横向滚动由全局 .table-wrap
-   规则（overflow-x:auto）统一保证，不在此重复声明。 */
+/* 窄屏：页面容器 padding 收窄；表格横向滚动由全局 .table-wrap 规则统一保证 */
 @media (max-width: 640px) {
-  .navbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 12px; }
-  .navbar a:not(.brand) { padding: 4px 8px; font-size: 13px; }
-  .navbar .spacer { flex: 1 1 100%; height: 0; }
   .container { padding: 12px; }
 }
+/* ===== ui-redesign 共享布局与组件（T7.3+） ===== */
+.page-head { display:flex; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+.page-head h1 { font-size:20px; line-height:28px; font-weight:700; letter-spacing:-.2px; margin:0; }
+.page-head .sub { font-size:13px; color:var(--ink-3); margin-top:2px; }
+.page-head .actions { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.split { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .split { grid-template-columns:minmax(0,1fr); } }
+.grid-stat { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+.stat-tile { background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-1); padding:16px 18px; }
+.stat-tile .num { font-size:20px; font-weight:700; letter-spacing:-.3px; font-variant-numeric:tabular-nums; }
+.stat-tile .lbl { font-size:13px; color:var(--ink-3); margin-top:2px; }
+.search-box { position:relative; }
+.search-box svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-3); }
+.search-box .input { padding-left:32px; }
+.tree { font-size:14px; }
+.tree .cat { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:var(--r-sm); color:var(--ink-2); font-weight:600; cursor:pointer; user-select:none; }
+.tree .cat:hover { background:var(--bg-hover); }
+.tree .cat.active { background:var(--brand-soft); color:var(--brand); }
+.tree .cat .cnt { margin-left:auto; font-size:12px; color:var(--ink-3); font-weight:500; }
+.tree .cat svg { width:14px; height:14px; color:var(--ink-3); flex:0 0 14px; }
+.tree .cat [data-chevron] { transition:transform .12s; }
+.tree .kids { display:none; }
+.tree .kids.on { display:block; }
+/* ui-redesign R2-A：报表配置左树（分类管理）——按已确认原型的 flex 行形态 */
+.tree .kids { padding-left:14px; }
+.tree .cat .nm { min-width:0; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tree .cat .ops { display:flex; align-items:center; gap:2px; flex:0 0 auto; opacity:.55; transition:opacity .12s; }
+.tree .cat:hover .ops { opacity:1; }
+.tree .cat .ops form { display:inline; margin:0; }
+.tree .cat .ops .btn { height:22px; min-width:22px; padding:0 4px; font-size:12px; }
+.tree .cat .ops .btn-outline, .tree .cat .ops .btn-ghost { background:transparent; border-color:transparent; color:var(--ink-3); }
+.tree .cat .ops .btn-outline:hover, .tree .cat .ops .btn-ghost:hover { background:var(--brand-soft); color:var(--brand); }
+.tree .cat .ops .btn-danger { background:transparent; border-color:transparent; color:var(--ink-3); }
+.tree .cat .ops .btn-danger:hover { background:var(--danger-soft); color:var(--danger); }
+/* 区块标题行：flex 化（消除 inline 挤压/重叠；.actions 靠右） */
+.section-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.section-title .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.report-card { background:#fff; border:1px solid var(--line); border-radius:var(--r-md); padding:14px 16px; box-shadow:var(--sh-1); display:flex; flex-direction:column; gap:6px; transition:border-color .12s, box-shadow .12s; cursor:pointer; text-decoration:none; }
+.report-card:hover { border-color:#c7d2fe; box-shadow:var(--sh-pop,0 4px 12px rgba(15,23,42,.10)); text-decoration:none; }
+.report-card .t { font-weight:600; color:var(--ink); font-size:15px; }
+.report-card .meta { font-size:12px; color:var(--ink-3); }
+.report-card .desc { font-size:13px; color:var(--ink-3); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.report-card .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
+.badge { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--r-full); font-size:12px; font-weight:600; line-height:18px; }
+.badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.75; }
+.badge-ok { background:#ecfdf5; color:#047857; }
+.badge-warn { background:#fffbeb; color:#b45309; }
+.badge-danger { background:#fef2f2; color:#b91c1c; }
+.badge-info { background:#eff6ff; color:#1d4ed8; }
+.badge-neutral { background:#f8fafc; color:#64748b; border:1px solid var(--line); }
+.muted { color:var(--ink-3); }
+/* 报表编辑：sticky 保存底栏（T7.7；按钮位于主 form 内，htmlcheck 门禁保持） */
+.formbar { position:sticky; bottom:0; margin:16px 0 0; padding:12px 16px; background:rgba(255,255,255,.95); backdrop-filter:blur(6px); border-top:1px solid var(--line); display:flex; align-items:center; gap:12px; z-index:20; box-shadow:0 -4px 16px rgba(15,23,42,.06); border-radius:0 0 var(--r-md) var(--r-md); }
+.formbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.formbar .cancel { color:var(--ink-3); text-decoration:none; font-size:13px; }
+.formbar .cancel:hover { color:var(--ink); }
+.config-form .form-section { grid-column:1 / -1; }
+.form-section { font-size:13px; font-weight:700; color:var(--ink-3); letter-spacing:.02em; border-bottom:1px solid var(--line); padding-bottom:6px; margin-top:8px; }
+/* API 行卡片（R2-D：api-main 主行 + api-more 展开区，与原型 page-api 统一为一套） */
+.api-row { border:1px solid var(--line); border-radius:var(--r-md); background:#fff; margin-bottom:10px; overflow:hidden; transition:border-color .12s, box-shadow .12s; }
+.api-row:hover { border-color:#c7d2fe; box-shadow:var(--sh-1); }
+.api-main { display:flex; gap:12px; align-items:center; padding:12px 14px; flex-wrap:wrap; cursor:pointer; }
+.api-main .name { font-weight:600; min-width:140px; color:#4f46e5; text-decoration:none; }
+.api-main .name:hover { text-decoration:underline; }
+.api-main .path-chip { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; background:var(--bg-subtle); border:1px solid var(--line); padding:2px 8px; border-radius:var(--r-sm); color:var(--ink-2); overflow-wrap:anywhere; }
+.api-main .ops { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.api-more { display:none; border-top:1px dashed var(--line); padding:12px 14px; background:var(--bg-subtle); font-size:13px; }
+.api-more.on { display:block; }
+.api-meta { display:flex; gap:14px; flex-wrap:wrap; color:#475569; font-size:12.5px; margin-bottom:4px; }
+.api-desc { color:#475569; overflow-wrap:anywhere; }
+.api-desc .lbl { font-weight:500; color:#64748b; margin-right:6px; }
+.api-help { margin:6px 0 0 0; font-size:12.5px; color:#64748b; }
+/* ===== 详情页：页头/Tab/工具行/抽屉/对话框（T7.4） ===== */
+.crumb { font-size:12px; color:var(--ink-3); margin-bottom:4px; }
+.crumb a { color:var(--ink-3); }
+.crumb a:hover { color:var(--brand); }
+.summary-line { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-3); margin-bottom:10px; flex-wrap:wrap; }
+.memo-bar { display:flex; gap:8px; align-items:center; background:var(--bg-subtle); border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:8px 12px; font-size:13px; color:var(--ink-2); margin-bottom:12px; }
+.memo-bar .txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:16px; flex-wrap:wrap; }
+.tab { border:0; background:none; padding:9px 14px; font-size:14px; font-weight:500; color:var(--ink-3); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; font-family:inherit; }
+.tab:hover { color:var(--ink); }
+.tab.active { color:var(--brand); border-bottom-color:var(--brand); font-weight:600; }
+.tabpanel { display:none; }
+.tabpanel.active { display:block; }
+.toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 12px; background:#fff; border:1px solid var(--line); border-radius:var(--r-md); margin-bottom:12px; }
+.toolbar .grow { flex:1; }
+.toolbar .meta { font-size:13px; color:var(--ink-3); }
+.toolbar .sep { width:1px; height:20px; background:var(--line); }
+.segment { display:inline-flex; background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:2px; gap:2px; }
+.segment button { border:0; background:transparent; padding:4px 12px; font-size:13px; color:var(--ink-2); border-radius:4px; cursor:pointer; font-family:inherit; }
+.segment button.active { background:#fff; color:var(--brand); font-weight:600; box-shadow:var(--sh-1); }
+.backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:50; opacity:0; pointer-events:none; transition:opacity .2s; }
+.backdrop.on { opacity:1; pointer-events:auto; }
+.side-panel {
+  position:fixed; top:0; right:0; bottom:0; width:420px; max-width:92vw; background:#fff;
+  z-index:60; box-shadow:var(--sh-2); transform:translateX(105%); transition:transform .2s ease-out;
+  overflow:auto; padding:16px 18px; border-radius:14px 0 0 14px; display:none;
+}
+.side-panel.on { display:block; transform:none; }
+.side-panel .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.side-panel .panel-head h3 { margin:0; font-size:15px; color:var(--ink); }
+.modal {
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-46%) scale(.98); width:560px; max-width:92vw;
+  background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-2); z-index:60; opacity:0; pointer-events:none;
+  transition:opacity .2s, transform .2s; max-height:88vh; overflow:auto;
+}
+.modal.on { opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+.modal .modal-head { padding:16px 18px 0; }
+.modal .modal-head h3 { margin:0; font-size:16px; }
+.modal .modal-body { padding:12px 18px 4px; font-size:14px; color:var(--ink-2); }
+.modal .modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:14px 18px 16px; }
+fieldset.fs { border:1px solid var(--line); border-radius:var(--r-sm); padding:12px 14px; margin-bottom:12px; }
+fieldset.fs legend { font-size:12px; font-weight:700; color:var(--ink-3); padding:0 6px; }
+.check-group { display:flex; flex-wrap:wrap; gap:10px 16px; }
+.check { display:inline-flex; align-items:center; gap:6px; font-size:14px; color:var(--ink-2); cursor:pointer; }
+/* ui-redesign R2-D：双栏布局与卡片头（原型 grid-2 / card-head 的生产唯一定义） */
+.grid-2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .grid-2 { grid-template-columns:minmax(0,1fr); } }
+.card-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.card-head .form-section, .card-head h2 {
+  margin:0; padding:0; border-bottom:0; font-size:15px; font-weight:700;
+  color:var(--ink); letter-spacing:-.1px;
+}
+.card-head .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+/* ui-redesign R2-D：排除规则可视化行/组（原型 rule-row / rule-group 的生产唯一定义） */
+.rule-group { border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:10px 12px; margin-bottom:8px; background:var(--bg-subtle); }
+.rule-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+/* ui-redesign R2-D：三栏统计磁贴/快捷入口网格（原型 grid-3 的生产唯一定义） */
+.grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .grid-3 { grid-template-columns:minmax(0,1fr); } }
+/* ui-redesign R2-D：SQL / 规则代码块（原型 code-block 的生产唯一定义） */
+.code-block { background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:10px 12px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px; line-height:20px; color:var(--ink-2); overflow:auto; white-space:pre-wrap; }
 .card {
-  background: #fff; border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-  padding: 24px; margin-bottom: 20px; animation: fadeUp 0.3s ease-out;
+  background: #fff; border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  padding: 20px; margin-bottom: 16px; animation: fadeUp 0.3s ease-out;
 }
 h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.3px; }
 h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
 .btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
-  text-decoration: none; cursor: pointer; transition: all 0.15s; border: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600;
+  text-decoration: none; cursor: pointer; transition: background 0.12s, border-color 0.12s; border: none;
 }
-.btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 2px 8px rgba(79,70,229,0.3); }
-.btn-primary:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,0.35); }
-.btn-success { background: #059669; color: #fff; box-shadow: 0 2px 8px rgba(5,150,105,0.3); }
-.btn-success:hover { background: #047857; transform: translateY(-1px); }
-.btn-danger { background: #dc2626; color: #fff; box-shadow: 0 2px 8px rgba(220,38,38,0.3); }
-.btn-danger:hover { background: #b91c1c; transform: translateY(-1px); }
-.btn-outline { background: transparent; color: #475569; border: 1px solid #e2e8f0; }
+.btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,0.35); }
+.btn-primary:hover { background: #4338ca; }
+.btn-success { background: #059669; color: #fff; box-shadow: 0 1px 2px rgba(5,150,105,0.3); }
+.btn-success:hover { background: #047857; }
+.btn-danger { background: #dc2626; color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,0.3); }
+.btn-danger:hover { background: #b91c1c; }
+.btn-outline { background: transparent; color: #475569; border: 1px solid var(--line-strong); }
 .btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
-.btn-sm { padding: 5px 12px; font-size: 13px; }
+.btn-sm { height: 26px; padding: 0 10px; font-size: 13px; }
+.btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
 table {
   border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
 }
 th {
-  background: #f8fafc; color: #475569; font-weight: 600; font-size: 13px;
-  text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 14px;
-  border-bottom: 2px solid #e2e8f0; text-align: left; white-space: nowrap;
+  background: var(--bg-subtle); color: var(--ink-2); font-weight: 600; font-size: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap;
   position: sticky; top: 0; z-index: 5;
 }
-td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; text-align: left; }
-tbody tr:hover { background: #f8fafc; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+/* ui-redesign R2-D：表头第二行快筛行（原型 qf-row；筛选输入迁出 th，协议不变） */
+tr.qf-row td { background: var(--bg-subtle); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+tr.qf-row td .filter-row { margin-top: 0; }
+tbody tr:hover { background: var(--bg-hover); }
 tbody tr:last-child td { border-bottom: none; }
-.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid #e2e8f0; border-radius: 8px; }
+.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid var(--line); border-radius: var(--r-md); }
 .flash {
-  padding: 14px 18px; border-radius: 8px; margin-bottom: 16px;
+  padding: 12px 14px; border-radius: var(--r-md); margin-bottom: 14px;
   font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
+  border: 1px solid transparent;
 }
 .flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
@@ -152,8 +336,8 @@ tbody tr:last-child td { border-bottom: none; }
 .pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
 .pagination a, .pagination .page-btn, .pagination .page-span {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 36px; height: 36px; padding: 0 10px; border-radius: 8px;
-  font-size: 14px; text-decoration: none; color: #475569; transition: all 0.15s;
+  min-width: 28px; height: 28px; padding: 0 8px; border-radius: var(--r-sm);
+  font-size: 13px; text-decoration: none; color: #475569; transition: background 0.12s;
 }
 .pagination a { background: #fff; border: 1px solid #e2e8f0; }
 .pagination a:hover { background: #f1f5f9; border-color: #cbd5e1; }
@@ -298,11 +482,6 @@ function toggleSection(btn, label) {
   var content = btn.nextElementSibling;
   var hidden = content.classList.toggle("hidden");
   btn.textContent = hidden ? "\u25b6 " + label : "\u25bc " + label;
-  var node = btn.closest('[data-mem-key]');
-  if (node) {
-    highlightMemMode(node, hidden ? 'fold' : 'open');
-    try { localStorage.setItem(node.getAttribute('data-mem-key'), hidden ? 'fold' : 'open'); } catch (e) {}
-  }
 }
 function toggleCatTree(btn) {
   var content = document.getElementById("cat-tree-content");
@@ -310,6 +489,27 @@ function toggleCatTree(btn) {
   var collapsed = content.classList.toggle("hidden");
   btn.textContent = (collapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
   try { localStorage.setItem("cat_tree_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+}
+function toggleCatNode(ev, row) {
+  if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button")) return;
+  var id = row.getAttribute("data-kids");
+  if (!id) return;
+  var kids = document.getElementById(id);
+  if (kids) kids.classList.toggle("on");
+}
+function apiToggleMore(btn) {
+  var row = btn && btn.closest && btn.closest(".api-row");
+  if (!row) return;
+  var more = row.querySelector(".api-more");
+  if (!more) return;
+  var on = more.classList.toggle("on");
+  btn.textContent = on ? "收起 ▴" : "展开 ▾";
+}
+function apiMainClick(ev, main) {
+  if (!ev || !ev.target || !ev.target.closest) return;
+  if (ev.target.closest("a, button, form, input, label")) return;
+  var btn = main.querySelector(".api-more-btn");
+  if (btn) apiToggleMore(btn);
 }
 function initCatTree() {
   var content = document.getElementById("cat-tree-content");
@@ -434,44 +634,6 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('DOMContentLoaded', function() {
   initCatTree();
 });
-function initMemToggles() {
-  var nodes = document.querySelectorAll('[data-mem-key]');
-  for (var i = 0; i < nodes.length; i++) {
-    applyMemMode(nodes[i], null, false);
-  }
-}
-function applyMemMode(node, mode, persist) {
-  var content = node.querySelector('.debug-content');
-  var btn = node.querySelector('.debug-toggle');
-  if (!content) return;
-  var key = node.getAttribute('data-mem-key');
-  var defHidden = node.getAttribute('data-default-hidden') === '1';
-  var m;
-  if (mode === null) {
-    try { m = localStorage.getItem(key) || 'auto'; } catch (e) { m = 'auto'; }
-  } else {
-    m = mode;
-  }
-  var isFold = (m === 'fold') || (m === 'auto' && defHidden);
-  content.classList.toggle('hidden', isFold);
-  if (btn) {
-    var label = btn.textContent.replace(/^[\u25b6\u25bc]\s*/, '');
-    btn.textContent = (isFold ? "\u25b6 " : "\u25bc ") + label;
-  }
-  highlightMemMode(node, m);
-  if (persist) { try { localStorage.setItem(key, m); } catch (e) {} }
-}
-function setMemToggle(btn, key, mode) {
-  var node = btn.closest('[data-mem-key]');
-  if (!node) return;
-  applyMemMode(node, mode, true);
-}
-function highlightMemMode(node, mode) {
-  var btns = node.querySelectorAll('.mem-mode');
-  for (var i = 0; i < btns.length; i++) {
-    btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === mode);
-  }
-}
 function showFlashWarn(msg) {
   /* 行内警告提示条（spec ux-optimization 批次6#27e）：替代阻塞式弹窗。
      复用 .flash-warn 样式，5 秒后自动隐藏；容器缺失时降级 console.warn。 */
@@ -576,14 +738,22 @@ function applyStoredCols(reportId) {
   });
 }
 function applyStoredColsToTable(wrap, visible) {
-  var headRow = wrap.querySelector('thead tr');
-  if (!headRow) return;
+  var headRows = wrap.querySelectorAll('thead tr');
+  if (!headRows.length) return;
   var hideIdx = [];
-  Array.prototype.forEach.call(headRow.children, function(th, i) {
+  Array.prototype.forEach.call(headRows[0].children, function(th, i) {
     var col = th.getAttribute('data-col');
     if (col !== null && !(col in visible)) { th.style.display = 'none'; hideIdx.push(i); }
   });
   if (!hideIdx.length) return;
+  /* ui-redesign R2-D：表头改为「排序行 + qf-row 快筛行」两行，隐藏列需同步 */
+  Array.prototype.forEach.call(headRows, function(row, ri) {
+    if (ri === 0) return;
+    hideIdx.forEach(function(i) {
+      var cell = row.children[i];
+      if (cell) cell.style.display = 'none';
+    });
+  });
   var bodyRows = wrap.querySelectorAll('tbody tr');
   Array.prototype.forEach.call(bodyRows, function(tr) {
     if (tr.children.length === 1 && tr.children[0].colSpan) return;
@@ -607,7 +777,6 @@ function initSqlEditorTabIndent() {
   });
 }
 document.addEventListener('DOMContentLoaded', function() {
-  initMemToggles();
   initFlashMessages();
   initAnchorRowHighlight();
   initQueryLoadingOverlay();
@@ -810,7 +979,9 @@ $common_css_assets
 <style>${extra_css}</style>
 </head>
 <body>
-$navbar
+<div class="app">
+$sidebar
+<main class="main">
 <div class="container">
 """)
 
@@ -846,12 +1017,13 @@ def ensure_common_assets(root: str = None) -> tuple[str, str] | None:
     """把公共 CSS/JS 写入 {root}/self@{hash8}/ 并返回 (css_url, js_url)。
 
     幂等：同内容重复调用覆盖写同样字节；内容升级生成新目录。
+    hash 覆盖 CSS+JS（ui-redesign C16：只改 JS 也会换 URL，避免 immutable 不刷新）。
     root 参数供测试注入临时目录；默认写仓库 static/vendor/。
     任一环节失败返回 None（调用方回退内联）。
     """
     try:
         base = root or self_assets_root()
-        hash8 = content_hash8(_COMMON_CSS)
+        hash8 = content_hash8(_COMMON_CSS + "\n;;;\n" + _COMMON_JS)
         target_dir = os.path.join(base, f"self@{hash8}")
         os.makedirs(target_dir, exist_ok=True)
         for fname, payload in (("common.css", _COMMON_CSS),
@@ -893,51 +1065,98 @@ def reset_common_assets_cache() -> None:
         _COMMON_ASSET_URLS = None
 
 def _render_common_footer() -> str:
-    """生成页尾公共脚本段（批次6#28）：外链可用时输出 <script defer>，
-    否则回退内联公共 JS。"""
+    """生成页尾公共脚本段：闭合 container/main/app + 外链公共 JS（失败内联回退）。"""
     _, js_url = _get_common_asset_urls()
     if js_url:
-        return f'</div>\n<script src="{js_url}" defer></script>\n</body>\n</html>'
-    return '</div>\n<script>' + _COMMON_JS + '</script>\n</body>\n</html>'
+        return ('</div>\n</main>\n</div>\n'
+                f'<script src="{js_url}" defer></script>\n</body>\n</html>')
+    return ('</div>\n</main>\n</div>\n'
+            '<script>' + _COMMON_JS + '</script>\n</body>\n</html>')
 
 # ---------------------------------------------------------------------------
 # 导航栏链接定义
 # ---------------------------------------------------------------------------
 
-_NAV_ITEMS = [
-    ("report", "/report", "报表页"),
-    ("config", "/config", "配置管理"),
-    ("scheduler", "/config/scheduler", "定时任务"),
-    ("api", "/config/api-endpoints", "API 接口"),
-    ("audit", "/audit", "审计日志"),
-    ("logout", "/logout", "退出"),
+# 侧栏导航（单一来源；ui-redesign T7.1，替代旧顶栏 _NAV_ITEMS）
+# 条目：(active_key, href, 标签, 可选内联 SVG path)
+_NAV_GROUPS = [
+    ("分析", [
+        ("report", "/report", "报表中心",
+         '<path d="M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6"/>'),
+    ]),
+    ("管理", [
+        ("config", "/config", "概览",
+         '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>'
+         '<rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
+        ("config-reports", "/config/reports", "报表配置",
+         '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>'),
+        ("config-pools", "/config/pools", "连接池",
+         '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>'),
+        ("config-users", "/config/users", "用户",
+         '<circle cx="9" cy="8" r="3.5"/><path d="M3 19c.5-3 2.8-4.5 6-4.5S14.5 16 15 19"/>'),
+    ]),
+    ("服务", [
+        ("api", "/config/api-endpoints", "API 接口",
+         '<path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19.1"/>'),
+        ("scheduler", "/config/scheduler", "定时任务",
+         '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
+    ]),
+    ("治理", [
+        ("audit", "/audit", "审计日志",
+         '<path d="M9 4h6l1 2h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3l1-2z"/><path d="M8 11h8M8 15h5"/>'),
+    ]),
 ]
 
 
-def _build_navbar_html(active: str = "") -> str:
-    """
-    构建导航栏 HTML。
+def _nav_is_active(key: str, active: str) -> bool:
+    """侧栏高亮：精确匹配 + config-reports 前缀（表单/列表同项）。"""
+    if not active:
+        return False
+    if key == active:
+        return True
+    if key == "config-reports" and active.startswith("config-reports"):
+        return True
+    return False
 
-    Args:
-        active: 当前活动页标识（report / config / logout），为空时无高亮。
 
-    Returns:
-        导航栏 HTML 字符串。
-    """
-    links_html = ""
+def _build_sidebar_html(active: str = "", nav_badges: dict = None,
+                        current_user: str = None) -> str:
+    """构建侧栏 HTML（含分组导航与账户区）。active 为 None/空时不高亮。"""
     active = active or ""
-    for key, href, label in _NAV_ITEMS:
-        # 子页面（如 config-reports）高亮所属主菜单项
-        is_active = key == active or (key == "config" and active.startswith("config-"))
-        cls = ' class="nav-active"' if is_active else ""
-        links_html += f'<a href="{href}"{cls}>{html_mod.escape(label)}</a>\n  '
-    return (
-        '<div class="navbar">\n'
-        '  <a href="/" class="brand">My<span>Report</span></a>\n'
-        '  <div class="spacer"></div>\n'
-        f'  {links_html}'
-        '</div>'
-    )
+    nav_badges = nav_badges or {}
+    parts = ['<aside class="sidebar" aria-label="主导航">',
+             '  <a class="brand" href="/report"><span class="logo">SR</span>'
+             '<span class="name">SqlReport</span></a>']
+    for group_title, items in _NAV_GROUPS:
+        parts.append(f'  <div class="nav-group">{html_mod.escape(group_title)}</div>')
+        for key, href, label, icon in items:
+            cls = ' class="nav-item nav-active"' if _nav_is_active(key, active) else ' class="nav-item"'
+            svg = (f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                   f'stroke-width="1.5">{icon}</svg>') if icon else ""
+            badge = ""
+            if key in nav_badges and nav_badges[key] is not None:
+                badge = f'<span class="nav-badge">{html_mod.escape(str(nav_badges[key]))}</span>'
+            parts.append(f'  <button type="button"{cls} '
+                         f"onclick=\"location.href='{href}'\" "
+                         f'title="{html_mod.escape(label)}">'
+                         f'{svg}<span>{html_mod.escape(label)}</span>{badge}</button>')
+    parts.append('  <div class="spacer"></div>')
+    parts.append('  <div class="account">')
+    if current_user:
+        initial = html_mod.escape(current_user[:1].upper() or "?")
+        parts.append(f'    <span class="avatar">{initial}</span>'
+                     f'<span class="who">{html_mod.escape(current_user)}</span>')
+    parts.append('    <a class="out" href="/logout">退出</a>')
+    parts.append('  </div>')
+    parts.append('</aside>')
+    return "\n".join(parts)
+
+
+def render_sidebar(active: str = "", nav_badges: dict = None,
+                   current_user: str = None) -> str:
+    """渲染侧栏导航（公开入口）。"""
+    return _build_sidebar_html(active, nav_badges=nav_badges,
+                               current_user=current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -953,36 +1172,41 @@ def _get_branding_prefix() -> str:
 
 def render_navbar(active: str = "") -> str:
     """
-    渲染导航栏。
+    渲染导航（兼容名 → 侧栏）。
 
     Args:
-        active: 当前活动页标识（report / config / logout），为空时无高亮。
+        active: 当前活动页标识，为空时无高亮。
 
     Returns:
-        导航栏 HTML 字符串。
+        侧栏 HTML 字符串。
     """
-    return _build_navbar_html(active)
+    return _build_sidebar_html(active)
 
 
-def render_page_header(title: str = "Web 报表工具",
+def render_page_header(title: str = "SqlReport",
                        active_nav: str = "",
-                       extra_css: str = "") -> str:
+                       extra_css: str = "",
+                       nav_badges: dict = None,
+                       current_user: str = None) -> str:
     """
-    渲染页面头部（<head> + 导航栏 + container 开头）。
+    渲染页面头部（<head> + 侧栏页壳 + container 开头）。
 
-    批次6#28：公共 CSS 优先外链（/static/vendor/self@{hash}/common.css，
-    immutable 缓存），资产写入失败时回退内联 <style>；extra_css 为页面
-    特有样式，始终内联。
+    ui-redesign T7.1：顶栏改为固定侧栏；公共 CSS 优先外链
+    （/static/vendor/self@{hash}/common.css，hash 覆盖 CSS+JS），失败回退内联。
+    extra_css 为页面特有样式，始终内联。
 
     Args:
         title: 页面标题（显示在浏览器标签页）。
-        active_nav: 当前活动页标识，传给导航栏用于高亮。
+        active_nav: 当前活动页标识，传给侧栏用于高亮。
         extra_css: 页面特定的额外 CSS 内容，追加在公共 CSS 之后。
+        nav_badges: 可选 {active_key: 数字}，侧栏徽标。
+        current_user: 可选当前用户名（侧栏账户区展示）。
 
     Returns:
         从 DOCTYPE 到 <div class="container"> 的完整头部 HTML。
     """
-    navbar_html = _build_navbar_html(active_nav)
+    sidebar_html = _build_sidebar_html(active_nav, nav_badges=nav_badges,
+                                       current_user=current_user)
     css_url, _ = _get_common_asset_urls()
     if css_url:
         common_css_assets = f'<link rel="stylesheet" href="{css_url}">'
@@ -997,17 +1221,24 @@ def render_page_header(title: str = "Web 报表工具",
         favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=common_css_assets,
         extra_css=extra_css.replace("$", "$$"),
-        navbar=navbar_html,
+        sidebar=sidebar_html,
     )
 
 
-def render_page_footer() -> str:
+def render_page_footer(extra_js: str = "") -> str:
     """
-    渲染页面尾部（container 闭合 + 脚本 + </body></html>）。
+    渲染页面尾部（container/main/app 闭合 + 脚本 + </body></html>）。
 
-    批次6#28：公共 JS 优先外链（<script defer>），资产写入失败时回退内联。
+    公共 JS 优先外链（<script defer>），资产写入失败时回退内联。
+    extra_js：页面级胶水脚本，以 defer 追加在公共 JS 之后（保持依赖顺序）。
     """
-    return _render_common_footer()
+    base = _render_common_footer()
+    if not extra_js:
+        return base
+    # 在 </body> 前插入页面级脚本
+    marker = "</body>\n</html>"
+    injected = f"<script defer>{extra_js}</script>\n{marker}"
+    return base.replace(marker, injected, 1)
 
 
 def build_config_filter_box_html() -> str:
@@ -1200,16 +1431,24 @@ def build_pagination_html(report_id: int, current: int, total_pages: int,
                           sorts=None, filters=None, cols_param: str = '',
                           result_param: str = '',
                           page_url_base: str = None,
-                          nested_filter=None) -> str:
+                          nested_filter=None,
+                          always: bool = False) -> str:
     """构建分页 HTML，携带多字段排序/筛选/自定义列/多结果参数。
 
     当提供 page_url_base 时，直接以此为基 URL（须已含 &amp; 转义），
     忽略 report_id/page_size/sorts/filters/cols/result 参数。
+    always=True（R2-D 报表详情页）：单页/空结果也渲染分页条（‹ 1 › + 跳转），
+    与原型 page-detail「表格下方恒显分页条」一致；默认 False 保持其它调用方
+    单页不输出的现状。
     """
     sorts = sorts or []
     filters = filters or []
-    if total_pages <= 1:
+    if total_pages <= 1 and not always:
         return ""
+    if always:
+        # 单页恒显：页数与当前页归一到 [1, max(total_pages,1)]，跳转仍受钳制
+        total_pages = max(int(total_pages or 0), 1)
+        current = min(max(int(current or 1), 1), total_pages)
 
     if page_url_base is not None:
         base_url = page_url_base
@@ -1285,13 +1524,13 @@ def build_redis_banners_html(cache_info) -> str:
             dt_str = app_config.format_local_time(ts, with_tz=False)
             banners.append(
                 f'<div class="flash flash-info">'
-                f'数据来自 Redis 快照（{_escape(dt_str)}）</div>'
+                f'数据来自缓存快照（{_escape(dt_str)}）</div>'
             )
     elif src == "mysql":
         if not redis_cache.redis_available():
             banners.append(
                 '<div class="flash flash-info">'
-                'Redis 不可用，已切换至直连 MySQL 模式'
+                '缓存服务暂不可用，已直连数据库查询（不影响使用）'
                 '</div>'
             )
 
@@ -1300,34 +1539,55 @@ def build_redis_banners_html(cache_info) -> str:
 
 def build_debug_section_html(pool_config, actual_sql, active_index,
                               num_results, result_names, filters, sorts) -> str:
-    """构建 Debug 信息折叠区 HTML。"""
+    """构建调试页签内容（R2-D：普通卡片 + grid-3 统计磁贴 + SQL 代码块）。
+
+    按已确认原型 page-detail「调试」页签：不再用 debug-info 折叠块。
+    连接池/结果/筛选/排序的可读信息行保留在磁贴下方（原文案），SQL 以
+    code-block 代码块展示（保留 .sql-debug 类，页面 JS 语法高亮照常生效）。
+    """
     sorts = sorts or []
     filters = filters or []
-    debug_lines = []
+    tiles = []
+    info_lines = []
     if pool_config:
         pname = pool_config.get("name", "?")
         phost = pool_config.get("host", "?")
         pport = pool_config.get("port", "?")
         puser = pool_config.get("user", "?")
         pdb = pool_config.get("database", "?")
-        debug_lines.append(f'连接池: {_escape(str(pname))} ({_escape(str(phost))}:{pport})'
-                           f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
-    debug_lines.append(
-        f'SQL: <pre class="sql-debug" style="white-space:pre-wrap;word-break:break-all;'
-        f'background:#f1f5f9;padding:8px 10px;border-radius:4px;font-size:13px;'
-        f'line-height:1.6;margin:4px 0;border:1px solid #e2e8f0;overflow-x:auto">'
-        f'{_escape(actual_sql)}</pre>'
-    )
+        tiles.append(
+            f'<div class="stat-tile"><div class="num">{_escape(str(pname))}</div>'
+            f'<div class="lbl">连接池 {_escape(str(phost))}:{pport}</div></div>')
+        tiles.append(
+            f'<div class="stat-tile"><div class="num">{_escape(str(pdb))}</div>'
+            f'<div class="lbl">数据库（用户 {_escape(str(puser))}）</div></div>')
+        info_lines.append(f'连接池: {_escape(str(pname))} ({_escape(str(phost))}:{pport})'
+                          f' | 用户: {_escape(str(puser))} | 数据库: {_escape(str(pdb))}')
     if num_results > 1:
-        debug_lines.append(f'结果: {active_index + 1}/{num_results} ({result_names[active_index]})')
+        tiles.append(
+            f'<div class="stat-tile"><div class="num">{active_index + 1}/{num_results}</div>'
+            f'<div class="lbl">结果视图（{_escape(str(result_names[active_index]))}）</div></div>')
+        info_lines.append(f'结果: {active_index + 1}/{num_results} ({result_names[active_index]})')
+    tiles.append(
+        f'<div class="stat-tile"><div class="num">{len(filters)} 条筛选 · {len(sorts)} 条排序</div>'
+        f'<div class="lbl">当前条件</div></div>')
     if filters:
         filter_desc = " AND ".join(f'{_escape(c)} {_escape(_OP_MAP.get(o, [o, o])[1])} "{_escape(v)}"' for c, o, v in filters)
-        debug_lines.append(f'筛选: {filter_desc}')
+        info_lines.append(f'筛选: {filter_desc}')
     if sorts:
         sort_desc = ", ".join(f'{_escape(c)} {"↑" if d == "asc" else "↓"}' for c, d in sorts)
-        debug_lines.append(f'排序: {sort_desc}')
-    debug_html = build_collapse_section_html("Debug 信息", "<br>".join(debug_lines))
-    return debug_html
+        info_lines.append(f'排序: {sort_desc}')
+    grid_html = (f'<div class="grid-3" style="margin-bottom:12px">{"".join(tiles)}</div>'
+                 if tiles else "")
+    info_html = (f'<div class="muted" style="font-size:13px;line-height:1.8;margin-bottom:10px">'
+                 f'{"<br>".join(info_lines)}</div>' if info_lines else "")
+    return (f'<div class="card">'
+            f'<div class="card-head"><h2>执行信息（Debug）</h2></div>'
+            f'{grid_html}{info_html}'
+            f'<h3 style="font-size:14px;margin-bottom:6px">实际执行 SQL</h3>'
+            f'<pre class="sql-debug code-block" style="word-break:break-all">'
+            f'{_escape(actual_sql)}</pre>'
+            f'</div>')
 
 
 # 嵌套筛选叶节点运算符 → 中文标签（与 result_transform._NESTED_LEAF_OPS 对齐）
@@ -1489,9 +1749,9 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
                                       all_columns: list[str],
                                       nested_filter=None) -> str:
     """
-    构建当前规则输出折叠区 HTML。
-    展示当前报表使用的筛选/排序/字段规则为 JSON 格式，提供复制按钮，
-    方便用户将规则粘贴到 API 接口配置表单。
+    构建「规则」页签内容（R2-D：左右分栏双卡，原型 page-detail）。
+    左卡=嵌套条件构建器；右卡=当前报表筛选/排序/字段规则为 JSON 格式，提供
+    复制/应用按钮，方便用户将规则粘贴到 API 接口配置表单。
     """
     sorts = sorts or []
     filters = filters or []
@@ -1547,63 +1807,64 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         'border-radius:6px;font-size:13px;line-height:1.5;font-family:monospace;border:1px solid #334155;'
         'resize:vertical;margin:0;min-height:80px" spellcheck="false">'
         f'{_escape(rules_json)}</textarea>'
-        '<div style="margin-top:6px;display:flex;gap:6px">'
-        '<button onclick="copyRulesJson()" class="btn-mini btn-mini-solid btn-mini-primary">复制</button>'
-        '<button onclick="applyRulesJson()" class="btn-mini btn-mini-solid btn-mini-success">应用</button>'
-        '</div>'
         '</div>'
         '<div style="margin-top:6px;font-size:12px;color:#64748b">'
         '提示: 以上 JSON 同时包含筛选/排序/字段/嵌套筛选，粘贴到 API 接口配置的「规则 JSON」即可完整复用当前报表规则。'
         '</div>'
     )
     builder_html = build_nested_filter_builder_html(all_columns, nested_filter)
-    content = (builder_html
-               + '<hr style="margin:10px 0;border:none;border-top:1px solid #e2e8f0">'
-               + content)
-    return build_collapse_section_html("当前规则", content, extra_style="margin-top:8px")
+    # R2-D（原型 page-detail「规则」页签）：grid-2 左右双卡（任务书/知识库
+    # 06 卷确认结构；原型为 340px split，此处按任务书用 grid-2 等宽双卡）——
+    # 左=嵌套条件构建器（筛选/排除规则），右=当前规则 JSON（复制/应用）。
+    left_card = ('<div class="card">'
+                 '<div class="card-head"><h2>嵌套条件</h2></div>'
+                 + builder_html + '</div>')
+    right_card = ('<div class="card">'
+                  '<div class="card-head"><h2>当前规则</h2>'
+                  '<div class="actions">'
+                  '<button type="button" onclick="copyRulesJson()" '
+                  'class="btn btn-outline btn-sm">复制 JSON</button>'
+                  '<button type="button" onclick="applyRulesJson()" '
+                  'class="btn btn-secondary btn-sm">从 JSON 应用</button>'
+                  '</div></div>' + content + '</div>')
+    return f'<div class="grid-2">{left_card}{right_card}</div>'
 
 
 def build_memo_section_html(memo_raw: str, report_id: int = None) -> str:
-    """构建备注折叠区 HTML。
+    """构建「备注」页签内容（R2-D：普通卡片，非折叠块）。
 
     备注内容为 Markdown 源文本：经 render_markdown() 渲染为已消毒的 HTML
     （含 ```mermaid 时产出 <pre class="mermaid">，由前端按需渲染）。
-    批次6#24（spec ux-optimization）：默认态改为折叠——备注不再挤占表格首屏，
-    表格自然回归首屏。已有三态记忆的用户保持其选择：前端 applyMemMode 在
-    auto 态读取 data-default-hidden（现恒为折叠），open/fold 记忆照常覆盖。
-    report_id 提供时启用三态记忆控件，
-    记忆键 memo_fold_{report_id}；report_id 为 None 时无记忆控件。
+    按已确认原型 page-detail：页签内直接展示卡片（card + card-head + md-body），
+    不再使用 debug-info 折叠块；无备注时显示占位文案。
+    report_id 仅保留签名兼容（三态折叠记忆已废除，不再使用）。
     """
-    memo_btn_text = "▶ 备注"
-    memo_hidden = True
     memo_html = markdown_render.render_markdown(memo_raw)
     # 内容外包 .md-body 排版容器（消费页 extra_css 末尾的 _MD_CSS 提供样式）
-    memo_html = f'<div class="md-body">{memo_html}</div>' if memo_html else ""
-    return build_collapse_section_html("备注", memo_html,
-                                       default_hidden=memo_hidden,
-                                       button_text=memo_btn_text,
-                                       mem_key=(f"memo_fold_{report_id}"
-                                                if report_id is not None else None))
+    body = f'<div class="md-body">{memo_html}</div>' if memo_html else '<div class="muted">暂无备注</div>'
+    return ('<div class="card">'
+            '<div class="card-head"><h2>备注（Markdown）</h2></div>'
+            + body + '</div>')
 
 
 def build_result_selector_html(report_id, qs_page_size, result_names,
                                 active_index, sql_override, swi,
                                 filters=None, sorts=None) -> str:
-    """构建多结果集切换下拉框 HTML。
+    """构建多结果集切换 segment（R2-D：原型 page-detail 工具行内的结果集分段控件）。
 
+    协议不变：容器携带 data-report-id / data-active-index / data-swi /
+    data-page-size / data-sql-override，点击按钮走 switchResult 切换 result=N。
     filters/sorts: 当前结果视图已应用的筛选/排序（用于状态角标，None 视为无）。
     """
     num_results = len(result_names)
     if num_results <= 1:
         return ""
-    opts = "".join(
-        f'<option value="{i}"{" selected" if i == active_index else ""}>{_escape(result_names[i])}</option>'
+    seg_btns = "".join(
+        f'<button type="button" class="{"active" if i == active_index else ""}"'
+        f' data-index="{i}" onclick="switchResult(this)">'
+        f'{_escape(result_names[i])}</button>'
         for i in range(num_results)
     )
-    qs_parts = [f"id={report_id}", f"page_size={qs_page_size}"]
-    if sql_override:
-        qs_parts.append(f"sql_query={urllib.parse.quote(sql_override)}")
-    base_qs = "&".join(qs_parts)
     # PH-11 视图状态角标：复用 sort-tag 样式，当前视图已应用筛选/排序时展示
     badge_parts = []
     if filters:
@@ -1618,15 +1879,12 @@ def build_result_selector_html(report_id, qs_page_size, result_names,
             f'font-size:12px;border:1px solid #c7d2fe">已排序 ×{len(sorts)}</span>')
     badges_html = "".join(badge_parts)
     return (
-        f'<div class="result-selector" style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-        f'<label style="font-size:13px;color:#475569;font-weight:500">结果视图:</label>'
-        f'<select id="resultSwitcher"'
+        f'<div class="result-selector" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"'
         f' data-report-id="{report_id}" data-active-index="{active_index}"'
         f' data-swi="{_escape(swi)}" data-page-size="{qs_page_size}"'
-        f' data-sql-override="{_escape(sql_override or "")}"'
-        f' onchange="switchResult(this)"'
-        f' style="padding:4px 8px;font-size:13px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">'
-        f'{opts}</select>'
+        f' data-sql-override="{_escape(sql_override or "")}">'
+        f'<span style="font-size:13px;color:#475569;font-weight:500">结果视图:</span>'
+        f'<div class="segment" aria-label="结果集">{seg_btns}</div>'
         f'{badges_html}'
         f'<span style="font-size:12px;color:#64748b">每个结果视图独立维护筛选/排序/分页状态</span>'
         f'</div>'
@@ -1642,12 +1900,13 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
     （ts + ttl*3600），已过期显示警示样式 + 「已过期（下次请求自动刷新）」；
     TTL=0（永不过期）保持现状。
     """
-    extra = ""
+    parts = []
     expired = False
     if prefer_cache:
-        extra = " prefer_cache"
+        parts.append("已启用缓存")
         if cache_ttl_hours > 0:
-            extra += f" | TTL={cache_ttl_hours}h"
+            parts.append(f"缓存 {cache_ttl_hours} 小时")
+    extra = (" · " + " · ".join(parts)) if parts else ""
     if cache_info:
         src = cache_info.get("source", "")
         ts = cache_info.get("timestamp")
@@ -1655,33 +1914,33 @@ def build_cache_badge_html(cache_info, prefer_cache: bool = False,
                 and prefer_cache and cache_ttl_hours > 0 and ts
                 and ts + cache_ttl_hours * 3600 < time.time()):
             expired = True
-            extra += " | 已过期（下次请求自动刷新）"
+            extra += " · 已过期，下次访问自动刷新"
         if src == "redis":
             age = int(time.time() - ts) if ts else 0
             css = "flash-warn" if expired else "fresh"
             return (f'<span class="cache-badge {css}">'
-                    f'Redis 快照 ({age}s 前{extra})'
+                    f'缓存快照 ({age}s 前{extra})'
                     '</span>')
         elif src == "redis_fallback":
             age = int(time.time() - ts) if ts else 0
             return ('<span class="cache-badge flash-warn">'
-                    f'缓存快照（{age}s 前{extra}，MySQL 不可用）'
+                    f'缓存快照（{age}s 前{extra}，数据库不可用）'
                     '</span>')
         elif src == "process":
             age = int(time.time() - ts) if ts else 0
             css = "flash-warn" if expired else "fresh"
             return (f'<span class="cache-badge {css}">'
-                    f'进程缓存 ({age}s 前刷新{extra})'
+                    f'本地缓存 ({age}s 前刷新{extra})'
                     '</span>')
         else:
-            badge = '直连 MySQL'
+            badge = '实时查询'
             if extra:
-                badge += f' ({extra.strip()})'
+                badge += f' ({extra[3:]})'
             return f'<span class="cache-badge">{badge}</span>'
     else:
         badge = '未缓存'
         if extra:
-            badge += f' ({extra.strip()})'
+            badge += f' ({extra[3:]})'
         return f'<span class="cache-badge">{badge}</span>'
 
 
@@ -1725,11 +1984,17 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
 def build_table_header_html(columns, display_columns, sorts, filters,
                              report_id, page_size, cols_param, result_param,
                              nested_filter=None) -> str:
-    """构建表头 HTML（含排序双箭头 + 筛选操作符下拉框 + 筛选输入框）。"""
+    """构建表头 HTML（排序行 + 独立快筛行）。
+
+    R2-D（原型 page-detail 数据页签）：第 1 行 <tr> 只放列名与排序双箭头；
+    第 2 行 <tr class="qf-row"> 放筛选操作符下拉框 + 筛选输入框（表头下独立
+    快筛行）。筛选协议（f_/op_ 参数名、form="ff" 关联、操作符集合）不变。
+    """
     sorts = sorts or []
     filters = filters or []
     filter_form_id = "ff"
     thead_parts = ["<tr>"]
+    qf_parts = ['<tr class="qf-row">']
     for col in display_columns:
         current_dir = None
         sort_priority = 0
@@ -1807,7 +2072,8 @@ def build_table_header_html(columns, display_columns, sorts, filters,
         input_style = "display:none" if input_hidden else ""
         input_disabled = "disabled" if input_hidden else ""
 
-        # 批次6#25：data-col 供前端列设置 localStorage 记忆定位列（th 隐藏 + 同索引 td 隐藏）
+        # 批次6#25：data-col 供前端列设置 localStorage 记忆定位列（排序行/快筛行
+        # 同步隐藏 + 同索引 td 隐藏；R2-D：快筛移至表头下独立 qf-row）
         thead_parts.append(f"""<th data-col="{_escape(col)}">
   <div class="sort-links" style="display:inline-flex;align-items:center;gap:0">
     <a href="{asc_href}" class="sort-link" title="升序">{_escape(col)}</a>
@@ -1815,7 +2081,9 @@ def build_table_header_html(columns, display_columns, sorts, filters,
     <a href="{desc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="降序"><span class="{desc_cls}">▼</span></a>
     {priority_badge}
   </div>
-  <div class="filter-row" style="display:flex;gap:2px;margin-top:6px;align-items:center">
+</th>""")
+        qf_parts.append(f"""<td data-col="{_escape(col)}">
+  <div class="filter-row" style="display:flex;gap:2px;align-items:center">
     <select class="filter-op" form="{filter_form_id}" name="{filter_op_name}"
       style="padding:2px 2px;font-size:11px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;width:auto;min-width:52px;flex-shrink:0;cursor:pointer"
       onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
@@ -1824,9 +2092,10 @@ def build_table_header_html(columns, display_columns, sorts, filters,
       value="{_escape(cur_fval)}" title="{_escape(cur_fval)}"
       style="{input_style}" {input_disabled}>
   </div>
-</th>""")
+</td>""")
     thead_parts.append("</tr>")
-    return "".join(thead_parts)
+    qf_parts.append("</tr>")
+    return "".join(thead_parts) + "".join(qf_parts)
 
 
 def build_table_body_html(rows, display_indices, filters=None,
@@ -1859,10 +2128,14 @@ def build_table_body_html(rows, display_indices, filters=None,
 def build_controls_bar_html(report_id, page_size, sorts, filters,
                              cols_param, display_columns, active_index,
                              cache_badge, total_rows, total_pages,
-                             result_param='', page=1, nested_filter=None) -> str:
-    """构建控制栏 HTML（分页控件、导出表单、缓存状态等）。
-    result_param: 多结果集时的 URL 参数字符串（如 "result=0"），仅当 num_results > 1 时非空。
-    page: 当前页码（重建缓存 POST 表单随附，回跳保持分页位置）。
+                             result_param='', page=1, nested_filter=None,
+                             result_html='') -> str:
+    """构建数据页工具行（分页行数、页大小、结果集 segment、刷新、设置抽屉、高级筛选、缓存状态）。
+
+    ui-redesign T7.4：导出选项迁至统一导出对话框（build_export_modal_html），
+    字段/排序设置改为右侧抽屉；页大小/重建缓存协议与隐藏字段保持不变。
+    result_html（R2-D）：多结果集 segment（build_result_selector_html 输出），
+    非空时插在页大小表单之后、grow 之前（原型 page-detail 工具行内）。
     """
     sorts = sorts or []
     filters = filters or []
@@ -1871,77 +2144,29 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
                  f'{_escape(urllib.parse.quote(json.dumps(nested_filter, ensure_ascii=False), safe=""))}">'
                  ) if nested_filter else ""
     return f"""
-<div class="controls">
-  <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:12px">
+<div class="toolbar">
+  <span class="meta">共 {total_rows} 行，{total_pages} 页</span>
+  <form method="get" action="/report" style="display:inline-flex;align-items:center;gap:8px">
     <input type="hidden" name="id" value="{report_id}">
     {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
     {"".join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
     {filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
     {nf_hidden}
-    <label>每页行数:
-      <select name="page_size" onchange="this.form.submit()">
+    <label>每页
+      <select name="page_size" onchange="this.form.submit()" style="height:26px;font-size:13px">
         {''.join(f'<option value="{s}"{" selected" if page_size == s else ""}>{s}</option>'
                  for s in [10, 20, 50, 100, 200])}
       </select>
     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">刷新</button></noscript>
   </form>
-  <form method="get" action="/export" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
-    <input type="hidden" name="id" value="{report_id}">
-    {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
-    {''.join(f'<input type="hidden" name="sort" value="{_escape(c)}"><input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)}
-    {filter_hidden_inputs(filters) if filters else ''}
-    {cols_hidden}
-    {nf_hidden}
-    <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
-      格式:
-      <select name="format" id="export-format-select" onchange="updateExportSmartState()" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-        <option value="csv">CSV</option>
-        <option value="json">JSON</option>
-      </select>
-    </label>
-    <details class="export-more" style="position:relative;display:inline-block">
-      <summary style="font-size:12px;color:#475569;cursor:pointer;user-select:none;list-style:none;background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px">更多选项 ▾</summary>
-      <div style="position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:8px;min-width:240px">
-        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:3px">
-          字符集:
-          <select name="charset" style="padding:2px 5px;font-size:12px;border:1px solid #e2e8f0;border-radius:4px">
-            <option value="gbk">GBK（Excel 中文版推荐）</option>
-            <option value="utf8">UTF-8（通用 / 程序处理）</option>
-          </select>
-        </label>
-        <div id="export-smart-panel" style="border-top:1px dashed #e2e8f0;padding-top:6px;font-size:12px;color:#475569;line-height:1.7">
-          <input type="hidden" name="smart_quotes" id="export-smart-quotes-input" value="0">
-          <div style="font-weight:600;color:#334155">智能去引号
-            <span id="export-smart-csv-hint" style="display:none;color:#dc2626;font-weight:400">（仅 JSON 格式支持）</span>
-          </div>
-          <label style="display:inline-flex;align-items:center;gap:2px;margin-top:2px">
-            <input type="checkbox" class="smart-quote-cb" value="1" onchange="updateExportSmartFlags()"> 十进制数字（含正负号）
-          </label>
-          <label style="display:inline-flex;align-items:center;gap:2px">
-            <input type="checkbox" class="smart-quote-cb" value="2" onchange="updateExportSmartFlags()"> 科学计数法
-          </label>
-          <label style="display:inline-flex;align-items:center;gap:2px">
-            <input type="checkbox" class="smart-quote-cb" value="4" onchange="updateExportSmartFlags()"> 千分位数字
-          </label>
-          <div style="font-size:11px;color:#64748b;line-height:1.6;margin-top:2px">
-            原生 int/float 恒裸输出；Decimal 数值列勾选十进制/科学时输出数字；勾选形态的字符串值
-            去引号，未勾选保持带引号；千分位输出去逗号；输出永远合法 JSON（RFC 8259）。
-          </div>
-        </div>
-        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-          <input type="checkbox" name="zip" value="1"> 压缩包
-        </label>
-        <label style="font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:2px">
-          <input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段
-        </label>
-      </div>
-    </details>
-    <button type="submit" class="btn btn-success btn-sm btn-mini-m">导出</button>
-  </form>
-  <button type="button" onclick="document.getElementById('fieldSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⚙ 字段设置</button>
-  <button type="button" onclick="document.getElementById('sortSettingsPanel').style.display='block'" class="btn-refresh" style="font-size:13px">⇅ 排序设置</button>
+  {f'<span class="sep"></span>{result_html}' if result_html else ''}
+  <div class="grow"></div>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('fieldSettingsPanel')">⚙ 字段设置</button>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('sortSettingsPanel')">⇅ 排序设置</button>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="gotoTab('rules')">高级筛选</button>
+  <span class="sep"></span>
    <form method="post" action="/report" style="display:inline-flex;align-items:center">
     <input type="hidden" name="action" value="refresh_cache">
     <input type="hidden" name="id" value="{report_id}">
@@ -1952,11 +2177,97 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {cols_hidden}
     {nf_hidden}
     {f'<input type="hidden" name="result" value="{active_index}">' if result_param else ''}
-    <button type="submit" class="btn-refresh">⟳ 重建缓存</button>
+    <button type="submit" class="btn btn-sm btn-refresh">⟳ 重建缓存</button>
    </form>
   {cache_badge}
-  <span class="stat">共 {total_rows} 行，{total_pages} 页</span>
-  <script>
+</div>"""
+
+
+def build_export_modal_html(report_id, sorts, filters, cols_param,
+                            display_columns, active_index,
+                            result_param='', nested_filter=None) -> str:
+    """统一导出对话框（GET /export，协议与原内联表单一致）。
+
+    选项常显：格式 / 字符集 / 智能去引号 / 压缩包 / 应用自定义字段（T7.4）。
+    """
+    sorts = sorts or []
+    filters = filters or []
+    cols_hidden = (f'<input type="hidden" name="cols" '
+                   f'value="{_escape(",".join(display_columns))}">') if cols_param else ""
+    nf_hidden = (f'<input type="hidden" name="nested_filter" value="'
+                 f'{_escape(urllib.parse.quote(json.dumps(nested_filter, ensure_ascii=False), safe=""))}">'
+                 ) if nested_filter else ""
+    hiddens = (
+        f'<input type="hidden" name="id" value="{report_id}">'
+        + (f'<input type="hidden" name="result" value="{active_index}">' if result_param else "")
+        + "".join(f'<input type="hidden" name="sort" value="{_escape(c)}">'
+                  f'<input type="hidden" name="dir" value="{_escape(d)}">' for c, d in sorts)
+        + (filter_hidden_inputs(filters) if filters else "")
+        + cols_hidden + nf_hidden
+    )
+    return f"""
+<div class="modal" id="modal-export" role="dialog" aria-modal="true" aria-label="导出">
+  <div class="modal-head"><h3>导出</h3></div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px">导出当前筛选、排序与列设置的完整结果集（不分页）。</p>
+    <form method="get" action="/export" id="export-modal-form">
+      {hiddens}
+      <fieldset class="fs">
+        <legend>格式</legend>
+        <div class="check-group">
+          <label class="check"><input type="radio" name="format" value="csv" checked id="export-format-csv"> CSV（UTF-8 BOM）</label>
+          <label class="check"><input type="radio" name="format" value="json" id="export-format-json"> JSON</label>
+          <label class="check"><input type="checkbox" name="zip" value="1"> 打包为 ZIP</label>
+        </div>
+        <select name="format" id="export-format-select" style="display:none">
+          <option value="csv">CSV</option><option value="json">JSON</option>
+        </select>
+      </fieldset>
+      <fieldset class="fs">
+        <legend>字符集</legend>
+        <div class="check-group">
+          <label class="check"><input type="radio" name="charset" value="gbk" checked> GBK（Excel 中文版推荐）</label>
+          <label class="check"><input type="radio" name="charset" value="utf8"> UTF-8（通用 / 程序处理）</label>
+        </div>
+      </fieldset>
+      <fieldset class="fs">
+        <legend>智能去引号（仅 JSON）</legend>
+        <div id="export-smart-panel">
+          <input type="hidden" name="smart_quotes" id="export-smart-quotes-input" value="0">
+          <div class="check-group">
+            <label class="check"><input type="checkbox" class="smart-quote-cb" value="1"> 十进制数字（含正负号）</label>
+            <label class="check"><input type="checkbox" class="smart-quote-cb" value="2"> 科学计数法</label>
+            <label class="check"><input type="checkbox" class="smart-quote-cb" value="4"> 千分位数字</label>
+          </div>
+          <div style="font-size:12px;color:#64748b;line-height:1.6;margin-top:6px">
+            原生 int/float 恒裸输出；输出永远合法 JSON（RFC 8259）。
+            <span id="export-smart-csv-hint" style="display:none;color:#dc2626">（仅 JSON 格式支持）</span>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fs">
+        <legend>列范围</legend>
+        <label class="check"><input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段</label>
+      </fieldset>
+    </form>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn btn-secondary" onclick="closePanel('modal-export')">取消</button>
+    <button type="submit" form="export-modal-form" class="btn btn-primary">导出</button>
+  </div>
+</div>
+<script>
+(function () {{
+  function syncRadio() {{
+    var sel = document.getElementById('export-format-select');
+    if (!sel) return;
+    sel.value = (document.getElementById('export-format-json')||{{}}).checked ? 'json' : 'csv';
+    if (typeof updateExportSmartState === 'function') updateExportSmartState();
+  }}
+  var rj = document.getElementById('export-format-json');
+  var rc = document.getElementById('export-format-csv');
+  if (rj) rj.addEventListener('change', syncRadio);
+  if (rc) rc.addEventListener('change', syncRadio);
   function updateExportSmartFlags() {{
     var input = document.getElementById('export-smart-quotes-input');
     if (!input) return;
@@ -1968,9 +2279,9 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     input.value = flags;
   }}
   function updateExportSmartState() {{
-    var fmtSel = document.getElementById('export-format-select');
-    if (!fmtSel) return;
-    var isCsv = fmtSel.value === 'csv';
+    var sel = document.getElementById('export-format-select');
+    if (!sel) return;
+    var isCsv = sel.value === 'csv';
     var cbs = document.querySelectorAll('#export-smart-panel .smart-quote-cb');
     cbs.forEach(function(cb) {{
       cb.disabled = isCsv;
@@ -1980,11 +2291,14 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     var hint = document.getElementById('export-smart-csv-hint');
     if (hint) hint.style.display = isCsv ? 'inline' : 'none';
   }}
-  document.addEventListener('DOMContentLoaded', function() {{
-    updateExportSmartState();
+  window.updateExportSmartFlags = updateExportSmartFlags;
+  window.updateExportSmartState = updateExportSmartState;
+  document.querySelectorAll('#export-smart-panel .smart-quote-cb').forEach(function(cb) {{
+    cb.addEventListener('change', updateExportSmartFlags);
   }});
-  </script>
-</div>"""
+  document.addEventListener('DOMContentLoaded', updateExportSmartState);
+}})();
+</script>"""
 
 
 def build_field_settings_panel_html(all_columns, display_columns) -> str:
@@ -2014,14 +2328,13 @@ def build_field_settings_panel_html(all_columns, display_columns) -> str:
             f'</label>'
         )
     field_settings_html = (
-        '<div id="fieldSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
-        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        '<h3 style="margin:0;font-size:15px;color:#1e293b">字段设置</h3>'
-        '<button type="button" onclick="document.getElementById(\'fieldSettingsPanel\').style.display=\'none\'" '
-        'class="btn-mini btn-mini-outline-light">收起</button>'
-        '</div>'
-        '<div id="fieldList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px;max-height:400px;overflow-y:auto">'
+        '<div id="fieldSettingsPanel" class="side-panel" role="dialog" '
+        'aria-modal="true" aria-label="字段设置">'
+        '<div class="panel-head"><h3>字段设置</h3>'
+        '<button type="button" class="btn btn-sm btn-ghost" '
+        'onclick="closePanel(\'fieldSettingsPanel\')">收起</button></div>'
+        '<div id="fieldList" style="display:grid;'
+        'grid-template-columns:1fr;gap:6px;max-height:60vh;overflow-y:auto">'
         + "".join(field_settings_items) +
         '</div>'
         '<div style="display:flex;gap:8px;margin-top:12px">'
@@ -2063,32 +2376,26 @@ def build_sort_settings_panel_html(sorts, all_columns) -> str:
         )
     col_options = "".join(f'<option value="{_escape(c)}">{_escape(c)}</option>' for c in all_columns)
     sort_settings_html = (
-        '<div id="sortSettingsPanel" style="display:none;margin-bottom:16px;padding:16px;'
-        'background:#fff;border:1px solid #e2e8f0;border-radius:8px">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        '<h3 style="margin:0;font-size:15px;color:#1e293b">排序设置</h3>'
-        '<button type="button" onclick="document.getElementById(\'sortSettingsPanel\').style.display=\'none\'" '
-        'class="btn-mini btn-mini-outline-light">收起</button>'
+        '<div id="sortSettingsPanel" class="side-panel" role="dialog" '
+        'aria-modal="true" aria-label="排序设置">'
+        '<div class="panel-head"><h3>排序设置</h3>'
+        '<button type="button" class="btn btn-sm btn-ghost" '
+        'onclick="closePanel(\'sortSettingsPanel\')">收起</button></div>'
+        '<div id="sortList" style="display:flex;flex-direction:column;gap:6px;'
+        'max-height:40vh;overflow-y:auto;margin-bottom:8px">'
+        + ("".join(sort_settings_items)
+           if sort_settings_items else
+           '<div style="color:#64748b;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
         '</div>'
-        '<div id="sortList" style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:8px">'
-        + ("".join(sort_settings_items) if sort_settings_items
-           else '<div style="color:#64748b;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
-        '</div>'
-        '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:#f8fafc;'
-        'border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
-        '<select id="newSortCol" style="flex:1;padding:4px 8px;border:1px solid #e2e8f0;'
-        'border-radius:4px;font-size:13px">'
-        '<option value="">-- 添加排序字段 --</option>'
-        + col_options +
-        '</select>'
-        '<select id="newSortDir" style="padding:4px 8px;border:1px solid #e2e8f0;'
-        'border-radius:4px;font-size:13px">'
-        '<option value="asc">↑ 升序</option>'
-        '<option value="desc">↓ 降序</option>'
-        '</select>'
+        '<div style="display:flex;gap:8px;align-items:center;padding:8px;'
+        'background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
+        '<select id="newSortCol" style="flex:1;padding:4px 8px;font-size:13px">'
+        '<option value="">-- 添加排序字段 --</option>' + col_options + '</select>'
+        '<select id="newSortDir" style="padding:4px 8px;font-size:13px">'
+        '<option value="asc">↑ 升序</option><option value="desc">↓ 降序</option></select>'
         '<button type="button" onclick="addSortItem()" class="btn btn-primary btn-sm">添加</button>'
         '</div>'
-        '<div style="display:flex;gap:8px;margin-top:8px">'
+        '<div style="display:flex;gap:8px;align-items:center">'
         '<button type="button" onclick="applySortSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
         '</div>'
         '</div>'
@@ -2209,9 +2516,11 @@ def build_report_switcher_html(reports_data, all_cats, cat_tree,
 # ===================================================================
 
 
-def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm") -> str:
-    """生成链接按钮"""
-    return f'<a href="{_escape(url)}" class="{cls}">{_escape(label)}</a>'
+def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm",
+              title: str = "") -> str:
+    """生成链接按钮（title 可选：图标化按钮的无障碍提示）"""
+    title_attr = f' title="{_escape(title)}"' if title else ""
+    return f'<a href="{_escape(url)}" class="{cls}"{title_attr}>{_escape(label)}</a>'
 
 
 def _report_delete_confirm(report: dict,
@@ -2230,7 +2539,9 @@ def _report_delete_confirm(report: dict,
 def build_delete_form_html(action_url: str, confirm_msg: str,
                            extra_hidden: str = "",
                            button_cls: str = "",
-                           indent: int = 4) -> str:
+                           indent: int = 4,
+                           label: str = "删除",
+                           btn_title: str = "") -> str:
     """构建删除确认表单 HTML（POST + confirm 确认 + 可选隐藏域）。
 
     参数:
@@ -2239,17 +2550,20 @@ def build_delete_form_html(action_url: str, confirm_msg: str,
         extra_hidden: 额外隐藏域 HTML，多行时按按钮行缩进统一缩进
         button_cls: 追加到按钮的额外 class（如迷你按钮尺寸 .btn-mini-s）
         indent: 表单开标签源码缩进空格数（与调用处对齐，保持输出逐字符一致）
+        label: 按钮可见文本（默认「删除」；左树图标化时传 ✕）
+        btn_title: 按钮 title 提示（空则不输出 title 属性；图标化时传无障碍文案）
     """
     pad = " " * indent
     btn_pad = " " * (indent + 2)
     hidden_html = ""
     if extra_hidden:
         hidden_html = "\n".join(f"{btn_pad}{ln}" for ln in extra_hidden.split("\n")) + "\n"
+    title_attr = f' title="{_escape(btn_title)}"' if btn_title else ""
     return (
         f'{pad}<form method="post" action="{action_url}" style="display:inline"\n'
         f'{pad}      onsubmit="return confirm(\'{confirm_msg}\')">\n'
         f'{btn_pad}{hidden_html}'
-        f'<button type="submit" class="btn btn-danger btn-sm{button_cls}">删除</button>\n'
+        f'<button type="submit" class="btn btn-danger btn-sm{button_cls}"{title_attr}>{_escape(label)}</button>\n'
         f'{pad}</form>'
     )
 
@@ -2435,11 +2749,14 @@ def _get_cat_depth(cat: dict, all_cats: list[dict]) -> int:
     return depth
 
 
-def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
+def build_pool_section_html(pools: list, report_counts: dict = None,
+                            pool_reports: dict = None) -> str:
     """渲染连接池配置列表（含复制、排序）（纯数据 → HTML，无 DB 调用）
 
     report_counts: {pool_id: 关联报表数}（spec ux-optimization 批次2#6）；
     提供时删除确认弹窗披露断连破坏半径。
+    pool_reports: {pool_id: [{id, name}, ...]}（R2 P9 关联报表列）；
+    提供时渲染第 6 列报表名链接，缺省显示计数或「—」。
     """
     rows = ""
     pool_count = len(pools)
@@ -2452,11 +2769,23 @@ def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
                             f"（报表保留但无法执行）")
         else:
             pool_confirm = f"确定删除连接池 {_escape(p['name'])}？"
+        linked = (pool_reports or {}).get(p["id"]) or []
+        if linked:
+            linked_cell = "、".join(
+                f'<a href="/report?id={int(r["id"])}" target="_blank" '
+                f'rel="noopener" style="color:#4f46e5;text-decoration:none">'
+                f'{_escape(r["name"])}</a>'
+                for r in linked)
+        elif ref_count > 0:
+            linked_cell = f"{ref_count} 个"
+        else:
+            linked_cell = '<span style="color:#cbd5e1">—</span>'
         rows += f"""<tr id="pool-{p['id']}">
   <td><strong>{_escape(p['name'])}</strong></td>
   <td><span class="badge badge-pool">{_escape(p['host'])}:{p['port']}</span></td>
   <td>{_escape(p['user'])}</td>
   <td>{_escape(p['database'])}</td>
+  <td style="font-size:13px">{linked_cell}</td>
   <td class="ops-cell">
     {move_btns}
     {_link_btn(f"/config/pools/{p['id']}/edit", "编辑")}
@@ -2471,9 +2800,9 @@ def build_pool_section_html(pools: list, report_counts: dict = None) -> str:
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th>名称</th><th>地址</th><th>用户</th><th>数据库</th><th>操作</th>
+  <th>名称</th><th>地址</th><th>用户</th><th>数据库</th><th>关联报表</th><th>操作</th>
 </tr></thead><tbody>
-{rows or build_empty_row_html(5, "暂无连接池配置")}
+{rows or build_empty_row_html(6, "暂无连接池配置")}
 </tbody></table>
 </div>
 </div>"""
@@ -2485,18 +2814,30 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
     current_username: 当前登录用户名（spec ux-optimization 批次2#7）；
     其所在行不渲染删除按钮——删除自己会立即失效自己的会话，
     服务端同样兜底拒绝（config.handle_user_delete）。
+
+    R2 P10：三列对齐原型 page-users（用户名｜角色说明｜操作）。
+    users 表无 role 字段（仅 id/username/password_hash），全部登录用户
+    权限相同，角色说明列按此实际语义渲染，不虚构只读角色。
     """
     rows = ""
     for u in users:
-        if current_username and u["username"] == current_username:
+        is_current = bool(current_username) and u["username"] == current_username
+        if is_current:
             delete_btn = '<span style="color:#cbd5e1;font-size:13px" title="不能删除当前登录账号">—</span>'
         else:
             delete_btn = build_delete_form_html(
                 f"/config/users/{u['id']}/delete",
                 f"确定删除用户 {_escape(u['username'])}？"
                 f"其全部登录会话将立即失效")
+        name_cell = f"<strong>{_escape(u['username'])}</strong>"
+        if is_current:
+            name_cell += ' <span class="badge badge-info">当前登录</span>'
+        role_cell = "管理员 · 全部配置与报表可管理"
+        if is_current:
+            role_cell += "；禁止删除当前登录用户"
         rows += f"""<tr id="user-{u['id']}">
-  <td><strong>{_escape(u['username'])}</strong></td>
+  <td>{name_cell}</td>
+  <td class="muted" style="font-size:13px">{role_cell}</td>
   <td class="ops-cell">
     {_link_btn(f"/config/users/{u['id']}/edit", "编辑")}
     {delete_btn}
@@ -2509,56 +2850,62 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
 </div>
 <div class="table-wrap">
 <table><thead><tr>
-  <th>用户名</th><th>操作</th>
+  <th>用户名</th><th>角色说明</th><th>操作</th>
 </tr></thead><tbody>
-{rows or build_empty_row_html(2, "暂无用户")}
+{rows or build_empty_row_html(3, "暂无用户")}
 </tbody></table>
 </div>
+<p class="muted" style="font-size:12px;margin-top:8px">
+约定保持：改用户名/密码后强制下线该用户全部会话；flash 不回显明文密码。</p>
 </div>"""
 
 
 def build_category_manage_section_html(all_cats, cat_tree,
-                                       show_report_add: bool = True) -> str:
+                                       show_report_add: bool = True,
+                                       report_counts: dict = None) -> str:
     """渲染分类管理区块（分类树 + 排序 + CRUD，纯数据 → HTML，无 DB 调用）
 
-    config-reports-merge：分类管理并入报表管理页，区块整体可折叠
+    ui-redesign R2-A：左树按已确认原型改为 flex 行——图标 + 名称 + 报表数角标 +
+    ghost 操作（✎↑↓✕，悬停提亮）；子分类包 .kids 容器逐级缩进，行点击折叠/展开
+    （toggleCatNode）；不再使用 ├─ 文本引导线。
+    config-reports-merge：区块整体可折叠
     （localStorage 记忆折叠状态，标题栏按钮折叠时仍可见）。
     """
-    def _render_cat_item(cat, guide, has_children):
-        children = [c for c in all_cats if c.get("parent_id") == cat["id"]]
+    counts = report_counts or {}
+
+    def _render_cat_item(cat, has_children):
         siblings = [c for c in all_cats if c.get("parent_id") == cat.get("parent_id")]
         idx = next((i for i, c in enumerate(siblings) if c["id"] == cat["id"]), -1)
         n = len(siblings)
         move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
-        badge = (f'<span style="color:#64748b;font-size:11px;margin-left:4px">({len(children)} 子分类)</span>'
-                 if has_children else "")
-        icon = "📁" if has_children else "📄"
-        name_style = ("font-size:14px;font-weight:600" if has_children
-                      else "font-size:14px;font-weight:400;color:#475569")
-        return f"""<div class="cat-tree-item">
-  <span class="tree-guide">{guide}</span>
-  <span style="font-size:13px;line-height:1">{icon}</span>
-  <span style="{name_style}">{_escape(cat["name"])}{badge}</span>
-  <span style="flex:1"></span>
-  {move_btns}
-  {_link_btn(f"/config/categories/{cat['id']}/edit", "编辑", "btn btn-outline btn-sm")}
-  {build_delete_form_html(f"/config/categories/{cat['id']}/delete",
-                          f"确定删除分类 {_escape(cat['name'])}？分类下的报表和子分类将变为未分类。",
-                          button_cls=" btn-mini-s",
-                          indent=2)}
+        count = counts.get(cat["id"])
+        count_html = f'<span class="cnt">{count}</span>' if count else ""
+        kids_attr = (f' data-kids="cat-kids-{cat["id"]}"'
+                     f' onclick="toggleCatNode(event,this)"' if has_children else "")
+        name = _escape(cat["name"])
+        edit_btn = _link_btn(f"/config/categories/{cat['id']}/edit", "✎",
+                             "btn btn-ghost btn-sm btn-icon", title="编辑")
+        del_btn = build_delete_form_html(
+            f"/config/categories/{cat['id']}/delete",
+            f"确定删除分类 {name}？分类下的报表和子分类将变为未分类。",
+            indent=2, label="✕", btn_title="删除")
+        return f"""<div class="cat"{kids_attr}>
+  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+  <span class="nm" title="{name}">{name}</span>
+  {count_html}
+  <span class="ops">
+    {move_btns}{edit_btn}{del_btn}
+  </span>
 </div>"""
 
-    def _render_tree(nodes, prefixes=None):
+    def _render_tree(nodes):
         html = ""
-        prefixes = prefixes or []
-        for i, node in enumerate(nodes):
-            is_last = i == len(nodes) - 1
-            guide = "".join(prefixes) + ("└─ " if is_last else "├─ ")
-            has_children = len([c for c in all_cats if c.get("parent_id") == node["id"]]) > 0
-            html += _render_cat_item(node, guide, has_children)
-            if node["children"]:
-                child_prefixes = prefixes + (["   "] if is_last else ["│  "])
-                html += _render_tree(node["children"], child_prefixes)
+        for node in nodes:
+            children = node.get("children") or []
+            html += _render_cat_item(node, bool(children))
+            if children:
+                html += (f'<div class="kids on" id="cat-kids-{node["id"]}">'
+                         f'{_render_tree(children)}</div>')
         return html
 
     cat_list_html = _render_tree(cat_tree)
@@ -2566,19 +2913,19 @@ def build_category_manage_section_html(all_cats, cat_tree,
     if not cat_list_html:
         cat_list_html = '<div style="color:#64748b;font-size:14px;padding:12px 0">暂无分类</div>'
 
-    report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-outline btn-sm")
+    report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-ghost btn-sm")
                       if show_report_add else "")
     return f"""<div class="section" id="sec-categories">
 <div class="section-title">
   <button type="button" id="cat-tree-toggle" class="btn btn-outline btn-sm"
           onclick="toggleCatTree(this)">▼ 报表分类</button>
   <span class="actions">
-    {_link_btn("/config/categories/add", "新增分类", "btn btn-primary btn-sm")}
+    {_link_btn("/config/categories/add", "新增分类", "btn btn-ghost btn-sm")}
     {report_add_btn}
   </span>
 </div>
 <div id="cat-tree-content">
-<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+<div class="tree" role="tree">
   {cat_list_html}
 </div>
 </div>
@@ -2588,7 +2935,8 @@ def build_category_manage_section_html(all_cats, cat_tree,
 def build_category_section_html(cat_reports, unclassified_reports, all_cats,
                                  all_reports, pools, cat_tree,
                                  api_endpoints_map: dict[int, list[dict]] = None,
-                                 schedules_map: dict[int, dict] = None) -> str:
+                                 schedules_map: dict[int, dict] = None,
+                                 split_parts: bool = False):
     """渲染报表分类配置段（分类管理 + 各分类下的报表列表，纯数据 → HTML，无 DB 调用）
 
     参数:
@@ -2794,8 +3142,9 @@ function updateBatchCount() {{
 </tr>"""
         return rows
 
-    cat_areas = build_category_manage_section_html(all_cats, cat_tree,
-                                                   show_report_add=True)
+    cat_areas = build_category_manage_section_html(
+        all_cats, cat_tree, show_report_add=True,
+        report_counts={e["id"]: len(e.get("reports") or []) for e in cat_reports})
 
     report_lookup: dict[int, list] = {entry["id"]: entry.get("reports", []) for entry in cat_reports}
     tab_html = ""
@@ -2854,6 +3203,9 @@ function updateBatchCount() {{
 </div>"""
 
     # 批次5#17：浮动操作条渲染一次，置于全部列表区块之后（footer 之前）
+    if split_parts:
+        # ui-redesign T7.6：左树（分类管理）/ 右表（分组报表+批量条）拆分
+        return cat_areas, tab_html + uncat_section + batch_bar
     return cat_areas + tab_html + uncat_section + batch_bar
 
 
@@ -2866,19 +3218,29 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                                    report_id: int = None,
                                    show_report_name: bool = False,
                                    base_url: str = "",
-                                   key_counts: dict = None) -> str:
+                                   key_counts: dict = None,
+                                   return_to: str = None,
+                                   desc_full: bool = False,
+                                   wrap_section: bool = True) -> str:
     """
-    渲染 API 接口列表区块。
+    渲染 API 接口列表区块（R2-D：api-main 主行 + api-more 展开区行卡片）。
 
     参数:
         api_endpoints: API 端点列表
-        report_id: 关联报表 ID（为 None 时表示独立管理页，不带编辑/新增按钮）
+        report_id: 关联报表 ID（为 None 时表示独立管理页，不带区块标题/新增按钮，
+                   标题与新建入口由页面 page-head 承担）
         show_report_name: 是否显示关联报表名称列（独立管理页使用）
         base_url: 服务器基础 URL（如 http://localhost:8080），仅作服务端兜底
                   渲染值；页面加载后 JS 用 window.location.origin 覆盖
                   （与 API 配置后台/报表查看页一致，显示用户实际访问的地址）
         key_counts: {endpoint_id: key 数量} 映射（多 key 化后列表显示数量徽标；
                     None 时回退旧 api_key 列掩码+复制逻辑）
+        return_to: toggle 后回跳地址（详情页签传 /report?id=N）；
+                   None 时按 report_id / 独立管理页推导
+        desc_full: 展开区说明用 Markdown 全文折叠区（详情页签，原型 md-body），
+                   False=截断摘要 + title 全文（列表页）
+        wrap_section: False=不包 .section 外壳与信息分级 help（详情页签由自己的
+                      card 提供标题）；True=区块外壳（页面/报表编辑页列表用）
     """
     _sc_cfg = static_cache.get_static_cache_config()
     _sc_enabled = _sc_cfg.get("enable", True)
@@ -2891,11 +3253,8 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         ep_path = _escape(ep_path_raw)
         ep_format = _escape(ep.get("output_format", "json"))
         enabled = int(ep.get("enabled", 1))
-        enabled_badge = (build_state_span("启用")
-                         if enabled else
-                         build_state_span("禁用", "warn"))
-        api_key_raw = ep.get("api_key") or ""
-        api_key_display = _mask_api_key(api_key_raw) if api_key_raw else "—"
+        enabled_badge = ('<span class="badge badge-ok">启用</span>' if enabled
+                         else '<span class="badge badge-warn">禁用</span>')
         ep_result_mode = ep.get("result_mode", "single")
         ep_result_index = int(ep.get("result_index", 0))
         if ep_result_mode == "all":
@@ -2910,25 +3269,27 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         static_cache_display = (build_state_span("开")
                                 if static_cache_on else
                                 build_state_span("关", "muted"))
-        # 名称列：点击进入该接口的配置页（新开窗）
+        # 主行名称：点击进入该接口的配置页（新开窗）
         ep_edit_url = _api_endpoint_url(ep['report_id'], ep_id)
-        name_cell = (f'<td><a href="{ep_edit_url}" target="_blank" rel="noopener" '
-                     f'title="打开接口配置" '
-                     f'style="color:#4f46e5;text-decoration:none;font-weight:600">'
-                     f'{ep_name}</a></td>')
-        report_name_cell = ""
+        name_html = (f'<a class="name" href="{ep_edit_url}" target="_blank" rel="noopener" '
+                     f'title="打开接口配置">'
+                     f'{ep_name}</a>')
+        # 主行关联报表（独立管理页）
+        report_html = ""
         if show_report_name:
             rname = _escape(ep.get("report_name", ""))
             rpt_id = int(ep.get("report_id", 0) or 0)
             if rpt_id:
-                report_name_cell = (f'<td><a href="/report?id={rpt_id}" '
-                                    f'target="_blank" rel="noopener" '
-                                    f'title="打开报表查看页" '
-                                    f'style="color:#4f46e5;text-decoration:none">'
-                                    f'{rname}</a></td>')
+                report_html = (f'<span class="muted" style="font-size:13px">报表：'
+                               f'<a href="/report?id={rpt_id}" '
+                               f'target="_blank" rel="noopener" '
+                               f'title="打开报表查看页" '
+                               f'style="color:#4f46e5;text-decoration:none">'
+                               f'{rname}</a></span>')
             else:
-                report_name_cell = f'<td>{rname}</td>'
-        # URL 列：三种调用地址（完整/全量/静态），置灰能力未开启的行
+                report_html = (f'<span class="muted" style="font-size:13px">'
+                               f'报表：{rname}</span>')
+        # 展开区：三种调用地址（完整/全量/静态），置灰能力未开启的行
         full_disabled = not allow_fetch_all
         full_hint = "未开启「允许全量获取」，请在接口配置中开启" if full_disabled else ""
         if static_cache_on:
@@ -2939,9 +3300,8 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             static_disabled = True
             static_hint = "未开启「静态缓存」，请在接口配置中开启"
         base_api_url, full_url, static_url = _api_url_variants(base_url, ep_path_raw)
-        url_cell = ('<td style="min-width:300px">'
-                    + _build_api_url_row(f"api-url-{ep_id}", "完整 URL:",
-                                         ep_path_raw, "base", base_api_url)
+        url_html = (_build_api_url_row(f"api-url-{ep_id}", "完整 URL:",
+                                       ep_path_raw, "base", base_api_url)
                     + _build_api_url_row(f"api-full-{ep_id}", "全量 URL:",
                                          ep_path_raw, "full", full_url,
                                          disabled=full_disabled,
@@ -2951,33 +3311,32 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
                                          ep_path_raw, "static", static_url,
                                          disabled=static_disabled,
                                          disabled_hint=static_hint,
-                                         edit_url=ep_edit_url)
-                    + '</td>')
-        # API Key：多 key 化后显示数量徽标（详情在端点配置页「API Key 管理」区块）；
-        # key_counts 未提供时回退旧 api_key 列掩码 + 复制完整值
+                                         edit_url=ep_edit_url))
+        # 主行 Key 徽标：多 key 化后显示数量（详情在端点配置页「API Key 管理」区块）；
+        # key_counts 未提供时回退旧 api_key 掩码 + 复制完整值
         api_key_raw = ep.get("api_key") or ""
+        api_key_display = _mask_api_key(api_key_raw) if api_key_raw else "—"
         if key_counts is not None:
             ep_key_count = key_counts.get(ep_id, 0)
             if ep_key_count:
-                key_cell = (f'<td style="white-space:nowrap">'
-                            f'<code style="font-size:12px;color:#64748b">'
-                            f'{ep_key_count} 个 Key</code></td>')
+                key_html = (f'<code style="font-size:12px;color:#64748b">'
+                            f'{ep_key_count} 个 Key</code>')
             else:
-                key_cell = f'<td><code style="font-size:12px;color:#64748b">—</code></td>'
+                key_html = '<code style="font-size:12px;color:#64748b">—</code>'
         elif api_key_raw:
-            key_cell = (f'<td style="white-space:nowrap">'
-                        f'<code style="font-size:12px;color:#64748b">{api_key_display}</code> '
+            key_html = (f'<code style="font-size:12px;color:#64748b">{api_key_display}</code> '
                         f'<code id="api-key-raw-{ep_id}" style="display:none">'
                         f'{_escape(api_key_raw)}</code>'
                         f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{ep_id}\')" '
                         f'title="复制完整 API Key" '
-                        f'class="btn-mini btn-mini-outline-key">复制</button>'
-                        f'</td>')
+                        f'class="btn-mini btn-mini-outline-key">复制</button>')
         else:
-            key_cell = f'<td><code style="font-size:12px;color:#64748b">—</code></td>'
+            key_html = '<code style="font-size:12px;color:#64748b">—</code>'
         # 快捷启用/禁用：POST 到独立管理页 toggle 端点，回跳来源页（禁用需确认）
         toggle_label = "禁用" if enabled else "启用"
-        if report_id is not None:
+        if return_to:
+            toggle_return_to = return_to
+        elif report_id is not None:
             toggle_return_to = f"/config/reports/{report_id}/edit"
         else:
             toggle_return_to = "/config/api-endpoints"
@@ -2990,56 +3349,80 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
       <button type="submit" class="btn btn-outline btn-sm">{toggle_label}</button>
     </form>"""
         if report_id is not None:
-            ops_cell = f"""<td class="ops-cell">
+            ops_html = f"""<div class="ops">
     {toggle_btn}
     {_link_btn(ep_edit_url, "编辑")}
     {build_delete_form_html(_api_endpoint_url(report_id, ep_id, "delete"),
                             f"确定删除 API 接口 {_escape(ep_name_raw)}？")}
-  </td>"""
+    <button type="button" class="btn btn-outline btn-sm api-more-btn" onclick="apiToggleMore(this)">展开 ▾</button>
+  </div>"""
         else:
-            ops_cell = f"""<td class="ops-cell">
+            ops_html = f"""<div class="ops">
     {toggle_btn}
     {_link_btn(ep_edit_url, "编辑")}
     {build_delete_form_html("/config/api-endpoints",
                             f"确定删除 API 接口 {_escape(ep_name_raw)}？",
                             extra_hidden='<input type="hidden" name="action" value="delete">\n'
                                          '<input type="hidden" name="endpoint_id" value="' + str(ep_id) + '">')}
-  </td>"""
-        rows += f"""<tr>
-  {name_cell}{report_name_cell}
-  <td>{_build_desc_summary_html(ep.get("description") or "") or '—'}</td>
-  {url_cell}
-  <td>{ep_format}</td>
-  <td>{mode_display}</td>
-  <td>{fetch_all_display}</td>
-  <td>{static_cache_display}</td>
-  <td>{enabled_badge}</td>
-  {key_cell}
-  {ops_cell}
-</tr>"""
-    extra_col = '<th>关联报表</th>' if show_report_name else ''
-    extra_colspan = 1 if show_report_name else 0
-    total_cols = 10 + extra_colspan
+    <button type="button" class="btn btn-outline btn-sm api-more-btn" onclick="apiToggleMore(this)">展开 ▾</button>
+  </div>"""
+        # 说明放展开区：列表=全文（不再截断到 title；title 仅作主行悬停兜底）；
+        # 详情页签 desc_full=True=Markdown 全文折叠区（原型 md-body）
+        if desc_full:
+            desc_full_html = _build_api_description_html(ep)
+            desc_block = (f'<div class="api-desc">{desc_full_html}</div>'
+                          if desc_full_html else "")
+        else:
+            desc_raw_full = (ep.get("description") or "").strip()
+            if desc_raw_full:
+                desc_block = (f'<div class="api-desc" title="{_escape(desc_raw_full)}">'
+                              f'<span class="lbl">说明</span>'
+                              f'{_escape(desc_raw_full)}</div>')
+            else:
+                desc_block = '<div class="api-desc"><span class="lbl">说明</span>—</div>'
+        rows += f"""<div class="api-row" id="api-row-{ep_id}">
+  <div class="api-main" onclick="apiMainClick(event, this)">
+    {name_html}
+    <span class="path-chip">{ep_path}</span>
+    {report_html}
+    {enabled_badge}
+    <span class="badge badge-neutral">{ep_format}</span>
+    {key_html}
+    {ops_html}
+  </div>
+  <div class="api-more" id="api-more-{ep_id}">
+    <div class="api-meta">
+      <span>输出模式：{mode_display}</span>
+      <span>全量获取：{fetch_all_display}</span>
+      <span>静态缓存：{static_cache_display}</span>
+    </div>
+    {desc_block}
+    {url_html}
+  </div>
+</div>"""
+    # 独立管理页由 page-head 承担标题与新建按钮，区块内不再重复标题
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
+    section_title = (f"""<div class="section-title" style="font-size:16px">
+  <span>🔌 API 接口</span>
+  <span class="actions">{title_actions}</span>
+</div>""" if report_id is not None else "")
     _sc_state = "开启" if _sc_enabled else "关闭"
     _sc_dir = _sc_cfg.get("dir", "static_cache")
     _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#64748b">'
                 f'静态文件缓存: 全局 {_sc_state} | 存储目录: <code>{_escape(str(_sc_dir))}</code>'
                 f'（通过 app_config.json 的 static_cache 段配置）</div>')
+    list_html = rows or '<div class="empty-state">暂无 API 接口配置</div>'
+    if not wrap_section:
+        # 详情页签：由调用方 card 提供标题，只输出静态缓存提示 + 卡片行
+        return f"{_sc_hint}\n{list_html}"
+    help_html = ('<p class="api-help">信息分级：主行只保留「名称/路径/状态/主操作」；'
+                 '全量与静态 URL、说明收进展开区（解决旧 11 列过载行）。</p>')
     return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
-<div class="section-title" style="font-size:16px">
-  <span>🔌 API 接口</span>
-  <span class="actions">{title_actions}</span>
-</div>
+{section_title}
 {_sc_hint}
-<div class="table-wrap">
-<table><thead><tr>
-  <th>名称</th>{extra_col}<th>说明</th><th>调用地址</th><th>格式</th><th>输出模式</th><th>全量</th><th>静态缓存</th><th>状态</th><th>API Key</th><th>操作</th>
-</tr></thead><tbody>
-{rows or build_empty_row_html(total_cols, "暂无 API 接口配置")}
-</tbody></table>
-</div>
+{list_html}
+{help_html}
 </div>"""
 
 
@@ -3498,13 +3881,26 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         )
         key_manage_extra = ""
 
-    return f"""<div class="card">
-<h2>{title}</h2>
-{flash_html}
-<div style="margin-bottom:16px;padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:14px;color:#475569">
-  关联报表: <strong>{_escape(report_name)}</strong> (ID: {report_id})
-</div>
+    # 页面头动作（spec page-api-edit）：编辑态给「真实数据预览」，
+    # 复用④卡片内的 preview-live-btn（previewWithRealData 按 id 取地址，document 级）
+    page_head_actions = (
+        '<button type="button" class="btn btn-secondary" '
+        'onclick="previewWithRealData()">真实数据预览</button>'
+        if is_edit and endpoint_id else "")
+    return f"""{flash_html}
 <form method="post" action="{action_url}" class="config-form">
+  <div class="page-head span-full">
+    <div>
+      <div class="crumb"><a href="/config/api-endpoints">API 接口</a> › {'编辑' if is_edit else '新增'}</div>
+      <h1>{title}</h1>
+      <div class="sub">关联报表：{_escape(report_name)}（ID: {report_id}）</div>
+    </div>
+    <div class="actions">{page_head_actions}</div>
+  </div>
+  <div class="grid-2 span-full">
+  <div>
+  <div class="card">
+  <div class="card-head"><div class="form-section">① 基本信息</div></div>
   <label>接口名称: <input type="text" name="name" value="{name}" required
     placeholder="例如: 客户数据 API"></label>
 
@@ -3516,6 +3912,9 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     </div>
   </label>
 
+  </div>
+  <div class="card">
+  <div class="card-head"><div class="form-section">② 调用地址</div></div>
   <label class="span-full">URL 路径:
     <div style="display:flex;align-items:center;gap:0;margin-top:4px">
       <span style="padding:6px 12px;background:#e2e8f0;border:1px solid #cbd5e1;border-right:none;border-radius:6px 0 0 6px;font-family:monospace;font-size:14px;color:#475569;white-space:nowrap;line-height:1.5">/api/</span>
@@ -3669,7 +4068,11 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   var _descTa = document.querySelector('textarea[name="description"]');
   if (_descTa) _descTa.addEventListener('input', scheduleDescPreview);
   </script>
-
+  </div>
+  </div>
+  <div>
+  <div class="card">
+  <div class="card-head"><div class="form-section">③ 请求与输出</div></div>
   <label>输出格式:
     <select name="output_format" onchange="updateStaticCacheState();updateTemplateState()">{format_opts}</select>
   </label>
@@ -3723,7 +4126,54 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
-  <div id="template-section" class="span-full" style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+  <div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
+    <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
+    切到「<strong>规则</strong>」页签，在「<strong>当前规则</strong>」卡片点击「<strong>复制 JSON</strong>」按钮即可获取 JSON 格式的配置，
+    直接粘贴到下方的 JSON 文本框中。
+    <div style="margin-top:4px;font-size:12px;color:#a16207">
+      查看报表 → <a href="/report?id={report_id}" target="_blank" style="color:#4f46e5;font-weight:600">/report?id={report_id}</a>
+    </div>
+  </div>
+
+  <label class="span-full">规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
+    <textarea name="rule_json" class="sql-textarea"
+      placeholder='{{"filters":[{{"col":"status","op":"eq","val":"active"}}],"sorts":[{{"col":"created_at","dir":"desc"}}],"columns":"id,name,email"}}'
+      rows="5" style="min-height:100px;font-family:monospace">{_escape(rule_json)}</textarea></label>
+
+  <label>最大行数（0=不限制）:
+    <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
+
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+    <input type="hidden" name="allow_fetch_all" value="0">
+    <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked} onchange="updateFetchAllUrl()">
+    <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
+  </label>
+  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+    <strong>使用示例：</strong>开启后，调用方在请求中携带 <code>fetch_all</code> 参数即可一次获取全部数据（不做翻页）：
+    <div style="font-family:monospace;font-size:12px;margin-top:4px">
+      GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
+      POST&nbsp; body: {{"fetch_all": true}}
+    </div>
+    <div style="color:#64748b;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
+  </div>
+
+  {api_key_block_html}
+
+  <label class="span-full">CORS 允许来源（逗号分隔，留空=不设 CORS）:
+    <input type="text" name="allowed_origins" value="{allowed_origins}"
+      placeholder="例如: https://example.com,http://localhost:3000"></label>
+
+  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">
+    <input type="hidden" name="enabled" value="0">
+    <input type="checkbox" name="enabled" value="1"{enabled_checked}>
+    <span style="font-weight:600">启用</span>
+  </label>
+
+  </div>
+  <div class="card">
+  <div class="card-head"><div class="form-section">④ JSON 模板</div></div>
+  <div id="template-section" class="span-full" style="margin:0;padding:0;background:none;border:0;border-radius:0">
+    <div class="form-section">④ JSON 模板</div>
     <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">JSON 输出模板（可选）</div>
     <label style="font-size:13px;color:#475569;display:block">
       <textarea name="json_template" id="json-template-input" rows="8"
@@ -3792,59 +4242,19 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <div id="template-preview-error" style="color:#dc2626;font-size:12px;margin-top:6px"></div>
   </div>
 
+  </div>
+  </div>
+  </div>
+
   {_API_TEMPLATE_JS}
 
-  <div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
-    <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
-    展开「<strong>当前规则</strong>」折叠区，点击<strong>复制</strong>按钮即可获取 JSON 格式的配置，
-    直接粘贴到下方的 JSON 文本框中。
-    <div style="margin-top:4px;font-size:12px;color:#a16207">
-      查看报表 → <a href="/report?id={report_id}" target="_blank" style="color:#4f46e5;font-weight:600">/report?id={report_id}</a>
-    </div>
-  </div>
-
-  <label class="span-full">规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
-    <textarea name="rule_json" class="sql-textarea"
-      placeholder='{{"filters":[{{"col":"status","op":"eq","val":"active"}}],"sorts":[{{"col":"created_at","dir":"desc"}}],"columns":"id,name,email"}}'
-      rows="5" style="min-height:100px;font-family:monospace">{_escape(rule_json)}</textarea></label>
-
-  <label>最大行数（0=不限制）:
-    <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
-
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
-    <input type="hidden" name="allow_fetch_all" value="0">
-    <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked} onchange="updateFetchAllUrl()">
-    <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
-  </label>
-  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
-    <strong>使用示例：</strong>开启后，调用方在请求中携带 <code>fetch_all</code> 参数即可一次获取全部数据（不做翻页）：
-    <div style="font-family:monospace;font-size:12px;margin-top:4px">
-      GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
-      POST&nbsp; body: {{"fetch_all": true}}
-    </div>
-    <div style="color:#64748b;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
-  </div>
-
-  {api_key_block_html}
-
-  <label class="span-full">CORS 允许来源（逗号分隔，留空=不设 CORS）:
-    <input type="text" name="allowed_origins" value="{allowed_origins}"
-      placeholder="例如: https://example.com,http://localhost:3000"></label>
-
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">
-    <input type="hidden" name="enabled" value="0">
-    <input type="checkbox" name="enabled" value="1"{enabled_checked}>
-    <span style="font-weight:600">启用</span>
-  </label>
-
-  <div class="form-actions span-full">
+  <div class="form-actions span-full formbar">
     <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
     <button type="submit" name="action" value="save_close" class="btn btn-outline">保存并关闭</button>
     <a href="/config/reports/{report_id}/edit" class="cancel">关闭</a>
   </div>
 </form>
-{key_manage_extra}
-</div>"""
+{key_manage_extra}"""
 
 
 # ===================================================================
@@ -4107,7 +4517,7 @@ def render_audit_page(
     }
     """
 
-    navbar_html = _build_navbar_html("audit")
+    sidebar_html = _build_sidebar_html("audit")
     # 批次6#28：公共 CSS 走外链管线，审计页特有样式并入 extra_css 段
     audit_css_url, _ = _get_common_asset_urls()
     if audit_css_url:
@@ -4115,11 +4525,11 @@ def render_audit_page(
     else:
         audit_common_assets = f"<style>{_COMMON_CSS}</style>"
     html = _PAGE_HEADER_TEMPLATE.substitute(
-        title=_get_branding_prefix() + "审计日志",
+        title=_get_branding_prefix() + "SqlReport - 审计日志",
         favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=audit_common_assets,
         extra_css=extra_css.replace("$", "$$"),
-        navbar=navbar_html,
+        sidebar=sidebar_html,
     )
 
     if message:
@@ -4135,36 +4545,34 @@ def render_audit_page(
         size_info = f'<span style="margin-left:16px;color:#64748b">数据库大小: {size_info}</span>'
 
     html += f"""
-<div class="card">
-  <h2>审计日志</h2>
-  <div class="audit-info">
-    <span>共 {total} 条记录，第 {page}/{total_pages} 页{size_info}</span>
-    <div class="audit-actions">
-      <a href="/audit?{export_qs}" class="btn btn-sm btn-success">导出 CSV</a>
+<div class="page-head">
+  <div>
+    <h1>审计日志</h1>
+    <div class="sub">共 {total} 条记录，第 {page}/{total_pages} 页{size_info}</div>
+  </div>
+  <div class="actions">
+    <a href="/audit?{export_qs}" class="btn btn-secondary">导出 CSV</a>
+    <button type="button" class="btn btn-danger" onclick="confirmClean()">清理过期</button>
+  </div>
+</div>
+<div class="audit-filters filterbar">
+  <form method="get" action="/audit" style="display:contents">
+    <label>类型: <select name="type">{type_html}</select></label>
+    <label>操作者: <input type="text" name="session_user" value="{html_mod.escape(session_user_val)}" placeholder="操作者"></label>
+    <label>关键字: <input type="text" name="keyword" value="{html_mod.escape(keyword_val)}" placeholder="关键字{FILTER_HINT_SUFFIX}"></label>
+    <div class="date-shortcuts">{range_btns}</div>
+    <label>从: <input type="datetime-local" name="date_from" value="{html_mod.escape(date_from)}"></label>
+    <label>到: <input type="datetime-local" name="date_to" value="{html_mod.escape(date_to)}"></label>
+    <div class="filter-btns">
+      <button type="submit" class="btn btn-sm btn-primary">筛选</button>
+      {render_filter_help()}
     </div>
-  </div>
-  <div class="audit-filters">
-    <form method="get" action="/audit" style="display:contents">
-      <label>类型: <select name="type">{type_html}</select></label>
-      <label>操作者: <input type="text" name="session_user" value="{html_mod.escape(session_user_val)}" placeholder="操作者"></label>
-      <label>关键字: <input type="text" name="keyword" value="{html_mod.escape(keyword_val)}" placeholder="关键字{FILTER_HINT_SUFFIX}"></label>
-      <div class="date-shortcuts">{range_btns}</div>
-      <label>从: <input type="datetime-local" name="date_from" value="{html_mod.escape(date_from)}"></label>
-      <label>到: <input type="datetime-local" name="date_to" value="{html_mod.escape(date_to)}"></label>
-      <div class="filter-btns">
-        <button type="submit" class="btn btn-sm btn-primary">筛选</button>
-        {render_filter_help()}
-        <button type="button" class="btn btn-sm btn-danger" onclick="confirmClean()">清理</button>
-      </div>
-    </form>
-  </div>
+  </form>
 </div>
-<div class="card">
-  <div class="table-wrap">
-    <table>{table_header}<tbody>{rows_html}</tbody></table>
-  </div>
-  {pagination}
+<div class="table-wrap">
+  <table>{table_header}<tbody>{rows_html}</tbody></table>
 </div>
+{pagination}
 <script>{extra_js}</script>"""
 
     html += _render_common_footer()
@@ -4174,24 +4582,26 @@ def render_audit_page(
 # ===================================================================
 
 
-def build_api_urls_section_html(api_endpoints: list[dict], base_url: str) -> str:
+def build_api_urls_section_html(api_endpoints: list[dict], base_url: str,
+                                return_to: str = None) -> str:
     """
-    渲染 API URL 折叠区域，显示每个 API 端点的调用地址。
+    渲染报表详情「接口」页签内容（R2-D：委托 build_api_endpoints_list_html
+    输出 api-row 卡片行，与列表页同一实现，禁止第二套体系）。
 
     参数:
         api_endpoints: API 端点列表
         base_url: 服务器基础 URL（如 http://localhost:8080）
+        return_to: toggle 后回跳地址；None 时按首个端点所属报表回跳 /report?id=N
     """
     if not api_endpoints:
         return ""
-
-    # 按接口名称分组（如果只有一个，不分组）
-    if len(api_endpoints) == 1:
-        ep = api_endpoints[0]
-        return _build_single_api_url_html(ep, base_url)
-
-    # 多个 API 时分组显示
-    return _build_grouped_api_urls_html(api_endpoints, base_url)
+    if return_to is None:
+        first_rid = int(api_endpoints[0].get("report_id") or 0)
+        if first_rid:
+            return_to = f"/report?id={first_rid}"
+    return build_api_endpoints_list_html(api_endpoints, base_url=base_url,
+                                          return_to=return_to, desc_full=True,
+                                          wrap_section=False)
 
 
 def build_collapse_section_html(title: str, content: str,
@@ -4207,31 +4617,15 @@ def build_collapse_section_html(title: str, content: str,
     multiline=True 时外层按多行排版输出（折叠区内容本身多行的场景），
     内容行的缩进由调用方在 content 中自带，保证与现状逐字符一致。
 
-    mem_key 提供时启用三态记忆控件（api-desc-markdown T1）：
-    - 容器带 data-mem-key 与 data-default-hidden（'1'/'0'），供前端
-      initMemToggles/setMemToggle 读取与覆盖（localStorage 记忆）。
-    - 标题行右侧追加「自动/展开/折叠」三态按钮组（当前态高亮，默认自动）。
-    - 三态控件置于内容 div 之后（不插入 button 与 content 之间），
-      保证 toggleSection 的 nextElementSibling 折叠逻辑不受影响。
-    mem_key 为 None 时输出与现状逐字符一致。
+    mem_key 参数保留仅为兼容调用方（T7.11 三态废除：不再输出
+    data-mem-key/data-default-hidden 与「自动/展开/折叠」控件；折叠态
+    由 default_hidden 决定，普通 toggleSection 切换）。
     """
     style_attr = f' style="{extra_style}"' if extra_style else ""
     hidden_cls = " hidden" if default_hidden else ""
     btn_text = button_text if button_text is not None else f"▶ {title}"
     mem_attrs = ""
     mem_ctl = ""
-    if mem_key:
-        mem_attrs = (f' data-mem-key="{mem_key}" '
-                     f'data-default-hidden="{"1" if default_hidden else "0"}"')
-        mem_ctl = (
-            f'<span class="mem-toggle">'
-            f'<button type="button" class="mem-mode mem-mode-auto active" data-mode="auto" '
-            f'onclick="setMemToggle(this,\'{mem_key}\',\'auto\')">自动</button>'
-            f'<button type="button" class="mem-mode mem-mode-open" data-mode="open" '
-            f'onclick="setMemToggle(this,\'{mem_key}\',\'open\')">展开</button>'
-            f'<button type="button" class="mem-mode mem-mode-fold" data-mode="fold" '
-            f'onclick="setMemToggle(this,\'{mem_key}\',\'fold\')">折叠</button>'
-            f'</span>')
     if multiline:
         return (f'<div class="debug-info"{mem_attrs}{style_attr}>\n'
                 f'<button class="debug-toggle" onclick="toggleSection(this, \'{title}\')" type="button">{btn_text}</button>\n'
@@ -4280,32 +4674,6 @@ def _build_api_url_row(code_id: str, label: str, url_path: str,
             f'{copy_btn} {fix_link}'
             f'</div>')
 
-
-def _build_api_admin_actions_html(ep: dict) -> str:
-    """构建 API 管理操作行（启用/禁用切换 + 配置入口）。
-
-    报表查看页折叠区内展示：POST toggle 到独立管理页端点（带回跳来源），
-    配置按钮新窗口打开编辑表单。管理操作随折叠区默认收起，不打扰浏览者。
-    """
-    ep_id = int(ep.get("id", 0))
-    report_id = int(ep.get("report_id", 0))
-    if not ep_id:
-        return ""
-    enabled = int(ep.get("enabled", 1)) == 1
-    toggle_label = "禁用" if enabled else "启用"
-    # 禁用对外停服，需确认；启用为无损操作不确认
-    confirm_attr = (" onsubmit=\"return confirm('确定禁用 API 接口 "
-                    f"{_escape(ep.get('name') or '')}？')\"") if enabled else ""
-    return_to = f"/report?id={report_id}"
-    return f"""<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-  <form method="post" action="/config/api-endpoints" style="display:inline"{confirm_attr}>
-    <input type="hidden" name="action" value="toggle">
-    <input type="hidden" name="endpoint_id" value="{ep_id}">
-    <input type="hidden" name="return_to" value="{return_to}">
-    <button type="submit" class="btn btn-sm btn-outline" style="cursor:pointer">{toggle_label}</button>
-  </form>
-  <a href="{_api_endpoint_url(report_id, ep_id)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">配置</a>
-</div>"""
 
 
 def build_state_span(text: str, state: str = "ok", bold: bool = True) -> str:
@@ -4356,6 +4724,43 @@ def _format_schedule_plan(sched: dict) -> str:
     return f"每 {minutes} 分钟"
 
 
+def build_report_schedule_summary_html(report_id, scheds: list) -> str:
+    """报表编辑页「④ 调度与保活」卡内的关联定时任务只读摘要（spec page-report-edit）。
+
+    scheds 为该报表已关联的任务（复用 db.get_all_schedules 的 report_ids 过滤，
+    不新建第二套查询语义）。无关联任务时输出静态提示；两种情况都给出真实的
+    「新建调度」入口 /config/scheduler/new?report_id=N（新建页按该参数预选报表）。
+    """
+    if not report_id:
+        return ""
+    new_url = f"/config/scheduler/new?report_id={report_id}"
+    if scheds:
+        rows = ""
+        for s in scheds:
+            on = int(s.get("enabled", 1) or 0) == 1
+            state = "启用" if on else "停用"
+            badge = "badge-ok" if on else "badge-neutral"
+            sid = int(s.get("id") or 0)
+            rows += (
+                '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;'
+                'font-size:13px;padding:7px 0;border-bottom:1px dashed var(--line)">'
+                f'<a href="/config/scheduler/{sid}/edit" style="font-weight:600;'
+                f'color:var(--brand);text-decoration:none">'
+                f'{_escape(s.get("name") or "未命名任务")}</a>'
+                f'<span class="badge {badge}">{state}</span>'
+                f'<span class="muted">{_escape(_format_schedule_plan(s))}</span>'
+                '</div>')
+        body = (rows + '<p style="font-size:12px;color:var(--ink-3);margin:8px 0 0">'
+                '命中排除规则（静默窗口）时该次执行跳过；多任务可同时绑定本报表。</p>')
+    else:
+        body = ('<p style="font-size:13px;color:var(--ink-3);margin:0">'
+                '本报表尚未关联定时任务；新建后可按间隔或每天定时批量刷新本报表缓存。</p>')
+    return (f'<div style="margin:0 0 12px;padding:10px 12px;background:var(--bg-subtle);'
+            f'border:1px dashed var(--line-strong);border-radius:var(--r-sm)">{body}'
+            f'<div style="margin-top:10px">'
+            f'<a class="btn btn-outline btn-sm" href="{new_url}">+ 新建调度</a></div></div>')
+
+
 def _format_schedule_last_result(sched: dict) -> str:
     """上次结果单元格：状态 + 耗时（含失败摘要 title 提示）。"""
     status = sched.get("last_status")
@@ -4373,92 +4778,12 @@ def _format_schedule_last_result(sched: dict) -> str:
     return '<span style="color:#cbd5e1">— 未执行</span>'
 
 
-def _format_schedule_last_run(sched: dict) -> str:
-    """上次执行时间单元格：epoch 秒 → 本地时间文本；未执行显示占位符。"""
-    at = sched.get("last_run_at")
-    if not at:
-        return '<span style="color:#cbd5e1">—</span>'
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(at)))
-
-
-def _format_schedule_event_row(ev: dict) -> str:
-    """最近执行记录单行：时间 / 任务 / 动作 / 结果 / 触发 / 报表（T3）。
-
-    after_value 结构（scheduler 写入）：
-      scheduled_run: {trigger, status, duration_ms, error,
-                      report_total, report_executed, report_names}
-      scheduled_skip: {trigger}
-      scheduled_misfire: {policy, ...}
-    """
-    try:
-        after = json.loads(ev.get("after_value") or "{}")
-        if not isinstance(after, dict):
-            after = {}
-    except Exception:
-        after = {}
-    ts = ev.get("timestamp")
-    time_text = (time.strftime("%m-%d %H:%M:%S", time.localtime(ts))
-                 if isinstance(ts, (int, float)) else str(ts or "—"))
-    # 任务列：entity_name 形如 task#{name}，去掉前缀显示为任务名并链接到编辑页
-    raw_name = ev.get("entity_name") or ""
-    task_name = raw_name[5:] if raw_name.startswith("task#") else raw_name
-    task_link = (f'<a href="/config/scheduler?edit={ev.get("entity_id")}" '
-                 f'style="color:#4f46e5;text-decoration:none">'
-                 f'{_escape(task_name) or "—"}</a>')
-    action = ev.get("action") or ""
-    if action == "scheduled_run":
-        status = after.get("status") or "?"
-        trigger = after.get("trigger") or "?"
-        duration = after.get("duration_ms")
-        error = (after.get("error") or "").replace('"', "&quot;")
-        summary = (after.get("error") or "")[:60]
-        ok = status == "success"
-        badge = ('<span style="color:#16a34a">✅ 成功</span>' if ok else
-                 f'<span style="color:#dc2626;cursor:help" title="{error}">'
-                 f'❌ 失败</span>')
-        dur = f' <span style="color:#64748b">{duration}ms</span>' \
-            if duration is not None else ""
-        trig_label = "手动" if trigger == "manual" else "自动"
-        # 报表列：本次参与执行的报表清单（向后兼容缺键降级为「—」）
-        names = after.get("report_names") or []
-        total = after.get("report_total")
-        executed = after.get("report_executed")
-        if names or total is not None:
-            rep_text = "报表：" + "、".join(_escape(n) for n in names)
-            if total is not None and executed is not None:
-                rep_text += f"（{executed}/{total}）"
-        else:
-            rep_text = "—"
-        return (f"<tr><td>{_escape(time_text)}</td>"
-                f"<td>{task_link}</td>"
-                f"<td>执行</td><td>{badge}{dur}</td>"
-                f'<td style="color:#64748b">{trig_label}</td>'
-                f"<td>{rep_text}</td></tr>")
-    # scheduled_skip（排除规则命中 → 静默跳过）
-    if action == "scheduled_skip":
-        trigger = after.get("trigger") or "?"
-        trig_label = "手动" if trigger == "manual" else "自动"
-        return (f"<tr><td>{_escape(time_text)}</td><td>{task_link}</td>"
-                '<td>静默跳过</td>'
-                '<td style="color:#64748b">🔇 排除命中未执行</td>'
-                f'<td style="color:#64748b">{trig_label}</td><td>—</td></tr>')
-    # scheduled_misfire
-    policy = after.get("policy") or "?"
-    label = "跳过（推进到下次计划）" if policy == "skip" else "补跑一次"
-    return (f"<tr><td>{_escape(time_text)}</td><td>{task_link}</td>"
-            f'<td>错过补偿</td>'
-            f'<td style="color:#d97706">⚠ {_escape(label)}</td>'
-            '<td style="color:#64748b">自动</td><td>—</td></tr>')
-
-
-def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
-                              recent_events: list | None = None) -> str:
+def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
     """构建 /config/scheduler 任务管理页主体（纯数据 → HTML，无 DB 调用）。
 
-    表格列（spec §5.3）：报表名 / 类型 / 计划 / 下次执行 / 上次执行 /
-    上次结果(含耗时) / 失败计数 / 状态 / 操作。全局停用时顶部显示横幅
-     （B17，页面仍可查看）；recent_events 提供时底部渲染"最近执行记录"
-     区块（来自审计库 scheduled_run/scheduled_skip/scheduled_misfire，最多 20 条）。
+    表格列对齐原型 page-scheduler（7 列）：任务名 / 关联报表 / 计划 /
+    下次执行 / 上次结果 / 状态 / 操作。全局停用时顶部显示横幅（B17，
+    页面仍可查看）。执行历史不在此页重复渲染，到审计日志查询。
     """
     banner = ""
     if not scheduler_enabled:
@@ -4495,13 +4820,11 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
         toggle_label = "停用" if enabled else "启用"
         toggle_cls = "btn-outline" if enabled else "btn-success"
         rows += f"""<tr>
-  <td><a href="/config/scheduler?edit={sid}" style="color:#4f46e5;text-decoration:none">{task_name}</a>{badges}</td>
+  <td><a href="/config/scheduler/{sid}/edit" style="color:#4f46e5;text-decoration:none">{task_name}</a>{badges}</td>
   <td>{reports_cell}</td>
   <td>{_escape(_format_schedule_plan(s))}<span style="color:#64748b;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
   <td>{next_cell}</td>
-  <td>{_format_schedule_last_run(s)}</td>
   <td>{_format_schedule_last_result(s)}</td>
-  <td style="text-align:center">{fail_count}</td>
   <td style="white-space:nowrap">{status_cell}</td>
   <td class="ops-cell" style="white-space:nowrap">
     <form method="post" action="/config/scheduler/run/{sid}" style="display:inline" onsubmit="this.querySelector('button').disabled=true">
@@ -4514,31 +4837,8 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
   </td>
 </tr>"""
     if not schedules:
-        rows = ('<tr><td colspan="9" class="empty-state">'
-                '暂无定时任务 — 在下方「新建定时任务」区配置</td></tr>')
-    events_block = ""
-    if recent_events is not None:
-        event_rows = "".join(_format_schedule_event_row(ev)
-                             for ev in recent_events[:20])
-        if not event_rows:
-            any_audit = any(int(s.get("audit_enabled", 0) or 0)
-                            for s in schedules)
-            if any_audit:
-                empty_text = '暂无执行记录'
-            else:
-                empty_text = ('暂无执行记录（所有任务均未开启「记录执行审计」，'
-                              '因此这里没有执行历史）')
-            event_rows = (f'<tr><td colspan="6" class="empty-state">'
-                          f'{empty_text}</td></tr>')
-        events_block = (
-            '<div class="section" style="margin-top:16px">'
-            '<div class="section-title"><span>📜 最近执行记录</span>'
-            '<span style="color:#64748b;font-size:13px;font-weight:400">'
-            '来自审计日志，最多显示 20 条</span></div>'
-            '<div class="table-wrap"><table><thead><tr>'
-            '<th>时间</th><th>任务</th><th>动作</th><th>结果</th>'
-            '<th>触发方式</th><th>报表</th></tr></thead><tbody>'
-            + event_rows + '</tbody></table></div></div>')
+        rows = ('<tr><td colspan="7" class="empty-state">'
+                '暂无定时任务 — 点击右上角「新建任务」创建</td></tr>')
     return (banner
             + '<div class="section"><div class="section-title"><span>⏰ 报表定时任务</span>'
               '<span class="actions">'
@@ -4548,11 +4848,13 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool,
             + '<div class="table-wrap"><table><thead><tr>'
               '<th>任务名</th><th>关联报表</th><th>计划</th>'
               '<th>下次执行</th>'
-              '<th>上次执行</th><th>上次结果</th>'
-              '<th style="text-align:center">失败计数</th>'
+              '<th>上次结果</th>'
               '<th>状态</th><th>操作</th>'
-              '</tr></thead><tbody>' + rows + '</tbody></table></div></div>'
-            + events_block)
+              '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+            '<p class="muted" style="font-size:12px;margin-top:8px">'
+            '徽标语义：成功/失败/熔断/静默窗口均为「颜色+文字」双编码；'
+            '任务级审计默认关，开启后显示「📝」徽标。'
+            '执行历史不在本页重复展示，请到审计日志查询。</p></div>')
 
 
 _EXCL_EDITOR_JS = """
@@ -4611,8 +4913,8 @@ _EXCL_EDITOR_JS = """
     return '<div class="excl-node" data-kind="'+kind+'"'
       +(type?' data-type="'+type+'"':'')
       +' style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;'
-      +'margin:6px 0;background:#fff"><div style="display:flex;gap:8px;'
-      +'align-items:center;flex-wrap:wrap">'+head
+      +'margin:6px 0;background:#fff"><div class="rule-row" style="display:flex;gap:8px;'
+      +'align-items:center;flex-wrap:wrap;margin-bottom:0">'+head
       +'<button type="button" class="btn btn-outline btn-sm"'+del+'>删除</button></div>'
       +'<div class="excl-children"></div></div>';
   }
@@ -4796,36 +5098,35 @@ def build_scheduler_task_form_html(prefill: dict | None,
             f'<td class="bind-cell" data-rid="{rid}">{bind_cell}</td>'
             f'</tr>')
     report_rows_html = "".join(_rows)
-    title = "编辑定时任务" if edit_id else "新建定时任务"
     edit_hidden = (f'<input type="hidden" name="edit_id" value="{edit_id}">'
                    if edit_id else "")
     excl_editor = f'''
-    <div style="display:flex;gap:10px;align-items:flex-start">
-      <label style="width:120px;padding-top:6px">排除规则<br>
-        <span style="color:#64748b;font-size:12px">静默窗口<br>任一规则命中即不执行</span></label>
-      <div style="flex:1">
-        <div id="excl-rules"></div>
-        <div style="display:flex;gap:8px;margin-top:4px">
-          <button type="button" class="btn btn-outline btn-sm" onclick="exclAddRule()">+ 添加规则</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="exclAddGroup()">+ 规则组</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="exclToggleSource()">源码</button>
-        </div>
-        <textarea id="excl-source" rows="5" style="display:none;width:100%;margin-top:6px;padding:6px;font-family:monospace;font-size:12px"></textarea>
-        <div id="excl-msg" style="display:none;color:#dc2626;font-size:12px;margin-top:4px"></div>
-      </div>
-    </div>
+    <p style="margin:0 0 8px;font-size:12px;color:var(--ink-3)">任一规则命中则本次不执行；解析失败按「不排除」处理（后端 validate_exclusions 兜底）。与报表嵌套筛选结构不同，勿混用。</p>
+    <div id="excl-rules" class="rule-group"></div>
+    <textarea id="excl-source" rows="5" style="display:none;width:100%;margin-top:6px;padding:6px;font-family:monospace;font-size:12px"></textarea>
+    <div id="excl-msg" style="display:none;color:#dc2626;font-size:12px;margin-top:4px"></div>
     <input type="hidden" name="exclusions" id="excl-json" value="{_escape(exclusions)}">'''
     interval_disp = "" if stype == "interval" else ' style="display:none"'
     daily_disp = "" if stype == "daily" else ' style="display:none"'
-    return f'''<div class="section"><div class="section-title"><span>⏱️ {title}</span></div>
-  <form method="post" action="/config/scheduler/save" class="config-form sched-form">
-    {edit_hidden}
-    <label>任务名<input type="text" name="name" value="{_escape(name)}" required></label>
-    <label>调度类型<select name="schedule_type" onchange="syncSchedType()">{type_opts}</select></label>
-    <div class="schedule-row span-full" id="row-interval"{interval_disp}><label>间隔（分钟）<input type="number" name="interval_minutes" value="{int(interval)}" min="1"></label></div>
-    <div class="schedule-row span-full" id="row-daily"{daily_disp}><label>每日时刻<input type="time" name="daily_time" value="{_escape(daily)}"></label></div>
-    <label>错过策略<select name="misfire_policy">{policy_opts}</select></label>
-    <div class="span-full">
+    # spec page-scheduler-new：grid-2（左「计划」卡｜右「关联报表」卡）→
+    # 独立「排除规则」卡（仍在主 form 内）→ formbar。按钮协议与 POST 字段不变。
+    return f'''<form method="post" action="/config/scheduler/save" class="config-form sched-form">
+  {edit_hidden}
+  <div class="grid-2 span-full">
+    <div class="card">
+      <div class="card-head"><h2>计划</h2></div>
+      <label>任务名<input type="text" name="name" value="{_escape(name)}" required></label>
+      <label>调度类型<select name="schedule_type" onchange="syncSchedType()">{type_opts}</select></label>
+      <div class="schedule-row span-full" id="row-interval"{interval_disp}><label>间隔（分钟）<input type="number" name="interval_minutes" value="{int(interval)}" min="1"></label></div>
+      <div class="schedule-row span-full" id="row-daily"{daily_disp}><label>每日时刻<input type="time" name="daily_time" value="{_escape(daily)}"></label></div>
+      <label>错过策略<select name="misfire_policy">{policy_opts}</select></label>
+      <div style="margin-top:10px">
+        <label class="check-inline"><input type="checkbox" name="schedule_enabled" {enabled_checked}> 启用</label>
+        <label class="check-inline"><input type="checkbox" name="audit_enabled" {audit_checked}> 记录执行审计</label>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>关联报表（按序执行）</h2></div>
       <label style="margin-bottom:6px">关联报表<span class="field-hint">勾选=绑定该报表；「参与执行」未勾选的报表在任务中停用（S10）</span></label>
       <div class="sched-reports-wrap">
         <table class="sched-reports">
@@ -4834,13 +5135,22 @@ def build_scheduler_task_form_html(prefill: dict | None,
         </table>
       </div>
     </div>
-    <div class="span-full">{excl_editor}</div>
-    <div class="span-full">
-      <label class="check-inline"><input type="checkbox" name="schedule_enabled" {enabled_checked}> 启用</label>
-      <label class="check-inline"><input type="checkbox" name="audit_enabled" {audit_checked}> 记录执行审计</label>
+  </div>
+  <div class="card span-full">
+    <div class="card-head"><h2>排除规则（静默窗口）</h2>
+      <div class="actions">
+        <button type="button" class="btn btn-outline btn-sm" onclick="exclAddRule()">+ 添加规则</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="exclAddGroup()">+ 规则组</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="exclToggleSource()">源码</button>
+      </div>
     </div>
-    <div class="form-actions span-full"><button type="submit" class="btn btn-primary">保存任务</button></div>
-  </form></div>
+    {excl_editor}
+  </div>
+  <div class="formbar span-full">
+    <a href="/config/scheduler" class="cancel">← 取消</a>
+    <div class="right"><button type="submit" class="btn btn-primary">保存任务</button></div>
+  </div>
+</form>
 <script>{_EXCL_EDITOR_JS}
 function syncSchedType() {{
   var sel = document.querySelector('form.sched-form select[name=schedule_type]');
@@ -4868,12 +5178,6 @@ def _api_url_variants(base_url: str, url_path: str) -> tuple[str, str, str]:
             f"{base_url}{url_path}{static_cache.JSON_SUFFIX}")
 
 
-def _build_api_status_badge(enabled) -> str:
-    """构建接口状态徽章 HTML（启用=绿/禁用=红）。"""
-    return (build_state_span("启用")
-            if int(enabled or 0) == 1 else
-            build_state_span("禁用", "warn"))
-
 
 def _build_api_description_html(ep: dict) -> str:
     """构建接口说明折叠区 HTML（api-desc-markdown T3）。
@@ -4893,76 +5197,3 @@ def _build_api_description_html(ep: dict) -> str:
         button_text="▼ 接口说明", mem_key=f"api_desc_fold_{ep['id']}")
 
 
-def _build_api_url_item_html(ep: dict, base_url: str, name: str = None,
-                             default_name: str = "未命名",
-                             margin_bottom: str = "4px",
-                             indent: int = 2) -> str:
-    """构建单个 API 端点的折叠区内容块（名称行 + 说明 + URL 三行 + 管理操作）。
-
-    单端点与分组端点共用（差异：名称缺省值、行间距、源码缩进），
-    能力未开启的 URL 行置灰 + 原因提示（不隐藏），与配置列表页标准一致。
-    """
-    ep_id = ep['id']
-    ep_name = name if name is not None else ep.get("name", default_name)
-    url_path = ep.get("url_path", "")
-    static_on = int(ep.get("static_cache", 1)) == 1
-    fetch_all_on = int(ep.get("allow_fetch_all", 1)) == 1
-    edit_url = _api_endpoint_url(ep.get('report_id', 0), ep_id)
-    sc_enabled = static_cache.get_static_cache_config().get("enable", True)
-
-    # url_path 已包含 /api/ 前缀，直接拼接。
-    # 服务端先用 base_url 渲染占位值；页面加载后 JS 用 window.location.origin
-    # 覆盖（与 API 配置后台一致，显示用户实际访问的地址）。
-    base_api_url, full_url, static_url = _api_url_variants(base_url, url_path)
-
-    rows = _build_api_url_row(f"api-url-{ep_id}", "完整 URL:", url_path, "base", base_api_url)
-    rows += _build_api_url_row(
-        f"api-full-{ep_id}", "全量 URL:", url_path, "full", full_url,
-        disabled=not fetch_all_on,
-        disabled_hint="未开启「允许全量获取」，请在接口配置中开启" if not fetch_all_on else "",
-        edit_url=edit_url)
-    rows += _build_api_url_row(
-        f"api-static-{ep_id}", "静态 URL:", url_path, "static", static_url,
-        disabled=not (static_on and sc_enabled),
-        disabled_hint=(("未开启「静态缓存」，请在接口配置中开启"
-                        if not static_on else
-                        "全局静态缓存已关闭（app_config.json 的 static_cache.enable）")
-                       if (not static_on or not sc_enabled) else ""),
-        edit_url=edit_url)
-
-    pad = " " * indent
-    return (f'{pad}<div style="margin-bottom:{margin_bottom}"><strong>{_escape(ep_name)}</strong> '
-            f'{_build_api_status_badge(ep.get("enabled", 1))}</div>\n'
-            f'{pad}{_build_api_description_html(ep)}\n'
-            f'{pad}{rows}\n'
-            f'{pad}{_build_api_admin_actions_html(ep)}')
-
-
-def _build_single_api_url_html(ep: dict, base_url: str) -> str:
-    """构建单个 API 端点的 URL 显示区域（样式与 Debug 信息模块一致）。
-
-    能力未开启的 URL 行置灰 + 原因提示（不隐藏），与配置列表页标准一致。
-    """
-    item = _build_api_url_item_html(ep, base_url)
-    return build_collapse_section_html(
-        "API 调用地址", item, extra_style="margin-top:8px", multiline=True)
-
-
-def _build_grouped_api_urls_html(api_endpoints: list[dict], base_url: str) -> str:
-    """构建多个 API 端点的分组 URL 显示区域（样式与 Debug 信息模块一致）。
-
-    能力未开启的 URL 行置灰 + 原因提示（不隐藏），与配置列表页标准一致。
-    """
-    # 构建每个 API 的 HTML（与单端点共用 _build_api_url_item_html）
-    api_items = ""
-    for idx, ep in enumerate(api_endpoints):
-        sep = ('<div style="border-top:1px dashed #cbd5e1;margin:8px 0"></div>'
-               if idx > 0 else "")
-        api_items += sep + "\n" + _build_api_url_item_html(
-            ep, base_url, default_name=f"接口 {idx + 1}",
-            margin_bottom="2px", indent=0)
-
-    return build_collapse_section_html(
-        f"API 调用地址 ({len(api_endpoints)} 个接口)",
-        "  " + api_items,
-        extra_style="margin-top:8px", multiline=True)

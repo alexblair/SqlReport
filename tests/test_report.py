@@ -185,7 +185,7 @@ class TestReportSelector(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("报表A", body)
         self.assertIn("报表B", body)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     def test_selector_empty(self):
         """没有报表时仍应正常渲染"""
@@ -201,7 +201,7 @@ class TestReportSelector(unittest.TestCase):
         """)
         code, body, _ = report.handle_request(conn2, "GET", "/report", "")
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
         conn2.close()
 
 
@@ -239,14 +239,14 @@ class TestReportExecution(unittest.TestCase):
 
     @patch("report.execute_report")
     def test_report_navbar_has_api_entry(self, mock_exec):
-        """报表页导航栏包含 API 接口独立入口"""
+        """报表页侧栏包含 API 接口独立入口"""
         mock_exec.return_value = report.ReportResult(
             columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
         )
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("API 接口", body)
-        self.assertIn('href="/config/api-endpoints"', body)
+        self.assertIn("'/config/api-endpoints'", body)
 
     @patch("report.execute_report")
     def test_report_renders_flash(self, mock_exec):
@@ -292,6 +292,28 @@ class TestReportExecution(unittest.TestCase):
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("暂无数据", body)
+
+    @patch("report.execute_report")
+    def test_pagination_always_shown_single_page(self, mock_exec):
+        """R2-D：详情页分页条恒显——单页结果也渲染分页容器"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=20,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn('<div class="pagination">', body)
+
+    @patch("report.execute_report")
+    def test_quick_filter_row_present(self, mock_exec):
+        """R2-D：表头下独立快筛行 tr.qf-row（筛选协议仍在）"""
+        mock_exec.return_value = report.ReportResult(
+            columns=["id", "name"], rows=[(1, "x")], total=1, page=1, page_size=20,
+        )
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                               "id=1", pool_override=self.mock_pool)
+        self.assertIn('<tr class="qf-row">', body)
+        self.assertIn('name="f_id"', body)
+        self.assertIn('name="op_id"', body)
 
     def test_report_not_found(self):
         """不存在的报表 ID 应显示错误"""
@@ -341,7 +363,7 @@ class TestReportExecution(unittest.TestCase):
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=abc", pool_override=self.mock_pool)
         self.assertEqual(code, 200)
-        self.assertIn("选择报表", body)
+        self.assertIn("报表中心", body)
 
     @patch("report.execute_report")
     def test_query_error_shown(self, mock_exec):
@@ -364,9 +386,9 @@ class TestReportExecution(unittest.TestCase):
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("这是报表备注说明", body)
-        # 批次6#24：有内容也默认折叠，内容保留在 DOM
-        self.assertIn("\u25b6 备注", body)
-        self.assertIn('class="debug-content hidden"', body)
+        # R2-D：备注页签为普通卡片（非折叠块），内容常显在 DOM 中
+        self.assertIn("备注（Markdown）", body)
+        self.assertNotIn('class="debug-content hidden"', body)
 
     @patch("report.execute_report")
     def test_report_hides_memo_when_empty(self, mock_exec):
@@ -379,11 +401,11 @@ class TestReportExecution(unittest.TestCase):
                          10, 1, memo=None)
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
-        self.assertIn("▶ 备注", body)  # 无内容时默认折叠
+        self.assertIn("暂无备注", body)  # R2-D：空备注卡片内显示占位文案
 
     @patch("report.execute_report")
     def test_report_memo_toggle_button(self, mock_exec):
-        """备注切换按钮应使用 toggleSection 函数"""
+        """备注摘要条「查看全文」跳转备注页签（gotoTab，R2-D 非折叠）"""
         mock_exec.return_value = report.ReportResult(
             columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
         )
@@ -391,7 +413,8 @@ class TestReportExecution(unittest.TestCase):
                          10, 1, memo="测试备注")
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
-        self.assertIn('toggleSection(this', body)
+        self.assertIn("gotoTab('memo')", body)
+        self.assertIn("查看全文", body)
         self.assertIn("备注", body)
 
     @patch("report.execute_report")
@@ -439,7 +462,7 @@ class TestReportExecution(unittest.TestCase):
         self.assertIn('src="/static/vendor/mermaid@11.16.1/mermaid.min.js"', body)
         self.assertIn("mermaid.initialize", body)
         self.assertIn('<pre class="mermaid">', body)
-        self.assertIn('data-mem-key="api_desc_fold_1"', body)
+        self.assertNotIn('data-mem-key="', body)
 
     @patch("report.execute_report")
     def test_report_skips_mermaid_when_neither_memo_nor_api_desc(self, mock_exec):
@@ -456,7 +479,7 @@ class TestReportExecution(unittest.TestCase):
                                                "id=1", pool_override=self.mock_pool)
         self.assertNotIn("mermaid@11.16.1", body)
         self.assertNotIn("mermaid.initialize", body)
-        self.assertIn("data-mem-key=\"api_desc_fold_1\"", body)
+        self.assertNotIn("data-mem-key=\"", body)
 
 
 class TestReportResult(unittest.TestCase):
@@ -1745,7 +1768,7 @@ class TestPreviewEndpoint(unittest.TestCase):
         form_body = "sql_query=SELECT+test"
         code, body, _ = report.handle_request(self.conn, "POST", "/report/preview",
                                                "", form_body)
-        self.assertIn("可用报表列表", body)
+        self.assertIn("报表中心", body)
 
 
 if __name__ == "__main__":

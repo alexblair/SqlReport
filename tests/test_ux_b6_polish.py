@@ -90,15 +90,15 @@ class TestRecentReports(BaseReportTest):
     """最近查看记录与总览快捷卡片（spec ux-optimization 批次6#22）"""
 
     def test_overview_mount_point_present(self):
-        """总览页应包含 recent-reports-mount 挂载点 div"""
+        """总览页应包含 recent-reports-mount 挂载点"""
         html = report.render_report_selector(self.conn)
-        self.assertIn('<div id="recent-reports-mount"></div>', html)
+        self.assertIn('id="recent-reports-mount"', html)
 
     def test_mount_point_at_top_of_body(self):
-        """挂载点应位于页面主体最前（第一个 card 之前）"""
+        """挂载点应位于分类树与报表网格之前（最近查看区块内）"""
         html = report.render_report_selector(self.conn)
         self.assertLess(html.index("recent-reports-mount"),
-                        html.index("<h2>选择报表</h2>"))
+                        html.index('id="rc-tree"'))
 
     def test_detail_page_injects_save_recent_visit(self):
         """报表详情页应注入 saveRecentVisit 调用（含报表 id 与名称）"""
@@ -213,36 +213,38 @@ class TestSqlEditorEnhancement(BaseConfigTest):
 
 
 class TestMemoDefaultCollapsed(unittest.TestCase):
-    """备注区块默认态折叠、三态记忆保留（spec ux-optimization 批次6#24）"""
+    """备注页签为普通卡片（R2-D：折叠块废除，三态记忆早已废除）"""
 
-    def test_nonempty_memo_default_collapsed(self):
-        """非空备注默认折叠：hidden 内容 + 折叠箭头 + default-hidden=1"""
+    def test_nonempty_memo_plain_card(self):
+        """非空备注输出普通卡片（md-body 常显），无折叠结构"""
         html = render.build_memo_section_html("有内容", 3)
-        self.assertIn("\u25b6 备注", html)
-        self.assertNotIn("\u25bc 备注", html)
-        self.assertIn('class="debug-content hidden"', html)
-        self.assertIn('data-default-hidden="1"', html)
+        self.assertIn("备注（Markdown）", html)
+        self.assertIn("有内容", html)
+        self.assertIn('class="md-body"', html)
+        self.assertNotIn('class="debug-content hidden"', html)
+        self.assertNotIn("data-default-hidden", html)
 
-    def test_empty_memo_default_collapsed(self):
-        """空备注保持默认折叠"""
+    def test_empty_memo_placeholder_card(self):
+        """空备注卡片内显示占位文案（非折叠）"""
         html = render.build_memo_section_html("", 3)
-        self.assertIn('class="debug-content hidden"', html)
-        self.assertIn('data-default-hidden="1"', html)
+        self.assertIn("暂无备注", html)
+        self.assertNotIn('class="debug-content hidden"', html)
 
-    def test_mem_key_preserved_for_user_preference(self):
-        """三态记忆键保留——用户已有 open/fold 选择仍由前端记忆覆盖"""
+    def test_tristate_removed(self):
+        """三态控件与记忆键已废除（T7.11 确认稿）"""
         html = render.build_memo_section_html("有内容", 3)
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn("mem-mode", html)
+        self.assertNotIn('data-mem-key', html)
+        self.assertNotIn("mem-mode", html)
 
-    def test_without_report_id_still_collapsed_no_memory(self):
-        """report_id=None 时同样默认折叠，且无记忆控件"""
+    def test_without_report_id_still_plain_card_no_memory(self):
+        """report_id=None 时同样为普通卡片，且无记忆控件"""
         html = render.build_memo_section_html("有内容")
-        self.assertIn('class="debug-content hidden"', html)
+        self.assertIn("备注（Markdown）", html)
+        self.assertNotIn('class="debug-content hidden"', html)
         self.assertNotIn("data-mem-key", html)
 
-    def test_content_not_lost_when_collapsed(self):
-        """折叠只影响显隐类，Markdown 渲染内容仍在 DOM 中"""
+    def test_content_shown_when_rendered(self):
+        """Markdown 渲染内容完整落在卡片 DOM 中"""
         html = render.build_memo_section_html("# 标题内容", 5)
         self.assertIn("<h1>标题内容</h1>", html)
 
@@ -312,10 +314,9 @@ class TestMobileMediaQuery(unittest.TestCase):
         """公共 CSS 应含 @media (max-width: 640px) 块"""
         self.assertTrue(self.block, "未找到 640px media query 块")
 
-    def test_navbar_allows_wrap_with_smaller_spacing(self):
-        """navbar 允许换行且链接间距缩小"""
-        self.assertIn(".navbar { flex-wrap: wrap", self.block)
-        self.assertIn(".navbar a:not(.brand) { padding: 4px 8px", self.block)
+    def test_navbar_removed_with_sidebar_shell(self):
+        """640px 块不再包含已废弃的顶栏 .navbar 规则（页壳已改侧栏）"""
+        self.assertNotIn(".navbar", self.block)
 
     def test_container_padding_narrowed(self):
         """页面容器 padding 收窄"""
@@ -344,7 +345,7 @@ class Test27a_ReportPageTitle(BaseReportTest):
                                      total=1, page=1, page_size=10)
         html = report._build_report_html(self.conn, ri, result,
                                          {"id": self.pool_id, "name": "池"})
-        self.assertIn("<title>月度销售 - Web 报表工具</title>", html)
+        self.assertIn("<title>月度销售 - SqlReport</title>", html)
 
     def test_title_is_html_escaped(self):
         """报表名中的 HTML 字符在 title 中被转义"""
@@ -354,7 +355,7 @@ class Test27a_ReportPageTitle(BaseReportTest):
                                      total=1, page=1, page_size=10)
         html = report._build_report_html(self.conn, ri, result,
                                          {"id": self.pool_id, "name": "池"})
-        self.assertIn("<title>&lt;x&gt;&amp;&quot;y&quot; - Web 报表工具</title>", html)
+        self.assertIn("<title>&lt;x&gt;&amp;&quot;y&quot; - SqlReport</title>", html)
 
 
 class Test27b_FaviconRoute(unittest.TestCase):
@@ -538,8 +539,10 @@ class Test27g_ExportCharsetLabels(BaseReportTest):
                                      total=1, page=1, page_size=10)
         html = report._build_report_html(self.conn, ri, result,
                                          {"id": self.pool_id, "name": "池"})
-        self.assertIn('<option value="gbk">GBK（Excel 中文版推荐）</option>', html)
-        self.assertIn('<option value="utf8">UTF-8（通用 / 程序处理）</option>', html)
+        self.assertIn('name="charset" value="gbk"', html)
+        self.assertIn('GBK（Excel 中文版推荐）', html)
+        self.assertIn('name="charset" value="utf8"', html)
+        self.assertIn('UTF-8（通用 / 程序处理）', html)
 
 
 class Test27h_TruncatedCellTitles(BaseConfigTest):
@@ -579,8 +582,8 @@ class Test27i_OverviewButtonAnchors(BaseConfigTest):
         html = config.render_overview(self.conn)
         self.assertIn('href="/config/reports#sec-categories"', html)
         # 精确提取两个按钮标签，逐一核对 href
-        m_cat = re.search(r'<a href="([^"]*)"[^>]*>管理分类</a>', html)
-        m_rpt = re.search(r'<a href="([^"]*)"[^>]*>管理报表</a>', html)
+        m_cat = re.search(r'<a [^>]*href="([^"]*)"[^>]*>管理分类</a>', html)
+        m_rpt = re.search(r'<a [^>]*href="([^"]*)"[^>]*>管理报表</a>', html)
         self.assertIsNotNone(m_cat)
         self.assertIsNotNone(m_rpt)
         self.assertEqual(m_cat.group(1), "/config/reports#sec-categories")
@@ -606,7 +609,8 @@ class Test28CommonAssetsExternal(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             urls = render.ensure_common_assets(root=tmp)
             self.assertIsNotNone(urls)
-            hash8 = render.content_hash8(render._COMMON_CSS)
+            hash8 = render.content_hash8(
+                render._COMMON_CSS + "\n;;;\n" + render._COMMON_JS)
             css_path = os.path.join(tmp, f"self@{hash8}", "common.css")
             js_path = os.path.join(tmp, f"self@{hash8}", "common.js")
             self.assertTrue(os.path.isfile(css_path))

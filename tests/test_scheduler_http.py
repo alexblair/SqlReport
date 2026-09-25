@@ -318,78 +318,48 @@ class TestReportFormSchedule(SchedulerHttpTest):
 class TestSchedulerPage(SchedulerHttpTest):
 
     def test_page_lists_tasks_with_columns(self):
+        """原型 page-scheduler 7 列口径（对齐原型，收敛 2 列）。"""
         self._add_schedule_row()
         code, body, _ = self._get("/config/scheduler")
         self.assertEqual(code, 200)
-        for fragment in ("报表A", "下次执行", "上次执行", "上次结果",
-                         "失败计数", "立即执行", "每 30 分钟"):
+        for fragment in ("报表A", "下次执行", "上次结果",
+                         "立即执行", "每 30 分钟"):
             self.assertIn(fragment, body)
+        # 收敛列：原型无「上次执行」「失败计数」独立列
+        self.assertNotIn(">上次执行</th>", body)
+        self.assertNotIn(">失败计数</th>", body)
 
-    def test_page_shows_last_run_time(self):
-        """上次执行列：last_run_at 格式化为本地时间。"""
+    def test_page_shows_last_result_cell(self):
+        """上次结果列：last_status 渲染为成功/失败徽标（不再展示上次执行时间）。"""
         at = time.time() - 120
-        self._add_schedule_row(last_run_at=at)
+        sid = self._add_schedule_row(last_run_at=at)
+        conn = _get_conn()
+        conn.execute("UPDATE report_schedules SET last_status='success', "
+                     "last_duration_ms=42 WHERE id=?", (sid,))
+        conn.commit()
+        conn.close()
         _, body, _ = self._get("/config/scheduler")
-        expect = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
-        self.assertIn(expect, body)
-
-    def test_page_shows_recent_events(self):
-        """最近执行记录区块：scheduled_run 成功/失败与 scheduled_misfire 渲染。"""
-        import json as _json
-        now = time.time()
-        events = [
-            {"id": 3, "action": "scheduled_misfire", "entity_type": "schedule",
-             "entity_id": 1, "timestamp": now - 60,
-             "after_value": _json.dumps({"policy": "skip"})},
-            {"id": 2, "action": "scheduled_run", "entity_type": "schedule",
-             "entity_id": 1, "timestamp": now - 3600,
-             "after_value": _json.dumps({"trigger": "manual",
-                                         "status": "fail", "error": "池炸了",
-                                         "duration_ms": 88})},
-            {"id": 1, "action": "scheduled_run", "entity_type": "schedule",
-             "entity_id": 1, "timestamp": now - 7200,
-             "after_value": _json.dumps({"trigger": "scheduler",
-                                         "status": "success",
-                                         "duration_ms": 42,
-                                         "report_total": 3,
-                                         "report_executed": 2,
-                                         "report_names": ["报表A", "报表C"]})},
-        ]
-        with patch("audit_db.get_recent_schedule_events",
-                    return_value=events):
-            _, body, _ = self._get("/config/scheduler")
-        self.assertIn("最近执行记录", body)
         self.assertIn("✅ 成功", body)
-        self.assertIn("❌ 失败", body)
-        self.assertIn("88ms", body)
-        self.assertIn("手动", body)                       # trigger=manual
-        self.assertIn("跳过（推进到下次计划）", body)       # misfire skip
-        self.assertIn("来自审计日志", body)
-        # T3：记录表 6 列，含「任务」「报表」列头
-        self.assertIn(">任务</th>", body)
-        self.assertIn(">报表</th>", body)
-        # T3：任务列链接回编辑页
-        self.assertIn('href="/config/scheduler?edit=1"', body)
-        # T3：报表列展示「报表：…（n/m）」
-        self.assertIn("报表：", body)
+        self.assertIn("(42ms)", body)
+        # 上次执行时间不再进表（原型无该列；执行历史查审计日志）
+        expect = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
+        self.assertNotIn(expect, body)
 
-    def test_page_empty_events_block_all_audit_off(self):
-        """无执行记录 + 所有任务未开审计 → 显示审计关闭提示（T4 空态）。"""
-        self._add_schedule_row(audit_enabled=0)
-        with patch("audit_db.get_recent_schedule_events", return_value=[]):
-            _, body, _ = self._get("/config/scheduler")
-        self.assertIn("最近执行记录", body)
-        self.assertIn("暂无执行记录", body)
-        self.assertIn("所有任务均未开启", body)
+    def test_page_has_no_second_events_table(self):
+        """原型无「最近执行记录」第二张表：单表 + help 提示执行历史到审计日志。"""
+        sid = self._add_schedule_row()
+        _, body, _ = self._get("/config/scheduler")
+        self.assertNotIn("最近执行记录", body)
+        self.assertNotIn("暂无执行记录", body)
+        self.assertIn("审计日志", body)
+        # 任务行链接与计划文案仍在单表内
+        self.assertIn(f'href="/config/scheduler/{sid}/edit"', body)
 
-    def test_page_empty_events_block_some_audit_on(self):
-        """无执行记录 + 有任务开启审计 → 仅通用占位，不含审计关闭提示（T4）。"""
-        self._add_schedule_row(audit_enabled=1)
-        with patch("audit_db.get_recent_schedule_events", return_value=[]):
-            _, body, _ = self._get("/config/scheduler")
-        self.assertIn("最近执行记录", body)
-        self.assertIn("暂无执行记录", body)
-        self.assertNotIn("所有任务均未开启", body)
+    def test_page_help_notes_badge_semantics(self):
+        """原型 help 文案位：徽标语义双编码提示。"""
+        self._add_schedule_row()
+        _, body, _ = self._get("/config/scheduler")
+        self.assertIn("徽标语义", body)
 
     def test_page_shows_banner_when_globally_disabled(self):
         """B17：全局停用 → 横幅提示，页面仍可查看。"""
@@ -446,7 +416,11 @@ class TestSchedulerUXForm(SchedulerHttpTest):
     """
 
     def _form_body(self, query=""):
-        _, body, _ = self._get("/config/scheduler", query)
+        # T7.9：表单迁至独立页；?edit=N 兼容路径仍渲染表单
+        if query:
+            _, body, _ = self._get("/config/scheduler", query)
+        else:
+            _, body, _ = self._get("/config/scheduler/new")
         return body
 
     def test_form_uses_config_form_class_no_inline_maxwidth(self):
@@ -649,13 +623,15 @@ class TestSchedulerSaveEditId(SchedulerHttpTest):
         端点 /config/scheduler/save，语义错误）。"""
         self._add_schedule_row(name="链接检查")
         _, body, _ = self._get("/config/scheduler")
-        self.assertIn('href="/config/scheduler?edit=', body)
+        self.assertIn('href="/config/scheduler/', body)
+        self.assertIn('/edit"', body)
         self.assertNotIn('href="/config/scheduler/save?edit=', body)
+        self.assertNotIn('href="/config/scheduler?edit=', body)
 
     def test_task_form_renders_exclusion_tree_editor(self):
         """§7.3：排除规则为前端树编辑器骨架（增删规则/嵌套组/源码模式），
         JSON 经隐藏域 name=exclusions 提交，不再暴露裸 textarea。"""
-        _, body, _ = self._get("/config/scheduler")
+        _, body, _ = self._get("/config/scheduler/new")
         for fragment in ('id="excl-rules"', 'id="excl-json"',
                          'name="exclusions"', "exclAddRule", "exclAddGroup",
                          "exclToggleSource", "exclRebuild"):
@@ -687,7 +663,8 @@ class TestServerLifecycle(unittest.TestCase):
 
     def test_main_wires_start_and_shutdown(self):
         import pathlib
-        src = pathlib.Path("/opdev/SqlReport/server.py").read_text(
+        # 仓库根相对推导，禁止写死主目录绝对路径（AGENTS.md 硬性约束 #10）
+        src = (pathlib.Path(__file__).resolve().parent.parent / "server.py").read_text(
             encoding="utf-8")
         # HTTP 服务就绪后才启动调度器；失败只告警不阻断 Web 服务
         self.assertIn("scheduler.start_scheduler_from_config()", src)

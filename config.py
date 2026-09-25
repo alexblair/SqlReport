@@ -16,7 +16,6 @@ URL 路由约定：
   用户和报表路由规则同上，替换 pools 为 users / reports
 """
 
-import contextlib
 import re
 import json
 import logging
@@ -54,6 +53,7 @@ from render import (
     build_api_endpoint_preview_help_html,
     build_scheduler_page_html,
     build_scheduler_task_form_html,
+    build_report_schedule_summary_html,
     _build_desc_summary_html,
     _WARN_BOX_STYLE,
     _MD_CSS,
@@ -103,6 +103,14 @@ def parse_config_path(path: str) -> dict:
         if path in ("/config/scheduler", "/config/scheduler/"):
             return {"section": "scheduler", "action": "list",
                     "id": None, "report_id": None, "endpoint_id": None}
+        if path in ("/config/scheduler/new", "/config/scheduler/new/"):
+            return {"section": "scheduler", "action": "new",
+                    "id": None, "report_id": None, "endpoint_id": None}
+        m2 = re.match(r"^/config/scheduler/(\d+)/edit$", path)
+        if m2:
+            return {"section": "scheduler", "action": "edit",
+                    "id": int(m2.group(1)), "report_id": None,
+                    "endpoint_id": None}
         m = re.match(r"^/config/scheduler/(run|toggle|delete)/(\d+)$", path)
         if m:
             return {"section": "scheduler", "action": m.group(1),
@@ -171,7 +179,7 @@ def parse_config_path(path: str) -> dict:
     if simple_action:
         return {"section": section, "action": simple_action, "id": None,
                 "report_id": None, "endpoint_id": None}
-    return {"section": section, "action": "add", "id": None,
+    return {"section": section, "action": "list", "id": None,
             "report_id": None, "endpoint_id": None}
 
 
@@ -289,18 +297,6 @@ _CONFIG_EXTRA_CSS = """
     font-size: 12px; font-weight: 600;
   }
   .badge-pool { background: #eef2ff; color: #4f46e5; }
-  /* 分类树引导线（文件树风格）：等宽字体保证 ├─/└─/│ 逐层对齐 */
-  .cat-tree-item {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; border-bottom: 1px solid #f1f5f9;
-    transition: background 0.15s;
-  }
-  .cat-tree-item:hover { background: #f8fafc; }
-  .cat-tree-item:last-child { border-bottom: none; }
-  .tree-guide {
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 13px; color: #a5b4fc; white-space: pre; user-select: none;
-  }
   /* 连接池表单「测试连接」结果（批次：ajax 不刷新，内联提示） */
   .config-form .form-actions .test-result {
     font-size: 13px; font-weight: 500; align-self: center;
@@ -429,7 +425,8 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
                        prefer_cache=1, cache_ttl_hours=0,
                        allow_write=0, sql_has_write=False,
                        allow_all_output=0, max_rows=100000,
-                       keepalive_enabled=0, keepalive_ahead_seconds=0):
+                       keepalive_enabled=0, keepalive_ahead_seconds=0,
+                       sched_summary_html=''):
     """构建报表表单完整 HTML（含 SQL 编辑器 JS + 查看/预览按钮）。
 
     allow_write: 「允许执行写操作」当前值（存量 1、新建 0）。
@@ -438,6 +435,8 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     allow_all_output: 「允许全部输出」当前值（存量 1、新建 0）。
     max_rows: 全量输出关闭时的截断行数上限（默认 100000，仅关闭全量输出时生效）。
     keepalive_enabled / keepalive_ahead_seconds: 缓存保活折叠区当前值（scheduler T4）。
+    sched_summary_html: 「④ 调度与保活」卡内的关联任务只读摘要
+                         （render.build_report_schedule_summary_html 产出）。
     """
     view_btn = (f'<a href="/report?id={report_id}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">查看</a>'
                 if is_edit and report_id else "")
@@ -495,62 +494,96 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
       </label>
     </div>
   </details>"""
-    return f"""<div class="card">
-<h2>{title}</h2>
-<form method="post" action="{action_url}" class="config-form" data-action="{action_url}"{aao_confirm}>
+    # 页面头（spec page-report-edit）：crumb + h1 + 查看/预览（预览按钮留在 form 内
+    # 以维持 previewReport(this.form) 协议，故 page-head 整体置于主 form 起始处）
+    crumb_tail = {"编辑报表": "报表编辑", "新增报表": "报表新增",
+                  "复制报表": "报表复制"}.get(title, title)
+    return f"""<form method="post" action="{action_url}" class="config-form" data-action="{action_url}"{aao_confirm}>
   {hidden_id}
-  <label>报表名称: <input type="text" name="name" value="{name}" required></label>
-  <label class="span-full">SQL 查询语句:
-    <textarea name="sql_query" class="sql-textarea sql-editor" data-tab-indent="1" placeholder="输入 MySQL 语句..." spellcheck="false" rows="14">{sql_query}</textarea>
-    <div class="sql-preview"></div>
-    <div class="sql-toolbar">
-      <button type="button" class="btn btn-outline btn-sm" onclick="formatSQL(this)">格式化 SQL</button>
-      <button type="button" class="btn btn-outline btn-sm" onclick="togglePreview(this)">显示高亮</button>
+  <div class="page-head span-full">
+    <div>
+      <div class="crumb"><a href="/config">配置</a> › {crumb_tail}</div>
+      <h1>{title}</h1>
+      <div class="sub">分区表单：基础 → SQL → 缓存护栏 → 调度与保活 → API 端点</div>
     </div>
-  </label>
-  <label>默认分页大小: <input type="number" name="default_page_size" value="{default_page_size}" min="1" required></label>
-  <label>使用的连接池:
-    <select name="pool_id" {required_attr}>
-      {no_pool_opt}
-      {pool_options}
-    </select>
-  </label>
-  <label>报表分类:
-    <select name="category_id">
-      <option value="">无分类</option>
-      {category_options}
-    </select>
-  </label>
-  <label class="span-full">备注（非必填）:
-    <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
-    <div class="memo-preview md-body" id="memo-preview"></div>
-    <div class="sql-toolbar">
-      <button type="button" class="btn btn-outline btn-sm" onclick="toggleMemoPreview(this)">预览备注</button>
+    <div class="actions">{view_btn}{preview_btn}</div>
+  </div>
+  <div class="grid-2 span-full">
+    <div>
+      <div class="card">
+        <div class="card-head"><div class="form-section">① 基础</div></div>
+        <label>报表名称: <input type="text" name="name" value="{name}" required></label>
+        <label>使用的连接池:
+          <select name="pool_id" {required_attr}>
+            {no_pool_opt}
+            {pool_options}
+          </select>
+        </label>
+        <label>报表分类:
+          <select name="category_id">
+            <option value="">无分类</option>
+            {category_options}
+          </select>
+        </label>
+        <label>默认分页大小: <input type="number" name="default_page_size" value="{default_page_size}" min="1" required></label>
+        <label class="span-full">备注（非必填）:
+          <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
+          <div class="memo-preview md-body" id="memo-preview"></div>
+          <div class="sql-toolbar">
+            <button type="button" class="btn btn-outline btn-sm" onclick="toggleMemoPreview(this)">预览备注</button>
+          </div>
+        </label>
+      </div>
     </div>
-  </label>
-  <label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
-    <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
-  </label>
-  <label style="display:flex;align-items:center;gap:8px;font-weight:400">
-    <input type="hidden" name="prefer_cache" value="0">
-    <input type="checkbox" name="prefer_cache" value="1"{cache_checked}>
-    <span style="font-weight:600">启用 Redis 缓存</span>
-    <span style="color:#94a3b8;font-weight:400;font-size:13px">（优先使用缓存数据加速访问）</span>
-  </label>
-  <label>缓存 TTL（小时）:
-    <input type="number" name="cache_ttl_hours" value="{cache_ttl_hours}" min="0" step="1"
-           style="width:120px">
-    <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
-  </label>
-  {allow_write_html}
-  {allow_all_output_html}
-  {keepalive_html}
-  <div class="form-actions span-full">
-    <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
-    <button type="submit" name="action" value="save_close" class="btn btn-outline">保存返回上级</button>
-    {view_btn}
-    {preview_btn}
-    <a href="/config/reports" class="cancel">取消</a>
+    <div>
+      <div class="card">
+        <div class="card-head"><div class="form-section">② SQL</div></div>
+        <label class="span-full">SQL 查询语句:
+          <textarea name="sql_query" class="sql-textarea sql-editor" data-tab-indent="1" placeholder="输入 MySQL 语句..." spellcheck="false" rows="14">{sql_query}</textarea>
+          <div class="sql-preview"></div>
+          <div class="sql-toolbar">
+            <button type="button" class="btn btn-outline btn-sm" onclick="formatSQL(this)">格式化 SQL</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="togglePreview(this)">显示高亮</button>
+          </div>
+        </label>
+        <label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
+          <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
+        </label>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="form-section">③ 缓存与护栏</div></div>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+          <input type="hidden" name="prefer_cache" value="0">
+          <input type="checkbox" name="prefer_cache" value="1"{cache_checked}>
+          <span style="font-weight:600">启用 Redis 缓存</span>
+          <span style="color:#94a3b8;font-weight:400;font-size:13px">（优先使用缓存数据加速访问）</span>
+        </label>
+        <label>缓存 TTL（小时）:
+          <input type="number" name="cache_ttl_hours" value="{cache_ttl_hours}" min="0" step="1"
+                 style="width:120px">
+          <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
+        </label>
+        {allow_write_html}
+        {allow_all_output_html}
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="form-section">④ 调度与保活</div>
+          <div class="actions">
+            <a class="btn btn-outline btn-sm" href="/config/scheduler">完整任务管理 →</a>
+          </div>
+        </div>
+        {sched_summary_html}
+        {keepalive_html}
+      </div>
+    </div>
+  </div>
+  <div class="formbar span-full">
+    <a href="/config/reports" class="cancel">← 取消</a>
+    <div class="right">
+      <button type="submit" name="action" value="save_close" class="btn btn-outline">保存并关闭</button>
+      <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
+    </div>
   </div>
 </form>
 <script>
@@ -627,8 +660,7 @@ function toggleMemoPreview(btn) {{
     }}
     refreshMemoPreview(btn);
 }}
-</script>
-</div>"""
+</script>"""
 
 
 def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_edit: bool = None,
@@ -677,6 +709,17 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
     keepalive_ahead = (_tolerant_int(report.get("keepalive_ahead_seconds"), 600)
                        if report else 600)
 
+    # ④ 调度与保活卡：复用 get_all_schedules 的 report_ids 过滤出本报表关联任务
+    sched_summary_html = ""
+    if is_edit and report and report.get("id"):
+        try:
+            _rid = report["id"]
+            _scheds = [s for s in db.get_all_schedules(conn)
+                       if _rid in (s.get("report_ids") or [])]
+        except Exception:
+            _scheds = []
+        sched_summary_html = build_report_schedule_summary_html(_rid, _scheds)
+
     return _report_form_html(title, action_url, name, sql_query, default_page_size,
                               required_attr, no_pool_opt, pool_options, category_options, memo_val,
                               result_names_val=result_names_val,
@@ -685,17 +728,26 @@ def _render_report_form(conn, report: dict = None, copy_mode: bool = False, is_e
                               allow_write=allow_write, sql_has_write=sql_has_write,
                               allow_all_output=allow_all_output, max_rows=max_rows,
                               keepalive_enabled=keepalive_enabled,
-                              keepalive_ahead_seconds=keepalive_ahead)
+                              keepalive_ahead_seconds=keepalive_ahead,
+                              sched_summary_html=sched_summary_html)
 
 
 def _render_pool_section(conn) -> str:
     """渲染连接池配置列表（含复制、排序）
 
     批次2#6：删除确认弹窗披露各池关联报表数（破坏半径前置披露）。
+    R2 P9：关联报表列在渲染层由 get_all_reports 按 pool_id 分组（不改 DB）。
     """
     pools = db.get_all_pools(conn)
+    pool_reports: dict[int, list[dict]] = {}
+    for rpt in db.get_all_reports(conn):
+        pid = rpt.get("pool_id")
+        if pid is not None:
+            pool_reports.setdefault(int(pid), []).append(
+                {"id": rpt["id"], "name": rpt.get("name") or f"#{rpt['id']}"})
     return build_pool_section_html(pools,
-                                   report_counts=db.count_reports_by_pool(conn))
+                                   report_counts=db.count_reports_by_pool(conn),
+                                   pool_reports=pool_reports)
 
 
 def _render_user_section(conn, current_username: str = None) -> str:
@@ -707,7 +759,7 @@ def _render_user_section(conn, current_username: str = None) -> str:
     return build_user_section_html(users, current_username=current_username)
 
 
-def _render_category_section(conn) -> str:
+def _render_category_section_parts(conn):
     """渲染报表分类配置段（分类管理 + 各分类下的报表列表）"""
     cat_reports, unclassified_reports = db.get_reports_by_category(conn)
     all_cats = db.get_all_categories(conn)
@@ -731,7 +783,13 @@ def _render_category_section(conn) -> str:
     return build_category_section_html(cat_reports, unclassified_reports, all_cats,
                                        all_reports, pools, cat_tree,
                                        api_endpoints_map=api_endpoints_map,
-                                       schedules_map=schedules_map)
+                                       schedules_map=schedules_map,
+                                       split_parts=True)
+
+def _render_category_section(conn) -> str:
+    """（兼容）分类段整体输出 = 左栏 + 右表。"""
+    manage_html, tables_html = _render_category_section_parts(conn)
+    return manage_html + tables_html
 
 
 def render_reports_page(conn, flash: str = None) -> str:
@@ -742,14 +800,25 @@ def render_reports_page(conn, flash: str = None) -> str:
     （render.build_config_filter_box_html，公共 JS initConfigFilter 生效）。
     """
     flash_html = build_flash_html(flash) if flash else ""
-    return (render_page_header(title="Web 报表工具 - 报表管理", active_nav="config-reports",
-                                extra_css=_CONFIG_EXTRA_CSS)
+    manage_html, tables_html = _render_category_section_parts(conn)
+    header = render_page_header(title="SqlReport - 报表管理",
+                                active_nav="config-reports",
+                                extra_css=_CONFIG_EXTRA_CSS,
+                                nav_badges=_nav_badges(conn))
+    return (header
+            + '<div class="page-head"><div>'
+            + '<h1>报表配置</h1>'
+            + '<div class="sub">报表管理 · 左栏分类树，右栏报表列表；勾选行后浮出批量操作</div>'
+            + '</div><div class="actions">'
+            + '<a class="btn btn-secondary" href="/config/categories/add">+ 新增分类</a>'
+            + '<a class="btn btn-primary" href="/config/reports/add">+ 新增报表</a>'
+            + '</div></div>'
             + flash_html
             + build_config_filter_box_html()
-            + '<h2 style="margin-bottom:0">报表管理</h2>'
-            + '<div id="sec-reports">'
-            + _render_category_section(conn)
-            + '</div>'
+            + '<div id="sec-reports"><div class="split">'
+            + '<aside class="card" style="padding:12px">' + manage_html + '</aside>'
+            + '<div>' + tables_html + '</div>'
+            + '</div></div>'
             + render_page_footer())
 
 
@@ -970,87 +1039,176 @@ def handle_import_test_cases(conn, session_user=None) -> tuple[int, str, dict]:
     return 302, f"/config?flash={urllib.parse.quote(flash)}", {}
 
 
+def _nav_badges(conn) -> dict:
+    """侧栏徽标计数（概览/列表页共用；逐项容错——任一表缺失不影响其它计数）。"""
+    badges = {}
+    for key, fn in (
+        ("config-reports", lambda: len(db.get_all_reports(conn))),
+        ("config-pools", lambda: len(db.get_all_pools(conn))),
+        ("config-users", lambda: len(db.get_all_users(conn))),
+        ("api", lambda: len(db.get_all_api_endpoints(conn))),
+        ("scheduler", lambda: len(db.get_all_schedules(conn))),
+    ):
+        try:
+            badges[key] = fn()
+        except Exception:
+            pass
+    return badges
+
+
+def render_pools_page(conn, flash: str = None) -> str:
+    """连接池独立列表页（T7.5：自概览拆出；破坏半径披露沿用 build_pool_section）。"""
+    flash_html = build_flash_html(flash) if flash else ""
+    badges = _nav_badges(conn)
+    body = render_page_header(title="SqlReport - 连接池",
+                              active_nav="config-pools",
+                              extra_css=_CONFIG_EXTRA_CSS,
+                              nav_badges=badges)
+    body += (
+        '<div class="page-head"><div><h1>连接池</h1>'
+        '<div class="sub">MySQL 连接配置 · 报表运行的数据源</div></div>'
+        '<div class="actions">'
+        '<a class="btn btn-primary" href="/config/pools/add">+ 新增连接池</a></div></div>'
+        + flash_html + _render_pool_section(conn))
+    body += render_page_footer()
+    return body
+
+
+def render_users_page(conn, flash: str = None, current_username: str = None) -> str:
+    """用户独立列表页（T7.5：自概览拆出）。"""
+    flash_html = build_flash_html(flash) if flash else ""
+    badges = _nav_badges(conn)
+    body = render_page_header(title="SqlReport - 用户",
+                              active_nav="config-users",
+                              extra_css=_CONFIG_EXTRA_CSS,
+                              nav_badges=badges)
+    body += (
+        '<div class="page-head"><div><h1>用户</h1>'
+        '<div class="sub">登录账号 · 密码经 PBKDF2 哈希存储</div></div>'
+        '<div class="actions">'
+        '<a class="btn btn-primary" href="/config/users/add">+ 新增用户</a></div></div>'
+        + flash_html + _render_user_section(conn, current_username=current_username))
+    body += render_page_footer()
+    return body
+
+
 def render_overview(conn, flash: str = None,
                     current_username: str = None) -> str:
-    """渲染配置总览页，包含三个配置段
+    """概览仪表盘：统计磁贴 + 快捷入口 + 系统状态 + 站点标识（T7.5 收窄）。
 
-    current_username: 当前登录用户名（批次2#7，透传用户列表渲染以隐藏
-    自身行的删除按钮）。
+    池/用户 CRUD 已迁至独立列表页（/config/pools、/config/users）。
+    current_username 保留签名兼容（用户列表已迁出）。
     """
-    flash_html = ""
-    if flash:
-        flash_html = build_flash_html(flash)
-    # PH-09 空状态引导：无连接池时总览顶部显示首次部署三步指引
-    pools = db.get_all_pools(conn)
-    onboarding_html = ""
-    if not pools:
-        onboarding_html = (
-            '<div class="card" style="border:1px dashed #c7d2fe;background:#f5f7ff;'
-            'padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-            '<span style="font-size:14px;color:#475569">🚀 首次使用？三步开始：'
-            '① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</span>'
-            '<span style="flex:1"></span>'
-            f'{_link_btn("/config/pools/add", "立即添加连接池", "btn btn-primary btn-sm")}'
+    flash_html = build_flash_html(flash) if flash else ""
+    badges = _nav_badges(conn)
+    try:
+        n_pools = badges.get("config-pools", 0)
+        n_users = badges.get("config-users", 0)
+        n_reports = badges.get("config-reports", 0)
+        n_cats = len(db.get_all_categories(conn))
+        n_api = badges.get("api", 0)
+        n_sched = badges.get("scheduler", 0)
+    except Exception:
+        n_pools = n_users = n_reports = n_cats = n_api = n_sched = 0
+
+    # 系统状态
+    try:
+        sched_on = bool(app_config.get_config().get("scheduler", {}).get("enable", False))
+    except Exception:
+        sched_on = False
+    try:
+        import redis_cache as _rc
+        redis_ok = bool(_rc.redis_available())
+    except Exception:
+        redis_ok = False
+    try:
+        eng = (app_config.get_active_db_config() or {}).get("engine") or               ("mysql" if (app_config.get_active_db_config() or {}).get("host") else "sqlite")
+    except Exception:
+        eng = "sqlite"
+
+    sched_badge = ('<span class="badge badge-ok">调度启用</span>' if sched_on
+                   else '<span class="badge badge-warn">调度停用</span>')
+    redis_badge = ('<span class="badge badge-ok">缓存可用</span>' if redis_ok
+                   else '<span class="badge badge-neutral">缓存未启用</span>')
+
+    onboarding = ""
+    if n_pools == 0:
+        onboarding = (
+            '<div class="banner banner-info">'
+            '<div><strong>首次使用？三步开始：</strong>'
+            '① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</div>'
+            '<a class="btn btn-primary btn-sm act" href="/config/pools/add">立即添加连接池</a>'
             '</div>')
-    api_endpoints = db.get_all_api_endpoints(conn)
-    api_endpoints_count = len(api_endpoints)
-    # 气泡内列出接口名称与说明摘要（截断 + title 全文），最多展示 5 个
-    items_html = ""
-    for ep in api_endpoints[:5]:
-        desc_html = _build_desc_summary_html(ep.get("description") or "")
-        desc_part = desc_html or '<span style="color:#cbd5e1">—</span>'
-        items_html += (f'<div style="margin:4px 0;display:flex;gap:8px;align-items:center">'
-                       f'<span style="font-weight:600;white-space:nowrap">{_escape(ep.get("name") or "")}</span>'
-                       f'<code style="font-size:12px;color:#94a3b8;background:#f1f5f9;padding:1px 6px;border-radius:4px">{_escape(ep.get("url_path") or "")}</code>'
-                       f'<span style="flex:1;min-width:0">{desc_part}</span></div>')
-    if len(api_endpoints) > 5:
-        items_html += (f'<div style="color:#94a3b8;font-size:12px;margin-top:4px">'
-                       f'…等共 {api_endpoints_count} 个接口</div>')
-    api_card = f"""<div class="card" style="margin-top:8px">
-<div class="section-title" style="font-size:16px;margin-bottom:8px">
-  <span>🔌 API 接口管理</span>
-  <span class="actions">{_link_btn("/config/api-endpoints", "管理 API 接口", "btn btn-outline btn-sm")}</span>
-</div>
-<p style="color:#64748b;margin:0">已配置 {api_endpoints_count} 个 API 接口</p>
-{items_html}
-</div>"""
-    # PH-13 报表区块收敛：报表总数 + 分类数 + 入口按钮（分类树/报表列表/批量操作迁至独立页）
-    reports_count = len(db.get_all_reports(conn))
-    categories_count = len(db.get_all_categories(conn))
-    reports_card = f"""<div class="card" style="margin-top:8px">
-<div class="section-title" style="font-size:16px;margin-bottom:8px">
-  <span>📊 报表管理</span>
-  <span class="actions">{_link_btn("/config/reports", "管理报表", "btn btn-outline btn-sm")}</span>
-</div>
-<p style="color:#64748b;margin:0">共 {reports_count} 个报表，{categories_count} 个分类</p>
-</div>"""
-    # PH-14 分类入口卡片：分类树/排序/CRUD 在独立页
-    # 批次6#27i：与「管理报表」按钮区分落点——分类按钮锚定合并页的分类区块
-    categories_card = f"""<div class="card" style="margin-top:8px">
-<div class="section-title" style="font-size:16px;margin-bottom:8px">
-  <span>📁 分类管理</span>
-  <span class="actions">{_link_btn("/config/reports#sec-categories", "管理分类", "btn btn-outline btn-sm")}</span>
-</div>
-<p style="color:#64748b;margin:0">共 {categories_count} 个分类（支持树形层级与排序）</p>
-</div>"""
-    # 新增测试用例：DEBUG 模式专属，将预设数据夹具一键导入当前配置库（按名称覆盖）
+
     test_cases_card = ""
     if app_config.is_debug_mode():
-        test_cases_card = f"""<div class="card" style="margin-top:8px;border:1px dashed #c7d2fe;background:#f5f7ff">
-<div class="section-title" style="font-size:16px;margin-bottom:8px">
-  <span>🧪 测试数据</span>
-</div>
-<p style="color:#475569;margin:0 0 10px">将预设测试用例（连接池 / 分类 / 报表 / API 接口 / Key / 定时任务）按名称 upsert 导入当前 DEBUG 配置库，用于功能验收与脚本测试。</p>
-<form method="post" action="/config/test-cases/import" onsubmit="return confirm('确认将预设测试用例导入当前 DEBUG 配置库？同名数据将被覆盖更新。')">
-  <button type="submit" class="btn btn-primary">新增测试用例</button>
-</form>
-</div>"""
-    body = (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html + onboarding_html + _render_pool_section(conn)
-            + _render_user_section(conn, current_username=current_username)
-            + reports_card + categories_card + api_card
-            + _render_branding_section() + test_cases_card + render_page_footer())
+        test_cases_card = """<div class="card" style="border:1px dashed #c7d2fe;background:#f8f7ff">
+<div class="card-head"><h2>导入演示数据（DEBUG）</h2></div>
+<p class="muted" style="margin-bottom:12px">将预设测试用例按名称导入当前 DEBUG 配置库，同名覆盖。用于功能验收与脚本测试。</p>
+<form method="post" action="/config/test-cases/import">
+<button type="submit" class="btn btn-primary" onclick="return confirm('确认将预设测试用例导入当前 DEBUG 配置库？同名数据将被覆盖更新。')">导入演示数据</button>
+</form></div>"""
+
+    body = render_page_header(title="SqlReport - 概览", active_nav="config",
+                              extra_css=_CONFIG_EXTRA_CSS, nav_badges=badges)
+    body += (
+        '<div class="page-head"><div><h1>概览</h1>'
+        '<div class="sub">系统规模、快捷入口与运行状态</div></div>'
+        '<div class="actions">'
+        '<a class="btn btn-secondary" href="#branding-section">站点标识设置</a></div></div>'
+        + flash_html + onboarding)
+    body += (
+        '<div class="grid-stat">'
+        f'<div class="stat-tile"><div class="num">{n_reports}</div><div class="lbl">个报表</div>'
+        '<a href="/config/reports" style="font-size:12px">前往配置 →</a></div>'
+        f'<div class="stat-tile"><div class="num">{n_cats}</div><div class="lbl">个分类</div>'
+        '<a href="/config/reports" style="font-size:12px">分类管理 →</a></div>'
+        f'<div class="stat-tile"><div class="num">{n_api}</div><div class="lbl">个 API 接口</div>'
+        '<a href="/config/api-endpoints" style="font-size:12px">管理接口 →</a></div>'
+        f'<div class="stat-tile"><div class="num">{n_sched}</div><div class="lbl">个定时任务</div>'
+        '<a href="/config/scheduler" style="font-size:12px">查看任务 →</a></div>'
+        f'<div class="stat-tile"><div class="num">{n_pools}</div><div class="lbl">个连接池</div>'
+        '<a href="/config/pools" style="font-size:12px">管理连接池 →</a></div>'
+        f'<div class="stat-tile"><div class="num">{n_users}</div><div class="lbl">个用户</div>'
+        '<a href="/config/users" style="font-size:12px">管理用户 →</a></div>'
+        '</div>')
+    body += (
+        '<div class="card"><div class="card-head"><h2>快捷入口</h2></div>'
+        '<div class="grid-3">'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/reports">管理报表</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/pools">连接池</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/users">用户</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/reports#sec-categories">管理分类</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/api-endpoints">API 接口</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/config/scheduler">定时任务</a>'
+        '<a class="btn btn-secondary" style="height:44px" href="/audit">审计日志</a>'
+        '</div></div>')
+    # grid-2：左=系统状态，右=导入演示数据（DEBUG，原型 page-config 口径）
+    body += (
+        '<div class="grid-2"><div class="card">'
+        '<div class="card-head"><h2>系统状态</h2></div>'
+        f'<div style="display:flex;flex-direction:column;gap:10px">'
+        f'<div style="display:flex;gap:10px;align-items:center">{sched_badge}'
+        '<span class="muted" style="font-size:13px">定时调度状态（scheduler.enable）</span></div>'
+        f'<div style="display:flex;gap:10px;align-items:center">{redis_badge}'
+        '<span class="muted" style="font-size:13px">Redis 三层缓存（不可用时自动直连数据库）</span></div>'
+        f'<div style="display:flex;gap:10px;align-items:center">'
+        f'<span class="badge badge-neutral">{_escape(str(eng).upper())}</span>'
+        '<span class="muted" style="font-size:13px">配置存储引擎</span></div>'
+        f'<div class="muted" style="font-size:13px">已配置 {n_api} 个 API 接口 · 共 {n_reports} 个报表、{n_cats} 个分类</div>'
+        '</div></div>'
+        + test_cases_card
+        + '</div>')
+    # 站点标识独立成行（移出 grid-2，避免卡中卡）
+    body += _render_branding_anchor()
+    body += render_page_footer()
     return body
+
+
+def _render_branding_anchor() -> str:
+    """站点标识区块（锚点 #branding-section；内层自带 card，此处不再包 card）。"""
+    return ('<div id="branding-section">'
+            + _render_branding_section() + '</div>')
 
 
 def render_pool_form_page(conn, pool_id: int = None, flash: str = None, copy_mode: bool = False,
@@ -1066,7 +1224,7 @@ def render_pool_form_page(conn, pool_id: int = None, flash: str = None, copy_mod
         return render_overview(conn, flash="错误: 连接池不存在")
     is_edit = pool_id is not None and not copy_mode
     flash_html = build_flash_html(flash) if flash else ""
-    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    return (render_page_header(title="SqlReport - 配置", active_nav="config-pools", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + _render_pool_form(pool, copy_mode, is_edit=is_edit,
                                              prefill_copy_suffix=not echo_pool) + render_page_footer())
 
@@ -1082,7 +1240,7 @@ def render_user_form_page(conn, user_id: int = None, flash: str = None, user: di
         return render_overview(conn, flash="错误: 用户不存在")
     is_edit = user_id is not None
     flash_html = build_flash_html(flash) if flash else ""
-    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    return (render_page_header(title="SqlReport - 配置", active_nav="config-users", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + _render_user_form(user, is_edit=is_edit) + render_page_footer())
 
 
@@ -1140,7 +1298,7 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None, 
   </div>
 </form>
 </div>"""
-    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_EXTRA_CSS)
+    return (render_page_header(title="SqlReport - 配置", active_nav="config-reports", extra_css=_CONFIG_EXTRA_CSS)
             + flash_html + form_html + render_page_footer())
 
 
@@ -1175,7 +1333,7 @@ def render_report_form_page(conn, report_id: int = None, flash: str = None, copy
         return render_overview(conn, flash="错误: 报表不存在")
     is_edit = report_id is not None and not copy_mode
     flash_html = build_flash_html(flash) if flash else ""
-    body = render_page_header(title="Web 报表工具 - 配置", active_nav="config", extra_css=_CONFIG_MD_EXTRA_CSS)
+    body = render_page_header(title="SqlReport - 配置", active_nav="config-reports", extra_css=_CONFIG_MD_EXTRA_CSS)
     body += flash_html + _render_report_form(conn, report, copy_mode, is_edit=is_edit,
                                              prefill_copy_suffix=not echo_report)
     # 编辑模式下显示 API 接口列表
@@ -1450,7 +1608,7 @@ def handle_pool_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
         return _save_or_render(
             data, render_pool_form_page, (conn, pid), {},
             success_flash=f"连接池 {data['name']} 已创建 (id={pid})",
-            redirect_url="/config", anchor=f"pool-{pid}")
+            redirect_url="/config/pools", anchor=f"pool-{pid}")
     except Exception as e:
         return 200, render_pool_form_page(conn, flash=f"错误: {e}",
                                           pool=_pool_from_form(data))
@@ -1474,7 +1632,7 @@ def handle_pool_edit(conn, pool_id: int, form_body: str, session_user=None) -> t
             return _save_or_render(
                 data, render_pool_form_page, (conn, pool_id), {},
                 success_flash=f"连接池 {data['name']} 已更新",
-                redirect_url="/config", anchor=f"pool-{pool_id}")
+                redirect_url="/config/pools", anchor=f"pool-{pool_id}")
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}",
@@ -1493,7 +1651,7 @@ def handle_pool_copy(conn, pool_id: int, form_body: str, session_user=None) -> t
         pid = db.add_pool(conn, data["name"], data["host"], int(data["port"]),
                           data["user"], data["password"], data["database"],
                           session_user=session_user)
-        return 302, f"/config?flash=连接池 {data['name']} 已创建（复制自 id={pool_id}）"
+        return 302, f"/config/pools?flash=连接池 {data['name']} 已创建（复制自 id={pool_id}）"
     except Exception as e:
         return 200, render_pool_form_page(conn, pool_id, flash=f"错误: {e}", copy_mode=True,
                                           pool=_pool_from_form(data, pool_id))
@@ -1511,9 +1669,9 @@ def handle_pool_delete(conn, pool_id: int, session_user=None) -> tuple[int, str]
     ref_count = db.count_reports_by_pool(conn).get(pool_id, 0)
     db.delete_pool(conn, pool_id, session_user=session_user)
     if ref_count > 0:
-        return 302, (f"/config?flash=连接池 {pool['name']} 已删除"
+        return 302, (f"/config/pools?flash=连接池 {pool['name']} 已删除"
                      f"（已断开 {ref_count} 个报表的连接，报表保留但无法执行）")
-    return 302, f"/config?flash=连接池 {pool['name']} 已删除"
+    return 302, f"/config/pools?flash=连接池 {pool['name']} 已删除"
 
 
 def handle_user_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1522,7 +1680,7 @@ def handle_user_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
     try:
         pw_hash = auth.hash_password(data["password"])
         uid = db.add_user(conn, data["username"], pw_hash, session_user=session_user)
-        return 302, f"/config?flash=用户 {data['username']} 已创建 (id={uid})#user-{uid}"
+        return 302, f"/config/users?flash=用户 {data['username']} 已创建 (id={uid})#user-{uid}"
     except Exception as e:
         return 200, render_user_form_page(conn, flash=f"错误: {e}",
                                           user=_user_from_form(data))
@@ -1553,9 +1711,9 @@ def handle_user_edit(conn, user_id: int, form_body: str, session_user=None) -> t
                 reason = ("其登录会话已全部注销，需重新登录"
                           if password_changed else
                           f"已改名为 {data['username']}，其登录会话已注销，需重新登录")
-                return 302, (f"/config?flash=用户 {target['username']} 已更新，{reason}"
+                return 302, (f"/config/users?flash=用户 {target['username']} 已更新，{reason}"
                              f"#user-{user_id}")
-            return 302, f"/config?flash=用户 {data['username']} 已更新#user-{user_id}"
+            return 302, f"/config/users?flash=用户 {data['username']} 已更新#user-{user_id}"
         return 302, "/config?flash=错误: 更新失败"
     except Exception as e:
         return 200, render_user_form_page(conn, user_id, flash=f"错误: {e}",
@@ -1577,7 +1735,7 @@ def handle_user_delete(conn, user_id: int, session_user=None) -> tuple[int, str]
     db.delete_user(conn, user_id, session_user=session_user)
     kicked = auth.remove_sessions_for_user(target["username"])
     suffix = f"（已注销其 {kicked} 个登录会话）" if kicked > 0 else ""
-    return 302, f"/config?flash=用户 {target['username']} 已删除{suffix}"
+    return 302, f"/config/users?flash=用户 {target['username']} 已删除{suffix}"
 
 
 def handle_report_add(conn, form_body: str, session_user=None) -> tuple[int, str]:
@@ -1909,46 +2067,73 @@ def handle_description_preview(form_body: str) -> tuple[int, str, dict]:
     return 200, markdown_render.render_markdown(description), {}
 
 
-def render_scheduler_page(conn, flash: str = None, edit_id: int = None) -> str:
-    """渲染定时任务管理页（/config/scheduler，scheduler T4）。
+def _scheduler_prefill(conn, edit_id):
+    """编辑态任务预填（含绑定报表与绑定级启停回显）。"""
+    if not edit_id:
+        return None
+    sched = db.get_schedule(conn, edit_id)
+    if not sched:
+        return None
+    reps = db.get_schedule_reports(conn, edit_id)
+    sched = dict(sched)
+    sched["report_ids"] = [r["report_id"] for r in reps]
+    sched["binding_enabled"] = {r["report_id"]: r["enabled"] for r in reps}
+    return sched
 
-    全局停用时页面仍可查看（横幅提示），操作按钮提交后由
-    handle_scheduler_* 各自降级处理（B17/B21）。edit_id 给定时回填
-    任务编辑表单。底部"最近执行记录"来自审计库 scheduled_run/scheduled_misfire
-    （读取失败不阻断页面，降级为空记录区块）。
+
+def render_scheduler_form_page(conn, sched_id: int = None,
+                               flash: str = None,
+                               preselect_report_ids: list = None) -> str:
+    """定时任务表单独立页（T7.9：/config/scheduler/new 与 /{id}/edit）。
+
+    preselect_report_ids：新建页 report_id 预选（报表编辑页「新建调度」
+    入口带 ?report_id=N；仅新建时生效，编辑态以库内绑定为准）。
     """
+    flash_html = build_flash_html(flash) if flash else ""
+    reports = db.get_all_reports(conn)
+    prefill = _scheduler_prefill(conn, sched_id)
+    if prefill is None and preselect_report_ids:
+        prefill = {"report_ids": [rid for rid in preselect_report_ids
+                                  if any(r["id"] == rid for r in reports)]}
+    title = "编辑定时任务" if (prefill or {}).get("id") else "新建定时任务"
+    return (render_page_header(title=f"SqlReport - {title}",
+                               active_nav="scheduler",
+                               extra_css=_CONFIG_EXTRA_CSS,
+                               nav_badges=_nav_badges(conn))
+            + flash_html
+            + '<div class="page-head"><div>'
+            + '<div class="crumb"><a href="/config/scheduler">定时任务</a></div>'
+            + f'<h1>{title}</h1>'
+            + '<div class="sub">计划、绑定报表、错过补偿与静默窗口</div>'
+            + '</div></div>'
+            + build_scheduler_task_form_html(prefill, reports)
+            + render_page_footer())
+
+
+def render_scheduler_page(conn, flash: str = None, edit_id: int = None) -> str:
+    """渲染定时任务管理页（/config/scheduler 列表主导，T7.9）。
+
+    全局停用时页面仍可查看（横幅提示）。edit_id 遗留参数：给定时回填
+    时改走表单独立页（兼容渲染，不再内嵌表单）。
+    执行历史不在本页展示（对齐原型 page-scheduler），到审计日志查询。
+    """
+    if edit_id:
+        return render_scheduler_form_page(conn, sched_id=edit_id, flash=flash)
     flash_html = build_flash_html(flash) if flash else ""
     scheduler_enabled = bool(app_config.get_config().get(
         "scheduler", {}).get("enable", False))
     schedules = db.get_all_schedules(conn)
-    reports = db.get_all_reports(conn)
-    prefill = None
-    if edit_id:
-        sched = db.get_schedule(conn, edit_id)
-        if sched:
-            reps = db.get_schedule_reports(conn, edit_id)
-            sched = dict(sched)
-            sched["report_ids"] = [r["report_id"] for r in reps]
-            # 绑定级启停回显（S10）
-            sched["binding_enabled"] = {r["report_id"]: r["enabled"]
-                                        for r in reps}
-            prefill = sched
-    try:
-        import audit_db
-        with contextlib.closing(audit_db.get_audit_db()) as audit_conn:
-            recent_events = audit_db.get_recent_schedule_events(audit_conn,
-                                                                 limit=20)
-    except Exception as e:
-        logging.warning("读取调度执行记录失败（降级为空）: %s", e)
-        recent_events = []
-    return (render_page_header(title="Web 报表工具 - 定时任务",
+    return (render_page_header(title="SqlReport - 定时任务",
                                active_nav="scheduler",
-                               extra_css=_CONFIG_EXTRA_CSS)
+                               extra_css=_CONFIG_EXTRA_CSS,
+                               nav_badges=_nav_badges(conn))
             + flash_html
-            + '<h2 style="margin-bottom:12px">报表定时任务</h2>'
-            + build_scheduler_task_form_html(prefill, reports)
-            + build_scheduler_page_html(schedules, scheduler_enabled,
-                                        recent_events=recent_events)
+            + '<div class="page-head"><div><h1>定时任务</h1>'
+            + '<div class="sub">列表为主 · 新建/编辑进入独立表单页；'
+            + '全局停用时仅展示不执行</div></div><div class="actions">'
+            + '<a class="btn btn-primary" href="/config/scheduler/new">+ 新建任务</a>'
+            + '</div></div>'
+            + build_scheduler_page_html(schedules, scheduler_enabled)
             + render_page_footer())
 
 
@@ -2078,12 +2263,30 @@ def handle_scheduler_request(conn, method: str, path: str, query: str,
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
     flash = qs.get("flash", [None])[0]
     if method == "GET":
+        if route["action"] == "new":
+            # 报表编辑页「新建调度」入口带 ?report_id=N（仅新建生效，预勾绑定）
+            preselect = []
+            try:
+                rid = int(qs.get("report_id", [None])[0])
+                if rid > 0:
+                    preselect = [rid]
+            except (TypeError, ValueError):
+                preselect = []
+            return 200, render_scheduler_form_page(
+                conn, flash=flash, preselect_report_ids=preselect), {}
+        if route["action"] == "edit" and route["id"]:
+            return 200, render_scheduler_form_page(
+                conn, sched_id=route["id"], flash=flash), {}
+        # 遗留 ?edit=N：直接渲染表单页（兼容旧链接/测试）
         edit_id = None
         try:
             edit_id = int(qs.get("edit", [None])[0])
         except (TypeError, ValueError):
             edit_id = None
-        return 200, render_scheduler_page(conn, flash, edit_id=edit_id), {}
+        if edit_id:
+            return 200, render_scheduler_form_page(
+                conn, sched_id=edit_id, flash=flash), {}
+        return 200, render_scheduler_page(conn, flash), {}
     if method == "POST":
         action = route["action"]
         if action == "run" and route["id"]:
@@ -2139,6 +2342,15 @@ def handle_request(conn, method: str, path: str, query: str,
 
     # ---- 表单页面 (GET) ----
     if method == "GET":
+        if route["action"] == "list":
+            if route["section"] == "pools":
+                return 200, render_pools_page(conn, flash), {}
+            if route["section"] == "users":
+                return 200, render_users_page(conn, flash), {}
+            if route["section"] == "reports":
+                return 200, render_reports_page(conn, flash), {}
+            if route["section"] == "categories":
+                return 200, render_reports_page(conn, flash), {}
         if route["action"] == "add":
             if route["section"] == "pools":
                 return 200, render_pool_form_page(conn), {}
@@ -2254,7 +2466,7 @@ def handle_request(conn, method: str, path: str, query: str,
                     pool["name"] if pool else str(route["id"]), safe="")
                 verb = "已上移" if direction == "up" else "已下移"
                 if db.move_pool(conn, route["id"], direction, session_user=session_user):
-                    return 302, f"/config?flash={verb} {obj_name}#sec-pools", {}
+                    return 302, f"/config/pools?flash={verb} {obj_name}#sec-pools", {}
                 return 302, (f"/config?flash=错误: 移动失败（{obj_name}"
                              f" 已在边界或不存在）#sec-pools"), {}
             else:
@@ -2374,7 +2586,7 @@ def render_api_endpoint_form_page(conn, report_id: int,
     # 编辑态查询该端点的 API Key 列表（多 key 管理区块）
     api_keys = config_db.list_api_keys(conn, endpoint_id) if endpoint_id else []
 
-    return (render_page_header(title="Web 报表工具 - 配置", active_nav="config",
+    return (render_page_header(title="SqlReport - API 接口", active_nav="api",
                                 extra_css=_CONFIG_EXTRA_CSS)
             + build_api_endpoint_form_html(report_id, report["name"],
                                             endpoint, flash,
@@ -2751,6 +2963,43 @@ def handle_api_endpoint_preview(conn, report_id: int, endpoint_id: int,
                            ensure_ascii=False), json_headers
 
 
+def render_api_endpoints_page(conn, flash: str = None) -> str:
+    """API 接口独立列表页（T7.5 抽出为可测函数；R2-D 对齐原型 page-api）。"""
+    api_endpoints = db.get_all_api_endpoints(conn)
+    flash_html = build_flash_html(flash) if flash else ""
+    base_url = app_config.get_server_base_url()
+    # page-head：h1 + 统计 sub + 「+ 新建接口」。接口表单挂在报表下（仅有
+    # /config/reports/{id}/api_endpoints/new 路由），故指向首张报表的新建接口表单；
+    # 无报表时先去新建报表。
+    enabled_n = sum(1 for ep in api_endpoints if int(ep.get("enabled", 1) or 0))
+    sc_cfg = static_cache.get_static_cache_config()
+    sc_dir = html_mod.escape(str(sc_cfg.get("dir", "static_cache")))
+    reports = config_db.get_all_reports(conn)
+    if reports:
+        new_href = f"/config/reports/{int(reports[0]['id'])}/api_endpoints/new"
+        new_title = ' title="接口表单挂在报表下，进入首张报表的新建接口表单"'
+    else:
+        new_href = "/config/reports/add"
+        new_title = ' title="尚无报表：先新建报表，再为其创建接口"'
+    body = (render_page_header(title="SqlReport - API 接口", active_nav="api",
+                               extra_css=_CONFIG_EXTRA_CSS,
+                               nav_badges=_nav_badges(conn))
+            + flash_html
+            + '<div class="page-head"><div>'
+            + '<h1>API 接口</h1>'
+            + (f'<div class="sub">API 接口管理 · 报表即服务 · 全局 '
+               f'{len(api_endpoints)} 个接口（{enabled_n} 启用） · '
+               f'静态缓存目录 {sc_dir}/api</div>')
+            + '</div><div class="actions">'
+            + f'<a class="btn btn-primary" href="{new_href}"{new_title}>+ 新建接口</a>'
+            + '</div></div>'
+            + build_api_endpoints_list_html(api_endpoints, show_report_name=True,
+                                            base_url=base_url,
+                                            key_counts=config_db.get_api_key_counts(conn))
+            + render_page_footer())
+    return body
+
+
 def handle_api_endpoints_request(conn, method: str, path: str, query: str,
                                   form_body: str = None,
                                   session_user=None) -> tuple[int, str, dict]:
@@ -2791,20 +3040,9 @@ def handle_api_endpoints_request(conn, method: str, path: str, query: str,
             return 302, f"/config/api-endpoints?flash={urllib.parse.quote(flash_msg)}", {}
         return 302, "/config/api-endpoints", {}
 
-    api_endpoints = db.get_all_api_endpoints(conn)
     qs = urllib.parse.parse_qs(query, keep_blank_values=True)
     flash = qs.get("flash", [None])[0]
-    flash_html = build_flash_html(flash) if flash else ""
-
-    base_url = app_config.get_server_base_url()
-    body = (render_page_header(title="Web 报表工具 - API 接口", active_nav="api", extra_css=_CONFIG_EXTRA_CSS)
-            + flash_html
-            + '<h2 style="margin-bottom:0">API 接口管理</h2>'
-            + build_api_endpoints_list_html(api_endpoints, show_report_name=True,
-                                            base_url=base_url,
-                                            key_counts=config_db.get_api_key_counts(conn))
-            + render_page_footer())
-    return 200, body, {}
+    return 200, render_api_endpoints_page(conn, flash), {}
 
 
 def _redirect_or_render(code: int, result: str) -> tuple[int, str, dict]:

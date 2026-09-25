@@ -2466,7 +2466,8 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
     def test_scheduler_source_free_of_runtime_dialect(self):
         """scheduler.py 运行时 SQL 一律不得含 datetime(（DDL 无此文件）。"""
         import pathlib
-        src = pathlib.Path("/opdev/SqlReport/scheduler.py").read_text(
+        # 仓库根相对推导，禁止写死主目录绝对路径（AGENTS.md 硬性约束 #10）
+        src = (pathlib.Path(__file__).resolve().parent.parent / "scheduler.py").read_text(
             encoding="utf-8")
         self.assertNotIn("datetime(", src)
 
@@ -2480,7 +2481,8 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
         """
         import inspect
         import pathlib
-        src = pathlib.Path("/opdev/SqlReport/config_db.py").read_text(
+        # 仓库根相对推导，禁止写死主目录绝对路径（AGENTS.md 硬性约束 #10）
+        src = (pathlib.Path(__file__).resolve().parent.parent / "config_db.py").read_text(
             encoding="utf-8")
         mysql_seg = src[src.index("_init_mysql_migrations"):]
         # 建表 DDL 含耗时列（新环境直接建全）
@@ -2496,7 +2498,8 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
         report_id 残留 UNIQUE、schedule_reports 空表 → 多报表解耦失效。
         """
         import pathlib
-        src = pathlib.Path("/opdev/SqlReport/config_db.py").read_text(
+        # 仓库根相对推导，禁止写死主目录绝对路径（AGENTS.md 硬性约束 #10）
+        src = (pathlib.Path(__file__).resolve().parent.parent / "config_db.py").read_text(
             encoding="utf-8")
         mysql_seg = src[src.index("_init_mysql_migrations"):]
         self.assertIn("SHOW COLUMNS FROM report_schedules", mysql_seg)

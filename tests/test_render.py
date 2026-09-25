@@ -44,7 +44,7 @@ from render import (
     # 表体
     build_table_body_html,
     # 控制栏
-    build_controls_bar_html,
+    build_controls_bar_html, build_export_modal_html,
     # 字段设置面板
     build_field_settings_panel_html,
     # 排序设置面板
@@ -101,18 +101,19 @@ class TestRenderPageHeader(unittest.TestCase):
     def test_default_title(self):
         """不传 title 时使用默认标题"""
         result = render_page_header()
-        self.assertIn("Web 报表工具", result)
+        self.assertIn("SqlReport", result)
 
-    def test_contains_navbar(self):
-        """输出包含导航栏"""
+    def test_contains_sidebar(self):
+        """输出包含侧栏页壳与品牌"""
         result = render_page_header()
-        self.assertIn('My<span>Report</span>', result)
+        self.assertIn('<aside class="sidebar"', result)
+        self.assertIn('<span class="name">SqlReport</span>', result)
 
     def test_navbar_has_api_entry(self):
-        """导航栏包含 API 接口独立入口"""
+        """侧栏包含 API 接口独立入口"""
         result = render_page_header()
         self.assertIn("API 接口", result)
-        self.assertIn('href="/config/api-endpoints"', result)
+        self.assertIn("'/config/api-endpoints'", result)
 
     def test_contains_container_div(self):
         """输出包含 container div 开头"""
@@ -120,15 +121,15 @@ class TestRenderPageHeader(unittest.TestCase):
         self.assertIn('<div class="container">', result)
 
     def test_active_nav_report(self):
-        """active_nav='report' 时报表页链接高亮"""
+        """active_nav='report' 时报表中心高亮"""
         result = render_page_header(active_nav="report")
-        self.assertIn('报表页', result)
+        self.assertIn('报表中心', result)
         self.assertIn('nav-active', result)
 
     def test_active_nav_config(self):
-        """active_nav='config' 时配置页链接高亮"""
+        """active_nav='config' 时概览高亮"""
         result = render_page_header(active_nav="config")
-        self.assertIn('配置管理', result)
+        self.assertIn('概览', result)
         self.assertIn('nav-active', result)
 
 
@@ -157,9 +158,9 @@ class TestRenderNavbar(unittest.TestCase):
     """render_navbar 函数测试"""
 
     def test_contains_brand(self):
-        """导航栏包含品牌名"""
+        """侧栏包含品牌名"""
         result = render_navbar()
-        self.assertIn('My<span>Report</span>', result)
+        self.assertIn('SqlReport', result)
 
     def test_contains_nav_links(self):
         """导航栏包含所有主要链接"""
@@ -541,6 +542,18 @@ class TestBuildPaginationHtml(unittest.TestCase):
         result = build_pagination_html(1, 0, 0, 20, 0)
         self.assertEqual(result, "")
 
+    def test_always_renders_single_page(self):
+        """always=True（R2-D 详情页）：单页也渲染分页条（恒显契约）"""
+        result = build_pagination_html(1, 1, 1, 20, 10, always=True)
+        self.assertIn('<div class="pagination">', result)
+        self.assertIn('class="active">1<', result)
+
+    def test_always_renders_zero_pages(self):
+        """always=True：空结果（total_pages=0）也归一渲染分页条"""
+        result = build_pagination_html(1, 1, 0, 20, 0, always=True)
+        self.assertIn('<div class="pagination">', result)
+        self.assertIn('跳转到:', result)
+
     def test_multi_page_has_pagination_div(self):
         """多页时包含分页容器"""
         result = build_pagination_html(1, 1, 5, 20, 100)
@@ -626,7 +639,7 @@ class TestBuildRedisBannersHtml(unittest.TestCase):
         ts = datetime.now().timestamp()
         result = build_redis_banners_html({"source": "redis", "timestamp": ts})
         self.assertIn("flash", result)
-        self.assertIn("Redis 快照", result)
+        self.assertIn("缓存快照", result)
 
 
 # ===================================================================
@@ -638,11 +651,12 @@ class TestBuildDebugSectionHtml(unittest.TestCase):
     """build_debug_section_html 函数测试"""
 
     def test_minimal(self):
-        """最小输入生成基本 debug 信息"""
+        """R2-D：最小输入生成卡片（执行信息 + SQL 代码块）"""
         result = build_debug_section_html(None, "SELECT 1", 0, 1, ["result1"], [], [])
-        self.assertIn("Debug", result)
+        self.assertIn("执行信息（Debug）", result)
         self.assertIn("SELECT 1", result)
-        self.assertIn("debug-info", result)
+        self.assertIn('class="sql-debug code-block"', result)
+        self.assertNotIn("debug-info", result)
 
     def test_with_pool_config(self):
         """含连接池配置时显示连接信息"""
@@ -666,11 +680,13 @@ class TestBuildDebugSectionHtml(unittest.TestCase):
         self.assertIn("2/3", result)
         self.assertIn("b", result)
 
-    def test_toggle_section_script(self):
-        """包含折叠按钮"""
+    def test_card_grid_structure(self):
+        """R2-D：调试页签 = grid-3 统计磁贴 + SQL 代码块（不再折叠）"""
         result = build_debug_section_html(None, "SELECT 1", 0, 1, ["r1"], [], [])
-        self.assertIn("toggleSection", result)
-        self.assertIn("▶ Debug 信息", result)
+        self.assertNotIn("toggleSection", result)
+        self.assertIn("grid-3", result)
+        self.assertIn("stat-tile", result)
+        self.assertIn("实际执行 SQL", result)
 
 
 # ===================================================================
@@ -682,12 +698,12 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
     """build_memo_section_html 函数测试"""
 
     def test_with_memo(self):
-        """有备注内容时默认折叠（批次6#24），内容仍在 DOM 中"""
+        """R2-D：有备注内容时输出普通卡片（md-body），内容在 DOM 中"""
         result = build_memo_section_html("这是一段备注内容")
-        self.assertIn("▶ 备注", result)
-        self.assertIn('class="debug-content hidden"', result)
+        self.assertIn("备注（Markdown）", result)
         self.assertIn("这是一段备注内容", result)
-        self.assertIn("debug-info", result)
+        self.assertIn("md-body", result)
+        self.assertNotIn("debug-info", result)
 
     def test_memo_wrapped_in_md_body(self):
         """渲染内容外包 .md-body 排版容器（列表缩进等样式由 _MD_CSS 提供）"""
@@ -697,14 +713,15 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         self.assertNotIn("md-body", result_empty)
 
     def test_empty_memo(self):
-        """备注为空时显示折叠状态"""
+        """R2-D：备注为空时卡片内显示占位文案"""
         result = build_memo_section_html("")
-        self.assertIn("▶ 备注", result)
+        self.assertIn("暂无备注", result)
+        self.assertIn("备注（Markdown）", result)
 
     def test_none_memo(self):
-        """备注为 None 时显示折叠状态"""
+        """R2-D：备注为 None 时同样输出占位卡片"""
         result = build_memo_section_html(None)
-        self.assertIn("▶ 备注", result)
+        self.assertIn("暂无备注", result)
 
     def test_memo_html_sanitized(self):
         """备注中的 raw HTML 被 sanitize 剥离（脚本标签移除、文本保留）"""
@@ -736,11 +753,11 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         self.assertIn("background: #0f172a", _MD_CSS)
 
     def test_long_memo(self):
-        """长备注全部渲染在 DOM 中（默认折叠，批次6#24）"""
+        """R2-D：长备注全部渲染在 DOM 中（普通卡片常显）"""
         long_text = "A" * 1000
         result = build_memo_section_html(long_text)
         self.assertIn("A" * 1000, result)
-        self.assertIn("▶ 备注", result)
+        self.assertIn("备注（Markdown）", result)
 
 
 # ===================================================================
@@ -766,9 +783,11 @@ class TestBuildResultSelectorHtml(unittest.TestCase):
         self.assertIn("年报", result)
 
     def test_active_selected(self):
-        """当前激活的结果标记为 selected"""
+        """R2-D：segment 中当前激活的结果按钮带 active（data-index 对应结果集）"""
         result = build_result_selector_html(1, 20, ["a", "b", "c"], 1, None, "tok")
-        self.assertIn('<option value="1" selected', result)
+        self.assertIn('class="segment"', result)
+        self.assertIn('<button type="button" class="active" data-index="1"', result)
+        self.assertNotIn('<button type="button" class="" data-index="1"', result)
 
     def test_contains_data_attributes(self):
         """包含 data-report-id 等属性"""
@@ -829,15 +848,15 @@ class TestBuildCacheBadgeHtml(unittest.TestCase):
         self.assertIn("cache-badge", result)
 
     def test_redis_source(self):
-        """Redis 来源显示快照"""
+        """Redis 来源显示缓存快照（T7.11 术语表）"""
         result = build_cache_badge_html({"source": "redis", "timestamp": 1000000})
-        self.assertIn("Redis 快照", result)
+        self.assertIn("缓存快照", result)
         self.assertIn("fresh", result)
 
     def test_mysql_source(self):
-        """MySQL 来源显示直连"""
+        """MySQL 来源显示实时查询（T7.11 术语表）"""
         result = build_cache_badge_html({"source": "mysql"})
-        self.assertIn("直连 MySQL", result)
+        self.assertIn("实时查询", result)
 
     def test_redis_fallback_source(self):
         """Redis 降级来源"""
@@ -845,9 +864,9 @@ class TestBuildCacheBadgeHtml(unittest.TestCase):
         self.assertIn("缓存快照", result)
 
     def test_process_source(self):
-        """进程缓存来源"""
+        """本地缓存来源（T7.11 术语表）"""
         result = build_cache_badge_html({"source": "process", "timestamp": 1000000})
-        self.assertIn("进程缓存", result)
+        self.assertIn("本地缓存", result)
 
 
 # ===================================================================
@@ -963,6 +982,21 @@ class TestBuildTableHeaderHtml(unittest.TestCase):
         result = build_table_header_html(cols, cols, [], [("name", "contains", "test")], 1, 20, "", "")
         self.assertIn('value="test"', result)
 
+    def test_filters_in_qf_row(self):
+        """R2-D：筛选控件迁至表头第二行 tr.qf-row，排序行不含筛选；协议不变"""
+        cols = ["id", "name"]
+        result = build_table_header_html(cols, cols, [], [], 1, 20, "", "")
+        self.assertIn('<tr class="qf-row">', result)
+        # 结构顺序：排序行（sort-links）在前，qf-row 在后且包含筛选控件
+        self.assertLess(result.index('class="sort-links"'),
+                        result.index('<tr class="qf-row">'))
+        self.assertLess(result.index('<tr class="qf-row">'),
+                        result.index('class="filter-op"'))
+        # 提交协议不变：form 关联 + f_/op_ 参数名
+        self.assertIn('form="ff"', result)
+        self.assertIn('name="f_name"', result)
+        self.assertIn('name="op_name"', result)
+
     def test_sort_priority_badge(self):
         """多字段排序显示优先级"""
         cols = ["id", "name"]
@@ -1032,14 +1066,14 @@ class TestBuildTableBodyHtml(unittest.TestCase):
 
 
 class TestBuildControlsBarHtml(unittest.TestCase):
-    """build_controls_bar_html 函数测试"""
+    """build_controls_bar_html（工具行）与 build_export_modal_html（导出对话框）测试"""
 
-    def test_contains_controls_div(self):
-        """包含 controls div"""
+    def test_contains_toolbar(self):
+        """工具行容器"""
         result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
                                           '<span class="cache-badge">test</span>',
                                           100, 5)
-        self.assertIn('<div class="controls">', result)
+        self.assertIn('<div class="toolbar">', result)
 
     def test_contains_report_form(self):
         """包含报表控制表单"""
@@ -1048,32 +1082,37 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertIn('<form method="get" action="/report"', result)
         self.assertIn('name="id"', result)
 
-    def test_contains_export_form(self):
-        """包含导出表单"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
+    def test_export_form_in_modal(self):
+        """导出表单迁至统一导出对话框（T7.4）"""
+        result = build_export_modal_html(1, [], [], "", ["id", "name"], 0)
         self.assertIn('<form method="get" action="/export"', result)
-        self.assertIn("CSV", result)
-        self.assertIn("JSON", result)
-
-    def test_page_size_selector(self):
-        """包含每页行数选择器"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
-        self.assertIn("每页行数:", result)
-        self.assertIn('name="page_size"', result)
-
-    def test_export_format_options(self):
-        """导出格式选项"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
         self.assertIn("CSV", result)
         self.assertIn("JSON", result)
         self.assertIn("GBK（Excel 中文版推荐）", result)
         self.assertIn("UTF-8（通用 / 程序处理）", result)
+        self.assertIn("智能去引号", result)
+        self.assertIn("打包为 ZIP", result)
+        self.assertIn('name="use_custom_cols"', result)
+
+    def test_export_modal_preserves_params(self):
+        """导出对话框保留排序/筛选/列隐藏字段"""
+        result = build_export_modal_html(
+            1, [("name", "asc")], [("age", "gt", "18")], "id,name",
+            ["id", "name"], 0, result_param="result=0")
+        self.assertIn('name="sort"', result)
+        self.assertIn('name="f_age"', result)
+        self.assertIn('name="cols"', result)
+        self.assertIn('name="result"', result)
+
+    def test_page_size_selector(self):
+        """包含页大小选择器"""
+        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
+                                          "", 100, 5)
+        self.assertIn("每页", result)
+        self.assertIn('name="page_size"', result)
 
     def test_cache_badge_in_controls(self):
-        """缓存标签出现在控制栏"""
+        """缓存标签出现在工具行"""
         badge = '<span class="cache-badge">测试缓存</span>'
         result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
                                           badge, 100, 5)
@@ -1115,83 +1154,19 @@ class TestBuildControlsBarHtml(unittest.TestCase):
         self.assertNotIn("refresh=1", result)
 
     def test_field_settings_button(self):
-        """包含字段设置按钮"""
+        """包含字段设置按钮（打开抽屉）"""
         result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
                                           "", 100, 5)
         self.assertIn("字段设置", result)
         self.assertIn("fieldSettingsPanel", result)
+        self.assertIn("openPanel", result)
 
     def test_sort_settings_button(self):
-        """包含排序设置按钮"""
+        """包含排序设置按钮（打开抽屉）"""
         result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
                                           "", 100, 5)
         self.assertIn("排序设置", result)
         self.assertIn("sortSettingsPanel", result)
-
-    def test_export_more_options_collapsed(self):
-        """PH-12 低频导出选项折叠到「更多选项」details 内"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
-        self.assertIn("<details", result)
-        self.assertIn("更多选项", result)
-        # 低频选项位于 details 折叠区内
-        details_start = result.find("<details")
-        details_end = result.find("</details>")
-        self.assertGreater(details_start, 0)
-        self.assertGreater(details_end, details_start)
-        folded = result[details_start:details_end]
-        self.assertIn('name="charset"', folded)
-        self.assertIn('name="smart_quotes"', folded)
-        self.assertIn('name="zip"', folded)
-        self.assertIn('name="use_custom_cols"', folded)
-        # 名称统一：「智能去引号」，无旧「值无引号」残留
-        self.assertIn("智能去引号", result)
-        self.assertNotIn("值无引号", result)
-        # 格式与导出按钮保留在折叠区外
-        format_pos = result.find('name="format"')
-        self.assertLess(format_pos, details_start)
-
-    def test_export_more_keep_submit_params(self):
-        """PH-12 折叠区字段仍为表单提交字段（参数不丢）"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
-        details_start = result.find("<details")
-        details_end = result.find("</details>")
-        folded = result[details_start:details_end]
-        self.assertIn("charset", folded)
-        self.assertIn("gbk", folded)
-        self.assertIn("utf8", folded)
-        self.assertIn('value="1"', folded)
-
-    def test_export_smart_quote_panel(self):
-        """智能去引号面板：3 项勾选 + hidden 位图 + CSV 禁用 JS"""
-        result = build_controls_bar_html(1, 20, [], [], "", ["id", "name"], 0,
-                                          "", 100, 5)
-        # 3 个勾选项（1=十进制 / 2=科学计数法 / 4=千分位）
-        self.assertIn('class="smart-quote-cb" value="1"', result)
-        self.assertIn('class="smart-quote-cb" value="2"', result)
-        self.assertIn('class="smart-quote-cb" value="4"', result)
-        # 位图随勾选状态即时写入隐藏 input（导出 URL 参数 smart_quotes）
-        self.assertIn('name="smart_quotes" id="export-smart-quotes-input" value="0"',
-                      result)
-        self.assertIn("updateExportSmartFlags", result)
-        # 说明文案：原生 int/float 恒裸 / Decimal 勾选数字特征裸出 / 千分位去逗号
-        self.assertIn("原生 int/float 恒裸输出", result)
-        self.assertIn("Decimal 数值列勾选十进制/科学时输出数字", result)
-        self.assertIn("千分位输出去逗号", result)
-        self.assertIn("输出永远合法 JSON（RFC 8259）", result)
-        # CSV 格式时面板禁用：格式 select 联动 + 仅 JSON 提示
-        self.assertIn('id="export-format-select" onchange="updateExportSmartState()"',
-                      result)
-        self.assertIn("export-smart-csv-hint", result)
-        self.assertIn("仅 JSON 格式支持", result)
-        self.assertIn("cb.disabled = isCsv", result)
-
-
-# ===================================================================
-# 字段设置面板测试
-# ===================================================================
-
 
 class TestBuildFieldSettingsPanelHtml(unittest.TestCase):
     """build_field_settings_panel_html 函数测试"""
@@ -1238,7 +1213,7 @@ class TestBuildFieldSettingsPanelHtml(unittest.TestCase):
         """fieldList 应为响应式多列网格（ui-form-wide-layout 矩阵 C）"""
         result = build_field_settings_panel_html(["id", "name"], ["id", "name"])
         self.assertIn('id="fieldList"', result)
-        self.assertIn("grid-template-columns:repeat(auto-fill,minmax(300px,1fr))", result)
+        self.assertIn("grid-template-columns:1fr", result)
         self.assertNotIn("flex-direction:column", result)
 
 
@@ -1719,8 +1694,8 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         self.unclassified_reports = [{"id": 3, "name": "测试报表", "sql_query": "SELECT 1", "default_page_size": 10, "pool_id": None, "memo": "", "prefer_cache": 1, "cache_ttl_hours": 0}]
         self.all_reports = [{"id": 1, "name": "日报"}, {"id": 3, "name": "测试报表"}]
 
-    def test_category_tree_visual_guides(self):
-        """分类管理块渲染树形引导线 + 层级图标"""
+    def test_category_tree_nested_rows(self):
+        """R2-A：分类树为原型 flex 行——SVG 图标 + .kids 嵌套容器 + ghost 操作（无 ├─ 引导线）"""
         all_cats = [
             {"id": 1, "name": "根分类", "parent_id": None},
             {"id": 2, "name": "子分类", "parent_id": 1},
@@ -1733,10 +1708,12 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         result = build_category_section_html(self.cat_reports, self.unclassified_reports,
                                               all_cats, self.all_reports,
                                               self.pools, cat_tree)
-        self.assertIn('class="tree-guide"', result)
-        self.assertIn("└─", result)
-        self.assertIn("📁", result)
-        self.assertIn("📄", result)
+        self.assertIn('<div class="kids on" id="cat-kids-1">', result)
+        self.assertIn('<svg class="ico"', result)
+        self.assertIn('class="ops"', result)
+        self.assertIn('<span class="cnt">1</span>', result)
+        self.assertNotIn('tree-guide', result)
+        self.assertNotIn('└─', result)
 
     def test_report_sections_nested_visual(self):
         """报表区块按层级缩进 + 左侧竖条嵌套（替代全角空格标题缩进）"""
@@ -2117,18 +2094,19 @@ class TestBuildApiEndpointsListHtml(unittest.TestCase):
         self.assertIn("删除", html)
 
     def test_list_has_description_column(self):
-        """列表包含说明列表头"""
+        """列表包含说明（展开区 api-desc 标签，R2-D 行卡片结构）"""
         html = build_api_endpoints_list_html([self._ep(1)], report_id=1)
-        self.assertIn("<th>说明</th>", html)
+        self.assertIn('<div class="api-desc"><span class="lbl">说明</span>', html)
 
-    def test_list_description_truncated_with_title(self):
-        """长说明单元格截断摘要显示，title 保留全文"""
+    def test_list_description_full_text_in_expand(self):
+        """展开区说明为全文（不再截断），title 同步保留全文"""
         long_desc = ("这是一段很长的接口说明文本，用于描述接口的用途和调用注意事项，"
-                     "内容足够长以验证摘要截断展示与悬停全文效果")
+                     "内容足够长以验证展开区完整展示与悬停提示效果")
         html = build_api_endpoints_list_html([self._ep(1, description=long_desc)],
                                              report_id=1)
-        self.assertIn(long_desc, html)  # title 全文
-        self.assertIn("…", html)  # 截断标记
+        self.assertIn(f'<div class="api-desc" title="{long_desc}">', html)
+        self.assertIn(f'<span class="lbl">说明</span>{long_desc}', html)
+        self.assertNotIn("…", html)  # 无截断标记
 
     def test_list_description_empty_placeholder(self):
         """无说明时显示占位符"""
@@ -2211,26 +2189,27 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
                 "description": description, "report_id": report_id,
                 "allow_fetch_all": fetch_all}
 
-    def test_uses_debug_info_structure(self):
-        """外层结构与 Debug 信息模块一致（debug-info/debug-toggle/toggleSection/debug-content hidden）。"""
+    def test_uses_api_row_structure(self):
+        """R2-D：详情页签委托 api-row 卡片行（与列表页同一实现，无折叠外壳）。"""
         html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
-        self.assertIn('class="debug-info"', html)
-        self.assertIn('class="debug-toggle"', html)
-        self.assertIn("toggleSection(this, 'API 调用地址')", html)
-        self.assertIn('class="debug-content hidden"', html)
-        self.assertIn("▶ API 调用地址", html)
+        self.assertIn('class="api-row"', html)
+        self.assertIn('class="api-main"', html)
+        self.assertIn('class="api-more"', html)
+        self.assertNotIn('class="debug-info"', html)
+        self.assertNotIn("API 调用地址", html)
 
     def test_default_collapsed(self):
-        """默认折叠（debug-content hidden）。"""
+        """展开区默认收起（api-more 无 on）。"""
         html = build_api_urls_section_html([self._ep(1)], "http://127.0.0.1:8080")
-        self.assertIn('class="debug-content hidden"', html)
+        self.assertIn('class="api-more"', html)
+        self.assertNotIn('class="api-more on"', html)
 
     def test_multiple_grouped_label(self):
-        """多个接口时标题显示数量。"""
+        """多个接口时每个端点各出一行卡片。"""
         html = build_api_urls_section_html(
             [self._ep(1), self._ep(2)], "http://127.0.0.1:8080")
-        self.assertIn("API 调用地址 (2 个接口)", html)
-        self.assertIn('toggleSection(this, \'API 调用地址 (2 个接口)\')', html)
+        self.assertEqual(2, html.count('class="api-row"'))
+        self.assertNotIn("API 调用地址", html)
 
     def test_url_code_has_js_attributes(self):
         """URL code 保留 data-path/data-kind/api-url-code 供 JS 填充。"""
@@ -2247,15 +2226,15 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         self.assertNotIn("/api//api/", html)
 
     def test_badge_enabled(self):
-        """启用端点在接口名旁显示绿色启用徽章"""
+        """启用端点主行显示绿色启用徽章"""
         html = build_api_urls_section_html([self._ep(1, enabled=1)], "http://x")
-        self.assertIn("#059669", html)
+        self.assertIn('badge badge-ok', html)
         self.assertIn("启用", html)
 
     def test_badge_disabled(self):
-        """禁用端点在接口名旁显示红色禁用徽章"""
+        """禁用端点主行显示警示禁用徽章"""
         html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
-        self.assertIn("#dc2626", html)
+        self.assertIn('badge badge-warn', html)
         self.assertIn("禁用", html)
 
     def test_description_keeps_newlines(self):
@@ -2277,19 +2256,19 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         self.assertNotIn("toggleApiDesc", html)
         self.assertNotIn("webkit-line-clamp", html)
         self.assertIn("▼ 接口说明", html)
-        self.assertIn('data-mem-key="api_desc_fold_1"', html)
+        self.assertNotIn('data-mem-key', html)
         # 折叠区内四行全部渲染（含 <br> 换行保留）
         self.assertIn("行一<br>", html)
         self.assertIn("行四", html)
 
     def test_short_description_in_fold(self):
-        """短说明在「接口说明」折叠区内渲染 + 三态控件，无 toggleApiDesc"""
+        """短说明在「接口说明」折叠区内渲染（三态已废除，T7.11）"""
         html = build_api_urls_section_html(
             [self._ep(1, description="简短说明")], "http://x")
         self.assertNotIn("toggleApiDesc", html)
         self.assertIn("▼ 接口说明", html)
-        self.assertIn('data-mem-key="api_desc_fold_1"', html)
-        self.assertIn("mem-mode", html)
+        self.assertNotIn('data-mem-key', html)
+        self.assertNotIn("mem-mode", html)
         self.assertIn("<p>简短说明</p>", html)
 
     def test_no_description_no_block(self):
@@ -2307,15 +2286,16 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
              self._ep(2, enabled=0, description="接口二说明")], "http://x")
         self.assertIn("接口一说明", html)
         self.assertIn("接口二说明", html)
-        self.assertEqual(html.count("#059669"), 1)
-        self.assertEqual(html.count("#dc2626"), 1)
+        self.assertEqual(html.count('badge badge-ok'), 1)
+        self.assertEqual(html.count('badge badge-warn'), 1)
 
     def test_admin_actions_row_enabled_ep(self):
-        """启用端点显示禁用按钮（POST toggle + 回跳来源）"""
+        """启用端点显示禁用按钮（POST toggle + 回跳本报表页）"""
         html = build_api_urls_section_html([self._ep(1, enabled=1)], "http://x")
         self.assertIn('name="action" value="toggle"', html)
         self.assertIn('name="endpoint_id" value="1"', html)
         self.assertIn('name="return_to"', html)
+        self.assertIn('value="/report?id=1"', html)
         self.assertIn("禁用", html)
 
     def test_admin_actions_row_disabled_ep(self):
@@ -2339,9 +2319,10 @@ class TestApiUrlsSectionHtml(unittest.TestCase):
         self.assertIn("confirm(", html)
 
     def test_report_page_enable_no_confirm(self):
-        """报表页启用操作不确认（无损操作）"""
+        """报表页启用操作不确认（无损操作；删除确认仍保留）"""
         html = build_api_urls_section_html([self._ep(1, enabled=0)], "http://x")
-        self.assertNotIn("onsubmit=", html)
+        self.assertNotIn("确定禁用", html)
+        self.assertIn("确定删除", html)
 
     def test_static_url_disabled_when_static_cache_off(self):
         """static_cache=0 时静态 URL 行置灰展示（不隐藏）：保留地址 + 原因提示 + 去开启链接。"""
@@ -2385,7 +2366,10 @@ class TestStickyTableHeaderCss(unittest.TestCase):
     def test_th_sticky_inside_th_rule(self):
         """sticky 规则位于 th 选择器块内（非全局裸规则）。"""
         css = _COMMON_CSS
-        th_rule = css[css.index("th {"):]
+        # 行首定位真 th 选择器：.api-main .path 等含 "th {" 子串，不能用裸 index
+        m = re.search(r"^th \{", css, re.M)
+        self.assertIsNotNone(m, "未找到行首 th 选择器块")
+        th_rule = css[m.start():]
         th_block_end = th_rule.index("}")
         th_block = th_rule[:th_block_end]
         self.assertIn("position: sticky", th_block)
@@ -2413,175 +2397,71 @@ class TestStickyTableHeaderCss(unittest.TestCase):
 # ===================================================================
 
 class TestCollapseMemKey(unittest.TestCase):
-    """build_collapse_section_html 的 mem_key 三态折叠组件（矩阵 M1）。"""
+    """build_collapse_section_html（T7.11 三态废除后的折叠契约）"""
 
-    def test_without_mem_key_hidden_unchanged(self):
-        """无 mem_key + default_hidden=True：与现状逐字符一致（无三态、无 data 属性）。"""
-        html = build_collapse_section_html("备注", "内容", default_hidden=True)
-        self.assertIn('<div class="debug-info">', html)
+    def test_plain_hidden_collapse(self):
+        """default_hidden=True：普通折叠，无三态/无 mem 属性"""
+        html = build_collapse_section_html(
+            "备注", "内容", default_hidden=True, button_text="▶ 备注",
+            mem_key="memo_fold_3")
         self.assertIn('class="debug-content hidden"', html)
         self.assertNotIn("data-mem-key", html)
-        self.assertNotIn("data-default-hidden", html)
-        self.assertNotIn("mem-toggle", html)
         self.assertNotIn("mem-mode", html)
+        self.assertNotIn("data-default-hidden", html)
 
-    def test_without_mem_key_expanded_unchanged(self):
-        """无 mem_key + default_hidden=False：现状输出，无三态。"""
-        html = build_collapse_section_html("备注", "内容", default_hidden=False)
-        self.assertIn('<div class="debug-info">', html)
-        self.assertIn('class="debug-content"', html)
-        self.assertNotIn('class="debug-content hidden"', html)
-        self.assertNotIn("mem-toggle", html)
-
-    def test_mem_key_expanded_by_default(self):
-        """mem_key + default_hidden=False：data 属性 + 三态按钮（自动高亮）+ 初始展开。"""
-        html = build_collapse_section_html(
-            "备注", "内容", default_hidden=False, button_text="▼ 备注", mem_key="memo_fold_3")
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn('data-default-hidden="0"', html)
-        self.assertIn('class="mem-mode mem-mode-auto active" data-mode="auto"', html)
-        self.assertIn('class="mem-mode mem-mode-open" data-mode="open"', html)
-        self.assertIn('class="mem-mode mem-mode-fold" data-mode="fold"', html)
-        self.assertIn("自动", html)
-        self.assertIn("展开", html)
-        self.assertIn("折叠", html)
-        self.assertIn("▼ 备注", html)
-        self.assertNotIn('class="debug-content hidden"', html)
-
-    def test_mem_key_hidden_by_default(self):
-        """mem_key + default_hidden=True：data-default-hidden=1 + 初始折叠。"""
-        html = build_collapse_section_html(
-            "备注", "内容", default_hidden=True, button_text="▶ 备注", mem_key="memo_fold_3")
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn('data-default-hidden="1"', html)
-        self.assertIn("▶ 备注", html)
-        self.assertIn('class="debug-content hidden"', html)
-        self.assertIn("mem-mode", html)
-
-    def test_mem_key_api_desc_key(self):
-        """API 说明折叠区使用 api_desc_fold_{id} 记忆键（契约：data-mem-key + 三态 + 初始展开）。"""
+    def test_plain_expanded_collapse(self):
+        """default_hidden=False：初始展开，无三态"""
         html = build_collapse_section_html(
             "接口说明", "说明", default_hidden=False, mem_key="api_desc_fold_7")
-        self.assertIn('data-mem-key="api_desc_fold_7"', html)
-        self.assertIn('data-default-hidden="0"', html)
-        self.assertIn("mem-mode", html)
         self.assertNotIn('class="debug-content hidden"', html)
+        self.assertNotIn("mem-mode", html)
+        self.assertNotIn("data-mem-key", html)
 
-    def test_toggle_button_adjacent_to_content(self):
-        """标题按钮与内容 div 保持相邻（toggleSection 依赖 nextElementSibling），三态在内容之后。"""
+    def test_button_content_adjacent(self):
+        """标题按钮与内容 div 保持相邻（toggleSection 依赖 nextElementSibling）"""
         html = build_collapse_section_html(
-            "备注", "内容", default_hidden=False, button_text="▼ 备注", mem_key="memo_fold_3")
-        self.assertIn("</button><div class=\"debug-content\">内容</div>", html)
-        # 三态控件在内容 div 之后、折叠区容器之内
-        self.assertIn('</div><span class="mem-toggle">', html)
-        self.assertLess(
-            html.index('class="debug-content"'), html.index("mem-toggle"))
+            "备注", "内容", default_hidden=False, button_text="▼ 备注")
+        self.assertIn('</button><div class="debug-content">', html)
 
-    def test_mem_key_multiline_keeps_structure(self):
-        """mem_key 与 multiline=True 组合：结构保持，三态仍在内容之后。"""
+    def test_multiline_keeps_structure(self):
+        """multiline=True 结构保持"""
         html = build_collapse_section_html(
-            "接口说明", "多行内容", default_hidden=False, multiline=True, mem_key="api_desc_fold_1")
-        self.assertIn('data-mem-key="api_desc_fold_1"', html)
-        self.assertIn('class="debug-content"', html)
-        self.assertIn("mem-toggle", html)
-        # multiline 输出 button 与 content 分行，但 button 后第一个兄弟仍是 content
-        self.assertIn("</button>\n<div class=\"debug-content\">\n", html)
+            "接口说明", "多行内容", default_hidden=False, multiline=True)
+        self.assertIn("多行内容", html)
+        self.assertNotIn("mem-mode", html)
 
 
 class TestCollapseMemKeyJs(unittest.TestCase):
-    """_COMMON_JS 三态 JS 逻辑（矩阵 M6，静态断言）。"""
+    """_COMMON_JS（T7.11 三态 JS 已移除）"""
 
-    def test_has_mem_toggle_functions(self):
-        """_COMMON_JS 含三态初始化与设置函数。"""
-        self.assertIn("function initMemToggles(", _COMMON_JS)
-        self.assertIn("function applyMemMode(", _COMMON_JS)
-        self.assertIn("function setMemToggle(", _COMMON_JS)
-        self.assertIn("function highlightMemMode(", _COMMON_JS)
+    def test_mem_toggle_functions_removed(self):
+        """三态初始化/设置函数不再存在"""
+        self.assertNotIn("function initMemToggles(", _COMMON_JS)
+        self.assertNotIn("function applyMemMode(", _COMMON_JS)
+        self.assertNotIn("function setMemToggle(", _COMMON_JS)
 
-    def test_auto_open_fold_value_domain(self):
-        """三态值域 auto/open/fold 出现在 JS 逻辑中。"""
-        self.assertIn("'auto'", _COMMON_JS)
-        self.assertIn("'open'", _COMMON_JS)
-        self.assertIn("'fold'", _COMMON_JS)
+    def test_toggle_section_still_present(self):
+        """普通折叠切换保留"""
+        self.assertIn("function toggleSection(", _COMMON_JS)
+        self.assertNotIn("initMemToggles();", _COMMON_JS)
 
-    def test_init_mem_toggles_called(self):
-        """页面加载即调用 initMemToggles（无 mem_key 元素时 no-op）。"""
-        self.assertIn("initMemToggles();", _COMMON_JS)
-
-    def test_toggle_section_syncs_mem_key(self):
-        """标题按钮折叠切换与三态同步：容器含 data-mem-key 时写 localStorage 并刷新高亮。"""
-        body = self._extract_js_function(_COMMON_JS, "toggleSection")
-        self.assertTrue(body, "应在 _COMMON_JS 中找到 toggleSection 函数")
-        self.assertIn("data-mem-key", body)
-        self.assertIn("localStorage.setItem", body)
-        self.assertIn("highlightMemMode", body)
-
-    @staticmethod
-    def _extract_js_function(js: str, name: str) -> str:
-        start = js.find(f"function {name}(")
-        if start < 0:
-            return ""
-        brace = js.find("{", start)
-        depth = 0
-        i = brace
-        while i < len(js):
-            if js[i] == "{":
-                depth += 1
-            elif js[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    return js[brace:i + 1]
-            i += 1
-        return ""
-
-
-# ===================================================================
-# api-desc-markdown T2：报表备注折叠区三态（矩阵 M2）
-# ===================================================================
 
 class TestMemoSectionMemKey(unittest.TestCase):
-    """build_memo_section_html 的 report_id 三态接入（矩阵 M2）。"""
+    """build_memo_section_html（T7.11 三态废除：默认折叠、无记忆控件）"""
 
-    def test_nonempty_with_report_id(self):
-        """非空备注 + report_id=3：默认折叠（批次6#24）+ data-mem-key + 三态 + .md-body。"""
-        html = build_memo_section_html("这是备注", 3)
-        self.assertIn("\u25b6 备注", html)
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn('data-default-hidden="1"', html)
-        self.assertIn("mem-mode", html)
-        self.assertIn('<div class="md-body"><p>这是备注</p></div>', html)
-        self.assertIn('class="debug-content hidden"', html)
-
-    def test_empty_with_report_id(self):
-        """空备注 + report_id=3：▶ 备注 + data-mem-key + 三态（折叠区仍渲染）。"""
-        html = build_memo_section_html("", 3)
-        self.assertIn("▶ 备注", html)
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn('data-default-hidden="1"', html)
-        self.assertIn("mem-mode", html)
-        self.assertIn('class="debug-content hidden"', html)
-
-    def test_nonempty_without_report_id_unchanged(self):
-        """非空备注 + report_id=None：无三态、无 data-mem-key，默认折叠（批次6#24）。"""
-        html = build_memo_section_html("这是备注")
-        self.assertIn("\u25b6 备注", html)
-        self.assertIn('class="debug-content hidden"', html)
+    def test_nonempty_memo_default_collapsed(self):
+        """R2-D：非空备注为普通卡片 + 无三态记忆"""
+        html = build_memo_section_html("有内容", 3)
+        self.assertIn("备注（Markdown）", html)
+        self.assertIn("有内容", html)
         self.assertNotIn("data-mem-key", html)
-        self.assertNotIn("data-default-hidden", html)
         self.assertNotIn("mem-mode", html)
 
-    def test_mermaid_content_kept_with_report_id(self):
-        """含 mermaid 备注 + report_id：折叠区内 <pre class="mermaid"> 保留，三态共存。"""
-        html = build_memo_section_html("```mermaid\nflowchart TD\n A-->B\n```", 3)
-        self.assertIn('data-mem-key="memo_fold_3"', html)
-        self.assertIn("mem-mode", html)
-        self.assertIn('<pre class="mermaid">', html)
-        self.assertIn("\u25b6 备注", html)
+    def test_memo_keeps_markdown(self):
+        """Markdown 渲染保留"""
+        html = build_memo_section_html("**粗**", 3)
+        self.assertIn("<strong>粗</strong>", html)
 
-
-# ===================================================================
-# api-desc-markdown T3：API 接口说明查看页 Markdown 化 + 折叠区（矩阵 M3）
-# ===================================================================
 
 class TestApiDescriptionMarkdown(unittest.TestCase):
     """_build_api_description_html 的 Markdown 折叠区语义（矩阵 M3）。"""
@@ -2598,12 +2478,12 @@ class TestApiDescriptionMarkdown(unittest.TestCase):
             self.assertEqual(_build_api_description_html(self._ep(desc=desc)), "")
 
     def test_plain_text(self):
-        """纯文本 desc：▼ 接口说明 + data-mem-key + 三态 + <p> 渲染 + 初始展开。"""
+        """纯文本 desc：▼ 接口说明 + <p> 渲染 + 初始展开（三态已废除）。"""
         html = _build_api_description_html(self._ep(desc="说明"))
         self.assertIn("▼ 接口说明", html)
-        self.assertIn('data-mem-key="api_desc_fold_7"', html)
-        self.assertIn('data-default-hidden="0"', html)
-        self.assertIn("mem-mode", html)
+        self.assertNotIn('data-mem-key', html)
+        self.assertNotIn('data-default-hidden', html)
+        self.assertNotIn("mem-mode", html)
         self.assertIn('<div class="md-body"><p>说明</p></div>', html)
         self.assertNotIn('class="debug-content hidden"', html)
 
@@ -2654,7 +2534,7 @@ class TestApiDescriptionMarkdown(unittest.TestCase):
             self._ep(desc="```mermaid\nflowchart TD\n A-->B\n```"))
         self.assertIn('<pre class="mermaid">', html)
         self.assertIn("▼ 接口说明", html)
-        self.assertIn("mem-mode", html)
+        self.assertNotIn("mem-mode", html)
 
 
 # ===================================================================

@@ -141,7 +141,7 @@ class TestServerIntegration(unittest.TestCase):
         resp = urllib.request.urlopen(f"{BASE_URL}/login")
         self.assertEqual(resp.status, 200)
         html = resp.read().decode("utf-8")
-        self.assertIn("Web 报表工具", html)
+        self.assertIn("SqlReport", html)
 
     def test_2_login_fail(self):
         """错误密码应返回登录页并显示错误"""
@@ -201,13 +201,13 @@ class TestServerIntegration(unittest.TestCase):
         resp = opener.open(f"{BASE_URL}/report")
         self.assertEqual(resp.status, 200)
         html = resp.read().decode("utf-8")
-        self.assertIn("选择报表", html)
+        self.assertIn("报表中心", html)
 
         # 使用 cookie 访问配置页
         resp = opener.open(f"{BASE_URL}/config")
         self.assertEqual(resp.status, 200)
         html = resp.read().decode("utf-8")
-        self.assertIn("配置管理", html)
+        self.assertIn("概览", html)
 
     def test_7_home_redirect_anonymous(self):
         """缺口12：未认证访问 GET / → 302 重定向 /login"""
@@ -418,7 +418,7 @@ class TestLoginPage(unittest.TestCase):
 
     def test_render_without_error(self):
         html = srv._render_login_page()
-        self.assertIn("Web 报表工具", html)
+        self.assertIn("SqlReport", html)
         self.assertIn("method=\"post\"", html)
 
     def test_render_with_error(self):
@@ -427,7 +427,7 @@ class TestLoginPage(unittest.TestCase):
 
     def test_render_empty_error(self):
         html = srv._render_login_page("")
-        self.assertIn("Web 报表工具", html)
+        self.assertIn("SqlReport", html)
         self.assertNotIn("用户名或密码错误", html)
 
 
@@ -592,7 +592,7 @@ class TestReportRefreshIntegration(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         html = resp.read().decode("utf-8")
         # 无 MySQL 时预填失败，目标页应降级为错误页（200），而非 500
-        self.assertIn("Web 报表工具", html)
+        self.assertIn("SqlReport", html)
 
 
 class TestHttpStatusCodes(unittest.TestCase):

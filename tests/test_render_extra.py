@@ -50,7 +50,7 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         result = build_memo_section_html("备注内容", report_id=1)
         self.assertIn("md-body", result)
         self.assertIn("备注内容", result)
-        self.assertIn("▶ 备注", result)
+        self.assertIn("备注（Markdown）", result)
 
     @patch('render.markdown_render')
     def test_empty_memo(self, mock_md):
@@ -59,15 +59,15 @@ class TestBuildMemoSectionHtml(unittest.TestCase):
         mock_md.render_markdown.return_value = ""
         result = build_memo_section_html("", report_id=1)
         self.assertNotIn("md-body", result)
-        self.assertIn("▶ 备注", result)
+        self.assertIn("暂无备注", result)
 
     @patch('render.markdown_render')
     def test_with_report_id_enables_memory(self, mock_md):
-        """report_id 提供时启用三态记忆"""
+        """report_id 提供时三态记忆已废除（T7.11）"""
         from render import build_memo_section_html
         mock_md.render_markdown.return_value = "<p>test</p>"
         result = build_memo_section_html("test", report_id=42)
-        self.assertIn("memo_fold_42", result)
+        self.assertNotIn("memo_fold_", result)
 
     @patch('render.markdown_render')
     def test_without_report_id_no_memory(self, mock_md):
@@ -243,7 +243,7 @@ class TestBuildRedisBannersHtml(unittest.TestCase):
         mock_app_config.format_local_time.return_value = "2024-01-01 12:00:00"
         cache_info = {"source": "redis", "timestamp": time.time()}
         result = build_redis_banners_html(cache_info)
-        self.assertIn("Redis 快照", result)
+        self.assertIn("缓存快照", result)
         self.assertIn("flash-info", result)
 
     @patch('render.redis_cache')
@@ -253,8 +253,8 @@ class TestBuildRedisBannersHtml(unittest.TestCase):
         mock_redis.redis_available.return_value = False
         cache_info = {"source": "mysql"}
         result = build_redis_banners_html(cache_info)
-        self.assertIn("Redis 不可用", result)
-        self.assertIn("直连 MySQL", result)
+        self.assertIn("缓存服务暂不可用", result)
+        self.assertIn("直连数据库查询", result)
 
     @patch('render.redis_cache')
     def test_mysql_available(self, mock_redis):
@@ -287,7 +287,7 @@ class TestBuildCacheBadgeHtml(unittest.TestCase):
         from render import build_cache_badge_html
         cache_info = {"source": "redis", "timestamp": time.time() - 10}
         result = build_cache_badge_html(cache_info)
-        self.assertIn("Redis 快照", result)
+        self.assertIn("缓存快照", result)
         self.assertIn("fresh", result)
 
     def test_redis_fallback(self):
@@ -295,28 +295,28 @@ class TestBuildCacheBadgeHtml(unittest.TestCase):
         from render import build_cache_badge_html
         cache_info = {"source": "redis_fallback", "timestamp": time.time() - 10}
         result = build_cache_badge_html(cache_info)
-        self.assertIn("MySQL 不可用", result)
+        self.assertIn("数据库不可用", result)
 
     def test_process_cache(self):
         """进程缓存时显示进程缓存"""
         from render import build_cache_badge_html
         cache_info = {"source": "process", "timestamp": time.time() - 10}
         result = build_cache_badge_html(cache_info)
-        self.assertIn("进程缓存", result)
+        self.assertIn("本地缓存", result)
 
     def test_direct_mysql(self):
         """直连 MySQL 时显示直连"""
         from render import build_cache_badge_html
         cache_info = {"source": "other"}
         result = build_cache_badge_html(cache_info)
-        self.assertIn("直连 MySQL", result)
+        self.assertIn("实时查询", result)
 
     def test_prefer_cache_with_ttl(self):
         """prefer_cache 且 TTL>0 时显示 TTL"""
         from render import build_cache_badge_html
         cache_info = {"source": "other"}
         result = build_cache_badge_html(cache_info, prefer_cache=True, cache_ttl_hours=2)
-        self.assertIn("TTL=2h", result)
+        self.assertIn("缓存 2 小时", result)
 
     def test_expired_cache(self):
         """缓存已过期时显示过期提示"""
