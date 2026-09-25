@@ -2096,13 +2096,15 @@ def render_scheduler_form_page(conn, sched_id: int = None,
         prefill = {"report_ids": [rid for rid in preselect_report_ids
                                   if any(r["id"] == rid for r in reports)]}
     title = "编辑定时任务" if (prefill or {}).get("id") else "新建定时任务"
+    crumb_tail = "编辑" if (prefill or {}).get("id") else "新建"
     return (render_page_header(title=f"SqlReport - {title}",
                                active_nav="scheduler",
                                extra_css=_CONFIG_EXTRA_CSS,
                                nav_badges=_nav_badges(conn))
             + flash_html
             + '<div class="page-head"><div>'
-            + '<div class="crumb"><a href="/config/scheduler">定时任务</a></div>'
+            + '<div class="crumb"><a href="/config/scheduler">定时任务</a>'
+            + f' › {crumb_tail}</div>'
             + f'<h1>{title}</h1>'
             + '<div class="sub">计划、绑定报表、错过补偿与静默窗口</div>'
             + '</div></div>'

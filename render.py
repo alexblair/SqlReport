@@ -4173,7 +4173,6 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <div class="card">
   <div class="card-head"><div class="form-section">④ JSON 模板</div></div>
   <div id="template-section" class="span-full" style="margin:0;padding:0;background:none;border:0;border-radius:0">
-    <div class="form-section">④ JSON 模板</div>
     <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">JSON 输出模板（可选）</div>
     <label style="font-size:13px;color:#475569;display:block">
       <textarea name="json_template" id="json-template-input" rows="8"
