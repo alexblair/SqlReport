@@ -17,8 +17,9 @@ config._report_form_html / render_category_form_page 为整页渲染，一并覆
 import unittest
 
 import config
+import db
 import render
-from tests import htmlcheck
+from tests import htmlcheck, init_test_db, make_config_db
 from tests.test_config import _make_conn
 
 
@@ -214,6 +215,42 @@ class TestWholePageStructure(unittest.TestCase, _HtmlStructureMixin):
         html = config.render_category_form_page(self.conn)
         self.assertWellFormed(html)
         self.assertMainFormHasSubmit(html, action_hint="/config/categories/new")
+
+    def test_reports_list_full_page(self):
+        """报表配置页整页（R2 左菜单分类树 + 分组列表 + 卡片行）。
+
+        MEMORY 待办补录：htmlcheck 此前未覆盖该整页，曾属门禁盲区。
+        """
+        conn = make_config_db()   # 现行 schema（含 parent_id 等新列）
+        init_test_db(conn)
+        try:
+            db.add_pool(conn, "整页池", "127.0.0.1", 3306, "u", "p", "d")
+            db.add_category(conn, "整页分类")
+            db.add_report(conn, "整页报表", "SELECT 1", 20, 1)
+            html = config.render_reports_page(conn)
+        finally:
+            conn.close()
+        self.assertWellFormed(html)
+        self.assertIn("整页报表", html)   # 有数据态，非空态兜底
+
+    def test_api_endpoints_list_full_page(self):
+        """API 接口列表整页（page-head + api-row 卡片行 + 展开区）。
+
+        MEMORY 待办补录：R2 改卡片结构后整页须进 htmlcheck 门禁。
+        """
+        conn = make_config_db()   # 现行 schema（含 parent_id 等新列）
+        init_test_db(conn)
+        try:
+            db.add_pool(conn, "整页池", "127.0.0.1", 3306, "u", "p", "d")
+            rid = db.add_report(conn, "挂载报表", "SELECT 1", 20, 1)
+            db.add_api_endpoint(conn, rid, "整页接口", "/api/fullpage",
+                                api_key="sk-fullpage")
+            html = config.render_api_endpoints_page(conn)
+        finally:
+            conn.close()
+        self.assertWellFormed(html)
+        self.assertIn("整页接口", html)   # api-row 行有数据态
+        self.assertIn("api-row", html)    # R2 卡片结构在门禁内
 
 
 if __name__ == "__main__":
