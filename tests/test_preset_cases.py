@@ -8,6 +8,10 @@
 import os
 import sys
 import unittest
+# 分段 discover（-p 'test_preset*.py'）只加载本文件时，unittest.mock 子模块
+# 尚未被其他测试文件带入；TestDebugVisibility._overview 直接用 unittest.mock
+# 需在此显式导入，否则 AttributeError: module 'unittest' has no attribute 'mock'
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

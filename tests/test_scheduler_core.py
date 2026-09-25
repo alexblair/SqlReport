@@ -875,7 +875,11 @@ class TestGoldenSampleWeekly(SchedulerCoreTest):
 
 class TestCircuitBreaker(SchedulerCoreTest):
 
-    FAR_FUTURE = NOW + 30 * 86400
+    # _run_schedule 用真实 time.time() 回写 next_run_at，而本模块 NOW 固定为
+    # 2026-08-21；系统日期越过 NOW+30 天后 FAR_FUTURE 会早于真实时钟推进出的
+    # next_run_at，get_due_schedules 查空、run_tick 恒 0（时间炸弹）。
+    # 故取真实时钟再加 30 天，确保远超任意一次执行回写的 next_run_at。
+    FAR_FUTURE = max(NOW, time.time()) + 30 * 86400
 
     def test_five_consecutive_failures_stop_auto_dispatch(self):
         """B5：连败 5 次（经手动触发累积）后 tick 不再自动派发。"""

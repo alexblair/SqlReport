@@ -18,18 +18,39 @@ from unittest.mock import patch
 
 import app_config
 
-# 其他测试（如 test_api_endpoint）在模块导入期会污染 os.environ 的
-# CONFIG_FILE / CONFIG_DB；本模块 setUp 统一清除，确保 _load_config 读取
-# 仓库真实 app_config.json，避免环境残留干扰断言。
+# 仓库根 app_config.json 未入库（gitignored），干净环境不存在；缺省 fallback
+# 仅含 config_db（无 server/redis 段）。故 setUp 自建临时基准配置并以
+# CONFIG_FILE 指向它，确保断言稳定且不污染仓库、不依赖本机文件。
 
 
 class TestDebugOverride(unittest.TestCase):
     """DEBUG 配置覆盖行为测试（文件驱动，patch 临时路径）。"""
 
     def setUp(self):
-        for k in ("CONFIG_FILE", "CONFIG_DB", "DEBUG_CONFIG_FILE"):
-            os.environ.pop(k, None)
+        fd, path = tempfile.mkstemp(prefix="sr-base-", suffix=".json")
+        os.close(fd)
+        self._base_path = path
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "server": {"host": "0.0.0.0", "port": 1000},
+                "redis": {"enable": False, "password": "", "db": 0,
+                          "default_ttl_hours": 24},
+                "config_db": [{"enable": True, "engine": "sqlite3",
+                               "path": "config.db"}],
+            }, f)
+        os.environ.pop("CONFIG_DB", None)
+        os.environ.pop("DEBUG_CONFIG_FILE", None)
+        os.environ["CONFIG_FILE"] = path
         app_config._config = None
+
+    def tearDown(self):
+        app_config._config = None
+        os.environ.pop("CONFIG_FILE", None)
+        os.environ.pop("DEBUG_CONFIG_FILE", None)
+        try:
+            os.unlink(self._base_path)
+        except OSError:
+            pass
 
     def _write_debug(self, payload: dict) -> str:
         fd, path = tempfile.mkstemp(prefix="sr-debug-", suffix=".json")
