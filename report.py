@@ -1152,12 +1152,15 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                 if not redis_hit:
                     # ---- MySQL 查询 ----
                     clean_sql = sql_query.rstrip("; \t\n\r")
-                    conn = db.create_mysql_connection(
-                        pool_config, read_timeout=read_timeout)
+                    conn = None
                     try:
+                        # 连接建立与查询同受保护：MySQL 宕机（connect 立即抛
+                        # InterfaceError）也须走下方过期快照兜底（docstring 承诺）
+                        conn = db.create_mysql_connection(
+                            pool_config, read_timeout=read_timeout)
                         all_results = db.execute_mysql_query(conn, clean_sql, transactional=True)
                     except Exception as e:
-                        # MySQL 失败 → 兜底读：尝试读取过期 Redis 快照
+                        # 数据源失败（连接建立或查询期）→ 兜底读：尝试读取过期 Redis 快照
                         if _mgr and snapshot_key:
                             _snap = _mgr.get_snapshot(snapshot_key)
                             if _snap is not None and _cache_matches_limit_policy(
@@ -1172,7 +1175,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                         if cache_info is None:
                             raise
                     finally:
-                        conn.close()
+                        if conn is not None:
+                            conn.close()
 
                     if cache_info is None:
                         # MySQL 查询成功 → 截断至 max_rows 后写入各层缓存
