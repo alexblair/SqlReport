@@ -1934,25 +1934,48 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
 
 def _build_compact_switcher(conn, current_id: int = None) -> str:
-    """详情页头部紧凑报表切换 select（T7.4，替代整宽切换卡）。"""
-    if not current_id:
-        return ""
-    reports = db.get_all_reports(conn)
-    all_cats = db.get_all_categories(conn)
-    cat_names = {c["id"]: c["name"] for c in all_cats}
-    opts = []
-    for r in reports:
-        cid = r.get("category_id")
-        label = (f"{cat_names.get(cid, '')}/" if cid in cat_names else "") + r["name"]
-        sel = " selected" if r["id"] == current_id else ""
-        opts.append(f'<option value="{r["id"]}"{sel}>{_escape(label)}</option>')
-    if not any(r["id"] == current_id for r in reports):
-        opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
-    return (
-        '<select class="select compact-switch" '
-        "onchange=\"if(this.value)location.href='/report?id='+this.value\" "
-        'aria-label="切换报表">' + "".join(opts) + "</select>"
-    )
+     """详情页头部紧凑报表切换 select（按分类层级树状呈现）。"""
+     if not current_id:
+         return ""
+     reports = db.get_all_reports(conn)
+     cat_tree = db.get_category_tree(conn)
+     cat_reports: dict = {}
+     for r in reports:
+         cid = r.get("category_id")
+         if cid is not None:
+             cat_reports.setdefault(cid, []).append(r)
+     uncategorized = [r for r in reports if r.get("category_id") is None]
+
+     def _render_tree(nodes: list[dict], depth: int = 0) -> str:
+         html = ""
+         indent = "　" * depth
+         for node in nodes:
+             cid = node["id"]
+             rpts = cat_reports.get(cid, [])
+             if rpts or node.get("children", []):
+                 html += f'<option value="" disabled>{indent}{_escape(node["name"])}</option>'
+                 for r in rpts:
+                     sel = ' selected' if r["id"] == current_id else ''
+                     html += f'<option value="{r["id"]}"{sel}>{indent}　{_escape(r["name"])}</option>'
+                 if node.get("children", []):
+                     html += _render_tree(node["children"], depth + 1)
+             else:
+                 html += f'<option value="" disabled>{indent}({_escape(node["name"])} - 无报表)</option>'
+                 if node.get("children", []):
+                     html += _render_tree(node["children"], depth + 1)
+         return html
+
+     opts = _render_tree(cat_tree)
+     for r in uncategorized:
+         sel = ' selected' if r["id"] == current_id else ''
+         opts += f'<option value="{r["id"]}"{sel}>(未分类) {_escape(r["name"])}</option>'
+     if not any(r["id"] == current_id for r in reports):
+         opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
+     return (
+         '<select class="select compact-switch" '
+         "onchange=\"if(this.value)location.href='/report?id='+this.value\" "
+         'aria-label="切换报表">' + "".join(opts) + "</select>"
+     )
 
 
 def _build_report_switcher(conn, current_id: int = None) -> str:
