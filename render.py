@@ -114,12 +114,12 @@ _COMMON_CSS = """
   width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:13px;
   background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:800;
 }
-.nav-group { padding:10px 12px 4px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
+.nav-group { padding:6px 12px 2px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
 .nav-item {
-   display:flex; align-items:center; gap:10px; margin:2px 10px; padding:8px 12px;
+   display:flex; align-items:center; gap:10px; margin:1px 10px; padding:6px 12px;
    border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
    border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
-   cursor:pointer;
+   cursor:pointer; box-sizing:border-box;
 }
 .nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
 .nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
@@ -134,7 +134,7 @@ _COMMON_CSS = """
   margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
   padding:0 6px; border-radius:var(--r-full);
 }
-.sidebar .spacer { flex:1; }
+.sidebar .spacer { flex:0 0 1.5em; min-height:24px; }
 .account {
   border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
   display:flex; align-items:center; gap:8px; font-size:13px;
