@@ -548,7 +548,38 @@ def _js_string(s: str) -> str:
 # ui-redesign C16：不再内联 _COMMON_JS（公共 JS 统一外链单轨）；
 # SQL 高亮/格式化仍按需随页面 defer 加载（C12）。
 _FOOTER_GLUE = r"""
-function openPanel(id) {
+/* ---- 无刷新导航 ---- */
+ function navigateTo(url, replace) {
+   if (replace) history.replaceState(null, '', url);
+   else history.pushState(null, '', url);
+   fetch(url)
+     .then(function(r) { return r.text(); })
+     .then(function(html) {
+       var parser = new DOMParser();
+       var doc = parser.parseFromString(html, 'text/html');
+       var newMain = doc.querySelector('main.main');
+       var oldMain = document.querySelector('main.main');
+       if (newMain && oldMain) oldMain.innerHTML = newMain.innerHTML;
+       var newTitle = doc.querySelector('title');
+       if (newTitle) document.title = newTitle.textContent;
+     })
+     .catch(function() { window.location.href = url; });
+ }
+ window.addEventListener('popstate', function() {
+   fetch(window.location.href)
+     .then(function(r) { return r.text(); })
+     .then(function(html) {
+       var parser = new DOMParser();
+       var doc = parser.parseFromString(html, 'text/html');
+       var newMain = doc.querySelector('main.main');
+       var oldMain = document.querySelector('main.main');
+       if (newMain && oldMain) oldMain.innerHTML = newMain.innerHTML;
+       var newTitle = doc.querySelector('title');
+       if (newTitle) document.title = newTitle.textContent;
+     })
+     .catch(function() {});
+ });
+ function openPanel(id) {
   var el = document.getElementById(id);
   if (!el) return;
   el.classList.add('on');
@@ -656,11 +687,11 @@ function applyFieldSettings() {
   filters.forEach(function(f) {
     url += '&' + f.key + '=' + encodeURIComponent(f.val);
   });
-  if (cols.length > 0 && cols.length < items.length) {
-    url += '&cols=' + encodeURIComponent(cols.join(','));
-  }
-  window.location.href = url;
-}
+   if (cols.length > 0 && cols.length < items.length) {
+     url += '&cols=' + encodeURIComponent(cols.join(','));
+   }
+   navigateTo(url);
+ }
 var _dragSrcEl = null;
 function initDragHandlers() {
   var list = document.getElementById('fieldList');
@@ -812,9 +843,9 @@ function applySortSettings() {
       url += '&' + key + '=' + encodeURIComponent(val);
     }
   });
-  if (cols) url += '&cols=' + encodeURIComponent(cols);
-  window.location.href = url;
-}
+   if (cols) url += '&cols=' + encodeURIComponent(cols);
+   navigateTo(url);
+ }
 function switchResult(btn) {
   /* R2-D：结果集切换改为 segment 按钮；协议不变（result=N + 会话记忆回跳）。
      数据属性挂在 .result-selector 容器上，btn.dataset.index 为目标结果集。 */
@@ -829,16 +860,16 @@ function switchResult(btn) {
   if (isNaN(targetIdx) || targetIdx === currIdx) return;
   var key = 'rstate_' + rid;
   sessionStorage.setItem(key + '_' + currIdx, window.location.href);
-  var saved = sessionStorage.getItem(key + '_' + targetIdx);
-  if (saved) {
-    window.location.href = saved;
-  } else {
-    var base = '/' + swi + '?id=' + rid + '&page_size=' + ps;
-    if (so) base += '&sql_query=' + encodeURIComponent(so);
-    base += '&result=' + targetIdx;
-    window.location.href = base;
-  }
-}
+   var saved = sessionStorage.getItem(key + '_' + targetIdx);
+   if (saved) {
+     navigateTo(saved);
+   } else {
+     var base = '/' + swi + '?id=' + rid + '&page_size=' + ps;
+     if (so) base += '&sql_query=' + encodeURIComponent(so);
+     base += '&result=' + targetIdx;
+     navigateTo(base);
+   }
+ }
 function formatDebugSQL() {
   var pres = document.querySelectorAll('.sql-debug');
   pres.forEach(function(pre) {
@@ -1973,7 +2004,7 @@ def _build_compact_switcher(conn, current_id: int = None) -> str:
          opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
      return (
          '<select class="select compact-switch" '
-         "onchange=\"if(this.value)location.href='/report?id='+this.value\" "
+          "onchange=\"if(this.value)navigateTo('/report?id='+this.value)\" "
          'aria-label="切换报表">' + "".join(opts) + "</select>"
      )
 

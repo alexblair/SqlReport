@@ -893,10 +893,10 @@ function applyRulesJson() {
       && Object.keys(rules.nested_filter).length) {
     params.set('nested_filter', encodeURIComponent(JSON.stringify(rules.nested_filter)));
   }
-  params.set('page', '1');
-  window.location.href = '?' + params.toString();
-}
-/* ---- 批次5#14：flash 自动消失 + × 关闭 + 剥 flash 参数 ---- */
+   params.set('page', '1');
+   navigateTo('?' + params.toString());
+ }
+ /* ---- 批次5#14：flash 自动消失 + × 关闭 + 剥 flash 参数 ---- */
 function initFlashMessages() {
   var params = new URLSearchParams(window.location.search);
   if (params.has('flash')) {
@@ -951,7 +951,7 @@ function initQueryLoadingOverlay() {
   }
 }
 /* ---- 批次5#20：跳页钳制 + 回车原生提交 ---- */
-function goPage(evt, baseUrl, current, totalPages) {
+ function goPage(evt, baseUrl, current, totalPages) {
   evt.preventDefault();
   var input = document.getElementById('jump_page');
   var p = parseInt(input.value, 10);
@@ -959,10 +959,41 @@ function goPage(evt, baseUrl, current, totalPages) {
   if (p < 1) p = 1;
   if (p > totalPages) p = totalPages;
   input.value = p;
-  window.location.href = baseUrl + '&page=' + p;
+  navigateTo(baseUrl + '&page=' + p);
   return false;
 }
-"""
+ /* ---- 无刷新导航：history.pushState + fetch 替换 <main> 内容 ---- */
+ function navigateTo(url, replace) {
+   if (replace) { history.replaceState(null, '', url); }
+   else { history.pushState(null, '', url); }
+   fetch(url)
+     .then(function(r) { return r.text(); })
+     .then(function(html) {
+       var parser = new DOMParser();
+       var doc = parser.parseFromString(html, 'text/html');
+       var newMain = doc.querySelector('main.main');
+       var oldMain = document.querySelector('main.main');
+       if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
+       var newTitle = doc.querySelector('title');
+       if (newTitle) document.title = newTitle.textContent;
+     })
+     .catch(function() { window.location.href = url; });
+ }
+ window.addEventListener('popstate', function() {
+   fetch(window.location.href)
+     .then(function(r) { return r.text(); })
+     .then(function(html) {
+       var parser = new DOMParser();
+       var doc = parser.parseFromString(html, 'text/html');
+       var newMain = doc.querySelector('main.main');
+       var oldMain = document.querySelector('main.main');
+       if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
+       var newTitle = doc.querySelector('title');
+       if (newTitle) document.title = newTitle.textContent;
+     })
+     .catch(function() {});
+ });
+ """
 
 # ---------------------------------------------------------------------------
 # SQL 格式化与高亮 JS（config.py 与 report.py 共享）
@@ -2223,12 +2254,12 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {filter_hidden_inputs(filters) if filters else ''}
     {cols_hidden}
     {nf_hidden}
-    <label>每页
-      <select name="page_size" onchange="this.form.submit()" style="height:26px;font-size:13px">
-        {''.join(f'<option value="{s}"{" selected" if page_size == s else ""}>{s}</option>'
-                 for s in [10, 20, 50, 100, 200])}
-      </select>
-    </label>
+     <label>每页
+       <select name="page_size" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())" style="height:26px;font-size:13px">
+         {''.join(f'<option value="{s}"{" selected" if page_size == s else ""}>{s}</option>'
+                  for s in [10, 20, 50, 100, 200])}
+       </select>
+     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">刷新</button></noscript>
   </form>
   {f'<span class="sep"></span>{result_html}' if result_html else ''}
@@ -2572,13 +2603,13 @@ def build_report_switcher_html(reports_data, all_cats, cat_tree,
   <div class="report-select">
     <form method="get" action="/report">
       <label style="font-size:14px;color:#475569;font-weight:500;margin-bottom:6px;display:block">切换报表:</label>
-      <select name="id" onchange="this.form.submit()" style="width:100%">
-        <option value="">-- 选择报表 --</option>
-        {options}
-      </select>
-    </form>
-  </div>
-</div>"""
+       <select name="id" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())" style="width:100%">
+         <option value="">-- 选择报表 --</option>
+         {options}
+       </select>
+     </form>
+   </div>
+ </div>"""
 
 
 # ===================================================================
