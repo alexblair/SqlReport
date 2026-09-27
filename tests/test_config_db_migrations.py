@@ -735,6 +735,12 @@ class TestInitDbFullMigration(unittest.TestCase):
     """init_db 应在旧版库上触发所有迁移段并产出新结构。"""
 
     def setUp(self):
+        # 环境隔离：本机 app_config.json 可能配置 engine=mysql（如 3307 端口
+        # 演示配置），此测试只跑 SQLite 迁移——按测试基座惯例 patch 引擎。
+        from unittest.mock import patch
+        self.engine_patcher = patch("db._get_engine", return_value="sqlite3")
+        self.engine_patcher.start()
+        self.addCleanup(self.engine_patcher.stop)
         self.conn = sqlite3.connect(":memory:")
         self.conn.row_factory = sqlite3.Row
 

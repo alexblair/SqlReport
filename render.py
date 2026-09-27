@@ -849,14 +849,18 @@ function initSqlEditorTabIndent() {
     });
   });
 }
-document.addEventListener('DOMContentLoaded', function() {
+function initPage() {
+  /* 页面初始化（DOMContentLoaded 与无刷新换页后共用；需幂等） */
+  initApiUrls();
+  initCatTree();
   initFlashMessages();
   initAnchorRowHighlight();
   initQueryLoadingOverlay();
   initConfigFilter();
   initRecentReports();
   initSqlEditorTabIndent();
-});
+}
+document.addEventListener('DOMContentLoaded', initPage);
 function applyRulesJson() {
   var ta = document.getElementById('current-rules-json');
   if (!ta) return;
@@ -929,24 +933,31 @@ function initAnchorRowHighlight() {
 /* ---- 批次5#18：慢查询 loading 遮罩 ----
    仅在触发查询的 form submit 与「重建缓存」按钮 click 时显示；
    不用 beforeunload（会误伤导出下载），导出表单同样排除。 */
-function initQueryLoadingOverlay() {
-  var overlay = document.createElement('div');
-  overlay.id = 'query-loading-overlay';
-  overlay.className = 'query-loading-overlay';
-  overlay.innerHTML = '<div class="spinner"></div><div>查询中…请稍候</div>';
-  document.body.appendChild(overlay);
+ function initQueryLoadingOverlay() {
+  var overlay = document.getElementById('query-loading-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'query-loading-overlay';
+    overlay.className = 'query-loading-overlay';
+    overlay.innerHTML = '<div class="spinner"></div><div>查询中…请稍候</div>';
+    document.body.appendChild(overlay);
+  }
   var showOverlay = function() { overlay.classList.add('show'); };
   var forms = document.querySelectorAll('form');
   for (var i = 0; i < forms.length; i++) {
+    if (forms[i].hasAttribute('data-ov-bound')) continue;
     var action = forms[i].getAttribute('action') || '';
     if (action.indexOf('/export') !== -1) continue;
     /* 仅同页提交与报表查询端点（精确匹配，防止 /config/reports/* 批量操作误伤） */
     if (action === '' || action === '/report' || action.indexOf('/report?') === 0) {
+      forms[i].setAttribute('data-ov-bound', '1');
       forms[i].addEventListener('submit', showOverlay);
     }
   }
   var refreshBtns = document.querySelectorAll('.btn-refresh[type="submit"]');
   for (var j = 0; j < refreshBtns.length; j++) {
+    if (refreshBtns[j].hasAttribute('data-ov-bound')) continue;
+    refreshBtns[j].setAttribute('data-ov-bound', '1');
     refreshBtns[j].addEventListener('click', showOverlay);
   }
 }
@@ -963,35 +974,46 @@ function initQueryLoadingOverlay() {
   return false;
 }
  /* ---- 无刷新导航：history.pushState + fetch 替换 <main> 内容 ---- */
+ function _swapMain(html, url, replace) {
+   var parser = new DOMParser();
+   var doc = parser.parseFromString(html, 'text/html');
+   var newMain = doc.querySelector('main.main');
+   var oldMain = document.querySelector('main.main');
+   if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
+   var newTitle = doc.querySelector('title');
+   if (newTitle) document.title = newTitle.textContent;
+   if (url) {
+     if (replace) { history.replaceState(null, '', url); }
+     else { history.pushState(null, '', url); }
+   }
+   if (typeof initPage === 'function') { initPage(); }
+ }
  function navigateTo(url, replace) {
-   if (replace) { history.replaceState(null, '', url); }
-   else { history.pushState(null, '', url); }
    fetch(url)
      .then(function(r) { return r.text(); })
-     .then(function(html) {
-       var parser = new DOMParser();
-       var doc = parser.parseFromString(html, 'text/html');
-       var newMain = doc.querySelector('main.main');
-       var oldMain = document.querySelector('main.main');
-       if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
-       var newTitle = doc.querySelector('title');
-       if (newTitle) document.title = newTitle.textContent;
-     })
+     .then(function(html) { _swapMain(html, url, replace); })
      .catch(function() { window.location.href = url; });
  }
  window.addEventListener('popstate', function() {
    fetch(window.location.href)
      .then(function(r) { return r.text(); })
-     .then(function(html) {
-       var parser = new DOMParser();
-       var doc = parser.parseFromString(html, 'text/html');
-       var newMain = doc.querySelector('main.main');
-       var oldMain = document.querySelector('main.main');
-       if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
-       var newTitle = doc.querySelector('title');
-       if (newTitle) document.title = newTitle.textContent;
-     })
+     .then(function(html) { _swapMain(html, null, false); })
      .catch(function() {});
+ });
+ /* ---- 上移/下移箭头无刷新（/config/{section}/{id}/move-up|move-down）：
+        fetch POST 跟随 302 后原位换 <main>，保持滚动位置（不跳顶）。
+        服务端无 JS 时仍走原生提交兜底。 ---- */
+ document.addEventListener('submit', function(e) {
+   var form = e.target;
+   if (!form || form.tagName !== 'FORM') return;
+   var action = form.getAttribute('action') || '';
+   if (!/\/move-(up|down)$/.test(action)) return;
+   e.preventDefault();
+   fetch(action, { method: 'POST', body: new FormData(form) })
+     .then(function(r) {
+       return r.text().then(function(html) { _swapMain(html, r.url, false); });
+     })
+     .catch(function() { form.submit(); });
  });
  """
 

@@ -27,7 +27,10 @@ PRESET_PATH = os.path.join(ROOT, "tests", "preset_test_cases.json")
 def make_db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    config_db.init_db(conn)
+    # 环境隔离：本机 app_config.json 可能配置 engine=mysql，此测试只跑
+    # SQLite——按测试基座惯例 patch 引擎，防止 MySQL 分支误执行 DDL。
+    with unittest.mock.patch("db._get_engine", return_value="sqlite3"):
+        config_db.init_db(conn)
     return conn
 
 

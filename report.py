@@ -2001,11 +2001,11 @@ def _build_compact_switcher(conn, current_id: int = None) -> str:
          sel = ' selected' if r["id"] == current_id else ''
          opts += f'<option value="{r["id"]}"{sel}>(未分类) {_escape(r["name"])}</option>'
      if not any(r["id"] == current_id for r in reports):
-         opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
+         opts = f'<option value="{current_id}" selected>（当前报表）</option>' + opts
      return (
          '<select class="select compact-switch" '
-          "onchange=\"if(this.value)navigateTo('/report?id='+this.value)\" "
-         'aria-label="切换报表">' + "".join(opts) + "</select>"
+         "onchange=\"if(this.value)navigateTo('/report?id='+this.value)\" "
+         'aria-label="切换报表">' + opts + "</select>"
      )
 
 
