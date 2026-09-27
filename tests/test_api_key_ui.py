@@ -17,6 +17,7 @@ import config
 import config_db
 import db
 import render
+from render import _icon
 from tests import htmlcheck
 from tests.test_config import _make_conn
 
@@ -239,7 +240,7 @@ class TestApiKeyAutoGenerate(_Base):
         code, body, _headers = self._post_new(extra={"action": "save"})
         self.assertEqual(code, 200)
         self.assertIn("API Key 管理", body)
-        self.assertIn("🔑 API Key 管理", body)
+        self.assertIn("{0} API Key 管理".format(_icon("key")), body)
 
 
 class TestKeyManageHtml(_Base):
@@ -251,7 +252,7 @@ class TestKeyManageHtml(_Base):
         k1 = config_db.add_api_key(self.conn, eid, "调用方A", "sk-abcdefgh1234")
         html = render.build_api_key_manage_html(
             config_db.list_api_keys(self.conn, eid), 1, eid)
-        self.assertIn("🔑 API Key 管理", html)
+        self.assertIn("{0} API Key 管理".format(_icon("key")), html)
         self.assertIn("调用方A", html)
         self.assertIn("sk-a***1234", html)  # 掩码：前4后4
         self.assertIn("copyToClipboard('api-key-raw-%d')" % k1, html)
@@ -294,7 +295,7 @@ class TestEndpointFormKeyBlock(_Base):
             result_names_list=[], result_count=1,
             endpoint_id=eid, is_edit=True,
             api_keys=config_db.list_api_keys(self.conn, eid))
-        self.assertIn("🔑 API Key 管理", html)
+        self.assertIn("{0} API Key 管理".format(_icon("key")), html)
         self.assertNotIn('name="api_key"', html)
         self.assertNotIn("留空=无需鉴权", html)
 
@@ -304,7 +305,7 @@ class TestEndpointFormKeyBlock(_Base):
             1, "测试报表", None, result_names_list=[], result_count=1,
             endpoint_id=None, is_edit=False)
         self.assertIn("保存后将自动生成 API Key", html)
-        self.assertNotIn("🔑 API Key 管理", html)
+        self.assertNotIn("{0} API Key 管理".format(_icon("key")), html)
         self.assertNotIn('name="api_key"', html)
 
     def test_edit_save_button_inside_main_form_only(self):
@@ -330,9 +331,9 @@ class TestEndpointFormKeyBlock(_Base):
                       "保存按钮必须位于主表单内")
         self.assertIn('name="action" value="save_close"', main_span,
                       "保存并关闭按钮必须位于主表单内")
-        self.assertNotIn("🔑 API Key 管理", main_span,
+        self.assertNotIn("{0} API Key 管理".format(_icon("key")), main_span,
                          "API Key 管理区块不得嵌套在主表单内")
-        self.assertEqual(html.count("🔑 API Key 管理"), 1,
+        self.assertEqual(html.count("{0} API Key 管理".format(_icon("key"))), 1,
                          "API Key 管理区块只能渲染一次")
 
 

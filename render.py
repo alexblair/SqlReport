@@ -30,6 +30,48 @@ from filter_help import (render_filter_help, FILTER_HINT_SUFFIX,
 import markdown_render
 
 # ---------------------------------------------------------------------------
+# SVG 图标辅助（替代 emoji 字符，符合设计规范 icon 集合）
+# ---------------------------------------------------------------------------
+
+_ICONS = {
+    "alert": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1v5M8 11.5v.5"/><circle cx="8" cy="8" r="7"/></svg>',
+    "search": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="5"/><line x1="10" y1="10" x2="14" y2="14"/></svg>',
+    "file": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h7l5 5v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z"/><polyline points="7,3 7,8 12,8"/></svg>',
+    "settings": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.3 3.3l1.4 1.4M11.3 11.3l1.4 1.4M3.3 12.7l1.4-1.4M11.3 4.7l1.4-1.4"/></svg>',
+    "list": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/></svg>',
+    "folder": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 3a1 1 0 011-1h4l2 2h5a1 1 0 011 1v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>',
+    "chart": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="10" width="3" height="4" rx.5"/><rect x="6.5" y="6" width="3" height="8" rx.5"/><rect x="11" y="2" width="3" height="12" rx.5"/></svg>',
+    "key": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14.5 1.5l-3 3M3 9V6a3 3 0 013-3h3"/><circle cx="8.5" cy="8.5" r="2.5"/></svg>',
+    "calendar": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg>',
+    "refresh": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,8 4.5,5.5 7,8"/><path d="M11 2.5A5.5 5.5 0 0114 7h-2a3.5 3.5 0 00-3.5-3.5"/></svg>',
+    "check": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5,8.5 6.5,11.5 12.5,4"/></svg>',
+    "x": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>',
+    "info": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="7"/><path d="M8 7v4M8 10.5v.5"/></svg>',
+    "edit": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L4 14H1V11z"/></svg>',
+    "plus": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/></svg>',
+    "chevron-down": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="4,6 8,10 12,6"/></svg>',
+    "chevron-right": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="6,4 10,8 6,12"/></svg>',
+    "chevron-up": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="4,10 8,6 12,10"/></svg>',
+    "chevron-left": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="10,4 6,8 10,12"/></svg>',
+    "copy": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="5" width="9" height="9" rx1"/><path d="M11 11V3a2 2 0 00-2-2H3"/></svg>',
+    "trash": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,4 14,4"/><path d="M4 4l1 10h6l1-10"/><path d="M6 7v5M10 7v5"/></svg>',
+    "download": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8M4 10l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>',
+    "database": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><ellipse cx="8" cy="5" rx="7" ry="3"/><path d="M1 5v6c0 1.66 3.13 3 7 3s7-1.34 7-3V5"/><path d="M1 11v2c0 1.66 3.13 3 7 3s7-1.34 7-3v-2"/></svg>',
+    "users": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5" cy="5" r="2.5"/><circle cx="11" cy="5" r="2.5"/><path d="M1 14a5 5 0 0110 0"/><circle cx="11" cy="8" r="2"/></svg>',
+    "eye": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>',
+    "play": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polygon points="4,1 14,8 4,15"/></svg>',
+    "link": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 3h4a3 3 0 013 3v2"/><path d="M11 13h-4a3 3 0 01-3-3V8"/></svg>',
+}
+
+def _icon(name: str) -> str:
+    """返回设计规范内联的 SVG 图标 HTML。name 不在集合中时返回空串。"""
+    return _ICONS.get(name, "")
+
+# 侧边栏折叠图标（保持原有语义）
+_CHEVRON_DOWN = _icon("chevron-down")
+_CHEVRON_RIGHT = _icon("chevron-right")
+
+# ---------------------------------------------------------------------------
 # 公共 CSS（全站单一来源：report.py + config.py + audit + 登录页共享）
 # ---------------------------------------------------------------------------
 
@@ -74,16 +116,20 @@ _COMMON_CSS = """
 }
 .nav-group { padding:10px 12px 4px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
 .nav-item {
-  display:flex; align-items:center; gap:10px; margin:2px 10px; padding:8px 12px;
-  border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
-  border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
+   display:flex; align-items:center; gap:10px; margin:2px 10px; padding:8px 12px;
+   border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
+   border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
+   cursor:pointer;
 }
 .nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
 .nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
 .nav-item.nav-active::before {
-  content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
+   content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
 }
 .nav-item svg { width:16px; height:16px; flex:0 0 16px; opacity:.9; }
+.nav-item a { color:inherit; text-decoration:none; }
+.nav-item a:hover { text-decoration:none; }
+.nav-item a:focus-visible { box-shadow:var(--focus-ring); border-radius:8px; }
 .nav-badge {
   margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
   padding:0 6px; border-radius:var(--r-full);
@@ -269,14 +315,28 @@ h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
 }
 .btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,0.35); }
 .btn-primary:hover { background: #4338ca; }
+.btn-secondary { background: #fff; border-color: var(--line-strong); color: var(--ink-2); box-shadow: var(--sh-1); }
+.btn-secondary:hover { background: var(--bg-hover); border-color: var(--ink-3); }
 .btn-success { background: #059669; color: #fff; box-shadow: 0 1px 2px rgba(5,150,105,0.3); }
 .btn-success:hover { background: #047857; }
 .btn-danger { background: #dc2626; color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,0.3); }
 .btn-danger:hover { background: #b91c1c; }
 .btn-outline { background: transparent; color: #475569; border: 1px solid var(--line-strong); }
 .btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--bg-hover); }
+.btn-link { background: none; border: none; color: var(--brand); height: auto; padding: 0; font-weight: 500; }
+.btn-link:hover { text-decoration: underline; }
 .btn-sm { height: 26px; padding: 0 10px; font-size: 13px; }
+.btn-icon { width: 34px; padding: 0; }
+.btn-icon.btn-sm { width: 26px; }
+.btn-group { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
+.btn.loading { position: relative; color: transparent; }
+.btn.loading::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 table {
   border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
 }
@@ -1136,11 +1196,10 @@ def _build_sidebar_html(active: str = "", nav_badges: dict = None,
             badge = ""
             if key in nav_badges and nav_badges[key] is not None:
                 badge = f'<span class="nav-badge">{html_mod.escape(str(nav_badges[key]))}</span>'
-            parts.append(f'  <button type="button"{cls} '
-                         f"onclick=\"location.href='{href}'\" "
+            parts.append(f'  <a{cls} href="{href}" '
                          f'title="{html_mod.escape(label)}">'
-                         f'{svg}<span>{html_mod.escape(label)}</span>{badge}</button>')
-    parts.append('  <div class="spacer"></div>')
+                         f'{svg}<span>{html_mod.escape(label)}</span>{badge}</a>')
+        parts.append('  <div class="spacer"></div>')
     parts.append('  <div class="account">')
     if current_user:
         initial = html_mod.escape(current_user[:1].upper() or "?")
@@ -1342,17 +1401,18 @@ def build_flash_html(flash: str, is_error: bool = None) -> str:
 
 
 def build_empty_row_html(colspan, text: str, with_icon: bool = False,
-                         icon: str = "📭") -> str:
+                          icon: str = "file") -> str:
     """构建表格空状态提示行 HTML。
 
-    with_icon=True 时输出带图标面板变体（colspan 固定 999，图标默认 📭，
-    批次5#19 筛选空态可传 🔍）。
+    with_icon=True 时输出带图标面板变体（colspan 固定 999，图标默认 file，
+         批次5#19 筛选空态可传 search）。
     其余为纯文字版 `<tr><td colspan="N" class="empty-state">text</td></tr>`。
     """
+    icon_html = _icon(icon)
     if with_icon:
         return ('<tr class="empty-state-row">'
                 '<td colspan="999"><div class="empty-state">'
-                f'<div class="icon">{icon}</div>' + text + '</div></td></tr>')
+                f'<div class="icon">{icon_html}</div>' + text + '</div></td></tr>')
     return f'<tr><td colspan="{colspan}" class="empty-state">{text}</td></tr>'
 
 
@@ -2103,7 +2163,7 @@ def build_table_body_html(rows, display_indices, filters=None,
     """构建表格数据行 HTML。
 
     批次5#19（spec ux-optimization）：空结果按是否有筛选区分文案——
-    filters 非空显示「🔍 没有符合筛选条件的行」+ 服务端构造好的
+    filters 非空显示「{_icon("search")} 没有符合筛选条件的行」+ 服务端构造好的
     「清除筛选」链接（当前路径去掉 f_*/op_* 参数）；否则保持「暂无数据」。
     """
     tbody = ""
@@ -2115,7 +2175,7 @@ def build_table_body_html(rows, display_indices, filters=None,
                         f' class="clear-filter">清除筛选</a>')
             tbody = build_empty_row_html(
                 999, "没有符合筛选条件的行" + link,
-                with_icon=True, icon="🔍")
+                with_icon=True, icon=_icon("search"))
         else:
             tbody = build_empty_row_html(999, "暂无数据", with_icon=True)
     else:
@@ -2163,8 +2223,8 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
   </form>
   {f'<span class="sep"></span>{result_html}' if result_html else ''}
   <div class="grow"></div>
-  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('fieldSettingsPanel')">⚙ 字段设置</button>
-  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('sortSettingsPanel')">⇅ 排序设置</button>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('fieldSettingsPanel')">{_icon("settings")} 字段设置</button>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="openPanel('sortSettingsPanel')">{_icon("list")} 排序设置</button>
   <button type="button" class="btn btn-sm btn-secondary" onclick="gotoTab('rules')">高级筛选</button>
   <span class="sep"></span>
    <form method="post" action="/report" style="display:inline-flex;align-items:center">
@@ -2942,7 +3002,7 @@ def build_category_section_html(cat_reports, unclassified_reports, all_cats,
     参数:
         api_endpoints_map: { report_id: [api_endpoint_dict, ...] }，可选。
         schedules_map: { report_id: schedule_dict }，可选；提供时在报表名
-                       后渲染 ⏰ 定时徽标（保活徽标取报表行 keepalive 列）。
+                       后渲染 {_icon("calendar")} 定时徽标（保活徽标取报表行 keepalive 列）。
     """
     pools_map: dict = {p["id"]: p for p in pools}
 
@@ -3169,7 +3229,7 @@ function updateBatchCount() {{
 </div>"""
             if has_children:
                 inner += _render_report_sections(node["children"], depth + 1)
-            icon = "📁" if has_children else "📊"
+            icon = _icon("folder") if has_children else _icon("chart")
             count_html = (f' <span style="font-weight:400;font-size:14px;color:#64748b">({len(reports)} 个报表)</span>'
                           if reports else "")
             nest_style = ""
@@ -3189,7 +3249,7 @@ function updateBatchCount() {{
     uncat_section = f"""<div class="section">
 
 <div class="section-title">
-  <span>📋 未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
+  <span>{_icon("list")} 未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
   <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
 </div>
 <div class="table-wrap">
@@ -3491,7 +3551,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
     warning_html = ""
     if not has_names:
         warning_html = (f'<div class="flash-warn" style="{_WARN_BOX_STYLE}">'
-                        f'<span>⚠️ 该报表的 SQL 包含 {result_count} 段 SELECT，但未配置结果集名称</span>'
+                        f'<span>{_icon("alert")} 该报表的 SQL 包含 {result_count} 段 SELECT，但未配置结果集名称</span>'
                         f'<span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>'
                         f'</div>')
 
@@ -3876,7 +3936,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
         api_key_block_html = (
             '<div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;'
             'border-radius:8px;border:1px solid #fde68a;font-size:13px">'
-            '<strong>🔑 API Key：</strong>保存后将自动生成 API Key（名称=接口名称），'
+            '<strong>' + _icon("key") + ' API Key：</strong>保存后将自动生成 API Key（名称=接口名称），'
             '可在编辑页「API Key 管理」区块查看、复制与禁用。</div>'
         )
         key_manage_extra = ""
@@ -4127,7 +4187,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
   <div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
-    <strong>💡 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
+    <strong>{_icon("info")} 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
     切到「<strong>规则</strong>」页签，在「<strong>当前规则</strong>」卡片点击「<strong>复制 JSON</strong>」按钮即可获取 JSON 格式的配置，
     直接粘贴到下方的 JSON 文本框中。
     <div style="margin-top:4px;font-size:12px;color:#a16207">
@@ -4316,7 +4376,7 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
         f'<div style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;'
         f'border:1px solid #e2e8f0">'
         f'<div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px">'
-        f'🔑 API Key 管理</div>'
+        f'{_icon("key")} API Key 管理</div>'
         f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
         f'每个调用方可分配独立 Key（名称仅作管理标识）；Key 明文可查看（内控要求），'
         f'通过 Authorization: Bearer &lt;key&gt; 或 ?api_key=xxx 调用。'
@@ -4700,15 +4760,15 @@ _SCHED_MISFIRE_LABELS = {"skip": "跳过", "run_once": "补跑一次"}
 
 
 def build_schedule_flags_badge_html(sched_flag, keepalive_flag) -> str:
-    """报表列表名称后的功能徽标：⏰=已配定时、♻=已开保活（纯文本符号）。
+    """报表列表名称后的功能徽标：{_icon("calendar")}=已配定时、{_icon("refresh")}=已开保活（纯文本符号）。
 
     两项均未启用时返回空串（不渲染单元格内容变化，仅追加徽标）。
     """
     parts = ""
     if int(sched_flag or 0) == 1:
-        parts += '<span title="已配置定时执行">⏰</span>'
+        parts += f'<span title="已配置定时执行">{_icon("calendar")}</span>'
     if int(keepalive_flag or 0) == 1:
-        parts += '<span title="已开启缓存保活">♻</span>'
+        parts += f'<span title="已开启缓存保活">{_icon("refresh")}</span>'
     if parts:
         parts = f' <span style="margin-left:4px;font-size:13px">{parts}</span>'
     return parts
@@ -4766,14 +4826,14 @@ def _format_schedule_last_result(sched: dict) -> str:
     duration = sched.get("last_duration_ms")
     dur_text = f" ({duration}ms)" if duration is not None else ""
     if status == "success":
-        return f'<span title="上次执行成功">✅ 成功{_escape(dur_text)}</span>'
+        return f'<span title="上次执行成功">{_icon("check")} 成功{_escape(dur_text)}</span>'
     if status == "fail":
         err = (sched.get("last_error") or "").replace('"', "&quot;")
         summary = _escape((sched.get("last_error") or "")[:60])
         return (f'<span style="color:#dc2626;cursor:help" '
-                f'title="{err}">❌ 失败{dur_text}：{summary}</span>')
+                f'title="{err}">{_icon("x")} 失败{dur_text}：{summary}</span>')
     if status == "skipped":
-        return '<span title="排除规则命中（静默窗口），本次未执行">🔇 静默跳过</span>'
+        return f'<span title="排除规则命中（静默窗口），本次未执行">{_icon("x")} 静默跳过</span>'
     return '<span style="color:#cbd5e1">— 未执行</span>'
 
 
@@ -4800,9 +4860,9 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
                         '<span style="color:#dc2626;font-size:13px">无关联报表</span>')
         badges = ""
         if s.get("exclusions"):
-            badges += ' <span title="已配置执行排除（静默窗口）">🔇</span>'
+            badges += f' <span title="已配置执行排除（静默窗口）">{_icon("x")}</span>'
         if int(s.get("audit_enabled", 0) or 0):
-            badges += ' <span title="执行审计已开启">📝</span>'
+            badges += f' <span title="执行审计已开启">{_icon("edit")}</span>'
         enabled = int(s.get("enabled", 1))
         fail_count = int(s.get("fail_count", 0))
         status_cell = (build_state_span("启用")
@@ -4839,7 +4899,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
         rows = ('<tr><td colspan="7" class="empty-state">'
                 '暂无定时任务 — 点击右上角「新建任务」创建</td></tr>')
     return (banner
-            + '<div class="section"><div class="section-title"><span>⏰ 报表定时任务</span>'
+            + f'<div class="section"><div class="section-title"><span>{_icon("calendar")} 报表定时任务</span>'
               '<span class="actions">'
               + _link_btn("/config/reports", "前往报表编辑页",
                           "btn btn-outline btn-sm")
@@ -4852,7 +4912,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
               '</tr></thead><tbody>' + rows + '</tbody></table></div>'
             '<p class="muted" style="font-size:12px;margin-top:8px">'
             '徽标语义：成功/失败/熔断/静默窗口均为「颜色+文字」双编码；'
-            '任务级审计默认关，开启后显示「📝」徽标。'
+            '任务级审计默认关，开启后显示「' + _icon("edit") + '」徽标。'
             '执行历史不在本页重复展示，请到审计日志查询。</p></div>')
 
 

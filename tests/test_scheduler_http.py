@@ -34,7 +34,9 @@ from unittest.mock import MagicMock, patch
 import config
 import config_db
 import db
+import render
 import scheduler
+from render import _icon
 
 
 _TMP_ROOT = tempfile.mkdtemp(prefix="test_sched_http_")
@@ -339,7 +341,7 @@ class TestSchedulerPage(SchedulerHttpTest):
         conn.commit()
         conn.close()
         _, body, _ = self._get("/config/scheduler")
-        self.assertIn("✅ 成功", body)
+        self.assertIn(_icon("check") + " 成功", body)
         self.assertIn("(42ms)", body)
         # 上次执行时间不再进表（原型无该列；执行历史查审计日志）
         expect = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
@@ -376,7 +378,7 @@ class TestSchedulerPage(SchedulerHttpTest):
         断言用 title 属性精确定位（页面「定时执行」折叠区标题本身
         含 ⏰ 字样，裸字符断言会误报）。
         """
-        badge_sched = '<span title="已配置定时执行">⏰</span>'
+        badge_sched = '<span title="已配置定时执行">' + _icon("calendar") + '</span>'
         conn = _get_conn()
         conn.execute("UPDATE report_configs SET keepalive_enabled=1,"
                      "keepalive_ahead_seconds=600 WHERE id=1")
@@ -390,15 +392,15 @@ class TestSchedulerPage(SchedulerHttpTest):
             _, body, _ = self._get("/config")
             body = config.render_reports_page(conn)
             self.assertIn(badge_sched, body)
-            self.assertIn("♻", body)
-            # 停用任务不出 ⏰ 徽标
+            self.assertIn(_icon("refresh"), body)
+            # 停用任务不出定时徽标
             conn.execute(
                 "UPDATE report_schedules SET enabled=0 WHERE id=?",
                 (self._sched_row(1)["id"],))
             conn.commit()
             body = config.render_reports_page(conn)
             self.assertNotIn(badge_sched, body)
-            self.assertIn("♻", body)
+            self.assertIn(_icon("refresh"), body)
         finally:
             conn.close()
 

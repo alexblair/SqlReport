@@ -246,7 +246,7 @@ class TestReportExecution(unittest.TestCase):
         code, body, _ = report.handle_request(self.conn, "GET", "/report",
                                                "id=1", pool_override=self.mock_pool)
         self.assertIn("API 接口", body)
-        self.assertIn("'/config/api-endpoints'", body)
+        self.assertIn('href="/config/api-endpoints"', body)
 
     @patch("report.execute_report")
     def test_report_renders_flash(self, mock_exec):

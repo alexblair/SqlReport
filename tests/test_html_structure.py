@@ -19,6 +19,7 @@ import unittest
 import config
 import db
 import render
+from render import _icon
 from tests import htmlcheck, init_test_db, make_config_db
 from tests.test_config import _make_conn
 
@@ -148,8 +149,8 @@ class TestFormRenderingStructure(unittest.TestCase, _HtmlStructureMixin):
             html, action_hint="/config/reports/1/api_endpoints/1/edit")
         # Key 管理区块（含独立 form）在主表单之外
         start, end = htmlcheck.main_form_span(html)
-        self.assertNotIn("🔑 API Key 管理", html[start:end])
-        self.assertEqual(1, html.count("🔑 API Key 管理"))
+        self.assertNotIn("{0} API Key 管理".format(_icon("key")), html[start:end])
+        self.assertEqual(1, html.count("{0} API Key 管理".format(_icon("key"))))
 
     def test_build_api_endpoint_form_html_edit_no_keys(self):
         """编辑态无 Key：生成表单仍须在主表单之外。"""

@@ -35,6 +35,7 @@ from json_template import ALL_KEYS, SINGLE_KEYS, validate_template
 from query_executor import sql_contains_write
 # 从 render 模块导入纯 HTML 渲染函数（无 DB 调用）
 from render import (
+    _icon,
     build_pool_form_html,
     build_user_form_html,
     build_category_opts_html,
@@ -456,7 +457,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
         if not allow_write:
             allow_write_html += ('<div class="flash-warn span-full" style="'
                                  + _WARN_BOX_STYLE + '">'
-                                 '⚠️ 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
+                                 '{_icon("alert")} 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
     else:
         allow_write_html = '<input type="hidden" name="allow_write" value="0">'
     # PH-07 全量输出护栏：checkbox + max_rows 输入（hidden 0 保底；开启时保存前 confirm）
@@ -480,7 +481,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     ka_checked = ' checked' if keepalive_enabled else ''
     keepalive_html = f"""
   <details class="span-full" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;background:#f8fafc">
-    <summary style="cursor:pointer;font-weight:600;color:#334155">♻ 缓存保活</summary>
+    <summary style="cursor:pointer;font-weight:600;color:#334155">{_icon("refresh")} 缓存保活</summary>
     <div style="margin-top:12px">
       <label style="display:flex;align-items:center;gap:8px;font-weight:400">
         <input type="hidden" name="keepalive_enabled" value="0">

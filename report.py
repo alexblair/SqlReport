@@ -51,6 +51,7 @@ from render import (
     _COMMON_JS,
     _SQL_HIGHLIGHT_JS,
     _SQL_FORMATTER_JS,
+    _icon,
     render_page_header,
     render_page_footer,
     _OP_MAP, DEFAULT_OP, _escape, format_cell,
@@ -1766,7 +1767,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     if int(report.get("allow_write", 1) or 0) and sql_contains_write(actual_sql):
         write_banner = ('<div class="flash-warn" style="'
                         + _BANNER_STYLE + '">'
-                        f'⚠️ {WRITE_ALLOWED_BANNER}'
+                        f'{_icon("alert")} {WRITE_ALLOWED_BANNER}'
                         '</div>')
     # PH-07 截断提示条：本次执行发生 max_rows 截断时，页面顶部提示
     # （编辑页「允许全部输出」可关闭截断；提示中的 N 取当前配置的 max_rows）
@@ -1774,7 +1775,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     if result.truncated:
         trunc_banner = ('<div class="flash-warn" style="'
                         + _BANNER_STYLE + '">'
-                        '⚠️ 结果超过 '
+                        '{_icon("alert")} 结果超过 '
                         + str(int(report.get("max_rows") or 100000))
                         + ' 行，已截断显示前 '
                         + str(int(report.get("max_rows") or 100000))
@@ -1841,7 +1842,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 '''
     preview_banner = (
         '<div class="flash flash-warn" style="' + _BANNER_STYLE + '">'
-        '🔍 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
+        '{_icon("search")} 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
         '</div>' if sql_override else '')
 
     memo_text = (report.get("memo") or "").strip()

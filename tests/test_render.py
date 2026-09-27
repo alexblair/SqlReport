@@ -17,6 +17,7 @@ import report as report_mod
 from filter_help import FILTER_HINT_SUFFIX
 from render import (
     render_page_header, render_page_footer, render_navbar,
+    _icon,
     # URL 参数工具
     build_sort_params, build_filter_params, filter_hidden_inputs, build_cols_param,
     # 单元格格式化与转义
@@ -113,7 +114,7 @@ class TestRenderPageHeader(unittest.TestCase):
         """侧栏包含 API 接口独立入口"""
         result = render_page_header()
         self.assertIn("API 接口", result)
-        self.assertIn("'/config/api-endpoints'", result)
+        self.assertIn('href="/config/api-endpoints"', result)
 
     def test_contains_container_div(self):
         """输出包含 container div 开头"""
@@ -1738,8 +1739,10 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
                                               all_cats, self.all_reports,
                                               self.pools, cat_tree)
         self.assertIn("margin-left:24px;border-left:3px solid #c7d2fe", result)
-        self.assertIn("📁 根分类", result)
-        self.assertIn("📊 子分类", result)
+        self.assertIn("根分类", result)
+        self.assertIn("子分类", result)
+        self.assertIn(_icon("folder"), result)
+        self.assertIn(_icon("chart"), result)
 
     def test_contains_category_section(self):
         """包含报表分类段"""

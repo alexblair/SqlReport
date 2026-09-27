@@ -332,34 +332,34 @@ class TestBuildScheduleFlagsBadgeHtml(unittest.TestCase):
 
     def test_both_disabled(self):
         """两项都未启用时返回空"""
-        from render import build_schedule_flags_badge_html
+        from render import build_schedule_flags_badge_html, _icon
         result = build_schedule_flags_badge_html(0, 0)
         self.assertEqual(result, "")
 
     def test_sched_enabled(self):
         """定时启用时显示时钟符号"""
-        from render import build_schedule_flags_badge_html
+        from render import build_schedule_flags_badge_html, _icon
         result = build_schedule_flags_badge_html(1, 0)
-        self.assertIn("⏰", result)
+        self.assertIn(_icon("calendar"), result)
         self.assertIn("已配置定时执行", result)
 
     def test_keepalive_enabled(self):
         """保活启用时显示回收符号"""
-        from render import build_schedule_flags_badge_html
+        from render import build_schedule_flags_badge_html, _icon
         result = build_schedule_flags_badge_html(0, 1)
-        self.assertIn("♻", result)
+        self.assertIn(_icon("refresh"), result)
         self.assertIn("已开启缓存保活", result)
 
     def test_both_enabled(self):
         """两项都启用时显示两个符号"""
-        from render import build_schedule_flags_badge_html
+        from render import build_schedule_flags_badge_html, _icon
         result = build_schedule_flags_badge_html(1, 1)
-        self.assertIn("⏰", result)
-        self.assertIn("♻", result)
+        self.assertIn(_icon("calendar"), result)
+        self.assertIn(_icon("refresh"), result)
 
     def test_none_values(self):
         """None 值等同于 0"""
-        from render import build_schedule_flags_badge_html
+        from render import build_schedule_flags_badge_html, _icon
         result = build_schedule_flags_badge_html(None, None)
         self.assertEqual(result, "")
 
