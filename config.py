@@ -189,12 +189,6 @@ def parse_config_path(path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _CONFIG_EXTRA_CSS = """
-  .section-title {
-    font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px;
-    padding-bottom: 12px; border-bottom: 2px solid #e2e8f0;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .section-title .actions { display: flex; gap: 8px; }
   form.config-form { max-width: 1200px; }
   @media (min-width: 1100px) {
     form.config-form {

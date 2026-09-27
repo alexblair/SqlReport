@@ -408,9 +408,22 @@ tbody tr:last-child td { border-bottom: none; }
   width: 64px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
   font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
 }
-.jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
-.hidden { display: none !important; }
-"""
+ .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+ .hidden { display: none !important; }
+ /* 排序设置面板（T7.7；sort-item/sort-up/sort-down/drag-handle/sort-num 唯一定义） */
+ .sort-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; cursor:grab; user-select:none; }
+ .sort-item .drag-handle { color:#94a3b8; font-size:14px; cursor:grab; flex-shrink:0; }
+ .sort-item .sort-num { font-weight:700; font-size:11px; color:#4f46e5; min-width:20px; }
+ .sort-item .sort-up, .sort-item .sort-down { padding:2px 6px; font-size:11px; border:1px solid #e2e8f0; border-radius:4px; cursor:pointer; background:#fff; color:#475569; }
+ .sort-item .sort-up:disabled, .sort-item .sort-down:disabled { opacity:0.4; cursor:not-allowed; }
+ .sort-item .sort-remove { padding:2px 6px; font-size:11px; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#dc2626; }
+ .sort-bar { margin-bottom:10px; font-size:13px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+ .sort-tag { display:inline-flex; align-items:center; gap:3px; background:#eef2ff; color:#4f46e5; border-radius:4px; padding:2px 8px; font-size:12px; border:1px solid #c7d2fe; }
+ .sort-prio { font-size:10px; color:#4f46e5; font-weight:700; margin-left:2px; }
+ .sort-link { color:var(--ink-2); text-decoration:none; }
+ .sort-link:hover { color:var(--brand); }
+ .compact-switch { width:auto; height:28px; font-size:13px; font-weight:500; display:inline-block; margin-left:8px; vertical-align:middle; max-width:280px; }
+ """
 
 # 迷你按钮公共样式（config 页与 report 页共享；类拆分与内联现状视觉等价）
 _MINIBTN_CSS = """
@@ -2011,7 +2024,7 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
     filters = filters or []
     sort_bar_parts = []
     if sorts:
-        sort_bar_parts.append('<div class="sort-bar" style="margin-bottom:10px;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">')
+        sort_bar_parts.append('<div class="sort-bar">')
         sort_bar_parts.append('<span style="color:#475569;font-weight:500">排序:</span>')
         for idx, (sc, sd) in enumerate(sorts, 1):
             label = f'{_escape(sc)} {"↑" if sd == "asc" else "↓"}'
@@ -2029,12 +2042,9 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
             if nested_filter:
                 rm_href += "&amp;" + build_nested_filter_param(nested_filter)
             sort_bar_parts.append(
-                f'<span class="sort-tag" style="display:inline-flex;align-items:center;gap:3px;'
-                f'background:#eef2ff;color:#4f46e5;border-radius:4px;padding:2px 8px;'
-                f'font-size:12px;border:1px solid #c7d2fe">'
-                f'<span style="font-weight:700;font-size:11px">{prio}</span> {label}'
-                f'<a href="{rm_href}" style="text-decoration:none;color:#64748b;margin-left:2px" '
-                f'title="移除排序">✕</a>'
+                f'<span class="sort-tag">'
+                f'<span class="sort-prio">{prio}</span> {label}'
+                f'<a href="{rm_href}" class="sort-link" title="移除排序">✕</a>'
                 f'</span>'
             )
         sort_bar_parts.append('</div>')

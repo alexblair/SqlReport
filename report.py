@@ -771,22 +771,21 @@ function addSortItem() {
     return inp.value === col;
   });
   if (existing) return;
-  var div = document.createElement('div');
-  div.className = 'sort-item';
-  div.draggable = true;
-  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:grab;user-select:none';
-  var icon = dir === 'asc' ? '↑' : '↓';
-  div.innerHTML = '<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
-    + '<span class="sort-num" style="font-weight:700;font-size:11px;color:#4f46e5;min-width:20px">' + (list.children.length + 1) + '</span>'
-    + '<span style="flex:1;font-size:13px;color:#1e293b">' + col + ' ' + icon + '</span>'
-    + '<input type="hidden" name="sort_col" value="' + col + '">'
-    + '<input type="hidden" name="sort_dir" value="' + dir + '">'
-    + '<button type="button" class="sort-up" onclick="moveSortItem(this,-1)" style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff;color:#475569">▲</button>'
-    + '<button type="button" class="sort-down" onclick="moveSortItem(this,1)" style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;background:#fff;color:#475569">▼</button>'
-    + '<button type="button" onclick="removeSortItem(this)" style="padding:2px 6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;background:transparent;color:#dc2626">✕</button>';
-  list.appendChild(div);
-  updateSortMoveButtons();
-  document.getElementById('newSortCol').value = '';
+   var div = document.createElement('div');
+   div.className = 'sort-item';
+   div.draggable = true;
+   var icon = dir === 'asc' ? '↑' : '↓';
+   div.innerHTML = '<span class="drag-handle" title="拖拽排序">⠿</span>'
+     + '<span class="sort-num">' + (list.children.length + 1) + '</span>'
+     + '<span>' + col + ' ' + icon + '</span>'
+     + '<input type="hidden" name="sort_col" value="' + col + '">'
+     + '<input type="hidden" name="sort_dir" value="' + dir + '">'
+     + '<button type="button" class="sort-up" onclick="moveSortItem(this,-1)">▲</button>'
+     + '<button type="button" class="sort-down" onclick="moveSortItem(this,1)">▼</button>'
+     + '<button type="button" class="sort-remove" onclick="removeSortItem(this)">✕</button>';
+   list.appendChild(div);
+   updateSortMoveButtons();
+   document.getElementById('newSortCol').value = '';
 }
 function applySortSettings() {
   var list = document.getElementById('sortList');
@@ -1950,8 +1949,7 @@ def _build_compact_switcher(conn, current_id: int = None) -> str:
     if not any(r["id"] == current_id for r in reports):
         opts.insert(0, f'<option value="{current_id}" selected>（当前报表）</option>')
     return (
-        '<select class="select" style="width:auto;height:28px;font-size:13px;'
-        'font-weight:500;display:inline-block;margin-left:8px;vertical-align:middle;max-width:280px" '
+        '<select class="select compact-switch" '
         "onchange=\"if(this.value)location.href='/report?id='+this.value\" "
         'aria-label="切换报表">' + "".join(opts) + "</select>"
     )

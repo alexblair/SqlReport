@@ -1,9 +1,8 @@
-#!/usr/bin/env bash
+ #!/usr/bin/env bash
 # install.sh — SqlReport 自动化安装脚本
 #
 # 用法:
 #   ./install.sh              # 创建 venv 并安装依赖
-#   ./install.sh --no-venv    # 仅安装依赖（跳过 venv 创建，使用当前 Python 环境）
 #
 # 说明:
 #   首次运行自动创建虚拟环境并安装所有 pip 依赖。
@@ -27,22 +26,18 @@ echo "================================"
 # --- 虚拟环境管理 ---
 VENV_DIR="venv"
 
-if [[ "${1:-}" != "--no-venv" ]]; then
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "[1/3] 创建虚拟环境: $VENV_DIR ..."
-        python3 -m venv "$VENV_DIR"
-    else
-        echo "[1/3] 虚拟环境已存在，跳过创建。"
-    fi
-
-    echo "[2/3] 激活虚拟环境 ..."
-    source "$VENV_DIR/bin/activate"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "[1/3] 创建虚拟环境: $VENV_DIR ..."
+    python3 -m venv "$VENV_DIR"
 else
-    echo "[1/2] 跳过虚拟环境创建（--no-venv 模式）..."
+    echo "[1/3] 虚拟环境已存在，跳过创建。"
 fi
 
+echo "[2/3] 激活虚拟环境 ..."
+source "$VENV_DIR/bin/activate"
+
 # --- 安装依赖 ---
-echo "[${3:-3}/3] 安装 pip 依赖 ..."
+echo "[3/3] 安装 pip 依赖 ..."
 pip install --upgrade pip -q
 pip install -r requirements.txt
 
@@ -53,11 +48,5 @@ echo "================================"
 echo ""
 echo "启动服务:"
 echo "  source $VENV_DIR/bin/activate"
-echo "  python server.py"
+echo "  python3 server.py"
 echo ""
-
-if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-    echo "提示: 请手动执行以下命令激活虚拟环境后运行:"
-    echo "  source $VENV_DIR/bin/activate"
-    echo "  python server.py"
-fi
