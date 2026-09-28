@@ -46,7 +46,6 @@ Thumbs.db
 .codegraph/
 
 # 文档与规范（本地使用，不提交）
-docs/
 SPEC.md
 spec.md
 CONTEXT.md
