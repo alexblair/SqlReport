@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R2 修订确认 · 弹性布局与左菜单 · SqlReport</title>
+<style>
+/* ===== 设计令牌（与 ui-redesign-prototype.html 同源，视觉不另起体系） ===== */
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#fff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#fff; --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+  --danger:#dc2626; --danger-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --fs-title:20px; --fs-h2:16px; --fs-h3:14px; --fs-body:14px; --fs-sm:13px; --fs-xs:12px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12); --sh-pop:0 4px 12px rgba(15,23,42,.10);
+  --r-sm:6px; --r-md:10px; --r-lg:14px; --r-full:999px;
+  --t-fast:120ms; --t-med:200ms;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+code{overflow-wrap:anywhere}
+html,body{height:100%}
+body{font-family:var(--font);font-size:var(--fs-body);line-height:22px;color:var(--ink);background:var(--bg-app)}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font-family:inherit}
+:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r-sm)}
+
+/* ===== 骨架（与站点一致：深色侧栏 + 主区 + 容器） ===== */
+.app{display:flex;min-height:100vh}
+.sidebar{width:240px;flex:0 0 240px;background:var(--sidebar-bg);color:var(--sidebar-ink);position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;z-index:40}
+.main{margin-left:240px;flex:1;min-width:0;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;color:#fff;font-weight:700;font-size:16px;letter-spacing:-.2px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:grid;place-items:center;font-size:13px;color:#fff;font-weight:800}
+.nav-group{padding:10px 12px 4px;font-size:var(--fs-xs);color:#64748b;font-weight:600;letter-spacing:.04em}
+.nav-item{display:flex;align-items:center;gap:10px;margin:2px 10px;padding:8px 12px;border-radius:8px;color:var(--sidebar-ink);font-size:var(--fs-body);cursor:pointer;border:0;background:transparent;width:calc(100% - 20px);text-align:left;position:relative}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-ink-active);font-weight:600}
+.nav-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:#818cf8}
+.nav-badge{margin-left:auto;font-size:11px;background:rgba(255,255,255,.1);padding:0 6px;border-radius:var(--r-full)}
+.sidebar .spacer{flex:1}
+.account{border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;display:flex;align-items:center;gap:8px;font-size:var(--fs-sm)}
+.account .avatar{width:28px;height:28px;border-radius:50%;background:#334155;display:grid;place-items:center;color:#e2e8f0;font-size:12px;font-weight:700}
+.account .who{color:#e2e8f0;font-weight:600}
+.account .out{margin-left:auto;color:#94a3b8;font-size:var(--fs-xs)}
+
+/* 本页容器：width:100%（即 R2-B 修法本身） */
+.page{display:block;padding:24px;max-width:1440px;width:100%;margin:0 auto}
+.page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.page-head h1{font-size:var(--fs-title);line-height:28px;font-weight:700;letter-spacing:-.2px}
+.page-head .sub{font-size:var(--fs-sm);color:var(--ink-3);margin-top:2px}
+.page-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* ===== 按钮 / 卡片 ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border-radius:var(--r-sm);font-size:var(--fs-body);font-weight:600;border:1px solid transparent;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast);white-space:nowrap;background:var(--bg-surface);color:var(--ink-2);border-color:var(--line-strong)}
+.btn:hover{background:var(--bg-hover);text-decoration:none}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(79,70,229,.35)}
+.btn-primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn-ghost:hover{background:var(--bg-hover)}
+.btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn-sm{height:26px;padding:0 10px;font-size:var(--fs-sm);gap:4px}
+.btn-icon{width:34px;padding:0}
+.btn-icon.btn-sm{width:26px}
+.card{background:var(--bg-surface);border-radius:var(--r-md);box-shadow:var(--sh-1);padding:20px;margin-bottom:16px}
+.card-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.card-head h2{font-size:var(--fs-h2);line-height:24px;font-weight:600}
+.card-head .actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.muted{color:var(--ink-3)}
+.help{font-size:var(--fs-xs);color:var(--ink-3);margin-top:4px}
+
+/* ===== Tabs / segment ===== */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+.tab{border:0;background:none;padding:9px 14px;font-size:var(--fs-body);font-weight:500;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+.segment{display:inline-flex;background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-sm);padding:2px;gap:2px;vertical-align:middle}
+.segment button{border:0;background:transparent;padding:4px 12px;font-size:var(--fs-sm);color:var(--ink-2);border-radius:4px;cursor:pointer}
+.segment button.active{background:var(--bg-surface);color:var(--brand);font-weight:600;box-shadow:var(--sh-1)}
+.ctrl-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.ctrl-label{font-size:var(--fs-sm);color:var(--ink-3);font-weight:600}
+
+/* ===== 说明横幅 / 数据徽标 ===== */
+.proto-note{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:var(--r-md);padding:14px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:#3730a3}
+.proto-note strong{color:#312e81}
+.proto-note ul{margin:6px 0 0 18px}
+.proto-note li{margin:2px 0}
+.stat-line{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-full);padding:3px 10px;font-size:var(--fs-xs);color:var(--ink-2);font-family:var(--mono)}
+.pill b{color:var(--brand)}
+.pill.warn{background:var(--warn-soft);border-color:#fde68a;color:#92400e}
+.pill.ok{background:var(--ok-soft);border-color:#a7f3d0;color:#065f46}
+
+/* ===== 表格（上下文填充） ===== */
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-surface)}
+table.table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-body)}
+.table th{background:var(--bg-subtle);color:var(--ink-2);font-size:var(--fs-xs);font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.table tr:last-child td{border-bottom:0}
+.table tbody tr:hover{background:var(--bg-hover)}
+
+/* ===== 左菜单演示：修复前（复刻生产现状：无 CSS 的 inline 堆叠） ===== */
+.split-demo{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+.before-box{border:1px solid var(--line);border-radius:var(--r-md);background:#fff;overflow:hidden}
+/* 生产 .section/.section-title/.cat-tree-item 均无样式规则——子元素按默认 inline 流排布 */
+.before-box .sec-title{padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg-subtle)}
+.before-box .cat-item{padding:4px 6px;border-bottom:1px dashed var(--line);font-size:13px;line-height:1.4}
+.before-box .cat-item:last-child{border-bottom:0}
+.before-box .cat-item .nm{font-size:14px;font-weight:400;color:#475569}
+.before-box .cat-item .nm b{font-weight:600;color:var(--ink)}
+/* 生产按钮尺寸（挤的来源：inline + 无 gap + 窄栏） */
+.pbtn{display:inline-block;padding:3px 8px;font-size:12px;border:1px solid var(--line-strong);border-radius:6px;background:#fff;color:var(--ink-2);white-space:nowrap}
+.pbtn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.pbtn.danger{background:#dc2626;border-color:#dc2626;color:#fff;padding:2px 6px;font-size:11px}
+.pbtn.mini{padding:2px 6px;font-size:11px}
+.pbtn.mut{color:#94a3b8;cursor:default}
+.before-hint{font-size:var(--fs-xs);color:#b45309;background:var(--warn-soft);border:1px solid #fde68a;border-radius:var(--r-sm);padding:6px 10px;margin-top:8px}
+
+/* ===== 左菜单演示：修复后（按已确认原型 .tree/.cat 形态，拟实施到生产） ===== */
+.r2-aside{padding:12px;margin-bottom:0}
+.r2-aside .card-head{margin-bottom:6px}
+.r2-aside .card-head h2{font-size:14px}
+.tree{font-size:var(--fs-body)}
+.tree .cat{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:var(--r-sm);color:var(--ink-2);font-weight:600;cursor:pointer;user-select:none}
+.tree .cat:hover{background:var(--bg-hover)}
+.tree .cat .ico{width:15px;height:15px;flex:0 0 15px;color:var(--ink-3)}
+.tree .cat .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree .cat .cnt{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);font-weight:500;flex:0 0 auto}
+.tree .leaf{display:flex;align-items:center;gap:6px;padding:5px 8px 5px 26px;border-radius:var(--r-sm);cursor:pointer;color:var(--ink-2)}
+.tree .leaf:hover{background:var(--bg-hover)}
+.tree .leaf .ico{width:14px;height:14px;flex:0 0 14px;color:var(--ink-3)}
+.tree .leaf .cnt{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3)}
+.tree .kids{display:none}
+.tree .kids.on{display:block}
+/* 行内操作：常显 ghost 图标（焦点/悬停高亮），彻底消除文字按钮挤压 */
+.tree .ops{display:flex;gap:2px;margin-left:6px;flex:0 0 auto;opacity:.55;transition:opacity var(--t-fast)}
+.tree .cat:hover .ops,.tree .leaf:hover .ops{opacity:1}
+.tree .ops .btn{height:22px;width:22px;padding:0;font-size:12px}
+.tree .ops .btn:hover{background:var(--brand-soft);color:var(--brand)}
+.tree .ops .btn.del:hover{background:var(--danger-soft);color:var(--danger)}
+
+/* ===== Tab2：PC 宽度演示舞台（真 CSS 复现 fit-content 根因，JS 缩放呈现） ===== */
+.stage-frame{position:relative;border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden;background:#e8ebf2;height:430px}
+.stage-scaler{position:absolute;top:0;left:0;transform-origin:top left;display:flex}
+.st-sidebar{width:64px;flex:0 0 64px;background:var(--sidebar-bg);padding:10px 6px}
+.st-sidebar .dot{height:26px;border-radius:6px;background:rgba(255,255,255,.08);margin-bottom:6px}
+.st-sidebar .dot.on{background:var(--sidebar-active-bg)}
+.st-main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg-app);height:100%}
+.st-head{padding:14px 18px 0;display:flex;align-items:center;gap:10px}
+.st-head .h{font-weight:700;font-size:15px}
+.st-head .s{font-size:11px;color:var(--ink-3)}
+.st-head .b{margin-left:auto;height:24px;padding:0 10px;border-radius:6px;background:var(--brand);color:#fff;font-size:11px;display:inline-flex;align-items:center}
+/* 修复前：与生产 render.py:115 同——margin:0 auto 且无 width:100%，在纵向 flex 内退化 fit-content */
+.st-cont{margin:0 auto;padding:14px 18px}
+.st-cont.after{width:100%}
+.st-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-bottom:10px}
+.st-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:var(--sh-1)}
+.st-card .t{font-size:12.5px;font-weight:600}
+.st-card .d{font-size:11px;color:var(--ink-3);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-card .g{display:flex;gap:4px;margin-top:6px}
+.st-card .g i{font-style:normal;font-size:10px;background:var(--brand-soft);color:var(--brand);border-radius:99px;padding:0 6px}
+.st-table{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.st-table .r{display:flex;font-size:11px;border-bottom:1px solid var(--line)}
+.st-table .r:last-child{border-bottom:0}
+.st-table .r.h{background:var(--bg-subtle);font-weight:600;color:var(--ink-2)}
+.st-table .c{padding:6px 10px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-table .c.w{flex:0 0 90px}
+.stage-readout{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+
+/* ===== Tab3：移动端 390 演示 ===== */
+.phone{width:414px;padding:12px;background:#0f172a;border-radius:26px;box-shadow:var(--sh-2)}
+.phone .scr{width:390px;height:620px;background:var(--bg-app);border-radius:16px;overflow:hidden;position:relative;display:flex}
+.m-rail{width:56px;flex:0 0 56px;background:var(--sidebar-bg);padding:10px 6px}
+.m-rail .dot{height:24px;border-radius:6px;background:rgba(255,255,255,.08);margin-bottom:6px}
+.m-rail .dot.on{background:var(--sidebar-active-bg)}
+.m-body{flex:1;min-width:0;overflow:auto;position:relative}
+.m-cont{padding:10px}
+.m-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.m-head .h{font-weight:700;font-size:14px}
+.m-head .b{margin-left:auto;height:22px;padding:0 8px;border-radius:6px;background:var(--brand);color:#fff;font-size:11px;display:inline-flex;align-items:center}
+/* 修复前：单列 1fr（=minmax(auto,1fr)，min-content 决定轨道）导致整页被撑开 */
+.m-split{display:grid;grid-template-columns:1fr;gap:8px}
+/* 修复后：minmax(0,1fr) 轨道可收缩 + .table-wrap 内滚 */
+.m-split.after{grid-template-columns:minmax(0,1fr)}
+.m-aside{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px;font-size:12px}
+.m-aside .t{font-weight:600;font-size:12px;margin-bottom:4px}
+.m-aside .row{display:flex;gap:4px;align-items:center;padding:4px 2px;border-bottom:1px dashed var(--line)}
+.m-aside .row:last-child{border-bottom:0}
+.m-aside .row .op{margin-left:auto;display:flex;gap:2px}
+.m-aside .row .op span{font-size:10px;border:1px solid var(--line-strong);border-radius:4px;padding:0 4px;background:#fff}
+/* 演示用宽表：制造 min-content 压力（对应生产 10 列报表表） */
+.m-tablewrap{border:1px solid var(--line);background:#fff;border-radius:8px;overflow:auto}
+.m-split.after .m-tablewrap{overflow:auto}
+.m-table{border-collapse:collapse;font-size:12px;width:max-content;min-width:880px}
+.m-table th,.m-table td{border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap;text-align:left}
+.m-table th{background:var(--bg-subtle);font-size:11px;color:var(--ink-2)}
+.m-readout{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* ===== 验收清单表 ===== */
+.acc-tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm);background:#fff;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.acc-tbl th,.acc-tbl td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+.acc-tbl th{background:var(--bg-subtle);font-size:var(--fs-xs);color:var(--ink-2);font-weight:600}
+.acc-tbl tr:last-child td{border-bottom:0}
+.acc-tbl code{font-family:var(--mono);font-size:12px;background:var(--bg-subtle);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.tag{display:inline-block;background:var(--brand-soft);color:var(--brand);border-radius:4px;padding:0 6px;font-weight:700;font-size:12px;margin-right:4px}
+
+/* ===== 逐页对比（原型 vs 生产 并排） ===== */
+.cmp-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-bottom:14px}
+.cmp-kind{background:#fff;border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;font-size:var(--fs-sm);color:var(--ink-2)}
+.cmp-kind b{display:block;color:var(--ink);margin-bottom:2px}
+.cmp-page{background:#fff;border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:16px;overflow:hidden}
+.cmp-page .hd{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex-wrap:wrap}
+.cmp-page .hd h3{font-size:var(--fs-h3);font-weight:700}
+.cmp-page .hd .lvl{font-size:11px;font-weight:700;border-radius:99px;padding:1px 8px}
+.cmp-page .hd .lvl.struct{background:var(--danger-soft);color:#b91c1c}
+.cmp-page .hd .lvl.style{background:var(--warn-soft);color:#92400e}
+.cmp-page .hd .lvl.same{background:var(--ok-soft);color:#065f46}
+.cmp-page .hd .loc{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.cmp-page .diffs{padding:8px 14px 0;font-size:var(--fs-sm);color:var(--ink-2)}
+.cmp-page .diffs ul{margin:2px 0 8px 18px}
+.cmp-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 14px 14px}
+.cmp-fig{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#fff;min-width:0}
+.cmp-fig figcaption{font-size:var(--fs-xs);font-weight:700;padding:5px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);color:var(--ink-2);position:sticky;top:0}
+.cmp-fig figcaption .src-p{color:var(--brand)}
+.cmp-fig figcaption .src-l{color:var(--warn)}
+.cmp-scroll{height:520px;overflow:auto;background:#e8ebf2}
+.cmp-scroll img{width:100%;display:block;background:#fff}
+@media (max-width:900px){ .cmp-pair{grid-template-columns:1fr} }
+
+/* toast */
+.toast-zone{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--r-md);font-size:var(--fs-sm);box-shadow:var(--sh-2);animation:fadeUp .2s ease-out}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* 移动端整体：本确认稿自身也遵守响应式 */
+@media (max-width:1024px){
+  .sidebar{width:64px;flex-basis:64px}
+  .sidebar .nav-item span,.sidebar .nav-group,.brand .name,.nav-badge,.account .who,.account .out{display:none}
+  .sidebar .nav-item{justify-content:center;margin:2px 8px;padding:8px}
+  .main{margin-left:64px}
+  .split-demo{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:640px){
+  .page{padding:12px}
+  .phone{width:100%;padding:8px;border-radius:18px}
+  .phone .scr{width:100%;height:560px;border-radius:12px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 深色侧栏（站点骨架示意；报表配置高亮） -->
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">SR</span><span class="name">SqlReport</span></div>
+    <div class="nav-group">分析</div>
+    <button class="nav-item"><span>报表中心</span></button>
+    <div class="nav-group">管理</div>
+    <button class="nav-item"><span>概览</span></button>
+    <button class="nav-item active"><span>报表配置</span><span class="nav-badge">7</span></button>
+    <button class="nav-item"><span>连接池</span><span class="nav-badge">3</span></button>
+    <button class="nav-item"><span>用户</span><span class="nav-badge">2</span></button>
+    <div class="nav-group">服务</div>
+    <button class="nav-item"><span>API 接口</span><span class="nav-badge">6</span></button>
+    <button class="nav-item"><span>定时任务</span><span class="nav-badge">2</span></button>
+    <div class="nav-group">治理</div>
+    <button class="nav-item"><span>审计日志</span></button>
+    <div class="spacer"></div>
+    <div class="account"><span class="avatar">A</span><span class="who">admin</span><span class="out">退出</span></div>
+  </aside>
+
+  <main class="main">
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>R2 修订确认 · 弹性布局与左菜单</h1>
+          <div class="sub">交付后三条反馈的修复演示 —— 逐页签切换「修复前 / 修复后」可交互对比；确认后才改生产代码</div>
+        </div>
+        <div class="actions">
+          <span class="pill">特性文档 ui-redesign · S2-F</span>
+        </div>
+      </div>
+
+      <div class="proto-note">
+        <strong>诊断摘要（截图取证：32 张 + 指标 + 13 页逐页对比，来源 /tmp/ui-diag-r2/）</strong>
+        <ul>
+          <li><strong>① 左菜单挤</strong>：生产 <code>.cat-tree-item</code> / <code>.section-title</code> 全库无 CSS，子元素全 inline——260px 栏要塞 ≥320px 的「引导符+名称+徽标+↑↓+编辑+删除」，标题行三枚按钮重叠。</li>
+          <li><strong>② PC 挤中间</strong>：<code>.container{margin:0 auto}</code> 位于纵向 flex 的 <code>.main</code> 内退化为 fit-content 居中——1920 视口实测内容列：报表中心 809px(42%)、详情 1011px(53%)、概览 1048px(55%)。</li>
+          <li><strong>③ 移动端撑爆</strong>：390 视口下配置页布局视口被撑到 <strong>1012px</strong>（<code>.split</code> 单列 <code>1fr</code>=minmax(auto,1fr) 不收缩，整页按千像素渲染再缩小）。</li>
+          <li><strong>④ 逐页结构对比（用户反馈）</strong>：原型 13 页 vs 生产逐页比对，<strong>11 页存在结构/布局/排列级差异</strong>（仅登录页、报表中心一致）——详见页签⑤。</li>
+        </ul>
+      </div>
+
+      <!-- 页签 -->
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="t1">① 左菜单（报表配置）</button>
+        <button class="tab" data-tab="t2">② PC 大屏宽度</button>
+        <button class="tab" data-tab="t3">③ 移动端 390</button>
+        <button class="tab" data-tab="t5">④ 逐页对比（11/13 结构级）</button>
+        <button class="tab" data-tab="t4">⑤ 验收清单与范围</button>
+      </div>
+
+      <!-- ===== ① 左菜单 ===== -->
+      <section class="tabpanel active" id="t1">
+        <div class="ctrl-row">
+          <span class="ctrl-label">对比模式</span>
+          <span class="segment" id="seg-left">
+            <button data-v="before">修复前（现状复刻）</button>
+            <button data-v="after" class="active">修复后（拟实施）</button>
+          </span>
+          <span class="muted" style="font-size:13px">窄栏 260px · 与生产同宽；修复后悬停行可见 ✎↑↓✕ 操作，点击节点可折叠</span>
+        </div>
+
+        <div class="split-demo">
+          <!-- 左：演示面板（260px） -->
+          <div id="left-demo">
+            <!-- 修复后（默认） -->
+            <div class="card r2-aside" id="demo-after">
+              <div class="card-head">
+                <h2>分类树</h2>
+                <div class="actions">
+                  <button class="btn btn-sm btn-ghost" title="新增分类" data-act="新增分类">＋</button>
+                </div>
+              </div>
+              <div class="tree">
+                <div class="cat"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="nm">全部报表</span><span class="cnt">7</span></div>
+                <div class="cat" data-kids="k1"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="nm">经营分析</span><span class="cnt">3</span>
+                  <span class="ops">
+                    <button class="btn btn-sm btn-ghost btn-icon" title="重命名" data-act="重命名「经营分析」">✎</button>
+                    <button class="btn btn-sm btn-ghost btn-icon" title="上移" data-act="上移「经营分析」">↑</button>
+                    <button class="btn btn-sm btn-ghost btn-icon" title="下移" data-act="下移「经营分析」">↓</button>
+                    <button class="btn btn-sm btn-ghost btn-icon del" title="删除" data-act="删除「经营分析」">✕</button>
+                  </span>
+                </div>
+                <div class="kids on" id="k1">
+                  <div class="leaf"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="nm">区域销售</span><span class="cnt">1</span>
+                    <span class="ops">
+                      <button class="btn btn-sm btn-ghost btn-icon" title="重命名" data-act="重命名「区域销售」">✎</button>
+                      <button class="btn btn-sm btn-ghost btn-icon" title="上移" data-act="上移「区域销售」">↑</button>
+                      <button class="btn btn-sm btn-ghost btn-icon del" title="删除" data-act="删除「区域销售」">✕</button>
+                    </span>
+                  </div>
+                </div>
+                <div class="cat"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="nm">财务核算</span><span class="cnt">1</span>
+                  <span class="ops">
+                    <button class="btn btn-sm btn-ghost btn-icon" title="重命名" data-act="重命名「财务核算」">✎</button>
+                    <button class="btn btn-sm btn-ghost btn-icon" title="上移" data-act="上移「财务核算」">↑</button>
+                    <button class="btn btn-sm btn-ghost btn-icon del" title="删除" data-act="删除「财务核算」">✕</button>
+                  </span>
+                </div>
+                <div class="cat"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="nm">未分类</span><span class="cnt">2</span>
+                  <span class="ops">
+                    <button class="btn btn-sm btn-ghost btn-icon" title="重命名" data-act="重命名「未分类」">✎</button>
+                    <button class="btn btn-sm btn-ghost btn-icon del" title="删除" data-act="删除「未分类」">✕</button>
+                  </span>
+                </div>
+              </div>
+              <p class="help">保留 <code>#sec-categories</code> 锚点与 <code>cat-tree-toggle</code> 折叠开关（卡头 ⌄ 可折叠，localStorage 记忆同现状）；删除仍走 POST 确认，协议不变。</p>
+            </div>
+
+            <!-- 修复前：生产现状 DOM 模式复刻（无样式规则 → inline 挤压/重叠） -->
+            <div id="demo-before" style="display:none">
+              <div class="before-box">
+                <div class="sec-title">
+                  <button class="pbtn" id="r2-toggle-mock">▼ 报表分类</button>
+                  <span class="pbtn primary">新增分类</span>
+                  <span class="pbtn">新增报表</span>
+                </div>
+                <div class="cat-item"><span style="color:#94a3b8">├─ </span><span>📁</span> <span class="nm"><b>经营分析</b></span><span style="color:#64748b;font-size:11px">(1 子分类)</span> <span class="pbtn mini mut">↑</span><span class="pbtn mini mut">↓</span><span class="pbtn mini">编辑</span><span class="pbtn mini danger">删除</span></div>
+                <div class="cat-item" style="padding-left:26px"><span style="color:#94a3b8">└─ </span><span>📄</span> <span class="nm">区域销售</span> <span class="pbtn mini mut">↑</span><span class="pbtn mini">编辑</span><span class="pbtn mini danger">删除</span></div>
+                <div class="cat-item"><span style="color:#94a3b8">└─ </span><span>📄</span> <span class="nm">财务核算</span> <span class="pbtn mini mut">↑</span><span class="pbtn mini">编辑</span><span class="pbtn mini danger">删除</span></div>
+                <div class="cat-item"><span style="color:#94a3b8">└─ </span><span>📄</span> <span class="nm">未分类</span> <span class="pbtn mini mut">↑</span><span class="pbtn mini">编辑</span><span class="pbtn mini danger">删除</span></div>
+              </div>
+              <div class="before-hint">现状实拍：标题行「报表分类 / 新增分类 / 新增报表」三钮重叠，节点名称断行（经营分析→两行）、编辑/删除竖挤贴死——260px 栏放不下 ≥320px 的内容，且无任何 CSS 约束。</div>
+            </div>
+          </div>
+
+          <!-- 右：上下文表格（示意右栏报表列表，跟随同宽） -->
+          <div>
+            <div class="card" style="padding:12px;margin-bottom:0">
+              <div class="card-head" style="margin-bottom:8px"><h2 style="font-size:14px">经营分析 · 报表</h2>
+                <div class="actions"><span class="muted" style="font-size:12px">右栏不受影响（示意）</span></div>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>名称</th><th>连接池</th><th>缓存</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr><td>订单概览</td><td>主库-交易</td><td>1h</td><td><span class="pbtn mini">编辑</span></td></tr>
+                    <tr><td>缓存命中率报表</td><td>从库-报表</td><td>24h</td><td><span class="pbtn mini">编辑</span></td></tr>
+                    <tr><td>数据维护-写入示例</td><td>主库-交易</td><td>否</td><td><span class="pbtn mini">编辑</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stat-line">
+          <span class="pill ok">修法：左栏改原型 <b>.tree/.cat</b> flex 行（gap 6px）</span>
+          <span class="pill">操作=ghost 图标 <b>✎↑↓✕</b> 悬停高亮</span>
+          <span class="pill">节点单行 <b>nowrap+ellipsis</b></span>
+          <span class="pill">功能不减：增删改/调序/折叠/锚点全保留</span>
+        </div>
+      </section>
+
+      <!-- ===== ② PC 大屏宽度 ===== -->
+      <section class="tabpanel" id="t2">
+        <div class="ctrl-row">
+          <span class="ctrl-label">视口宽度</span>
+          <span class="segment" id="seg-vp">
+            <button data-v="1366">1366</button>
+            <button data-v="1536">1536</button>
+            <button data-v="1920" class="active">1920</button>
+            <button data-v="2560">2560</button>
+          </span>
+          <span class="ctrl-label">模式</span>
+          <span class="segment" id="seg-wmode">
+            <button data-v="before">修复前</button>
+            <button data-v="after" class="active">修复后</button>
+          </span>
+        </div>
+
+        <div class="stage-frame" id="stage-frame">
+          <div class="stage-scaler" id="stage-scaler">
+            <div class="st-sidebar">
+              <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+            <div class="st-main">
+              <div class="st-head"><span class="h">报表中心</span><span class="s">按分类浏览，或搜索报表名称与备注</span><span class="b">＋ 新建报表</span></div>
+              <div class="st-cont" id="st-cont">
+                <div class="st-cards">
+                  <div class="st-card"><div class="t">订单概览</div><div class="d">基础单结果集报表示例…</div><div class="g"><i>定时</i><i>2 API</i></div></div>
+                  <div class="st-card"><div class="t">销售多维统计</div><div class="d">多结果集报表：验收 result_names…</div><div class="g"><i>定时</i><i>1 API</i></div></div>
+                  <div class="st-card"><div class="t">缓存命中率报表</div><div class="d">验收缓存优先 + 缓存保活…</div><div class="g"><i>保活</i></div></div>
+                  <div class="st-card"><div class="t">全量导出报表</div><div class="d">验收全量输出（allow_all_output…</div><div class="g"><i>写护栏</i></div></div>
+                  <div class="st-card"><div class="t">Markdown备注报表</div><div class="d">支持 **加粗**、行内代码…</div><div class="g"><i>1 API</i></div></div>
+                  <div class="st-card"><div class="t">临时查询</div><div class="d">无分类归属报表，验收未分类分支</div><div class="g"><i>写护栏</i></div></div>
+                </div>
+                <div class="st-table">
+                  <div class="r h"><div class="c">名称</div><div class="c w">连接池</div><div class="c">备注</div><div class="c w">操作</div></div>
+                  <div class="r"><div class="c">订单概览</div><div class="c w">主库-交易</div><div class="c">基础单结果集报表示例，用于验收分页/筛选/排序</div><div class="c w">编辑 复制</div></div>
+                  <div class="r"><div class="c">销售多维统计</div><div class="c w">从库-报表</div><div class="c">多结果集报表：验收 result_names 与多结果集切换</div><div class="c w">编辑 复制</div></div>
+                  <div class="r"><div class="c">缓存命中率报表</div><div class="c w">从库-报表</div><div class="c">验收缓存优先 + 缓存保活（keepalive）</div><div class="c w">编辑 复制</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage-readout" id="st-readout">
+          <span class="pill">视口 <b id="ro-vp">1920</b> px</span>
+          <span class="pill">内容列 <b id="ro-w">—</b> px</span>
+          <span class="pill">利用率 <b id="ro-pct">—</b></span>
+          <span class="pill warn" id="ro-note">修复前：margin:auto 退化 fit-content（生产实测 42%~55%）</span>
+        </div>
+        <p class="help" style="margin-top:8px">舞台按真实 CSS 复现：<strong>修复前</strong>=生产 <code>.container{margin:0 auto}</code>（无 width:100%）在纵向 flex 内的表现；<strong>修复后</strong>=加 <code>width:100%</code> 并沿用既有 1440→1680→1920→2400 阶梯。舞台等比缩放，读数为布局真实值。</p>
+      </section>
+
+      <!-- ===== ③ 移动端 390 ===== -->
+      <section class="tabpanel" id="t3">
+        <div class="ctrl-row">
+          <span class="ctrl-label">模式</span>
+          <span class="segment" id="seg-mmode">
+            <button data-v="before">修复前</button>
+            <button data-v="after" class="active">修复后</button>
+          </span>
+          <span class="muted" style="font-size:13px">390×844 视口 · 左侧为 ≤1024 的 64px 图标栏（与生产一致）· 表格可横向滚动</span>
+        </div>
+
+        <div class="ctrl-row">
+          <div class="phone">
+            <div class="scr">
+              <div class="m-rail"><div class="dot"></div><div class="dot"></div><div class="dot on"></div><div class="dot"></div></div>
+              <div class="m-body" id="m-body">
+                <div class="m-cont">
+                  <div class="m-head"><span class="h">报表配置</span><span class="b">＋ 新增报表</span></div>
+                  <div class="m-split" id="m-split">
+                    <div class="m-aside">
+                      <div class="t">分类树</div>
+                      <div class="row">📁 经营分析 <span class="op"><span>✎</span><span>↑</span><span>✕</span></span></div>
+                      <div class="row" style="padding-left:12px">📄 区域销售 <span class="op"><span>✎</span><span>✕</span></span></div>
+                      <div class="row">📁 财务核算 <span class="op"><span>✎</span><span>↑</span><span>✕</span></span></div>
+                      <div class="row">📄 未分类 <span class="op"><span>✎</span></span></div>
+                    </div>
+                    <div class="m-tablewrap" id="m-tw">
+                      <table class="m-table">
+                        <thead><tr><th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th></tr></thead>
+                        <tbody>
+                          <tr><td>订单概览</td><td>SELECT id, customer, amount…</td><td>20</td><td>主库-交易</td><td>是</td><td>1h</td><td>基础单结果集…</td><td>2 个接口</td><td>编辑 复制 删除</td></tr>
+                          <tr><td>销售多维统计</td><td>SELECT region, SUM(amount)…</td><td>50</td><td>从库-报表</td><td>否</td><td>—</td><td>多结果集…</td><td>1 个接口</td><td>编辑 复制 删除</td></tr>
+                          <tr><td>缓存命中率报表</td><td>SELECT * FROM cache_stats…</td><td>20</td><td>从库-报表</td><td>是</td><td>24h</td><td>缓存优先…</td><td>1 个接口</td><td>编辑 复制 删除</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;min-width:260px">
+            <div class="m-readout" id="m-readout" style="margin-top:0">
+              <span class="pill">布局 scrollWidth <b id="m-ro-w">—</b> px</span>
+              <span class="pill" id="m-ro-state">—</span>
+            </div>
+            <div id="m-note-before" style="display:none">
+              <div class="before-hint" style="margin-top:10px">修复前：单列轨道 <code>grid-template-columns:1fr</code> 的 min 轨道=min-content——宽表把整页撑开（生产实测配置页 <strong>1012px</strong>、详情 <strong>543px</strong>），390 屏按千像素布局整体缩小，观感「挤成一团」。右侧手机屏可左右拖动查看溢出部分。</div>
+            </div>
+            <div id="m-note-after">
+              <div class="before-hint" style="margin-top:10px;border-color:#a7f3d0;background:var(--ok-soft);color:#065f46">修复后：单列改 <code>minmax(0,1fr)</code> + 主内容 <code>min-width:0</code>，布局宽度=390 不溢出；宽表在 <code>.table-wrap</code> 内横向滚动（与生产既有表格滚动语义一致）。手机屏内表格可左右滑动。</div>
+            </div>
+            <div class="card" style="margin-top:12px;padding:12px">
+              <div class="card-head" style="margin-bottom:6px"><h2 style="font-size:14px">同屏可见的移动端细节</h2></div>
+              <ul style="margin-left:18px;font-size:13px;color:var(--ink-2);line-height:22px">
+                <li>侧栏 ≤1024 收 64px 图标栏（现状保持，原型一致）</li>
+                <li>页头按钮换行不叠压（flex-wrap）</li>
+                <li>容器 padding ≤640 收窄为 12px（现状保持）</li>
+                <li>左树在窄屏下置于表格上方单列堆叠</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ④ 逐页对比（原型 vs 生产，11/13 结构级） ===== -->
+      <section class="tabpanel" id="t5">
+        <div class="proto-note">
+          <strong>逐页对比结论</strong>：原型 13 个页面逐页比对生产实现，<strong>11 页为结构/布局/排列级差异</strong>，仅登录页、报表中心判定一致（或仅样式）。结构级差异归为四类：
+        </div>
+        <div class="cmp-summary">
+          <div class="cmp-kind"><b>类型① 双栏卡片塌成单列平铺</b>报表编辑、端点表单、调度新建——原型 grid-2 双栏多卡 + page-head/crumb，生产为单 card 内 form-section 单列（全仓 grid-2 仅概览一处）</div>
+          <div class="cmp-kind"><b>类型② 卡片行/分栏被改折叠块</b>API 接口、报表详情——原型为可展开卡片行/左右分栏/统计磁贴，生产为 11 列伪卡片表格、debug-info 折叠块</div>
+          <div class="cmp-kind"><b>类型③ 区块多出或归属挪位</b>调度列表多「最近执行记录」表、概览品牌卡挤占右列、审计筛选/表格入 card 且按钮移位</div>
+          <div class="cmp-kind"><b>类型④ 表格列构成缺失</b>连接池缺「关联报表」列、用户缺「角色说明」列、报表配置右列从单表拆成 4 张分类表</div>
+        </div>
+
+        <!-- 结构级 · 严重 -->
+        <div class="cmp-page">
+          <div class="hd"><h3>报表编辑 · /config/reports/1/edit</h3><span class="lvl struct">结构级 · 严重</span><span class="loc">config.py:1295-1296, 496-511, 544, 559, 494, 1301-1306</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head（面包屑+查看/预览）→ <b>grid-2 双栏</b>——左①基础卡，右②SQL/③护栏/<b>④调度保活卡</b>/⑤API端点卡 → 底部 formbar。</li>
+            <li>生产：无 page-head/crumb；单 card 内 ①②③<b>单列平铺</b>；④调度卡缺失（保活降为 details）；⑤API 端点移出表单外；formbar 插在中部。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 报表编辑（双栏卡片）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-report-edit-proto-20260924200719.png" alt="原型 报表编辑"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/reports/1/edit（单列平铺）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-report-edit-live-20260924200842.png" alt="生产 报表编辑"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>端点表单 · /config/reports/1/api_endpoints/1/edit</h3><span class="lvl struct">结构级 · 严重</span><span class="loc">config.py:2540-2547, 2515</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head（面包屑+真实数据预览）→ <b>grid-2</b>：左①②卡，右③④⑤(API Key)卡 → formbar。</li>
+            <li>生产：无 page-head/crumb；单 card 内 ①~④ 单列平铺；API Key 管理移出 card 外。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 端点表单（双栏）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-api-edit-proto-20260924200719.png" alt="原型 端点表单"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · 端点表单（单列）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-api-edit-live-20260924200842.png" alt="生产 端点表单"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>API 接口 · /config/api-endpoints</h3><span class="lvl struct">结构级 · 严重</span><span class="loc">config.py:2926; render.py:3240-3243, 170-178</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head（含「+ 新建接口」）→ <b>api-row 卡片行</b>×N，每行带展开区（主/全量/静态 URL+说明）→ help。</li>
+            <li>生产：无 page-head、无新建按钮；h2 + <b>11 列表格</b>经 CSS 伪卡片、全字段平铺无展开区，1920 下文字重叠。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · API 接口（卡片行+展开区）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-api-proto-20260924200719.png" alt="原型 API 接口"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/api-endpoints（伪卡片表格）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-api-live-20260924200842.png" alt="生产 API 接口"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>调度新建 · /config/scheduler/new</h3><span class="lvl struct">结构级</span><span class="loc">config.py:2043-2062; render.py:4944, 4930</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head（面包屑）→ <b>grid-2</b>（左「计划」卡｜右「关联报表」卡）→ 独立「排除规则」卡（<b>rule-row 可视化</b>+添加规则组）→ formbar。</li>
+            <li>生产：单 section 平铺；排除规则为 <b>textarea 源码</b>无可视化；无 grid-2。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 调度新建（双栏+可视化规则）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-scheduler-new-proto-20260924200719.png" alt="原型 调度新建"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/scheduler/new（单列+textarea）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-scheduler-new-live-20260924200842.png" alt="生产 调度新建"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>报表详情 · /report?id=1</h3><span class="lvl struct">结构级</span><span class="loc">report.py:1867-1870, 1857; render.py:1375-1376</span></div>
+          <div class="diffs"><ul>
+            <li>原型：数据面板=toolbar（结果集 segment）+快筛行+分页；规则=左右分栏双卡；接口=api-row 卡；调试=<b>grid-3 统计磁贴</b>+SQL 代码块。</li>
+            <li>生产：五页签齐，但规则/接口/调试/备注全为 <b>debug-info 折叠块</b>；无磁贴无分栏；单页时不渲染分页条（条件渲染 vs 原型恒显）。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 报表详情</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-detail-proto-20260924200719.png" alt="原型 报表详情"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /report?id=1</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-detail-live-20260924200842.png" alt="生产 报表详情"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>调度列表 · /config/scheduler</h3><span class="lvl struct">结构级</span><span class="loc">render.py:4728-4731, 4736</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head → banner → <b>单表 7 列</b> → help。</li>
+            <li>生产：9 列表 + <b>多出「最近执行记录」第二张表</b>（原型没有）；banner 变 flash。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 调度列表（单表）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-scheduler-proto-20260924200719.png" alt="原型 调度列表"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/scheduler（双表）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-scheduler-live-20260924200842.png" alt="生产 调度列表"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>概览 · /config</h3><span class="lvl struct">结构级</span><span class="loc">config.py:1148, 1156, 1107, 1157, 1169</span></div>
+          <div class="diffs"><ul>
+            <li>原型：grid-2 右列=系统状态｜<b>导入演示数据</b>。</li>
+            <li>生产：右列=系统状态｜<b>站点标识卡（卡中卡）</b>；导入演示数据挪到 grid-2 外成尾卡。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 概览</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-config-proto-20260924200719.png" alt="原型 概览"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-config-live-20260924200842.png" alt="生产 概览"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>报表配置 · /config/reports</h3><span class="lvl struct">结构级</span><span class="loc">config.py:770; render.py:1375</span></div>
+          <div class="diffs"><ul>
+            <li>原型：filterbar → split(分类树｜<b>单张报表表</b>+分页) → batchbar。</li>
+            <li>生产：右列为<b>按分类拆成 4 张 section 表</b>、无分页条；左栏即「① 左菜单」问题页。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 报表配置（单表+左树）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-reports-proto-20260924200719.png" alt="原型 报表配置"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/reports（4 张分类表）</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-reports-live-20260924200842.png" alt="生产 报表配置"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>连接池 · /config/pools</h3><span class="lvl struct">结构级 · 轻</span><span class="loc">render.py:2667</span></div>
+          <div class="diffs"><ul>
+            <li>原型：表 6 列含<b>关联报表</b>；内联新增/编辑表单卡+formbar。</li>
+            <li>生产：5 列缺关联报表；表单走独立页 /config/pools/add（列表页无内联表单卡）。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 连接池</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-pools-proto-20260924200719.png" alt="原型 连接池"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/pools</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-pools-live-20260924200842.png" alt="生产 连接池"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>用户 · /config/users</h3><span class="lvl struct">结构级 · 轻</span><span class="loc">render.py:2711-2713</span></div>
+          <div class="diffs"><ul>
+            <li>原型：表 3 列（用户名/<b>角色说明</b>/操作）+ help。</li>
+            <li>生产：表 2 列，缺角色说明。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 用户</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-users-proto-20260924200719.png" alt="原型 用户"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /config/users</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-users-live-20260924200842.png" alt="生产 用户"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>审计日志 · /audit</h3><span class="lvl struct">结构级 · 轻</span><span class="loc">render.py:4348-4354, 4355-4368, 4371-4376</span></div>
+          <div class="diffs"><ul>
+            <li>原型：page-head actions 含<b>清理过期</b>；裸 filterbar + 裸 table。</li>
+            <li>生产：清理钮移入筛选条；filterbar/表格被包进 card。</li>
+          </ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 审计日志</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-audit-proto-20260924200719.png" alt="原型 审计"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /audit</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-audit-live-20260924200842.png" alt="生产 审计"></div></figure>
+          </div>
+        </div>
+
+        <!-- 一致 / 仅样式 -->
+        <div class="cmp-page">
+          <div class="hd"><h3>报表中心 · /report</h3><span class="lvl style">仅样式</span><span class="loc">结构一致</span></div>
+          <div class="diffs"><ul><li>结构同原型（页头搜索+最近查看+左树右卡片）；差异主要来自宽度利用率（见页签②）。</li></ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 报表中心</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-report-proto-20260924200719.png" alt="原型 报表中心"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /report</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-report-live-20260924200842.png" alt="生产 报表中心"></div></figure>
+          </div>
+        </div>
+
+        <div class="cmp-page">
+          <div class="hd"><h3>登录 · /login</h3><span class="lvl same">一致</span><span class="loc">结构一致</span></div>
+          <div class="diffs"><ul><li>login-card 构成一致（标题+副题+2 字段+提交+脚注）。</li></ul></div>
+          <div class="cmp-pair">
+            <figure class="cmp-fig"><figcaption><span class="src-p">原型</span> · 登录</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-login-proto-20260924200719.png" alt="原型 登录"></div></figure>
+            <figure class="cmp-fig"><figcaption><span class="src-l">生产</span> · /login</figcaption><div class="cmp-scroll"><img loading="lazy" src="shots/r2/cmp-login-live-20260924200842.png" alt="生产 登录"></div></figure>
+          </div>
+        </div>
+
+        <div class="proto-note" style="margin-top:4px">
+          <strong>实施含义</strong>：11 个结构级页面将按上表逐页把布局/排列对齐原型（grid-2 双栏、卡片行+展开区、page-head/crumb、表格列补全、区块归位），协议与锚点保持不变；截图原图在 <code>docs/compose/spec/shots/r2/</code>（对照源：/tmp/ui-diag-r2/）。
+        </div>
+      </section>
+
+      <!-- ===== ④ 验收清单 ===== -->
+      <section class="tabpanel" id="t4">
+        <div style="overflow:auto;border-radius:var(--r-md)">
+        <table class="acc-tbl" style="min-width:760px">
+          <thead><tr><th style="width:70px">#</th><th>反馈</th><th>根因</th><th>修法（落点）</th><th>可测验收指标</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="tag">R2-A</span></td>
+              <td>报表配置左菜单按钮文字挤在一起</td>
+              <td><code>.cat-tree-item</code>/<code>.section-title</code> 无 CSS，inline 无间距；260px 栏塞 ≥320px 内容</td>
+              <td>按原型重做左树：flex 行 + ghost 图标操作 + 卡头（<code>render.py build_category_section_html</code> 左栏拼装 + 共享 CSS）</td>
+              <td>实拍无重叠/断行；节点单行；悬停出 ✎↑↓✕；<code>#sec-categories</code>/<code>cat-tree-toggle</code>/<code>cat-tree-content</code> 与折叠 localStorage 行为不变；htmlcheck 通过</td>
+            </tr>
+            <tr>
+              <td><span class="tag">R2-B</span></td>
+              <td>PC 大屏内容挤在中间，没利用好屏幕</td>
+              <td><code>.container</code> 在纵向 flex 内 margin:auto → fit-content；内容列 42%~55% 漂移</td>
+              <td><code>.container{width:100%}</code>（<code>render.py</code> 共享 CSS），保留 1440→1680→1920→2400 阶梯</td>
+              <td>1920 视口：报表中心/详情/概览内容列 ≥ min(1680, main宽−48)，利用率 ≥85%；各页宽度一致</td>
+            </tr>
+            <tr>
+              <td><span class="tag">R2-C</span></td>
+              <td>移动端挤在一起不好看</td>
+              <td><code>.split</code> 单列 <code>1fr</code> 不收缩，配置页 scrollWidth=1012</td>
+              <td>单列改 <code>minmax(0,1fr)</code> + <code>min-width:0</code>；宽表维持 <code>.table-wrap</code> 内滚</td>
+              <td>390 视口全站 <code>scrollWidth == innerWidth</code>（无整页横向溢出）；表格容器内滚</td>
+            </tr>
+            <tr>
+              <td><span class="tag">R2-D</span></td>
+              <td>很多页面只改全局样式，布局排列没跟上原型</td>
+              <td>逐页对比：13 页中 11 页结构级差异（4 类：双栏塌单列 / 卡片行变折叠块 / 区块挪位 / 表格列缺失）</td>
+              <td>11 页逐页对齐原型布局排列（grid-2 双栏、api-row 展开区、page-head/crumb、列补全、区块归位），落 <code>render.py</code>/<code>config.py</code>/<code>report.py</code> 的 <code>build_*</code> 拼装</td>
+              <td>页签⑤ 每页差异点在实施后逐条消除；截图复验并排对照无结构级残留；测试按 #9 同步且全绿</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>实施范围与不变式</h2></div>
+          <ul style="margin-left:18px;line-height:24px;color:var(--ink-2)">
+            <li><strong>改</strong>：<code>render.py</code> 共享 CSS（<code>_BASE_CSS</code>/<code>_COMMON_CSS</code>）、报表配置左栏拼装，以及页签⑤ 列出的 11 个结构级页面的布局排列（涉 <code>render.py</code>/<code>config.py</code>/<code>report.py</code>）；测试断言按 AGENTS #9 同任务同步。</li>
+            <li><strong>不变</strong>：URL/锚点/批量条协议、POST 删除与调序、htmlcheck 门禁（form 不嵌套）、技术选型（纯标准库）、全站单一 class 体系。</li>
+            <li><strong>不碰</strong>：生产副本 <code>/alexblair/windir/www/SqlReport/</code>；筛选/排序/导出/API/鉴权等后端共享语义。</li>
+            <li>验证：L0→L1 分段（子进程执行）+ 截图复验（32 张基线 vs 修复后，唯一文件名不删除）。</li>
+          </ul>
+        </div>
+
+        <div class="proto-note" style="margin-top:16px">
+          <strong>确认方式</strong>：请先浏览页签「④ 逐页对比」核对 11 个结构级页面的判断是否属实，再对四个修复方向（R2-A 左菜单 / R2-B 宽度 / R2-C 移动端 / R2-D 逐页结构对齐）与验收指标回复「确认通过」；如某页差异判断不准或范围需增减，请直接指出页名与意见，我按意见修订本稿后再请你确认。
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="toast-zone" id="toast-zone"></div>
+
+<script>
+/* ===== 页签 ===== */
+document.querySelectorAll('.tab').forEach(function (t) {
+  t.addEventListener('click', function () {
+    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+    document.querySelectorAll('.tabpanel').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active');
+    document.getElementById(t.dataset.tab).classList.add('active');
+    if (t.dataset.tab === 't2') fitStage();
+  });
+});
+
+function toast(msg) {
+  var z = document.getElementById('toast-zone');
+  var el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  z.appendChild(el);
+  setTimeout(function () { el.remove(); }, 1800);
+}
+
+/* ===== ① 左菜单：修复前/后切换 + 交互 ===== */
+document.querySelectorAll('#seg-left button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('#seg-left button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    var before = b.dataset.v === 'before';
+    document.getElementById('demo-before').style.display = before ? '' : 'none';
+    document.getElementById('demo-after').style.display = before ? 'none' : '';
+  });
+});
+document.querySelectorAll('#left-demo .tree .cat[data-kids]').forEach(function (c) {
+  c.addEventListener('click', function (e) {
+    if (e.target.closest('.ops')) return;
+    var k = document.getElementById(c.dataset.kids);
+    if (k) k.classList.toggle('on');
+  });
+});
+document.querySelectorAll('#left-demo [data-act]').forEach(function (b) {
+  b.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toast('演示：' + b.dataset.act + '（生产走既有 GET/POST 协议，此处仅示意交互）');
+  });
+});
+var mockToggle = document.getElementById('r2-toggle-mock');
+if (mockToggle) mockToggle.addEventListener('click', function () { toast('演示：折叠分类树（现状逻辑保留）'); });
+
+/* ===== ② PC 宽度舞台：视口/模式切换，真 CSS 复现 ===== */
+var vp = 1920, wmode = 'after';
+function ladder(w) { return w >= 2600 ? 2400 : w >= 2100 ? 1920 : w >= 1700 ? 1680 : 1440; }
+function fitStage() {
+  var frame = document.getElementById('stage-frame');
+  var scaler = document.getElementById('stage-scaler');
+  if (!frame || !scaler) return;
+  var k = frame.clientWidth / vp;
+  scaler.style.width = vp + 'px';
+  scaler.style.height = '430px';
+  scaler.style.transform = 'scale(' + k + ')';
+  var cont = document.getElementById('st-cont');
+  cont.style.maxWidth = ladder(vp) + 'px';
+  cont.classList.toggle('after', wmode === 'after');
+  /* 读数（布局真实值） */
+  var w = cont.offsetWidth;
+  document.getElementById('ro-vp').textContent = vp;
+  document.getElementById('ro-w').textContent = w;
+  document.getElementById('ro-pct').textContent = Math.round(w / vp * 100) + '%';
+  document.getElementById('ro-note').textContent = wmode === 'after'
+    ? '修复后：width:100% 填满至阶梯上限 ' + ladder(vp) + 'px'
+    : '修复前：margin:auto 退化 fit-content（生产实测 42%~55%）';
+  document.getElementById('ro-note').className = 'pill ' + (wmode === 'after' ? 'ok' : 'warn');
+}
+document.querySelectorAll('#seg-vp button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('#seg-vp button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    vp = parseInt(b.dataset.v, 10);
+    fitStage();
+  });
+});
+document.querySelectorAll('#seg-wmode button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('#seg-wmode button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    wmode = b.dataset.v;
+    fitStage();
+  });
+});
+window.addEventListener('resize', fitStage);
+
+/* ===== ③ 移动端：模式切换 + scrollWidth 读数 ===== */
+function mReadout() {
+  var body = document.getElementById('m-body');
+  var w = body.scrollWidth;
+  document.getElementById('m-ro-w').textContent = w;
+  var activeBtn = document.querySelector('#seg-mmode button.active');
+  var okEl = document.getElementById('m-ro-state');
+  var before = activeBtn && activeBtn.dataset.v === 'before';
+  if (before) {
+    okEl.textContent = '演示溢出 ' + w + 'px（生产实测 1012px）';
+    okEl.className = 'pill warn';
+  } else {
+    okEl.textContent = w <= 390 ? '无整页横向溢出 ✓' : '仍溢出 ' + w + 'px';
+    okEl.className = 'pill ' + (w <= 390 ? 'ok' : 'warn');
+  }
+  document.getElementById('m-note-before').style.display = before ? '' : 'none';
+  document.getElementById('m-note-after').style.display = before ? 'none' : '';
+}
+document.querySelectorAll('#seg-mmode button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('#seg-mmode button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    document.getElementById('m-split').classList.toggle('after', b.dataset.v === 'after');
+    var body = document.getElementById('m-body');
+    if (b.dataset.v === 'before') {
+      /* 修复前：去掉 wrap 的内滚保护，让 min-content 撑开轨道（复现根因机制） */
+      document.getElementById('m-tw').style.overflow = 'visible';
+      document.getElementById('m-tw').style.minWidth = '880px';
+    } else {
+      document.getElementById('m-tw').style.overflow = '';
+      document.getElementById('m-tw').style.minWidth = '';
+    }
+    body.scrollLeft = 0;
+    mReadout();
+  });
+});
+
+/* 初始化 */
+fitStage();
+document.getElementById('m-split').classList.add('after');
+mReadout();
+</script>
+</body>
+</html>

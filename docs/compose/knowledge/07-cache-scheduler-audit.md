@@ -1,0 +1,84 @@
+# 缓存 · 定时任务 · 审计
+
+## L1 进程缓存（`report.QueryCache`）
+
+- 键约 `(report_id, sql_query)`；TTL ~300s  
+- 存全量多结果集；内存分页/筛选在此之上  
+- `force_rebuild` 跳过读；截断策略经 `_cache_matches_limit_policy`
+
+## L2 Redis（`redis_cache`）
+
+| 概念 | 说明 |
+|------|------|
+| `ReportSnapshot` + `_SNAPSHOT_VERSION=2` | JSON 快照；Decimal 标记；v1 淘汰 |
+| `compute_config_version(sql, pool_id)` | 进键；改 SQL/pool 自然 miss |
+| `build_snapshot_key` / `build_lock_key` | `{prefix}:snapshot:{rid}:{ver}` / lock |
+| `RedisConnectionManager` | 连接 + 15s 健康检查 + SETNX 锁 |
+| 保活 | 剩余 TTL < ahead → `force_rebuild` **先算后换** |
+
+配置：`redis.enable` 默认关；`key_prefix` `sr`；`default_ttl_hours`。  
+`redis_available()` False → 上层**静默降级**，不当异常。
+
+## L3 静态 API 缓存（`static_cache`）
+
+见 `05-api.md`。`enable` 默认 true；`try_read` 校验版本+TTL(mtime)；`write_versioned_file` 无 meta 模板端点；`invalidate` 删稳定+全部 v*；`record_invalidated` 仅展示不参与命中。
+
+## 定时任务（`scheduler`）
+
+- **进程内 daemon 线程** + `ThreadPoolExecutor`；无外部调度器  
+- `get_scheduler_config`：`enable` 默认 false、`tick_seconds=10`、`workers=2`  
+- 生命周期：`start_scheduler_from_config` / `shutdown_scheduler` / `get_scheduler` / `trigger_manual`  
+- 任务=DB 行：`upsert_schedule` + `schedule_reports`；管理页 `/config/scheduler`  
+- 类型：interval / daily（`compute_next_run`）  
+- **排除规则**（静默窗口）：叶子 `dow/tod/date/date_range`，`AND/OR` + **`children`**（大写 op，**≠ nested_filter 的 conditions**）  
+- `evaluate_exclusions`：解析失败 → **False + warning（按不排除执行）**  
+- 多报表按 `order_index`；单绑定失败不中断整包  
+- 熔断：`fail_count≥5` 自动停派发；手动触发不受限且成功重置  
+- misfire：启动扫描 interval 合并 / daily skip|run_once  
+- 执行：`execute_report(..., force_rebuild=True)`；成功回写 Redis+L1  
+- 保活 tick：剩余 TTL < ahead → rebuild + 联动 `rebuild_static_endpoint_file`  
+- 审计：`log_type=scheduler`；任务级开关默认关  
+- worker **自建配置库连接**  
+- 页面 `refresh_cache`：主动失效 L1/Redis/该报表静态 API（与保活先算后换不同）
+
+## 审计（`audit_db` + `audit_page`）
+
+| API | 说明 |
+|-----|------|
+| `record_operation` | 业务统一入口；空 user 跳过；失败 warning |
+| `insert_audit_log` | 底层插入 |
+| `query/count/export_audit_logs` | 筛选分页导出 |
+| `rotate/delete_audit_logs` | 轮转/条件删除 |
+| `get_recent_schedule_events` | 调度最近事件 |
+
+类型：`operation | web_access | api | scheduler`（见 02 卷）。  
+keyword 共用 `parse_filter_expr`。  
+路径：`app_config.audit_db.path` 默认 `audit.db`；`retention_days` 0=永久。  
+页面入口：`audit_page.handle_audit_request`（每次先轮转；POST clean；GET export=csv / 分页）。
+
+## 三层数据流
+
+```
+/report 或 /api
+  → execute_report
+      force_rebuild 或 SQL含写? 跳过读（写报表禁缓存短路，2026-09-25）
+      → L1 QueryCache + 截断策略
+      → L2 prefer_cache && redis_available → get_snapshot(config_version)
+      → miss → 锁 → MySQL（连接期或查询期失败 → 过期快照兜底
+        redis_fallback，fresh=False；兜底也失败才抛）
+        → set_snapshot + L1
+  → cache_info: process | redis | mysql | redis_fallback
+
+scheduler tick → force_rebuild 预热 L2 + 静态 .json
+```
+
+## 易踩坑
+
+1. 三层 TTL 语义不同（秒 / 小时 / mtime+版本）  
+2. 保活 vs 页面 refresh 行为不同  
+3. 排除树损坏 → 按不排除跑（可能执行）  
+4. 删除报表要清调度绑定（FK 不可靠）  
+5. 审计失败不阻断业务——「没日志」先看 warning  
+
+---
+最后核对：explore-2/3 报告

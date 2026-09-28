@@ -1,0 +1,2272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SqlReport 重构确认稿 · ui-redesign</title>
+<style>
+/* ===== 设计令牌（ui-redesign-visual-spec §1） ===== */
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#fff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#fff; --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+  --danger:#dc2626; --danger-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --fs-title:20px; --fs-h2:16px; --fs-h3:14px; --fs-body:14px; --fs-sm:13px; --fs-xs:12px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12); --sh-pop:0 4px 12px rgba(15,23,42,.10);
+  --r-sm:6px; --r-md:10px; --r-lg:14px; --r-full:999px;
+  --t-fast:120ms; --t-med:200ms;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:var(--fs-body);line-height:22px;color:var(--ink);background:var(--bg-app)}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font-family:inherit}
+:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r-sm)}
+
+/* ===== 骨架 ===== */
+.app{display:flex;min-height:100vh}
+.sidebar{width:240px;flex:0 0 240px;background:var(--sidebar-bg);color:var(--sidebar-ink);position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;z-index:40}
+.main{margin-left:240px;flex:1;min-width:0;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;color:#fff;font-weight:700;font-size:16px;letter-spacing:-.2px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:grid;place-items:center;font-size:13px;color:#fff;font-weight:800}
+.brand .prefix{margin-left:auto;font-size:11px;background:rgba(255,255,255,.12);padding:1px 6px;border-radius:var(--r-full);color:#e0e7ff}
+.nav-group{padding:10px 12px 4px;font-size:var(--fs-xs);color:#64748b;font-weight:600;letter-spacing:.04em}
+.nav-item{display:flex;align-items:center;gap:10px;margin:2px 10px;padding:8px 12px;border-radius:8px;color:var(--sidebar-ink);font-size:var(--fs-body);cursor:pointer;border:0;background:transparent;width:calc(100% - 20px);text-align:left;position:relative}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#fff;text-decoration:none}
+.nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-ink-active);font-weight:600}
+.nav-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:#818cf8}
+.nav-item svg{width:16px;height:16px;flex:0 0 16px;opacity:.9}
+.nav-badge{margin-left:auto;font-size:11px;background:rgba(255,255,255,.1);padding:0 6px;border-radius:var(--r-full)}
+.sidebar .spacer{flex:1}
+.account{border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;display:flex;align-items:center;gap:8px;font-size:var(--fs-sm)}
+.account .avatar{width:28px;height:28px;border-radius:50%;background:#334155;display:grid;place-items:center;color:#e2e8f0;font-size:12px;font-weight:700}
+.account .who{color:#e2e8f0;font-weight:600}
+.account .out{margin-left:auto;color:#94a3b8;font-size:var(--fs-xs);cursor:pointer;background:none;border:0}
+.account .out:hover{color:#fff}
+
+/* 顶栏（内容区页头） */
+.page{display:none;padding:24px;max-width:1440px;width:100%;margin:0 auto;animation:fadeUp .25s ease-out}
+.page.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.page{animation:none}}
+.page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.page-head h1{font-size:var(--fs-title);line-height:28px;font-weight:700;letter-spacing:-.2px}
+.page-head .sub{font-size:var(--fs-sm);color:var(--ink-3);margin-top:2px}
+.page-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.crumb{font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:4px}
+
+/* ===== 按钮 ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border-radius:var(--r-sm);font-size:var(--fs-body);font-weight:600;border:1px solid transparent;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast);white-space:nowrap;background:var(--bg-surface);color:var(--ink-2);border-color:var(--line-strong)}
+.btn:hover{background:var(--bg-hover);text-decoration:none}
+.btn svg{width:15px;height:15px}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(79,70,229,.35)}
+.btn-primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn-secondary{background:var(--bg-surface);border-color:var(--line-strong);color:var(--ink-2)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn-ghost:hover{background:var(--bg-hover)}
+.btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn-danger:hover{background:#b91c1c}
+.btn-link{background:none;border:none;color:var(--brand);height:auto;padding:0;font-weight:500}
+.btn-sm{height:26px;padding:0 10px;font-size:var(--fs-sm);gap:4px}
+.btn-sm svg{width:13px;height:13px}
+.btn-icon{width:34px;padding:0}
+.btn-icon.btn-sm{width:26px}
+.btn[disabled],.btn.disabled{opacity:.5;pointer-events:none}
+.btn.loading{position:relative;color:transparent}
+.btn.loading::after{content:"";position:absolute;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn-group{display:inline-flex;gap:8px;flex-wrap:wrap}
+
+/* ===== 卡片 / 布局块 ===== */
+.card{background:var(--bg-surface);border-radius:var(--r-md);box-shadow:var(--sh-1);padding:20px;margin-bottom:16px}
+.card-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.card-head h2{font-size:var(--fs-h2);line-height:24px;font-weight:600}
+.card-head .actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.grid-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.split{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+@media (max-width:1024px){.split{grid-template-columns:1fr}.sidebar{width:64px;flex-basis:64px}.sidebar .nav-item span,.sidebar .nav-group,.brand .name,.account .who,.account .out,.nav-badge,.brand .prefix{display:none}.main{margin-left:64px}.nav-item{justify-content:center;margin:2px 8px;padding:8px}}
+
+.stat-tile{background:var(--bg-surface);border-radius:var(--r-md);box-shadow:var(--sh-1);padding:16px 18px}
+.stat-tile .num{font-size:var(--fs-title);font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.stat-tile .lbl{font-size:var(--fs-sm);color:var(--ink-3);margin-top:2px}
+.stat-tile a{font-size:var(--fs-xs)}
+
+/* ===== 表单 ===== */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:var(--fs-sm);font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field .req{color:var(--danger);margin-left:2px}
+.input,.select,.textarea{width:100%;height:34px;padding:0 10px;border:1px solid var(--line-strong);border-radius:var(--r-sm);font-size:var(--fs-body);font-family:inherit;color:var(--ink);background:var(--bg-surface)}
+.textarea{height:auto;min-height:88px;padding:8px 10px;line-height:20px;resize:vertical}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--brand);box-shadow:var(--focus-ring)}
+.input.mono,.textarea.mono{font-family:var(--mono);font-size:13px}
+.help{font-size:var(--fs-xs);color:var(--ink-3);margin-top:4px}
+.field-error .input{border-color:var(--danger)}
+.field-error .help{color:var(--danger)}
+.check-group{display:flex;flex-wrap:wrap;gap:10px 16px}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--ink-2);cursor:pointer}
+.check input{width:15px;height:15px;accent-color:var(--brand)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+@media (max-width:768px){.form-row{grid-template-columns:1fr}}
+
+/* sticky 表单底栏 */
+.formbar{position:sticky;bottom:0;margin:16px -24px -24px;padding:12px 24px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;z-index:20;box-shadow:0 -4px 16px rgba(15,23,42,.06)}
+.formbar .dirty{display:none;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--warn)}
+.formbar .dirty.on{display:inline-flex}
+.formbar .dirty::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.formbar .right{margin-left:auto;display:flex;gap:8px}
+
+/* ===== 表格 ===== */
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-surface)}
+table.table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-body)}
+.table th{background:var(--bg-subtle);color:var(--ink-2);font-size:var(--fs-xs);font-weight:600;text-align:left;padding:10px 12px;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--line);white-space:nowrap}
+.table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink)}
+.table tr:last-child td{border-bottom:0}
+.table tbody tr:hover{background:var(--bg-hover)}
+.table tbody tr.selected{background:var(--brand-soft)}
+.table .num{text-align:right;font-variant-numeric:tabular-nums}
+.table .ops{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.table .mono{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+.table-empty{padding:40px 16px;text-align:center;color:var(--ink-3)}
+.table-empty .t{font-weight:600;color:var(--ink-2);margin-bottom:4px}
+.sortable{cursor:pointer;user-select:none}
+.sortable:hover{color:var(--brand)}
+.sort-tag{display:inline-flex;align-items:center;background:var(--brand-soft);color:var(--brand);border-radius:var(--r-full);font-size:11px;padding:0 6px;margin-left:4px;font-weight:700}
+
+/* 快速筛选行 */
+.qf-row td{background:var(--bg-subtle);padding:6px 8px;border-bottom:1px solid var(--line)}
+.qf{display:flex;gap:4px}
+.qf .select,.qf .input{height:26px;font-size:var(--fs-xs);padding:0 6px}
+.qf .select{width:auto;max-width:110px}
+.qf .input{width:110px}
+
+/* ===== 徽标 / 横幅 / chips ===== */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:var(--r-full);font-size:var(--fs-xs);font-weight:600;line-height:18px}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.75}
+.badge-ok{background:var(--ok-soft);color:#047857}
+.badge-warn{background:var(--warn-soft);color:#b45309}
+.badge-danger{background:var(--danger-soft);color:#b91c1c}
+.badge-info{background:var(--info-soft);color:#1d4ed8}
+.badge-neutral{background:var(--bg-subtle);color:var(--ink-3);border:1px solid var(--line)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:var(--r-full);background:var(--bg-subtle);border:1px solid var(--line);font-size:var(--fs-xs);color:var(--ink-2)}
+.chip button{border:0;background:none;cursor:pointer;color:var(--ink-3);font-size:14px;line-height:1}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:var(--r-md);margin-bottom:14px;font-size:var(--fs-body);border:1px solid transparent}
+.banner .bi{flex:0 0 auto;width:18px;height:18px;margin-top:2px}
+.banner-info{background:var(--info-soft);border-color:#bfdbfe;color:#1e3a8a}
+.banner-success{background:var(--ok-soft);border-color:#a7f3d0;color:#065f46}
+.banner-warn{background:var(--warn-soft);border-color:#fde68a;color:#92400e}
+.banner-danger{background:var(--danger-soft);border-color:#fecaca;color:#991b1b}
+.banner .x{margin-left:auto;border:0;background:none;cursor:pointer;color:inherit;opacity:.6;font-size:16px}
+.banner .act{margin-left:auto}
+.status-dot{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--ink-2)}
+.status-dot::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.status-dot.warn::before{background:var(--warn)}
+.status-dot.mut::before{background:var(--ink-3)}
+
+/* ===== Tabs / segment ===== */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.tab{border:0;background:none;padding:9px 14px;font-size:var(--fs-body);font-weight:500;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+.segment{display:inline-flex;background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-sm);padding:2px;gap:2px}
+.segment button{border:0;background:transparent;padding:4px 12px;font-size:var(--fs-sm);color:var(--ink-2);border-radius:4px;cursor:pointer}
+.segment button.active{background:var(--bg-surface);color:var(--brand);font-weight:600;box-shadow:var(--sh-1)}
+
+/* ===== 工具行 / 数据页 ===== */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:12px}
+.toolbar .grow{flex:1}
+.toolbar .meta{font-size:var(--fs-sm);color:var(--ink-3)}
+.toolbar .sep{width:1px;height:20px;background:var(--line)}
+.summary-line{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--ink-3);margin-bottom:10px}
+.memo-bar{display:flex;gap:8px;align-items:center;background:var(--bg-subtle);border:1px dashed var(--line-strong);border-radius:var(--r-sm);padding:8px 12px;font-size:var(--fs-sm);color:var(--ink-2);margin-bottom:12px}
+.memo-bar .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ===== 分页 ===== */
+.pagination{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 4px 0;font-size:var(--fs-sm);color:var(--ink-3)}
+.pagination .pages{display:flex;gap:4px;align-items:center}
+.page-btn{min-width:28px;height:28px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--bg-surface);color:var(--ink-2);font-size:var(--fs-sm);cursor:pointer;padding:0 6px}
+.page-btn:hover{background:var(--bg-hover)}
+.page-btn.cur{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700}
+.page-btn[disabled]{opacity:.4;pointer-events:none}
+
+/* ===== 抽屉 / 对话框 / 遮罩 ===== */
+.backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;opacity:0;pointer-events:none;transition:opacity var(--t-med)}
+.backdrop.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;background:var(--bg-surface);z-index:60;box-shadow:var(--sh-2);transform:translateX(105%);transition:transform var(--t-med);display:flex;flex-direction:column;border-radius:var(--r-lg) 0 0 var(--r-lg)}
+.drawer.on{transform:none}
+.drawer.wide{width:480px}
+.drawer-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.drawer-head h3{font-size:var(--fs-h2);font-weight:600}
+.drawer-head .x{margin-left:auto;border:0;background:var(--bg-subtle);width:28px;height:28px;border-radius:var(--r-sm);cursor:pointer;color:var(--ink-2);font-size:15px}
+.drawer-body{flex:1;overflow:auto;padding:16px 18px}
+.drawer-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line)}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-46%) scale(.98);width:480px;max-width:92vw;background:var(--bg-surface);border-radius:var(--r-md);box-shadow:var(--sh-2);z-index:60;opacity:0;pointer-events:none;transition:opacity var(--t-med),transform var(--t-med)}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal.wide{width:560px}
+.modal-head{padding:16px 18px 0}
+.modal-head h3{font-size:var(--fs-h2);font-weight:600}
+.modal-body{padding:12px 18px 4px;font-size:var(--fs-body);color:var(--ink-2)}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 18px 16px}
+fieldset.fs{border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:12px}
+fieldset.fs legend{font-size:var(--fs-xs);font-weight:700;color:var(--ink-3);padding:0 6px}
+
+/* 批量条 */
+.batchbar{position:fixed;left:calc(240px + 24px);right:24px;bottom:18px;background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--sh-2);padding:10px 14px;display:none;align-items:center;gap:10px;z-index:30}
+.batchbar.on{display:flex}
+.batchbar .cnt{font-weight:700;color:var(--brand)}
+.batchbar .right{margin-left:auto;display:flex;gap:8px}
+@media (max-width:1024px){.batchbar{left:74px}}
+
+/* toast */
+.toast-zone{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--r-md);font-size:var(--fs-sm);box-shadow:var(--sh-2);animation:fadeUp .2s ease-out;pointer-events:auto;display:flex;gap:8px;align-items:center}
+.toast.ok{background:#065f46}
+.toast.err{background:#991b1b}
+
+/* 提交遮罩 */
+.loading-mask{position:fixed;inset:0;background:rgba(255,255,255,.55);z-index:70;display:none;align-items:center;justify-content:center}
+.loading-mask.on{display:flex}
+.loading-mask .box{background:var(--bg-surface);border-radius:var(--r-md);padding:14px 22px;box-shadow:var(--sh-2);display:flex;gap:10px;align-items:center;font-weight:600}
+.spinner{width:16px;height:16px;border:2px solid var(--brand-soft);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite}
+
+/* ===== 侧栏内的报表中心 / 树 ===== */
+.tree{font-size:var(--fs-body)}
+.tree .cat{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:var(--r-sm);color:var(--ink-2);font-weight:600;cursor:pointer;user-select:none}
+.tree .cat:hover{background:var(--bg-hover)}
+.tree .cat .cnt{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);font-weight:500}
+.tree .cat svg,.tree .leaf svg{width:14px;height:14px;color:var(--ink-3)}
+.tree .leaf{display:flex;align-items:center;gap:6px;padding:5px 8px 5px 22px;border-radius:var(--r-sm);cursor:pointer;color:var(--ink-2)}
+.tree .leaf:hover{background:var(--bg-hover)}
+.tree .leaf.active{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.tree .kids{display:none}
+.tree .kids.on{display:block}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.report-card{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;box-shadow:var(--sh-1);display:flex;flex-direction:column;gap:6px;transition:border-color var(--t-fast),box-shadow var(--t-fast);cursor:pointer}
+.report-card:hover{border-color:#c7d2fe;box-shadow:var(--sh-pop);text-decoration:none}
+.report-card .t{font-weight:600;color:var(--ink);font-size:15px}
+.report-card .meta{font-size:var(--fs-xs);color:var(--ink-3)}
+.report-card .desc{font-size:var(--fs-sm);color:var(--ink-3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.report-card .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.search-box{position:relative}
+.search-box svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--ink-3)}
+.search-box .input{padding-left:32px}
+
+/* API 行卡片 */
+.api-row{border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-surface);margin-bottom:10px;overflow:hidden}
+.api-main{display:flex;gap:12px;align-items:center;padding:12px 14px;flex-wrap:wrap}
+.api-main .name{font-weight:600;min-width:140px}
+.api-main .path{font-family:var(--mono);font-size:12.5px;background:var(--bg-subtle);border:1px solid var(--line);padding:2px 8px;border-radius:var(--r-sm);color:var(--ink-2)}
+.api-main .ops{margin-left:auto;display:flex;gap:6px;align-items:center}
+.api-more{display:none;border-top:1px dashed var(--line);padding:12px 14px;background:var(--bg-subtle);font-size:var(--fs-sm)}
+.api-more.on{display:block}
+.url-line{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}
+.url-line .lbl{color:var(--ink-3);width:64px;flex:0 0 64px}
+.url-line code{font-family:var(--mono);font-size:12px;color:var(--brand);word-break:break-all}
+
+/* 代码块 / SQL */
+.code-block{background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;font-family:var(--mono);font-size:12.5px;line-height:20px;color:var(--ink-2);overflow:auto;white-space:pre-wrap}
+.sql-editor{width:100%;min-height:220px;font-family:var(--mono);font-size:13px;line-height:20px;border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:10px 12px;color:var(--ink);background:#fcfcfd;tab-size:2}
+.sql-editor:focus{outline:none;border-color:var(--brand);box-shadow:var(--focus-ring)}
+.md-body{font-size:var(--fs-body);color:var(--ink-2);line-height:22px}
+.md-body h1,.md-body h2,.md-body h3{color:var(--ink);margin:14px 0 8px}
+.md-body p{margin:8px 0}
+.md-body code{font-family:var(--mono);font-size:12.5px;background:var(--bg-subtle);padding:1px 5px;border-radius:4px}
+.md-body ul{padding-left:20px;margin:8px 0}
+
+/* 登录 */
+.login-wrap{min-height:100vh;display:grid;place-items:center;background:linear-gradient(160deg,#0f172a 0%,#1e1b4b 55%,#312e81 100%);padding:24px}
+.login-card{width:380px;background:var(--bg-surface);border-radius:var(--r-lg);box-shadow:0 24px 64px rgba(0,0,0,.35);padding:36px 32px}
+.login-card .lg-brand{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px;font-size:17px;font-weight:700}
+.login-card .lg-sub{text-align:center;color:var(--ink-3);font-size:var(--fs-sm);margin-bottom:22px}
+.login-card .btn{width:100%;height:38px}
+.login-card .foot{text-align:center;color:var(--ink-3);font-size:var(--fs-xs);margin-top:18px}
+
+/* 排除规则组件示意 */
+.rule-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.rule-row .select,.rule-row .input{height:30px;width:auto;min-width:96px;max-width:100%;font-size:var(--fs-sm)}
+.rule-group{border:1px dashed var(--line-strong);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px;background:var(--bg-subtle)}
+.rule-group .ghead{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:8px;font-weight:600;white-space:nowrap}
+
+/* 帮助抽屉内容 */
+.kbd{font-family:var(--mono);font-size:11px;background:var(--bg-subtle);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+.help-tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin:8px 0 14px}
+.help-tbl th,.help-tbl td{border:1px solid var(--line);padding:6px 8px;text-align:left}
+.help-tbl th{background:var(--bg-subtle);font-size:var(--fs-xs)}
+
+/* 附录清单 */
+.appendix table{width:100%;border-collapse:collapse;font-size:var(--fs-xs);margin-bottom:18px}
+.appendix th,.appendix td{border:1px solid var(--line);padding:5px 7px;text-align:left;vertical-align:top}
+.appendix th{background:var(--bg-subtle);font-weight:600}
+.appendix h2{font-size:var(--fs-h2);margin:18px 0 8px}
+.appendix h3{font-size:var(--fs-h3);margin:14px 0 6px;color:var(--ink-2)}
+.appendix p,.appendix li{font-size:var(--fs-sm);color:var(--ink-2)}
+.appendix code{font-family:var(--mono);font-size:11px}
+.appendix .tag{display:inline-block;background:var(--brand-soft);color:var(--brand);border-radius:4px;padding:0 5px;font-weight:700;margin-right:4px}
+
+/* 说明横幅（原型导语） */
+.proto-note{background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:var(--r-md);padding:14px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:#3730a3}
+.proto-note strong{color:#312e81}
+.filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;margin-bottom:14px}
+.filterbar .search-box{flex:1;min-width:200px}
+.filterbar .select{width:auto;min-width:110px}
+.date-chips{display:flex;gap:6px;flex-wrap:wrap}
+.date-chips .chip{cursor:pointer}
+.date-chips .chip.on{background:var(--brand-soft);border-color:#c7d2fe;color:var(--brand);font-weight:600}
+.muted{color:var(--ink-3)}
+.mt0{margin-top:0}.mb0{margin-bottom:0}
+.right{text-align:right}
+</style>
+</head>
+<body>
+<!-- ===== 登录页（路由 #/login） ===== -->
+<div id="view-login" class="login-view" style="display:none">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="lg-brand"><span class="logo" style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800">SR</span> SqlReport</div>
+      <p class="lg-sub">登录以访问报表工作台</p>
+      <div class="banner banner-warn" id="login-notice" style="display:none"></div>
+      <form id="login-form">
+        <div class="field">
+          <label for="lg-u">用户名</label>
+          <input class="input" id="lg-u" autocomplete="username" value="admin">
+        </div>
+        <div class="field">
+          <label for="lg-p">密码</label>
+          <input class="input" id="lg-p" type="password" autocomplete="current-password" value="admin123">
+        </div>
+        <button class="btn btn-primary" type="submit">登录</button>
+      </form>
+      <p class="foot">SqlReport · 报表与 API 工作台</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 应用骨架 ===== -->
+<div class="app" id="app-shell">
+  <aside class="sidebar" aria-label="主导航">
+    <div class="brand"><span class="logo">SR</span><span class="name">SqlReport</span></div>
+
+    <div class="nav-group">分析</div>
+    <button class="nav-item" data-route="#/report" title="报表中心">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6"/></svg>
+      <span>报表中心</span>
+    </button>
+
+    <div class="nav-group">管理</div>
+    <button class="nav-item" data-route="#/config" title="概览">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>概览</span>
+    </button>
+    <button class="nav-item" data-route="#/config/reports" title="报表配置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
+      <span>报表配置</span><span class="nav-badge">7</span>
+    </button>
+    <button class="nav-item" data-route="#/config/pools" title="连接池">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg>
+      <span>连接池</span><span class="nav-badge">2</span>
+    </button>
+    <button class="nav-item" data-route="#/config/users" title="用户">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3.5"/><path d="M3 19c.5-3 2.8-4.5 6-4.5S14.5 16 15 19M16 8.5a3 3 0 1 1 0 5.9M17.5 19c-.2-1.5-.8-2.7-1.8-3.5"/></svg>
+      <span>用户</span>
+    </button>
+
+    <div class="nav-group">服务</div>
+    <button class="nav-item" data-route="#/config/api-endpoints" title="API 接口">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19.1"/></svg>
+      <span>API 接口</span><span class="nav-badge">6</span>
+    </button>
+    <button class="nav-item" data-route="#/config/scheduler" title="定时任务">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+      <span>定时任务</span><span class="nav-badge">10</span>
+    </button>
+
+    <div class="nav-group">治理</div>
+    <button class="nav-item" data-route="#/audit" title="审计日志">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 4h6l1 2h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3l1-2z"/><path d="M8 11h8M8 15h5"/></svg>
+      <span>审计日志</span>
+    </button>
+    <button class="nav-item" data-route="#/appendix" title="覆盖清单附录">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+      <span>覆盖清单</span>
+    </button>
+
+    <div class="spacer"></div>
+    <div class="account">
+      <span class="avatar">A</span>
+      <span class="who">admin</span>
+      <button class="out" data-route="#/login" title="退出登录">退出</button>
+    </div>
+  </aside>
+
+  <div class="main">
+
+  <!-- ===== 报表中心 ===== -->
+  <section class="page" id="page-report" data-nav="#/report">
+    <div class="page-head">
+      <div>
+        <h1>报表中心</h1>
+        <div class="sub">按分类浏览，或搜索报表名称与备注</div>
+      </div>
+      <div class="actions">
+        <div class="search-box" style="width:280px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input class="input" id="rc-search" placeholder="搜索报表…">
+        </div>
+        <button class="btn btn-primary" data-demo="新建报表（进入分区编辑表单）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>新建报表
+        </button>
+      </div>
+    </div>
+
+    <div class="card" id="rc-recent-card" style="margin-bottom:16px">
+      <div class="card-head"><h2>最近查看</h2></div>
+      <div class="card-grid" id="rc-recent"></div>
+    </div>
+
+    <div class="split">
+      <aside class="card" style="padding:12px">
+        <div class="card-head" style="margin-bottom:6px"><h2 style="font-size:14px">分类</h2></div>
+        <div class="tree" id="rc-tree">
+          <div class="cat" data-cat="all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M4 12h16M4 18h10"/></svg>全部报表<span class="cnt">7</span></div>
+          <div class="cat" data-cat="经营分析"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>经营分析<span class="cnt">3</span></div>
+          <div class="kids on">
+            <div class="leaf" data-cat="区域销售"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>区域销售</div>
+          </div>
+          <div class="cat" data-cat="财务核算"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>财务核算<span class="cnt">1</span></div>
+          <div class="cat" data-cat="未分类"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>未分类<span class="cnt">2</span></div>
+        </div>
+      </aside>
+      <div>
+        <div class="card-grid" id="rc-grid"></div>
+        <div class="card empty" id="rc-empty" style="display:none;text-align:center;padding:48px">
+          <div style="font-weight:600;margin-bottom:6px">没有匹配的报表</div>
+          <div class="muted" style="margin-bottom:14px">换个关键词，或清除筛选查看全部</div>
+          <button class="btn btn-secondary" id="rc-clear">清除筛选</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 报表详情 ===== -->
+  <section class="page" id="page-detail" data-nav="#/report">
+    <div class="page-head">
+      <div>
+        <div class="crumb"><a href="#/report">报表中心</a> / 经营分析</div>
+        <h1>订单概览
+          <select class="select" style="width:auto;height:28px;font-size:13px;font-weight:500;display:inline-block;margin-left:8px;vertical-align:middle" data-demo="切换报表（紧凑 select）">
+            <option>订单概览（当前）</option><option>销售多维统计</option><option>缓存命中率报表</option><option>数据维护-写入示例</option><option>Markdown备注报表</option><option>全量导出报表</option><option>临时查询</option>
+          </select>
+        </h1>
+        <div class="sub">基础单结果集报表示例，用于验收分页 / 筛选 / 排序 · 连接池：主库-交易</div>
+      </div>
+      <div class="actions">
+        <span class="status-dot" title="缓存状态">数据更新于 3 分钟前 · 缓存 1 小时</span>
+        <button class="btn btn-secondary" data-route="#/config/reports/1/edit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 20h4l10-10-4-4L4 16v4zM13.5 6.5l4 4"/></svg>编辑
+        </button>
+        <button class="btn btn-secondary" data-open="modal-export">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>导出
+        </button>
+        <button class="btn btn-primary" id="btn-refresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>刷新数据
+        </button>
+      </div>
+    </div>
+
+    <div class="banner banner-warn" id="detail-banner">
+      <svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v4m0 4h.01M10.3 4.3 2.6 18a1.5 1.5 0 0 0 1.3 2.2h16.2a1.5 1.5 0 0 0 1.3-2.2L13.7 4.3a1.5 1.5 0 0 0-2.6 0z"/></svg>
+      <div>本页为「全量导出」受限提示示例：结果已截断至 100,000 行。如需完整数据，可在 <a href="#/config/reports/1/edit">编辑页</a> 开启「允许导出全部行」。</div>
+      <button class="x" onclick="this.closest('.banner').remove()">×</button>
+    </div>
+
+    <div class="memo-bar" id="detail-memo">
+      <strong style="flex:0 0 auto">备注</strong>
+      <span class="txt"># 订单概览 · 基础单结果集报表示例，用于验收分页/筛选/排序。（Markdown，点击展开全文到「备注」页签）</span>
+      <button class="btn btn-sm btn-ghost" data-tab="memo">查看全文</button>
+    </div>
+
+    <div class="tabs" role="tablist" id="detail-tabs">
+      <button class="tab active" role="tab" data-tab="data">数据</button>
+      <button class="tab" role="tab" data-tab="rules">规则</button>
+      <button class="tab" role="tab" data-tab="api">接口<span class="badge badge-info" style="margin-left:6px">2</span></button>
+      <button class="tab" role="tab" data-tab="debug">调试</button>
+      <button class="tab" role="tab" data-tab="memo">备注</button>
+    </div>
+
+    <!-- 数据 tab -->
+    <div class="tabpanel active" data-panel="data">
+      <div class="toolbar">
+        <span class="meta">共 <strong>3</strong> 行 · 1 页</span>
+        <select class="select" style="width:auto;height:28px" data-demo="页大小即时提交（协议 page_size）">
+          <option>每页 20</option><option>每页 50</option><option>每页 100</option><option>每页 200</option>
+        </select>
+        <div class="sep"></div>
+        <div class="segment" aria-label="结果集">
+          <button class="active">结果 1</button>
+        </div>
+        <div class="grow"></div>
+        <button class="btn btn-sm btn-secondary" data-open="drawer-cols">列设置</button>
+        <button class="btn btn-sm btn-secondary" data-open="drawer-sort">排序</button>
+        <button class="btn btn-sm btn-secondary" data-open="drawer-filter">高级筛选</button>
+        <button class="btn btn-sm btn-ghost" data-open="drawer-help" title="筛选语法帮助">帮助 ?</button>
+        <button class="btn btn-sm btn-ghost" data-demo="已复制规则 JSON">复制规则</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table" id="detail-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-demo="排序切换：ID ↑（第 1 主键）">ID <span class="sort-tag">↑1</span></th>
+              <th class="sortable" data-demo="排序切换：CUSTOMER">CUSTOMER</th>
+              <th class="sortable" data-demo="排序切换：AMOUNT">AMOUNT</th>
+              <th class="sortable" data-demo="排序切换：CREATED_AT">CREATED_AT</th>
+            </tr>
+            <tr class="qf-row">
+              <td><div class="qf"><select class="select"><option>不筛选</option><option>包含</option><option>等于</option><option>大于</option><option>为空</option></select></div></td>
+              <td><div class="qf"><select class="select"><option>不筛选</option><option>包含</option><option>等于</option><option>不等于</option></select><input class="input" placeholder="值"></div></td>
+              <td><div class="qf"><select class="select"><option>不筛选</option><option>大于</option><option>小于</option></select><input class="input" placeholder="值"></div></td>
+              <td><div class="qf"><select class="select"><option>不筛选</option><option>大于等于</option><option>小于等于</option></select></div></td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">3</td><td>Carol</td><td class="num">80</td><td class="mono">2026-01-03 14:15:00</td></tr>
+            <tr><td class="num">2</td><td>Bob</td><td class="num">250.5</td><td class="mono">2026-01-02 10:30:00</td></tr>
+            <tr><td class="num">1</td><td>Alice</td><td class="num">100</td><td class="mono">2026-01-01 09:00:00</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <span>第 1–3 行，共 3 行</span>
+        <div class="pages">
+          <button class="page-btn" disabled>‹</button>
+          <button class="page-btn cur">1</button>
+          <button class="page-btn" disabled>›</button>
+        </div>
+        <select class="select" style="width:auto;height:28px"><option>20 行/页</option><option>50 行/页</option></select>
+        <label>跳至 <input class="input" style="width:56px;height:28px;display:inline-block" id="jump-page"> 页</label>
+      </div>
+    </div>
+
+    <!-- 规则 tab（原：当前规则 + 嵌套构建器 + 排序面板 合并） -->
+    <div class="tabpanel" data-panel="rules">
+      <div class="split" style="grid-template-columns:340px 1fr">
+        <div class="card">
+          <div class="card-head"><h2>嵌套条件</h2></div>
+          <div class="rule-group">
+            <div class="ghead">满足以下 <select class="select" style="width:auto;height:24px;font-size:12px"><option>全部 (AND)</option><option>任一 (OR)</option></select>
+              <button class="btn btn-sm btn-ghost" style="margin-left:auto" data-demo="删除组">删除组</button>
+            </div>
+            <div class="rule-row">
+              <select class="select"><option>customer</option><option>amount</option></select>
+              <select class="select"><option>包含</option><option>等于</option></select>
+              <input class="input" value="o">
+              <button class="btn btn-sm btn-ghost" data-demo="移除条件">✕</button>
+            </div>
+            <div class="rule-row">
+              <select class="select"><option>amount</option></select>
+              <select class="select"><option>大于</option></select>
+              <input class="input" value="80">
+              <button class="btn btn-sm btn-ghost" data-demo="移除条件">✕</button>
+            </div>
+            <div class="btn-group" style="margin-top:6px">
+              <button class="btn btn-sm btn-secondary">+ 条件</button>
+              <button class="btn btn-sm btn-secondary">+ 分组</button>
+              <button class="btn btn-sm btn-ghost" data-demo="插入 today()">today()</button>
+              <button class="btn btn-sm btn-ghost" data-demo="打开日期表达式 date_add">date_add…</button>
+            </div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary btn-sm" data-demo="已应用嵌套筛选（URL nested_filter 协议不变）">应用筛选</button>
+            <button class="btn btn-secondary btn-sm" data-demo="已清除嵌套筛选">清除</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>当前规则</h2>
+            <div class="actions">
+              <button class="btn btn-sm btn-secondary" data-demo="已复制规则 JSON">复制 JSON</button>
+              <button class="btn btn-sm btn-secondary" data-demo="已从剪贴板应用规则">从 JSON 应用</button>
+            </div>
+          </div>
+          <div class="code-block">{
+  "filters": [
+    {"col": "customer", "op": "contains", "value": "o"},
+    {"col": "amount", "op": "gt", "value": "80"}
+  ],
+  "sorts": [
+    {"col": "id", "dir": "asc"}
+  ],
+  "columns": ["id", "customer", "amount", "created_at"]
+}</div>
+          <p class="help">协议与现状一致：URL 参数 <code>f_/op_/sort/cols/nested_filter</code> 不变，仅呈现合并。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 接口 tab -->
+    <div class="tabpanel" data-panel="api">
+      <div class="card">
+        <div class="card-head"><h2>本报表的 API 接口</h2>
+          <div class="actions"><button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints">管理全部接口</button></div>
+        </div>
+        <div class="api-row" style="margin-bottom:12px">
+          <div class="api-main">
+            <span class="name">订单概览API</span>
+            <span class="path">/api/orders</span>
+            <span class="badge badge-ok">启用</span>
+            <span class="badge badge-info">2 个 Key</span>
+            <div class="ops"><button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders">复制 URL</button></div>
+          </div>
+          <div class="api-more on">
+            <div class="url-line"><span class="lbl">主地址</span><code>http://127.0.0.1:8080/api/orders</code></div>
+            <div class="url-line"><span class="lbl">全量</span><code>http://127.0.0.1:8080/api/orders?fetch_all=true</code></div>
+            <div class="url-line"><span class="lbl">静态</span><code>http://127.0.0.1:8080/api/orders.json</code></div>
+            <div class="md-body" style="margin-top:8px">
+              <strong>接口说明</strong>
+              <p># 订单概览接口 返回订单列表，支持分页与排序。</p>
+            </div>
+          </div>
+        </div>
+        <div class="api-row">
+          <div class="api-main">
+            <span class="name">订单概览-智能去引号</span>
+            <span class="path">/api/orders/noquote</span>
+            <span class="badge badge-ok">启用</span>
+            <div class="ops"><button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders/noquote">复制 URL</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 调试 tab -->
+    <div class="tabpanel" data-panel="debug">
+      <div class="card">
+        <div class="card-head"><h2>执行信息</h2></div>
+        <div class="grid-3" style="margin-bottom:12px">
+          <div class="stat-tile"><div class="num" style="font-size:15px">主库-交易</div><div class="lbl">连接池</div></div>
+          <div class="stat-tile"><div class="num" style="font-size:15px">进程缓存</div><div class="lbl">命中层级（L1）</div></div>
+          <div class="stat-tile"><div class="num" style="font-size:15px">12 ms</div><div class="lbl">最近一次查询</div></div>
+        </div>
+        <h3 style="font-size:14px;margin-bottom:6px">实际执行 SQL</h3>
+        <div class="code-block">SELECT id, customer, amount, created_at
+FROM orders
+ORDER BY created_at DESC
+LIMIT 100</div>
+      </div>
+    </div>
+
+    <!-- 备注 tab -->
+    <div class="tabpanel" data-panel="memo">
+      <div class="card">
+        <div class="card-head"><h2>备注（Markdown）</h2></div>
+        <div class="md-body">
+          <h3>备注说明</h3>
+          <p>基础单结果集报表示例，用于验收分页 / 筛选 / 排序。</p>
+          <ul><li>分页：内存分页，支持 10/20/50/100/200</li><li>筛选：10 种操作符 + 统一匹配语法</li><li>排序：列头点击与排序抽屉双入口</li></ul>
+          <p>旧「自动/展开/折叠」三态开关已移除：有备注默认展开记忆为普通折叠态。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 概览 ===== -->
+  <section class="page" id="page-config" data-nav="#/config">
+    <div class="page-head">
+      <div><h1>概览</h1><div class="sub">系统规模、快捷入口与运行状态</div></div>
+      <div class="actions"><button class="btn btn-secondary" data-demo="进入站点标识设置（favicon / 前缀）">站点标识设置</button></div>
+    </div>
+
+    <div class="grid-stat">
+      <div class="stat-tile"><div class="num">7</div><div class="lbl">报表</div><a href="#/config/reports">前往配置 →</a></div>
+      <div class="stat-tile"><div class="num">3</div><div class="lbl">分类</div><a href="#/config/reports">管理分类 →</a></div>
+      <div class="stat-tile"><div class="num">6</div><div class="lbl">API 接口（5 启用）</div><a href="#/config/api-endpoints">管理接口 →</a></div>
+      <div class="stat-tile"><div class="num">10</div><div class="lbl">定时任务（调度已停用）</div><a href="#/config/scheduler">查看任务 →</a></div>
+      <div class="stat-tile"><div class="num">2</div><div class="lbl">连接池</div><a href="#/config/pools">管理连接池 →</a></div>
+      <div class="stat-tile"><div class="num">1</div><div class="lbl">用户</div><a href="#/config/users">管理用户 →</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>快捷入口</h2></div>
+      <div class="grid-3">
+        <button class="btn btn-secondary" style="height:44px" data-route="#/config/reports">报表配置</button>
+        <button class="btn btn-secondary" style="height:44px" data-route="#/config/pools">连接池</button>
+        <button class="btn btn-secondary" style="height:44px" data-route="#/config/users">用户</button>
+        <button class="btn btn-secondary" style="height:44px" data-route="#/config/api-endpoints">API 接口</button>
+        <button class="btn btn-secondary" style="height:44px" data-route="#/config/scheduler">定时任务</button>
+        <button class="btn btn-secondary" style="height:44px" data-route="#/audit">审计日志</button>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h2>系统状态</h2></div>
+        <div class="field mb0">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <span class="badge badge-warn">调度停用</span>
+            <span class="muted" style="font-size:13px">定时调度当前为停用状态，任务仅保存不自动执行</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <span class="badge badge-ok">缓存可用</span>
+            <span class="muted" style="font-size:13px">Redis 正常 · 三层缓存已启用</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <span class="badge badge-neutral">SQLite</span>
+            <span class="muted" style="font-size:13px">配置存储引擎（app_config 可切换 MySQL）</span>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="border:1px dashed #c7d2fe;background:#f8f7ff">
+        <div class="card-head"><h2>导入演示数据（DEBUG）</h2></div>
+        <p class="muted" style="margin-bottom:12px">将预设测试用例按名称导入当前 DEBUG 配置库，同名覆盖。用于功能验收与脚本测试。</p>
+        <button class="btn btn-primary" data-confirm="导入演示数据？同名数据将被覆盖更新。" data-danger="0">导入演示数据</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 连接池 ===== -->
+  <section class="page" id="page-pools" data-nav="#/config/pools">
+    <div class="page-head">
+      <div><h1>连接池</h1><div class="sub">MySQL 连接配置 · 报表运行的数据源</div></div>
+      <div class="actions"><button class="btn btn-primary" data-route="#/config/pools/new">+ 新增连接池</button></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>名称</th><th>地址</th><th>用户</th><th>数据库</th><th>关联报表</th><th class="right">操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>主库-交易</strong></td><td class="mono">127.0.0.1:3307</td><td class="mono">sqlreport_test</td><td class="mono">sqlreport_test</td><td>4</td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-demo="测试连接成功（状态条）">测试</button>
+              <button class="btn btn-sm btn-secondary" data-route="#/config/pools/new">编辑</button>
+              <button class="btn btn-sm btn-ghost" data-demo="复制连接池">复制</button>
+              <button class="btn btn-sm btn-secondary" data-confirm="删除连接池「主库-交易」？关联的 4 张报表将失去数据源。" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+          <tr>
+            <td><strong>从库-报表</strong></td><td class="mono">127.0.0.1:3307</td><td class="mono">sqlreport_test</td><td class="mono">sqlreport_test</td><td>3</td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-demo="测试连接成功">测试</button>
+              <button class="btn btn-sm btn-secondary" data-route="#/config/pools/new">编辑</button>
+              <button class="btn btn-sm btn-ghost" data-demo="复制连接池">复制</button>
+              <button class="btn btn-sm btn-secondary" data-confirm="删除连接池「从库-报表」？关联的 3 张报表将失去数据源。" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h2>新增 / 编辑（表单页示意）</h2></div>
+      <div class="form-row">
+        <div class="field"><label>名称<span class="req">*</span></label><input class="input" value="主库-交易"></div>
+        <div class="field"><label>主机<span class="req">*</span></label><input class="input mono" value="127.0.0.1"></div>
+        <div class="field"><label>端口</label><input class="input mono" value="3307"></div>
+        <div class="field"><label>数据库</label><input class="input mono" value="sqlreport_test"></div>
+        <div class="field"><label>用户</label><input class="input mono" value="sqlreport_test"></div>
+        <div class="field"><label>密码</label><input class="input" type="password" placeholder="留空表示不修改"></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-secondary" data-demo="测试连接成功：12ms">测试连接</button>
+      </div>
+      <div class="formbar" style="position:static;margin:16px -20px -20px;border-radius:0 0 10px 10px">
+        <span class="dirty on">有未保存更改</span>
+        <div class="right">
+          <button class="btn btn-secondary" data-route="#/config/pools">取消</button>
+          <button class="btn btn-secondary" data-demo="已保存并返回列表（save_close + flash）">保存并关闭</button>
+          <button class="btn btn-primary" data-demo="已保存（save，留在本页）">保存</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 用户 ===== -->
+  <section class="page" id="page-users" data-nav="#/config/users">
+    <div class="page-head">
+      <div><h1>用户</h1><div class="sub">登录账号 · 密码经 PBKDF2 哈希存储</div></div>
+      <div class="actions"><button class="btn btn-primary" data-demo="打开新增用户表单">+ 新增用户</button></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>用户名</th><th>角色说明</th><th class="right">操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>admin</strong> <span class="badge badge-info">当前登录</span></td>
+            <td class="muted">首个管理员；禁止删除当前登录用户</td>
+            <td><div class="ops"><button class="btn btn-sm btn-secondary" data-demo="编辑用户（改密将使该用户会话失效）">编辑</button></div></td>
+          </tr>
+          <tr>
+            <td><strong>ops</strong></td>
+            <td class="muted">运维账号示例</td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-demo="编辑用户">编辑</button>
+              <button class="btn btn-sm btn-secondary" data-confirm="删除用户「ops」？其全部会话将立即失效。" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="help" style="margin-top:10px">约定保持：改用户名/密码后强制下线该用户全部会话；flash 不回显明文密码。</p>
+  </section>
+
+  <!-- ===== 报表配置（左树右表 + 批量条） ===== -->
+  <section class="page" id="page-reports" data-nav="#/config/reports">
+    <div class="page-head">
+      <div><h1>报表配置</h1><div class="sub">左栏管理分类，右栏管理报表；勾选行后出现批量操作</div></div>
+      <div class="actions">
+        <button class="btn btn-secondary" data-demo="新增分类">+ 新增分类</button>
+        <button class="btn btn-primary" data-route="#/config/reports/1/edit">+ 新增报表</button>
+      </div>
+    </div>
+    <div class="filterbar">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input class="input" id="rp-search" placeholder="过滤当前列表（名称 / 备注 / SQL 片段）…">
+      </div>
+      <span class="muted" style="font-size:12px">清空恢复全部</span>
+    </div>
+
+    <div class="split">
+      <aside class="card" style="padding:12px">
+        <div class="card-head" style="margin-bottom:6px"><h2 style="font-size:14px">分类树</h2>
+          <div class="actions"><button class="btn btn-sm btn-ghost" data-demo="新增子分类">+</button></div>
+        </div>
+        <div class="tree">
+          <div class="cat active" style="background:var(--brand-soft);color:var(--brand)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>全部<span class="cnt">7</span></div>
+          <div class="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>经营分析<span class="cnt">3</span>
+            <span style="margin-left:auto;display:flex;gap:2px" class="ops-inline">
+              <button class="btn btn-sm btn-ghost" title="重命名" data-demo="重命名分类">✎</button>
+              <button class="btn btn-sm btn-ghost" title="上移">↑</button>
+            </span>
+          </div>
+          <div class="kids on">
+            <div class="leaf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>区域销售<span class="cnt" style="margin-left:auto">1</span></div>
+          </div>
+          <div class="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>财务核算<span class="cnt">1</span></div>
+          <div class="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>未分类<span class="cnt">2</span></div>
+        </div>
+        <p class="help" style="margin-top:8px">原「分类管理独立区块」已并入左树：增删改名、调序、新增子类均在节点操作；<code>#sec-categories</code> 锚点兼容指向左树。</p>
+      </aside>
+
+      <div>
+        <div class="table-wrap">
+          <table class="table" id="rp-table">
+            <thead>
+              <tr>
+                <th style="width:36px"><input type="checkbox" id="rp-all" aria-label="全选"></th>
+                <th>名称</th><th>连接池</th><th>缓存</th><th>备注</th><th>API</th><th class="right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr data-name="订单概览">
+                <td><input type="checkbox" class="rp-check"></td>
+                <td><a href="#/config/reports/1/edit"><strong>订单概览</strong></a> <span class="badge badge-warn">定时</span> <span class="badge badge-ok">保活</span></td>
+                <td>主库-交易</td>
+                <td><span class="badge badge-ok">1h</span></td>
+                <td class="muted">基础单结果集报表示例…</td>
+                <td><a href="#/config/api-endpoints">2 个接口</a></td>
+                <td><div class="ops">
+                  <a class="btn btn-sm btn-secondary" href="#/report/detail">查看</a>
+                  <a class="btn btn-sm btn-secondary" href="#/config/reports/1/edit">编辑</a>
+                  <button class="btn btn-sm btn-ghost" data-demo="复制报表（不继承调度绑定）">复制</button>
+                  <button class="btn btn-sm btn-ghost" data-confirm="删除报表「订单概览」？将同时下线其 2 个 API 端点。" data-danger="1">删除</button>
+                </div></td>
+              </tr>
+              <tr data-name="销售多维统计">
+                <td><input type="checkbox" class="rp-check"></td>
+                <td><a href="#/config/reports/1/edit"><strong>销售多维统计</strong></a> <span class="badge badge-warn">定时</span></td>
+                <td>从库-报表</td>
+                <td><span class="badge badge-neutral">关</span></td>
+                <td class="muted">多结果集报表：验收 result_mode…</td>
+                <td><a href="#/config/api-endpoints">1 个接口</a></td>
+                <td><div class="ops">
+                  <a class="btn btn-sm btn-secondary" href="#/report/detail">查看</a>
+                  <a class="btn btn-sm btn-secondary" href="#/config/reports/1/edit">编辑</a>
+                  <button class="btn btn-sm btn-ghost" data-demo="复制报表">复制</button>
+                  <button class="btn btn-sm btn-ghost" data-confirm="删除报表「销售多维统计」？" data-danger="1">删除</button>
+                </div></td>
+              </tr>
+              <tr data-name="缓存命中率报表">
+                <td><input type="checkbox" class="rp-check"></td>
+                <td><a href="#/config/reports/1/edit"><strong>缓存命中率报表</strong></a> <span class="badge badge-ok">保活</span></td>
+                <td>从库-报表</td>
+                <td><span class="badge badge-ok">24h</span></td>
+                <td class="muted">验收缓存优先 + 缓存保活…</td>
+                <td><a href="#/config/api-endpoints">1 个接口</a></td>
+                <td><div class="ops">
+                  <a class="btn btn-sm btn-secondary" href="#/report/detail">查看</a>
+                  <a class="btn btn-sm btn-secondary" href="#/config/reports/1/edit">编辑</a>
+                  <button class="btn btn-sm btn-ghost" data-demo="复制报表">复制</button>
+                  <button class="btn btn-sm btn-ghost" data-confirm="删除报表「缓存命中率报表」？" data-danger="1">删除</button>
+                </div></td>
+              </tr>
+              <tr data-name="数据维护-写入示例">
+                <td><input type="checkbox" class="rp-check"></td>
+                <td><a href="#/config/reports/1/edit"><strong>数据维护-写入示例</strong></a></td>
+                <td>主库-交易</td>
+                <td><span class="badge badge-neutral">关</span></td>
+                <td class="muted">验收写护栏（allow_write）…</td>
+                <td class="muted">—</td>
+                <td><div class="ops">
+                  <a class="btn btn-sm btn-secondary" href="#/report/detail">查看</a>
+                  <a class="btn btn-sm btn-secondary" href="#/config/reports/1/edit">编辑</a>
+                  <button class="btn btn-sm btn-ghost" data-demo="复制报表">复制</button>
+                  <button class="btn btn-sm btn-ghost" data-confirm="删除报表「数据维护-写入示例」？" data-danger="1">删除</button>
+                </div></td>
+              </tr>
+              <tr data-name="Markdown备注报表">
+                <td><input type="checkbox" class="rp-check"></td>
+                <td><a href="#/config/reports/1/edit"><strong>Markdown备注报表</strong></a></td>
+                <td>从库-报表</td>
+                <td><span class="badge badge-ok">1h</span></td>
+                <td class="muted">## 备注说明 · 支持 **加粗**…</td>
+                <td class="muted">—</td>
+                <td><div class="ops">
+                  <a class="btn btn-sm btn-secondary" href="#/report/detail">查看</a>
+                  <a class="btn btn-sm btn-secondary" href="#/config/reports/1/edit">编辑</a>
+                  <button class="btn btn-sm btn-ghost" data-demo="复制报表">复制</button>
+                  <button class="btn btn-sm btn-ghost" data-confirm="删除报表「Markdown备注报表」？" data-danger="1">删除</button>
+                </div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination"><span>显示 5 / 7（演示截取）</span></div>
+      </div>
+    </div>
+
+    <div class="batchbar" id="batchbar" aria-live="polite">
+      <span>已选 <span class="cnt" id="batch-count">0</span> 项</span>
+      <div class="right">
+        <button class="btn btn-sm btn-secondary" data-demo="批量设置分类（对话框）">设置分类</button>
+        <button class="btn btn-sm btn-secondary" data-demo="批量设置连接池（对话框）">设置连接池</button>
+        <button class="btn btn-sm btn-secondary" data-demo="批量更新缓存策略（对话框）">缓存策略</button>
+        <button class="btn btn-sm btn-secondary" data-confirm="删除选中的 N 张报表？关联 API 端点将一并下线。" data-danger="1">删除</button>
+        <button class="btn btn-sm btn-ghost" id="batch-cancel">取消选择</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 报表编辑（分区 + sticky） ===== -->
+  <section class="page" id="page-report-edit" data-nav="#/config/reports">
+    <div class="page-head">
+      <div>
+        <div class="crumb"><a href="#/config/reports">报表配置</a> / 编辑</div>
+        <h1>编辑报表 · 订单概览</h1>
+        <div class="sub">分区表单：基础 → SQL → 输出护栏 → 调度与保活 → API 端点</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" data-route="#/report/detail">查看报表</button>
+        <button class="btn btn-secondary" data-demo="新窗口预览未保存 SQL（协议不变）">预览 SQL</button>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h2>① 基础</h2></div>
+        <div class="field"><label>报表名称<span class="req">*</span></label><input class="input" value="订单概览"></div>
+        <div class="form-row">
+          <div class="field"><label>连接池<span class="req">*</span></label>
+            <select class="select"><option>主库-交易</option><option>从库-报表</option></select>
+          </div>
+          <div class="field"><label>所属分类</label>
+            <select class="select"><option>经营分析</option><option>区域销售</option><option>财务核算</option><option>（未分类）</option></select>
+          </div>
+        </div>
+        <div class="field"><label>默认每页行数</label><input class="input" value="20" style="width:120px"></div>
+        <div class="field">
+          <label>备注（Markdown，非必填）</label>
+          <textarea class="textarea"># 订单概览
+基础单结果集报表示例，用于验收分页/筛选/排序。</textarea>
+          <div class="btn-group" style="margin-top:6px">
+            <button class="btn btn-sm btn-secondary" data-demo="备注预览（fetch /memo-preview）">预览备注</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>② SQL</h2></div>
+          <textarea class="sql-editor" id="sql-editor" spellcheck="false">SELECT id, customer, amount, created_at
+FROM orders
+ORDER BY created_at DESC
+LIMIT 100</textarea>
+          <div class="btn-group" style="margin-top:8px">
+            <button class="btn btn-sm btn-secondary" data-demo="已格式化 SQL（_SQL_FORMATTER_JS）">格式化 SQL</button>
+            <button class="btn btn-sm btn-secondary" data-demo="已切换语法高亮预览">显示高亮</button>
+            <button class="btn btn-sm btn-ghost" data-demo="新窗口预览未保存 SQL">未保存预览</button>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>结果名称（每行一个，顺序对应 SELECT 返回；不填自动编号）</label>
+            <textarea class="textarea" style="min-height:64px" placeholder="例如：
+汇总指标
+按城市分布"></textarea>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>③ 输出护栏</h2></div>
+          <div class="field">
+            <label class="check"><input type="checkbox" id="allow-all"> 允许导出全部行（关闭时超出上限将截断）</label>
+            <p class="help">新建默认关闭；存量报表默认开启（历史契约）。开启保存前需确认。</p>
+          </div>
+          <div class="field" id="maxrows-field" style="display:none">
+            <label>截断上限 max_rows</label><input class="input" value="100000" style="width:160px">
+          </div>
+          <div class="field">
+            <label class="check"><input type="checkbox"> 允许写语句执行（allow_write · 本报表 SQL 含写操作时显示）</label>
+            <p class="help">写护栏三端一致：页面 / 导出 / API 同文案拒绝。</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>④ 调度与保活</h2>
+            <div class="actions"><button class="btn btn-sm btn-secondary" data-route="#/config/scheduler">完整任务管理 →</button></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label>定时执行</label>
+              <select class="select"><option>不启用</option><option>按间隔（分钟）</option><option>每天定时</option></select>
+            </div>
+            <div class="field"><label>错过执行补偿</label>
+              <select class="select"><option>跳过</option><option>当天补跑一次</option></select>
+            </div>
+          </div>
+          <div class="field">
+            <label class="check"><input type="checkbox"> 缓存保活（到期前主动重建快照）</label>
+            <p class="help">需 Redis 可用；提前量秒数，0 = 不保活。列表页显示「保活」徽标。</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>⑤ API 端点</h2>
+            <div class="actions"><button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑端点表单</button></div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>名称</th><th>路径</th><th>状态</th><th class="right">操作</th></tr></thead>
+              <tbody>
+                <tr><td>订单概览API</td><td class="mono">/api/orders</td><td><span class="badge badge-ok">启用</span></td>
+                  <td><div class="ops"><button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑</button></div></td></tr>
+                <tr><td>订单概览-智能去引号</td><td class="mono">/api/orders/noquote</td><td><span class="badge badge-ok">启用</span></td>
+                  <td><div class="ops"><button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑</button></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="formbar">
+      <span class="dirty on" id="rp-dirty">有未保存更改</span>
+      <div class="right">
+        <button class="btn btn-secondary" data-route="#/config/reports">取消</button>
+        <button class="btn btn-secondary" data-demo="已保存并返回列表（save_close + flash）">保存并关闭</button>
+        <button class="btn btn-primary" data-demo="已保存（save，留在编辑页）">保存</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== API 接口列表 ===== -->
+  <section class="page" id="page-api" data-nav="#/config/api-endpoints">
+    <div class="page-head">
+      <div><h1>API 接口</h1><div class="sub">报表即服务 · 全局 6 个接口（5 启用）· 静态缓存目录 static_cache/api</div></div>
+      <div class="actions"><button class="btn btn-primary" data-route="#/config/api-endpoints/1/edit">+ 新建接口</button></div>
+    </div>
+
+    <div class="api-row">
+      <div class="api-main">
+        <span class="name">订单概览API</span>
+        <span class="path">/api/orders</span>
+        <span class="muted" style="font-size:13px">报表：订单概览</span>
+        <span class="badge badge-ok">启用</span>
+        <span class="badge badge-neutral">JSON</span>
+        <span class="badge badge-info">2 个 Key</span>
+        <div class="ops">
+          <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders">复制</button>
+          <button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑</button>
+          <button class="btn btn-sm btn-ghost" data-demo="已停用（toggle）">停用</button>
+          <button class="btn btn-sm btn-ghost" data-confirm="删除接口「订单概览API」？调用方将立即收到 404。" data-danger="1">删除</button>
+          <button class="btn btn-sm btn-ghost" data-toggle-api>展开 ▾</button>
+        </div>
+      </div>
+      <div class="api-more">
+        <div class="url-line"><span class="lbl">主地址</span><code>http://127.0.0.1:8080/api/orders</code></div>
+        <div class="url-line"><span class="lbl">全量</span><code>http://127.0.0.1:8080/api/orders?fetch_all=true</code></div>
+        <div class="url-line"><span class="lbl">静态</span><code>http://127.0.0.1:8080/api/orders.json</code><span class="badge badge-ok">静态缓存 开</span></div>
+        <p class="muted" style="margin-top:6px"># 订单概览接口 返回订单列表（悬停查看完整说明）</p>
+      </div>
+    </div>
+
+    <div class="api-row">
+      <div class="api-main">
+        <span class="name">销售多维统计API</span>
+        <span class="path">/api/sales/multi</span>
+        <span class="muted" style="font-size:13px">报表：销售多维统计</span>
+        <span class="badge badge-ok">启用</span>
+        <span class="badge badge-neutral">全部结果集</span>
+        <div class="ops">
+          <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/sales/multi">复制</button>
+          <button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑</button>
+          <button class="btn btn-sm btn-ghost" data-toggle-api>展开 ▾</button>
+        </div>
+      </div>
+      <div class="api-more">
+        <div class="url-line"><span class="lbl">主地址</span><code>http://127.0.0.1:8080/api/sales/multi</code></div>
+        <div class="url-line"><span class="lbl">静态</span><code>—（未开启）</code><button class="btn btn-sm btn-ghost" data-demo="去开启静态缓存">去开启 →</button></div>
+      </div>
+    </div>
+
+    <div class="api-row">
+      <div class="api-main">
+        <span class="name">全量导出API</span>
+        <span class="path">/api/export/big</span>
+        <span class="muted" style="font-size:13px">报表：全量导出报表</span>
+        <span class="badge badge-ok">启用</span>
+        <span class="badge badge-warn">全量允许</span>
+        <div class="ops">
+          <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/export/big">复制</button>
+          <button class="btn btn-sm btn-secondary" data-route="#/config/api-endpoints/1/edit">编辑</button>
+          <button class="btn btn-sm btn-ghost" data-toggle-api>展开 ▾</button>
+        </div>
+      </div>
+      <div class="api-more">
+        <div class="url-line"><span class="lbl">主地址</span><code>http://127.0.0.1:8080/api/export/big</code></div>
+        <div class="url-line"><span class="lbl">全量</span><code>http://127.0.0.1:8080/api/export/big?fetch_all=true</code></div>
+      </div>
+    </div>
+
+    <p class="help">信息分级：主行只保留「名称/路径/状态/主操作」；全量与静态 URL、说明收进展开区（解决旧 12 列过载行）。</p>
+  </section>
+
+  <!-- ===== 端点编辑（分区） ===== -->
+  <section class="page" id="page-api-edit" data-nav="#/config/api-endpoints">
+    <div class="page-head">
+      <div>
+        <div class="crumb"><a href="#/config/api-endpoints">API 接口</a> / 编辑</div>
+        <h1>编辑接口 · 订单概览API</h1>
+      </div>
+      <div class="actions"><button class="btn btn-secondary" data-demo="真实数据预览（previewWithRealData）">真实数据预览</button></div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>① 基本信息</h2></div>
+          <div class="field"><label>接口名称<span class="req">*</span></label><input class="input" value="订单概览API"></div>
+          <div class="field"><label>URL 路径<span class="req">*</span></label>
+            <input class="input mono" value="/api/orders">
+            <p class="help">存储一律 /api/ 前缀（normalize 不变）。</p>
+          </div>
+          <div class="field"><label>接口说明（Markdown）</label>
+            <textarea class="textarea"># 订单概览接口
+返回订单列表，支持分页与排序。</textarea>
+            <div class="btn-group" style="margin-top:6px"><button class="btn btn-sm btn-secondary" data-demo="说明预览（fetch description-preview）">预览说明</button></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>② 请求与输出</h2></div>
+          <div class="form-row">
+            <div class="field"><label>输出格式</label><select class="select" id="ep-format"><option>json</option><option>csv</option></select></div>
+            <div class="field"><label>结果集</label>
+              <select class="select"><option>单结果集</option><option>全部结果集（JSON 数组；CSV 不支持）</option></select>
+            </div>
+            <div class="field"><label>默认行数 row_limit</label><input class="input" value="20"></div>
+            <div class="field"><label>API Key</label>
+              <select class="select"><option>公开（无 Key 记录）</option><option>启用 Key 校验</option></select>
+            </div>
+          </div>
+          <fieldset class="fs">
+            <legend>智能去引号（仅 JSON）</legend>
+            <div class="check-group">
+              <label class="check"><input type="checkbox" checked> 十进制数字</label>
+              <label class="check"><input type="checkbox"> 科学计数法</label>
+              <label class="check"><input type="checkbox"> 千分位数字</label>
+            </div>
+          </fieldset>
+          <fieldset class="fs">
+            <legend>跨域 CORS</legend>
+            <div class="field mb0"><label>允许的 Origin（逗号分隔；留空 = 不返回 CORS 头）</label>
+              <input class="input mono" placeholder="https://a.example.com, https://b.example.com">
+            </div>
+          </fieldset>
+          <div class="field">
+            <label class="check"><input type="checkbox"> 允许 fetch_all 全量拉取</label>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>③ 调用地址</h2></div>
+          <div class="url-line"><span class="lbl">主地址</span><code>http://127.0.0.1:8080/api/orders</code>
+            <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders">复制</button></div>
+          <div class="url-line"><span class="lbl">全量</span><code>http://127.0.0.1:8080/api/orders?fetch_all=true</code>
+            <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders?fetch_all=true">复制</button></div>
+          <div class="url-line"><span class="lbl">静态</span><code>http://127.0.0.1:8080/api/orders.json</code>
+            <span class="badge badge-ok">已开启</span>
+            <button class="btn btn-sm btn-secondary copy-btn" data-copy="http://127.0.0.1:8080/api/orders.json">复制</button></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>④ JSON 模板</h2>
+            <div class="actions"><button class="btn btn-sm btn-ghost" data-demo="模板已重置为默认">重置默认</button></div>
+          </div>
+          <div class="field"><label>输出模板（{{data}} 单结果 / {{results}} 全结果）</label>
+            <textarea class="textarea mono" style="min-height:100px">{"code":0,"list":{{data}},"total":{{total}}}</textarea>
+          </div>
+          <div class="card" style="background:var(--bg-subtle);box-shadow:none;padding:12px;margin-bottom:0">
+            <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">实时预览</div>
+            <div class="code-block mb0">{"code":0,"list":[{"id":1,"customer":"Alice"}],"total":3}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>⑤ API Key</h2>
+            <div class="actions"><button class="btn btn-sm btn-secondary" data-demo="新增 Key（sk- 前缀）">+ 新增 Key</button></div>
+          </div>
+          <p class="help" style="margin-bottom:8px">Key 区保持在主 form 之外（htmlcheck 门禁）。启用/删除均有确认弹层。</p>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Key</th><th>状态</th><th class="right">操作</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">sk-a3f9…c21</td><td><span class="badge badge-ok">启用</span></td>
+                  <td><div class="ops">
+                    <button class="btn btn-sm btn-secondary" data-confirm="禁用该 API Key？调用方立即失效。" data-danger="1">禁用</button>
+                    <button class="btn btn-sm btn-ghost" data-demo="已复制 Key">复制</button>
+                  </div></td></tr>
+                <tr><td class="mono">sk-77b1…e0d</td><td><span class="badge badge-neutral">停用</span></td>
+                  <td><div class="ops">
+                    <button class="btn btn-sm btn-secondary" data-demo="已启用 Key">启用</button>
+                    <button class="btn btn-sm btn-ghost" data-confirm="删除该 API Key？不可恢复。" data-danger="1">删除</button>
+                  </div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="formbar">
+      <span class="dirty on">有未保存更改</span>
+      <div class="right">
+        <button class="btn btn-secondary" data-route="#/config/api-endpoints">取消</button>
+        <button class="btn btn-secondary" data-demo="已保存并返回列表">保存并关闭</button>
+        <button class="btn btn-primary" data-demo="已保存">保存</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 定时任务列表 ===== -->
+  <section class="page" id="page-scheduler" data-nav="#/config/scheduler">
+    <div class="page-head">
+      <div><h1>定时任务</h1><div class="sub">10 个任务 · 列表为主，新建/编辑进入独立表单页</div></div>
+      <div class="actions"><button class="btn btn-primary" data-route="#/config/scheduler/new">+ 新建任务</button></div>
+    </div>
+
+    <div class="banner banner-warn">
+      <svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v4m0 4h.01M10.3 4.3 2.6 18a1.5 1.5 0 0 0 1.3 2.2h16.2a1.5 1.5 0 0 0 1.3-2.2L13.7 4.3a1.5 1.5 0 0 0-2.6 0z"/></svg>
+      <div>定时调度当前为 <strong>停用</strong> 状态（app_config → scheduler.enable=false），任务仅保存不自动执行。</div>
+      <button class="x" onclick="this.closest('.banner').remove()">×</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>任务</th><th>计划</th><th>关联报表</th><th>下次执行</th><th>上次结果</th><th>状态</th><th class="right">操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>订单每日汇总</strong><div class="muted" style="font-size:12px">含静默窗口</div></td>
+            <td>每天 02:00</td>
+            <td>订单概览、销售多维统计</td>
+            <td class="mono">明天 02:00</td>
+            <td><span class="badge badge-ok">成功 1.2s</span></td>
+            <td><span class="badge badge-ok">启用</span></td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-demo="已触发立即执行（审计留痕）">立即执行</button>
+              <button class="btn btn-sm btn-secondary" data-route="#/config/scheduler/new">编辑</button>
+              <button class="btn btn-sm btn-ghost" data-demo="已停用">停用</button>
+              <button class="btn btn-sm btn-ghost" data-confirm="删除任务「订单每日汇总」？" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+          <tr>
+            <td><strong>缓存预热</strong></td>
+            <td>每 60 分钟</td>
+            <td>缓存命中率报表</td>
+            <td class="mono">14:30</td>
+            <td><span class="badge badge-danger">失败 ×5 已熔断</span></td>
+            <td><span class="badge badge-warn">熔断</span></td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-demo="手动触发不受熔断限制，成功后重置失败计数">立即执行</button>
+              <button class="btn btn-sm btn-secondary" data-route="#/config/scheduler/new">编辑</button>
+              <button class="btn btn-sm btn-ghost" data-confirm="删除任务「缓存预热」？" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+          <tr>
+            <td><strong>夜间轻量巡检</strong></td>
+            <td>每 30 分钟</td>
+            <td>临时查询</td>
+            <td class="mono">—（停用）</td>
+            <td><span class="badge badge-neutral">跳过（静默窗口）</span></td>
+            <td><span class="badge badge-neutral">停用</span></td>
+            <td><div class="ops">
+              <button class="btn btn-sm btn-secondary" data-route="#/config/scheduler/new">编辑</button>
+              <button class="btn btn-sm btn-ghost" data-demo="已启用">启用</button>
+              <button class="btn btn-sm btn-ghost" data-confirm="删除任务「夜间轻量巡检」？" data-danger="1">删除</button>
+            </div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="help" style="margin-top:10px">显示 3 / 10（演示）。徽标语义：成功/失败/熔断/静默窗口均为「颜色+文字」双编码；任务级审计默认关，开启后显示「审计」徽标。</p>
+  </section>
+
+  <!-- ===== 任务表单 ===== -->
+  <section class="page" id="page-scheduler-new" data-nav="#/config/scheduler">
+    <div class="page-head">
+      <div>
+        <div class="crumb"><a href="#/config/scheduler">定时任务</a> / 新建</div>
+        <h1>新建定时任务</h1>
+        <div class="sub">原「表单压列表」拆分为独立表单页，列表保持管理主视图</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h2>计划</h2></div>
+        <div class="field"><label>任务名<span class="req">*</span></label><input class="input" placeholder="例如：订单每日汇总"></div>
+        <div class="form-row">
+          <div class="field"><label>调度类型</label><select class="select"><option>按间隔（分钟）</option><option>每天定时</option></select></div>
+          <div class="field"><label>间隔（分钟）</label><input class="input" value="60"></div>
+          <div class="field"><label>错过执行补偿</label><select class="select"><option>跳过</option><option>当天补跑一次</option></select></div>
+          <div class="field"><label>任务级审计</label>
+            <label class="check" style="margin-top:8px"><input type="checkbox"> 记录每次执行到审计日志</label>
+          </div>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" checked> 启用该任务</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>关联报表（按序执行）</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th style="width:36px">绑定</th><th>报表</th><th>顺序</th></tr></thead>
+            <tbody>
+              <tr><td><input type="checkbox" checked></td><td>订单概览（#1）</td><td>1</td></tr>
+              <tr><td><input type="checkbox" checked></td><td>销售多维统计（#2）</td><td>2</td></tr>
+              <tr><td><input type="checkbox"></td><td>缓存命中率报表（#3）</td><td class="muted">—</td></tr>
+              <tr><td><input type="checkbox"></td><td>数据维护-写入示例（#4）</td><td class="muted">—</td></tr>
+              <tr><td><input type="checkbox"></td><td>全量导出报表（#5）</td><td class="muted">—</td></tr>
+              <tr><td><input type="checkbox"></td><td>临时查询（#6）</td><td class="muted">—</td></tr>
+              <tr><td><input type="checkbox"></td><td>Markdown备注报表（#7）</td><td class="muted">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="help">勾选＝绑定并按勾选顺序参与执行；单条失败不中断整包。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>排除规则（静默窗口）</h2>
+        <div class="actions">
+          <button class="btn btn-sm btn-secondary">+ 添加规则</button>
+          <button class="btn btn-sm btn-secondary">+ 规则组</button>
+          <button class="btn btn-sm btn-ghost" data-demo="切换源码视图（children 结构，AND/OR 大写）">源码</button>
+        </div>
+      </div>
+      <p class="help" style="margin-bottom:10px">任一规则命中则本次不执行；解析失败按「不排除」处理（保持现状语义）。与报表嵌套筛选结构不同，勿混用。</p>
+      <div class="rule-group">
+        <div class="ghead">组关系 <select class="select" style="width:auto;height:24px;font-size:12px"><option>AND</option><option>OR</option></select>
+          <span style="margin-left:auto">叶子规则 2 条</span>
+        </div>
+        <div class="rule-row">
+          <select class="select"><option>星期（dow）</option><option>时段（tod）</option><option>日期（date）</option><option>日期区间</option></select>
+          <select class="select"><option>等于</option><option>属于</option></select>
+          <input class="input" value="0,6" placeholder="0-6">
+          <button class="btn btn-sm btn-ghost">✕</button>
+        </div>
+        <div class="rule-row">
+          <select class="select"><option>时段（tod）</option></select>
+          <select class="select"><option>位于</option></select>
+          <input class="input" value="01:00-05:00">
+          <button class="btn btn-sm btn-ghost">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="formbar">
+      <span class="dirty on">有未保存更改</span>
+      <div class="right">
+        <button class="btn btn-secondary" data-route="#/config/scheduler">取消</button>
+        <button class="btn btn-primary" data-demo="已保存任务（upsert 同步 schedule_reports）">保存任务</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 审计 ===== -->
+  <section class="page" id="page-audit" data-nav="#/audit">
+    <div class="page-head">
+      <div><h1>审计日志</h1><div class="sub">四类记录：操作 / 页面访问 / API / 调度 · 关键字与报表筛选同一语法</div></div>
+      <div class="actions">
+        <button class="btn btn-secondary" data-demo="已导出 CSV（export=csv 协议不变）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>导出 CSV
+        </button>
+        <button class="btn btn-secondary" data-confirm="清理审计日志？将按保留期删除过期记录，且不可恢复。" data-danger="1">清理过期</button>
+      </div>
+    </div>
+
+    <div class="filterbar">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input class="input" placeholder="关键字（action / 实体 / 路径 / 用户）">
+      </div>
+      <select class="select"><option>全部类型</option><option>operation 操作</option><option>web_access 页面访问</option><option>api 接口调用</option><option>scheduler 调度</option></select>
+      <input class="input" placeholder="用户" style="width:110px">
+      <div class="date-chips">
+        <button class="chip on">今天</button>
+        <button class="chip">近 7 天</button>
+        <button class="chip">近 30 天</button>
+        <input class="input" type="date" style="width:140px;height:26px;font-size:12px">
+        <span class="muted">→</span>
+        <input class="input" type="date" style="width:140px;height:26px;font-size:12px">
+      </div>
+      <button class="btn btn-sm btn-primary">应用</button>
+      <button class="btn btn-sm btn-ghost" data-demo="已清除筛选">清除</button>
+      <button class="btn btn-sm btn-ghost" data-open="drawer-help">语法帮助</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>时间</th><th>类型</th><th>操作</th><th>实体</th><th>路径</th><th>用户</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">2026-09-25 14:31:02</td><td><span class="badge badge-info">api</span></td><td>api_call</td><td class="mono">/api/orders</td><td class="mono">/api/orders</td><td class="mono">api_key:sk-a3f9…</td></tr>
+          <tr><td class="mono">2026-09-25 14:30:18</td><td><span class="badge badge-neutral">web</span></td><td>page_view</td><td>报表详情</td><td class="mono">/report?id=1</td><td>admin</td></tr>
+          <tr><td class="mono">2026-09-25 14:29:55</td><td><span class="badge badge-warn">scheduler</span></td><td>schedule_run</td><td>缓存预热</td><td class="muted">—</td><td class="muted">—</td></tr>
+          <tr><td class="mono">2026-09-25 14:20:03</td><td><span class="badge badge-ok">operation</span></td><td>report_edit</td><td>订单概览</td><td class="mono">/config/reports/1/edit</td><td>admin</td></tr>
+          <tr><td class="mono">2026-09-25 09:02:41</td><td><span class="badge badge-ok">operation</span></td><td>login</td><td>会话建立</td><td class="mono">/login</td><td>admin</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <span>共 1,204 条 · 第 1/241 页</span>
+      <div class="pages">
+        <button class="page-btn" disabled>‹</button>
+        <button class="page-btn cur">1</button><button class="page-btn">2</button><button class="page-btn">3</button>
+        <button class="page-btn">…</button><button class="page-btn">241</button>
+        <button class="page-btn">›</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 覆盖清单附录 ===== -->
+  <section class="page appendix" id="page-appendix" data-nav="#/appendix">
+    <div class="page-head">
+      <div><h1>附录 · 功能/交互覆盖清单</h1>
+      <div class="sub">与 T1《ui-redesign-inventory.md》同源生成（脚本转换），每条含来源与新方案去向；实施与验收以该清单为准。</div></div>
+    </div>
+    <div class="proto-note">
+      <strong>核对方法：</strong>逐条查看「新方案去向」列——「保留 / 重构 / 移位 / 拆分 / 合并 / 删除（含理由） / 保持」；若发现某条去向不符合预期，请在确认时指出条目编号（R/C/E 或小节号）。
+    </div>
+    <div id="appendix-body"><h2>功能/交互覆盖清单（ui-redesign · T1）</h2>
+<p>用途：重构的防遗漏基准。每条含「功能/约定/交互 → 来源 → 新方案去向」。</p>
+<p>来源基准：<code>docs/compose/knowledge/</code>（INDEX §2 路由总表、§3 页面地图、06 UI 分卷）→ 源码核对 → README-CN 功能特性与页面说明。</p>
+<p>「新方案去向」列由 T3 信息架构方案填写；T3 完成后本清单不得残留空缺。</p>
+<p>最后更新：2026-09-25（T1 成稿）</p>
+<h2>0. 清单口径</h2>
+<ul>
+<li><strong>路由级</strong>：<code>server.py</code> <code>ROUTES</code> 全部 17 行（顺序首次匹配）+ 静态 vendor 直出 + 404/405/500 错误页。</li>
+<li><strong>页面级</strong>：每个用户可见页面的功能、控件、交互、状态与来源。</li>
+<li><strong>约定级</strong>：跨页面共享的交互约定（必须在新方案中保留或显式改造）。</li>
+<li><strong>组件级</strong>：<code>render.py</code> 单一来源的全部 <code>build_*</code> / <code>render_*</code> / CSS/JS 资产。</li>
+<li><strong>功能特性级</strong>：README-CN「功能特性」46 项逐条映射 UI 承载（或标注为非 UI 后端能力）。</li>
+</ul>
+<h2>1. 路由级条目（server.py ROUTES，全 17 行）</h2>
+<table><thead><tr><th>#</th><th>方法</th><th>模式</th><th>auth</th><th>db</th><th>页面/行为</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>R1</td><td>GET</td><td><code>^/favicon\.ico$</code></td><td>否</td><td>否</td><td>favicon（branding 三模式 default/color/custom）</td><td>server.py ROUTES、02 卷</td><td>保留（favicon 机制不变，视觉随 branding 令牌化）</td></tr>
+<tr><td>R2</td><td>GET/POST</td><td><code>^/login$</code></td><td>否</td><td>否</td><td>登录页/提交；失败限流 5 次/5 分钟；过期提示 + <code>next</code> 白名单</td><td>server.py:59-167、02 卷</td><td>重构→/login（统一视觉；限流/过期/next 语义不变）</td></tr>
+<tr><td>R3</td><td>GET</td><td><code>^/health$</code></td><td>否</td><td>否</td><td>JSON 健康检查（status+uptime）</td><td>02 卷</td><td>保持（非 UI）</td></tr>
+<tr><td>R4</td><td>GET</td><td><code>^/?$</code></td><td>是</td><td>否</td><td>首页 302 → <code>/report</code></td><td>02 卷</td><td>保持（302→报表中心）</td></tr>
+<tr><td>R5</td><td>GET</td><td><code>^/logout$</code></td><td>是</td><td>否</td><td>退出登录</td><td>02 卷</td><td>移位→侧栏底部账户区入口（URL 不变）</td></tr>
+<tr><td>R6</td><td>GET/POST</td><td><code>^/config/api-endpoints$</code></td><td>是</td><td>是</td><td>独立 API 管理页</td><td>INDEX §2、config.py:2754</td><td>重构→API 接口列表页（同 URL，行卡片+展开布局）</td></tr>
+<tr><td>R7</td><td>GET</td><td><code>^/config/reports$</code></td><td>是</td><td>是</td><td>报表列表（含分类树+批量）</td><td>config.py:737</td><td>重构→报表配置页（同 URL，左树右表+浮出批量条）</td></tr>
+<tr><td>R8</td><td>POST</td><td><code>^/config/reports/memo-preview$</code></td><td>是</td><td>否</td><td>备注 Markdown 预览（fetch）</td><td>config.py:1890</td><td>保留（fetch 预览协议不变，挂载编辑表单备注区）</td></tr>
+<tr><td>R9</td><td>GET</td><td><code>^/config/categories$</code></td><td>是</td><td>是</td><td>旧分类页 → 重定向 <code>/config/reports#sec-categories</code></td><td>04 卷、README 页面说明</td><td>保持（重定向不变；锚点改左树选中定位并保留兼容）</td></tr>
+<tr><td>R10</td><td>POST</td><td><code>^/config/api-endpoints/description-preview$</code></td><td>是</td><td>否</td><td>接口说明 Markdown 预览（fetch）</td><td>config.py:1901</td><td>保留（fetch 预览协议不变，挂载端点说明区）</td></tr>
+<tr><td>R11</td><td>POST</td><td><code>^/config/site-branding$</code></td><td>是</td><td>是</td><td>站点标识保存</td><td>config.py:875</td><td>移位→概览页设置区块（POST 不变）</td></tr>
+<tr><td>R12</td><td>*</td><td>`^/config($</td><td>/)`</td><td>是</td><td>是</td><td>配置门户 + pools/users/报表表单/分类/调度/预设导入等全部 config 分支</td><td>config.handle_request:2107</td></tr>
+<tr><td>R13</td><td>*</td><td>`^/report($</td><td>/)`</td><td>是</td><td>是</td><td>报表选择页 / 报表详情 / POST refresh_cache / <code>/report/preview</code></td><td>report.handle_request:1775</td></tr>
+<tr><td>R14</td><td>*</td><td>`^/export($</td><td>/)`</td><td>是</td><td>是</td><td>CSV/JSON/ZIP 导出下载</td><td>export.handle_export:319</td></tr>
+<tr><td>R15</td><td>*</td><td><code>^/api/</code></td><td>否</td><td>是</td><td>数据 API（Bearer/api_key；非页壳）</td><td>api_handler:55、05 卷</td><td>保持（非页壳）</td></tr>
+<tr><td>R16</td><td>*</td><td>`^/audit($</td><td>/)`</td><td>是</td><td>否</td><td>审计日志页（只连 audit.db）</td><td>audit_page</td></tr>
+<tr><td>R17</td><td>GET</td><td><code>/static/vendor/&lt;name@ver&gt;/&lt;file&gt;</code></td><td>否</td><td>否</td><td>白名单静态直出（common.css/js 等）</td><td>02 卷</td><td>保持（机制不变）</td></tr>
+</tbody></table>
+<p>补充（不在 ROUTES 表独立行但用户可达）：</p>
+<table><thead><tr><th>条目</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>E1</td><td><code>POST /config/pools/test</code> 测试连接（不落库，密码留空=沿用）</td><td>04 卷</td><td>保留（连接池表单按钮，协议不变）</td></tr>
+<tr><td>E2</td><td><code>POST /config/test-cases/import</code> DEBUG 预设夹具导入（confirm）</td><td>config.py:930、04 卷</td><td>移位→概览 DEBUG 区块（同现状，视觉统一）</td></tr>
+<tr><td>E3</td><td>404/405/500 统一 <code>_render_error_page</code></td><td>02 卷、server.py:172</td><td>重构→统一错误页（令牌化+返回入口）</td></tr>
+</tbody></table>
+<h2>2. 页面级功能与交互</h2>
+<h3>2.1 <code>/login</code> 登录页</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>登录表单</td><td>username/password POST <code>/login</code>，autofill autocomplete，提交按钮「登 录」</td><td>server.py:59</td><td>保留（并入统一表单组件）</td></tr>
+<tr><td><code>next</code> 回跳</td><td>仅 <code>/</code> 开头且非 <code>//</code>/<code>/\</code> 白名单，隐藏字段透传</td><td>server.py:155-170、02 卷</td><td>保持（协议不变）</td></tr>
+<tr><td>错误/过期/限流状态</td><td>error（红）/notice（黄）两种提示；<code>expired=1</code> 过期提示；5 分钟 5 次限流拒绝</td><td>server.py:135、auth.py</td><td>保留（统一状态条组件）</td></tr>
+<tr><td>独立页壳</td><td><code>_LOGIN_PAGE</code> + <code>_BASE_CSS</code>，紫渐变全屏背景，卡片式表单</td><td>server.py:59-127</td><td>删除（紫渐变独立壳废除，登录并入全站令牌布局）</td></tr>
+<tr><td>版本页脚</td><td>「Web 报表工具 v1.0」</td><td>server.py:124</td><td>改名→页脚显示产品名+版本（branding 感知）</td></tr>
+</tbody></table>
+<h3>2.2 <code>/report</code>（无 id）报表选择页</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>分类树状下拉</td><td>按分类树层级缩进生成 option，<code>onchange</code> 自动提交跳转报表</td><td>report.py:1266、render.py:2198</td><td>重构→报表中心左分类树（点击筛选右网格）；紧凑切换 select 仅留详情页头部</td></tr>
+<tr><td>最近查看卡片</td><td>localStorage <code>sqlreport_recent</code> 去重保序、最多 8 条，服务端挂载点渲染</td><td>report.py:1360、render.py:512-527</td><td>重构→报表中心顶部卡片横排（空则隐藏，key 不变）</td></tr>
+<tr><td>分类树选择器</td><td><code>build_report_switcher_html</code> 分组树状选择</td><td>render.py:2156</td><td>合并→报表中心（左树+右卡片网格，单一入口）</td></tr>
+</tbody></table>
+<h3>2.3 <code>/report?id=</code> 报表详情页（核心页）</h3>
+<p>页面顺序（06 卷）：header → 切换器 → Redis 横幅 → flash → memo → 调试/规则/API URL 折叠 → 控制栏+排序条+表格+分页+字段/排序面板+隐藏筛选 form → 自定义 <code>_FOOTER</code>（再次内联 <code>_COMMON_JS</code>）。</p>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>报表切换器</td><td>下拉/树状切换报表，自动跳转</td><td>render.py:2156、report.py:1686</td><td>重构→详情头部紧凑 select + 报表中心入口（整宽切换卡废除）</td></tr>
+<tr><td>Redis 横幅</td><td><code>build_redis_banners_html</code> 缓存来源/降级提示</td><td>render.py:1275</td><td>重构→状态横幅（仅异常出现，人话文案）</td></tr>
+<tr><td>flash 提示</td><td>302 <code>?flash=</code> 注入 + 6s 淡出剥参</td><td>render.py:1092、658</td><td>保留（统一 flash 组件换装）</td></tr>
+<tr><td>备注 memo</td><td>Markdown 渲染折叠区 + 三态开关（自动/展开/折叠），按报表 localStorage 记忆</td><td>render.py:1566、437</td><td>重构→Tab「备注」+数据页单行摘要；三态开关删除（按报表记忆保留为折叠态）</td></tr>
+<tr><td>调试区</td><td><code>build_debug_section_html</code> 实际 SQL/连接信息折叠</td><td>render.py:1301</td><td>移位→Tab「调试」</td></tr>
+<tr><td>当前规则区</td><td>筛选/排序/列 JSON 展示，复制/应用按钮</td><td>render.py:1488</td><td>合并→Tab「规则」（与嵌套构建器/排序列表合一）</td></tr>
+<tr><td>API URL 区</td><td><code>build_api_urls_section_html</code> + <code>initApiUrls</code> 复制</td><td>render.py:4177、422</td><td>移位→Tab「接口」（复制组件统一）</td></tr>
+<tr><td>控制栏</td><td>页大小 10/20/50/100/200 自动提交、刷新、编辑跳转、导出 form</td><td>render.py:1859</td><td>重构→数据页工具行（主操作=刷新；导出入对话框；设置入抽屉）</td></tr>
+<tr><td>导出内联 form</td><td><code>/export</code> GET：format CSV/JSON、charset GBK/UTF-8、zip、智能去引号 details（十进制/科学计数/千分位 flags 1/2/4）、CSV 提示</td><td>render.py:1890-1980</td><td>合并→统一导出对话框（参数协议不变，选项常显）</td></tr>
+<tr><td>排序条</td><td><code>build_sort_bar_html</code> 列头 ▲▼ 组合排序展示与移除</td><td>render.py:1688</td><td>保留→数据页排序 chips 行（组件换装）</td></tr>
+<tr><td>结果表格</td><td>表头悬浮吸附、列头点击排序、行内筛选输入（<code>f_</code>/<code>op_</code>）、10 操作符下拉、<code>?</code> 筛选帮助弹窗</td><td>render.py:1725/1832、filter_help.py</td><td>重构→通用数据表组件（吸附表头/列排序/快速筛选/帮助收敛保留）</td></tr>
+<tr><td>分页</td><td>总页数、跳转输入 <code>goPage</code>、页码链接</td><td>render.py:1198</td><td>保留→通用分页组件（跳转防误触）</td></tr>
+<tr><td>字段设置面板</td><td>拖拽/上下移排序、显隐勾选、全选/全不选、应用；列设置 localStorage <code>sqlreport_cols_{id}</code></td><td>render.py:1990、543</td><td>重构→右侧抽屉（遮罩+ESC+焦点管理）</td></tr>
+<tr><td>排序设置面板</td><td>添加/删除/调序、应用</td><td>render.py:2037</td><td>重构→右侧抽屉（与列设置同组件族）</td></tr>
+<tr><td>嵌套筛选构建器</td><td>and/or 分组、条件增删、<code>now()/today()</code> 等表达式插入、JSON 载入、应用/清除</td><td>render.py:1348</td><td>合并→「高级筛选」抽屉（可视化构建/规则预览双视图）</td></tr>
+<tr><td>结果集 tab</td><td>多结果集 <code>result=N</code> 切换，独立筛选/排序状态</td><td>render.py:1589、3151</td><td>重构→数据页结果集分段控件（多结果集状态协议不变）</td></tr>
+<tr><td>缓存徽标与重建</td><td>快照时间/TTL/已过期警示；<code>action=refresh_cache</code> POST 302 保留 page/sort/cols/result</td><td>render.py:1636、report.py:1699</td><td>重构→轻量缓存状态行 + 刷新确认（术语翻译，refresh 协议不变）</td></tr>
+<tr><td>截断横幅</td><td>全量输出护栏截断提示（max_rows 上限 + 编辑页开启指引）</td><td>03 卷、README 报表页</td><td>保留→状态横幅组件（文案统一）</td></tr>
+<tr><td>写护栏横幅</td><td><code>WRITE_ALLOWED_BANNER</code> / 拒绝提示（三端同文案）</td><td>03 卷</td><td>保留→状态横幅组件（三端同文案保持）</td></tr>
+<tr><td>非法筛选 flash</td><td>数值筛选非法仅 Web 页提示</td><td>report.py:1756</td><td>保留（协议不变，组件换装）</td></tr>
+<tr><td>接口说明折叠</td><td>每端点「接口说明」Markdown 独立折叠 + 三态开关（按端点 id 记忆），摘要 40 字截断悬停</td><td>README 报表页、06 卷</td><td>移位→Tab「接口」端点说明卡；三态删除（默认展开）</td></tr>
+<tr><td>锚点行高亮</td><td><code>initAnchorRowHighlight</code></td><td>render.py:681</td><td>保留（行为不变，样式令牌化）</td></tr>
+<tr><td>loading 遮罩</td><td><code>initQueryLoadingOverlay</code> 仅 <code>/report</code> 与 <code>.btn-refresh</code>（排除 <code>/export</code>）</td><td>render.py:690</td><td>扩展→全站提交遮罩（导出下载除外）</td></tr>
+</tbody></table>
+<h3>2.4 <code>/report/preview</code> 与编辑页联动</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>未保存 SQL 预览</td><td>编辑页【预览】新窗口 POST 当前表单 SQL，实时查看结果</td><td>README、config.py:1165</td><td>保留→SQL 分区工具组按钮</td></tr>
+<tr><td>查看-编辑双向关联</td><td>详情页【编辑】→ 编辑页；编辑页【查看】→ 详情页</td><td>README 编辑-查看双向关联</td><td>保留→统一操作组位置（详情头部 / 编辑底栏）</td></tr>
+<tr><td>memo 预览</td><td>编辑表单备注 Markdown fetch 预览</td><td>config.py:1890</td><td>保留→备注区 fetch 预览</td></tr>
+</tbody></table>
+<h3>2.5 <code>/export</code> 导出</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>导出触发</td><td>控制栏内联 form GET <code>/export</code>（非独立页面）；保留筛选/排序/列/结果集</td><td>render.py:1890、03 卷</td><td>合并→统一导出对话框（唯一入口；GET 协议与参数不变）</td></tr>
+<tr><td>格式/字符集/ZIP/智能去引号</td><td>CSV 默认、GBK 默认、zip=1、smart_quotes flags</td><td>03 卷、README 导出</td><td>保留→对话框字段组（常显，废除 popover 藏匿）</td></tr>
+<tr><td>截断标记</td><td>头 <code>X-Export-Truncated</code>、CSV 尾注、JSON <code>_meta.truncated</code></td><td>03 卷</td><td>保持（非 UI）</td></tr>
+</tbody></table>
+<h3>2.6 <code>/config</code> 配置门户（render_overview）</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>首部署引导</td><td>无连接池时三步指引横幅（添加池→建报表→发布 API）</td><td>config.py:973 onboarding</td><td>移位→报表中心空态 + 概览空态（文案复用）</td></tr>
+<tr><td>连接池列表区</td><td><code>build_pool_section_html</code>：列表+报表关联数、添加/编辑/复制/删除（confirm 披露破坏半径）、上下移动、测试连接</td><td>render.py:2438、config.py:691</td><td>移位→/config/pools 独立列表页</td></tr>
+<tr><td>用户列表区</td><td><code>build_user_section_html</code>：添加/编辑/删除；隐藏自身删除行</td><td>render.py:2482</td><td>移位→/config/users 独立列表页</td></tr>
+<tr><td>报表管理卡</td><td>报表总数/分类数 + 入口 <code>/config/reports</code></td><td>config.py:1026</td><td>合并→概览统计磁贴+快捷入口（大卡片留白废除）</td></tr>
+<tr><td>分类管理卡</td><td>分类数 + 入口 <code>/config/reports#sec-categories</code></td><td>config.py:1036</td><td>合并→概览统计磁贴（分类管理在报表配置页左树）</td></tr>
+<tr><td>API 接口卡</td><td>接口数 + 前 5 个接口名称/路径/说明摘要（截断+title）+ 入口</td><td>config.py:996</td><td>合并→概览统计磁贴+快捷入口（内嵌清单废除）</td></tr>
+<tr><td>站点标识区</td><td>favicon 三模式（内置/纯色/自定义 PNG·ICO ≤256KB）、标签页前缀、颜色带 <code>#</code>、保存即刷</td><td>render_overview <code>_render_branding_section</code>、04 卷</td><td>保留→概览设置区块（表单组件换装）</td></tr>
+<tr><td>DEBUG 测试数据卡</td><td>仅 DEBUG：预设夹具导入 confirm POST</td><td>config.py:1040</td><td>保留→概览 DEBUG 区块（仅 DEBUG）</td></tr>
+<tr><td>flash</td><td>302 后提示</td><td>config.py:984</td><td>保留（组件换装）</td></tr>
+</tbody></table>
+<h3>2.7 <code>/config/pools</code> 连接池表单</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>新增/编辑/复制表单</td><td><code>build_pool_form_html</code>；保存双按钮 <code>save</code>（留页）/<code>save_close</code>（302+flash）</td><td>render.py:2285、04 卷</td><td>保留→/config/pools 表单页（分区：连接信息）</td></tr>
+<tr><td>测试连接</td><td>「测试连接」按钮 POST <code>/config/pools/test</code>，不落库；密码留空=沿用</td><td>render.py:2337、04 卷</td><td>保留（结果统一为行内状态条）</td></tr>
+<tr><td>删除</td><td>confirm + 关联报表数披露</td><td>config.py:1502</td><td>保留（统一确认弹层+破坏半径披露）</td></tr>
+<tr><td>上下移动</td><td><code>build_move_buttons_html</code></td><td>render.py:2257</td><td>保留→列表排序模式（组件换装）</td></tr>
+</tbody></table>
+<h3>2.8 <code>/config/users</code> 用户表单</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>新增/编辑/删除</td><td><code>build_user_form_html</code>；改密/改名清 sessions；禁止删除当前登录用户</td><td>render.py:2383、04 卷</td><td>保留→/config/users 表单页（会话约束不变）</td></tr>
+<tr><td>保存双按钮</td><td>save / save_close 模式</td><td>04 卷</td><td>重构→sticky 底栏「保存/保存并关闭/取消」（全站表单统一）</td></tr>
+<tr><td>flash 防泄露</td><td>不回显明文密码</td><td>04 卷易踩坑</td><td>保持（约束不变）</td></tr>
+</tbody></table>
+<h3>2.9 <code>/config/reports</code> 报表列表页（render_reports_page）</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>分类树区块</td><td><code>build_category_section_html</code> 树状分组缩进，整体折叠（localStorage <code>cat_tree_collapsed</code> / <code>data-mem-key</code>）</td><td>render.py:2588、314</td><td>移位→页左栏常驻分类树（独立折叠区块废除）</td></tr>
+<tr><td>报表行操作</td><td>查看（新窗）/编辑（新窗）/复制/删除 confirm/上下移动</td><td>README 报表列表</td><td>重构→查看/编辑主链接 +「更多」菜单收纳复制/删除/移动</td></tr>
+<tr><td>徽标</td><td>⏰ 定时启用、♻ 缓存保活</td><td>render.py:4335、README</td><td>重构→文字徽标「定时」「保活」（emoji 废除）</td></tr>
+<tr><td>备注摘要</td><td>前 15 字符截断预览</td><td>README</td><td>保留（悬停全文）</td></tr>
+<tr><td>前端过滤框</td><td><code>build_config_filter_box_html</code> + <code>initConfigFilter</code></td><td>render.py:1013、493</td><td>保留→页头搜索框（组件换装）</td></tr>
+<tr><td>批量操作</td><td>全选/反选（分类级）、批量删除/改连接池/改分类/改缓存策略（含 TTL 输入切换）；跨分类移动下拉</td><td>render.py:2622-2642、config.py:1758-1869</td><td>重构→选中后底部浮出批量条（功能全保留）</td></tr>
+<tr><td>分类管理区块</td><td><code>build_category_manage_section_html</code>：树形增删改名/调序/新增子类</td><td>render.py:2520</td><td>移位→左栏树节点操作（增删改名/排序/新增子类）</td></tr>
+<tr><td>锚点定位</td><td><code>#sec-categories</code> 直达分类区块</td><td>config.py 路由注释</td><td>改名→左树选中定位（URL 锚点兼容保留）</td></tr>
+</tbody></table>
+<h3>2.10 报表编辑表单（/config/reports/add|edit|copy）</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>SQL 编辑器</td><td>Tab 缩进 <code>initSqlEditorTabIndent</code>、格式化按钮 <code>_SQL_FORMATTER_JS</code>、语法高亮预览切换 <code>_SQL_HIGHLIGHT_JS</code></td><td>render.py:596/729/755</td><td>保留→SQL 分区（Tab 缩进/格式化/高亮/预览按钮组保留）</td></tr>
+<tr><td>字段</td><td>名称/SQL/连接池/默认页大小/分类/备注（Markdown 预览）</td><td>README、config.py:1165</td><td>合并→「基础」+「SQL」分区</td></tr>
+<tr><td>全量输出护栏</td><td><code>allow_all_output</code> 开关 + max_rows 输入（开关开启保存前 confirm）；报表含写 SQL 才显示 <code>allow_write</code>，新建默认 0</td><td>04 卷、README</td><td>移位→「输出护栏」分区（逻辑不变）</td></tr>
+<tr><td>定时执行折叠区</td><td>启用、间隔分钟或每天 HH:MM、错过补偿 skip/run_once；保存同步任务行</td><td>README 报表编辑</td><td>移位→「调度与保活」分区（完整管理链调度页）</td></tr>
+<tr><td>缓存保活折叠区</td><td>提前量秒数，0=不保活；需 Redis</td><td>README、07 卷</td><td>移位→「调度与保活」分区</td></tr>
+<tr><td>API 端点区</td><td>端点表单/预览/说明 Markdown/Key 管理（<strong>主 form 外</strong>）</td><td>render.py:3382/3855、05 卷</td><td>移位→「API 端点」分区（Key 区仍在主 form 外）</td></tr>
+<tr><td>保存</td><td><code>save</code> 留页 / <code>save_close</code> 返回列表 + flash</td><td>04 卷</td><td>重构→sticky 底栏三键（save/save_close 协议映射不变）</td></tr>
+</tbody></table>
+<h3>2.11 <code>/config/api-endpoints</code> 与端点表单</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>全局接口列表</td><td><code>build_api_endpoints_list_html</code>：关联报表、路径、启停、删除 confirm、复制 URL</td><td>render.py:2865</td><td>重构→行卡片+展开（主 URL 优先，次要 URL 收起）</td></tr>
+<tr><td>端点表单</td><td>名称/路径/输出格式/智能引号/模板/CORS/预设/分页/<code>allow_fetch_all</code>；URL 联动更新（static/fetch-all 复制按钮）</td><td>render.py:3382、3674-3816</td><td>重构→分区表单（基本信息/请求与输出/模板/预设与 Key）</td></tr>
+<tr><td>模板预览</td><td><code>{{data}}/{{results}}</code> 实时渲染、重置默认</td><td>render.py:3784</td><td>保留→模板分区实时预览</td></tr>
+<tr><td>接口说明</td><td>Markdown + fetch 预览（description-preview）</td><td>config.py:1901、render.py:3515</td><td>保留→说明字段（fetch 预览保留）</td></tr>
+<tr><td>Key 管理</td><td>多 Key 启停/删除 confirm/新增；<code>sk-</code> 前缀；<strong>主 form 之外</strong>（htmlcheck 门禁）</td><td>render.py:3855、05 卷</td><td>保留→独立 Key 区块（主 form 外门禁保持）</td></tr>
+<tr><td>真实数据预览</td><td><code>previewWithRealData()</code></td><td>render.py:3477</td><td>保留→基本信息区按钮</td></tr>
+<tr><td>静态缓存状态</td><td><code>updateStaticCacheState</code>、版本化 <code>.json</code> URL 展示</td><td>render.py:3674、05 卷</td><td>保留→请求输出区状态行（术语翻译）</td></tr>
+</tbody></table>
+<h3>2.12 <code>/config/scheduler</code> 定时任务页</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>任务列表</td><td><code>build_scheduler_page_html</code>：任务名、关联报表（按序）、下次执行、上次结果（耗时）、失败计数、审计标记、熔断标记</td><td>render.py:4454、README</td><td>重构→列表主导（行卡片，信息分级）</td></tr>
+<tr><td>单任务操作</td><td>立即执行/启停/删除（confirm）</td><td>config.py:1959-1995</td><td>保留（按钮换装；删除入「更多」）</td></tr>
+<tr><td>任务表单</td><td><code>build_scheduler_task_form_html</code>：interval/daily、多报表绑定、错过补偿、审计开关</td><td>render.py:4746</td><td>拆分→/config/scheduler/new 与 /{id}/edit 独立表单页</td></tr>
+<tr><td>排除规则编辑器</td><td>静默窗口树：<code>dow/tod/date/date_range</code> 叶子、AND/OR 分组（<code>children</code> 结构，≠ nested_filter）</td><td>07 卷、03 卷</td><td>保留→表单内组件（分组树交互统一）</td></tr>
+<tr><td>全局停用横幅</td><td><code>scheduler.enable=false</code> 顶部提示</td><td>06 卷/README</td><td>保留→页顶状态横幅（人话文案）</td></tr>
+<tr><td>🔇 徽标</td><td>已配置排除规则</td><td>README</td><td>改名→「含静默窗口」文字徽标（emoji 废除）</td></tr>
+</tbody></table>
+<h3>2.13 <code>/audit</code> 审计页</h3>
+<table><thead><tr><th>功能/交互</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>筛选</td><td>type/date_from/date_to/session_user/keyword（共用 <code>parse_filter_expr</code> 语义）</td><td>02 卷、render.py:3933</td><td>重构→统一筛选条组件（参数与语义不变）</td></tr>
+<tr><td>日期快捷</td><td>快捷选择按钮</td><td>06 卷页面地图</td><td>保留→筛选条内快捷 chips</td></tr>
+<tr><td>分页 + 导出 CSV</td><td><code>?export=csv</code></td><td>render.py:4143、07 卷</td><td>保留（导出入操作区按钮）</td></tr>
+<tr><td>清理</td><td>POST clean + confirm</td><td>07 卷</td><td>保留（统一确认+危险分级）</td></tr>
+<tr><td>进页轮转</td><td>每次进页 <code>_rotate_expired</code>（非 UI 约定）</td><td>02 卷</td><td>保持（非 UI）</td></tr>
+</tbody></table>
+<h2>3. 跨页面共享交互约定（新方案须保留或显式改造）</h2>
+<table><thead><tr><th>#</th><th>约定</th><th>说明</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>C1</td><td>整页 GET/POST 刷新，无 SPA</td><td>状态经 URL 参数/hidden 透传</td><td>06 卷</td><td>保持（整页刷新模式；抽屉/对话框为页内增强）</td></tr>
+<tr><td>C2</td><td>flash 模式</td><td>成功 302 + <code>?flash=</code>（须 quote）+ 6s 淡出 + <code>initFlashMessages</code> 剥参</td><td>06 卷、02 卷</td><td>保留→统一 flash 组件（剥参逻辑不变）</td></tr>
+<tr><td>C3</td><td>危险操作 confirm</td><td>原生 <code>confirm</code> + POST；无第二套 modal</td><td>06 卷原则</td><td>重构→统一确认弹层（仍基于 build 组件，无框架；文案模板化）</td></tr>
+<tr><td>C4</td><td>checkbox 双字段</td><td><code>hidden 0</code> + checkbox <code>1</code>，<code>parse_qs</code> 取最后值</td><td>04 卷、06 卷</td><td>保持（checkbox 协议不变）</td></tr>
+<tr><td>C5</td><td>保存双按钮</td><td><code>action=save</code> 留页 / <code>save_close</code> 302 回列表</td><td>04 卷</td><td>重构→sticky 底栏三键（save/save_close 语义映射）</td></tr>
+<tr><td>C6</td><td>localStorage 约定</td><td>树折叠 <code>cat_tree_collapsed</code>、<code>data-mem-key</code>、最近查看 <code>sqlreport_recent</code>、列设置 <code>sqlreport_cols_{id}</code>、memo/说明三态开关</td><td>render.py:304-570</td><td>保留（key 不变；三态记忆改为普通折叠记忆）</td></tr>
+<tr><td>C7</td><td>loading 遮罩</td><td><code>initQueryLoadingOverlay</code>：<code>preventDefault</code> 后须自行 <code>form.submit()</code>；仅 <code>/report</code> 与 <code>.btn-refresh</code>，排除 <code>/export</code></td><td>render.py:690、06 卷</td><td>扩展→全站提交遮罩（导出排除；统一封装自提交）</td></tr>
+<tr><td>C8</td><td>内联 onclick 体系</td><td>面板/折叠/复制/批量/嵌套筛选等大量内联事件</td><td>render.py onclick 清单</td><td>重构→公共 JS 统一事件初始化（减少内联 onclick）</td></tr>
+<tr><td>C9</td><td>筛选语法单一来源</td><td><code>result_transform.parse_filter_expr</code> + <code>filter_help.py</code> 帮助弹窗（报表/审计/条件构建器共用）</td><td>03 卷</td><td>语义保持；帮助入口重构→统一帮助抽屉（内容源 filter_help 不变）</td></tr>
+<tr><td>C10</td><td>URL 状态参数</td><td><code>id/page/page_size/sort/dir/f_/op_/cols/result/nested_filter/flash</code></td><td>03 卷</td><td>保持（URL 协议）</td></tr>
+<tr><td>C11</td><td>Markdown 渲染</td><td><code>markdown_render</code> 消毒 + mermaid + <code>_MD_CSS</code> 追加末尾</td><td>03 卷、06 卷</td><td>保留（渲染链不变；样式并入令牌）</td></tr>
+<tr><td>C12</td><td>SQL 高亮/格式化</td><td><code>_SQL_HIGHLIGHT_JS</code> / <code>_SQL_FORMATTER_JS</code> 仅编辑表单</td><td>render.py:729/755</td><td>保留（编辑表单 SQL 分区）</td></tr>
+<tr><td>C13</td><td>导航单一来源</td><td><code>_NAV_ITEMS</code>：报表/配置/定时/API/审计/退出</td><td>render.py:907</td><td>重构→侧栏导航 <code>_NAV_GROUPS</code>（替代顶栏 <code>_NAV_ITEMS</code>，一处改原则不变）</td></tr>
+<tr><td>C14</td><td>页壳骨架</td><td><code>render_page_header(title, active_nav, extra_css)</code> + <code>render_page_footer</code>；<code>$</code>→<code>$$</code> 转义</td><td>render.py:967/1004</td><td>重构→侧栏+内容区页壳（仍单一来源；extra_css 保留）</td></tr>
+<tr><td>C15</td><td>公共资产</td><td><code>_BASE_CSS</code>/<code>_COMMON_CSS</code>（=BASE+通用+minibtn+flash+B6）/<code>_COMMON_JS</code>；<code>ensure_common_assets</code> → <code>static/vendor/self@{hash8}/</code>；<strong>hash 只算 CSS</strong></td><td>render.py:287、06 卷</td><td>重构→设计令牌化公共 CSS（合成/ensure_common_assets 保留；hash 覆盖 CSS+JS）</td></tr>
+<tr><td>C16</td><td>报表页 JS 双轨</td><td>报表页 <code>_FOOTER</code> 再次内联 <code>_COMMON_JS</code>（config/audit 走外链）</td><td>06 卷</td><td>重构→JS 单一外链加载（废除报表页内联双轨）</td></tr>
+<tr><td>C17</td><td>锚点行高亮</td><td><code>initAnchorRowHighlight</code></td><td>render.py:681</td><td>保留（行为不变）</td></tr>
+<tr><td>C18</td><td>复制到剪贴板</td><td><code>copyToClipboard</code>（Key、URL、规则 JSON 等）</td><td>render.py 清单</td><td>保留（公共 copyToClipboard）</td></tr>
+<tr><td>C19</td><td>空态行</td><td><code>build_empty_row_html</code></td><td>render.py:1113</td><td>保留→通用空态组件（文案统一）</td></tr>
+<tr><td>C20</td><td>HTML 质量门禁</td><td>无嵌套 form、标签平衡、主表单含保存、Key 区在主 form 外</td><td>tests/htmlcheck.py、06 卷</td><td>保持（htmlcheck 门禁）</td></tr>
+<tr><td>C21</td><td>全站中文</td><td>全部用户可感知文字简体中文</td><td>AGENTS #2</td><td>保持</td></tr>
+<tr><td>C22</td><td>错误页</td><td>404/405/500 <code>_render_error_page</code> 统一样式</td><td>server.py:172</td><td>重构→统一错误页（同令牌）</td></tr>
+<tr><td>C23</td><td>会话过期跳转</td><td>302 <code>/login?expired=1&amp;next=…</code></td><td>02 卷</td><td>保持</td></tr>
+<tr><td>C24</td><td>写护栏三端同文案</td><td>页面横幅/导出 403/API 403</td><td>03 卷</td><td>保持</td></tr>
+<tr><td>C25</td><td>截断三端一致</td><td>页面横幅 / <code>X-Export-Truncated</code> / JSON <code>_meta</code></td><td>03 卷</td><td>保持</td></tr>
+</tbody></table>
+<h2>4. render.py 组件资产清单（单一来源全量）</h2>
+<h3>4.1 CSS / JS 资产</h3>
+<table><thead><tr><th>符号</th><th>作用</th><th>行</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td><code>_BASE_CSS</code></td><td>reset/body/fadeUp</td><td>37</td><td>合并→<code>_TOKENS_CSS</code>（reset/fadeUp 并入令牌体系）</td></tr>
+<tr><td><code>_COMMON_CSS</code></td><td>合成：BASE+通用+minibtn+flash+B6</td><td>45/287</td><td>重构→令牌化重写（合成链机制保留）</td></tr>
+<tr><td><code>_MD_CSS</code></td><td>Markdown 区块样式（追加末尾）</td><td>210</td><td>保留（并入 Markdown 分区样式，追加顺序约定不变）</td></tr>
+<tr><td><code>_MINIBTN_CSS</code> / <code>_FLASH_WARN_CSS</code> / <code>_B6_CSS</code></td><td>切片样式</td><td>~287 合成</td><td>合并→统一按钮/提示令牌组件（切片与 btn-mini 变体废除）</td></tr>
+<tr><td><code>_COMMON_JS</code></td><td>折叠/复制/flash/过滤/最近查看/列记忆/loading/Tab 缩进…</td><td>296</td><td>重构→公共初始化器集合（折叠/复制/flash/过滤/最近/列记忆/loading/Tab 功能保留）</td></tr>
+<tr><td><code>_SQL_HIGHLIGHT_JS</code></td><td>SQL 高亮</td><td>729</td><td>保留</td></tr>
+<tr><td><code>_SQL_FORMATTER_JS</code></td><td>SQL 格式化</td><td>755</td><td>保留</td></tr>
+<tr><td><code>ensure_common_assets</code></td><td>写 `static/vendor/self@{sha8}/common.css\</td><td>js`</td><td>—</td></tr>
+</tbody></table>
+<h3>4.2 通用组件</h3>
+<table><thead><tr><th>函数</th><th>作用</th><th>行</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td><code>render_navbar</code> / <code>_NAV_ITEMS</code></td><td>顶部导航</td><td>907/954</td><td>重构→<code>render_sidebar</code> / <code>_NAV_GROUPS</code>（顶栏废除）</td></tr>
+<tr><td><code>render_page_header</code> / <code>render_page_footer</code></td><td>页壳</td><td>967/1004</td><td>重构→侧栏页壳（<code>$</code> 转义约定保留）</td></tr>
+<tr><td><code>build_flash_html</code></td><td>flash 条</td><td>1092</td><td>保留（换装）</td></tr>
+<tr><td><code>build_empty_row_html</code></td><td>空态行</td><td>1113</td><td>保留（换装）</td></tr>
+<tr><td><code>build_pagination_html</code></td><td>分页+跳转</td><td>1198</td><td>保留（换装+跳转防误触）</td></tr>
+<tr><td><code>build_config_filter_box_html</code></td><td>列表前端过滤框</td><td>1013</td><td>保留→搜索框组件</td></tr>
+<tr><td><code>build_delete_form_html</code></td><td>独立删除 form（confirm）</td><td>2230</td><td>保留→统一确认弹层封装</td></tr>
+<tr><td><code>build_move_buttons_html</code></td><td>上下移动按钮</td><td>2257</td><td>保留→排序模式显隐</td></tr>
+<tr><td><code>build_collapse_section_html</code></td><td>通用折叠区</td><td>4197</td><td>保留（分区折叠场景沿用）</td></tr>
+<tr><td><code>build_state_span</code></td><td>状态徽章</td><td>4311</td><td>保留→状态徽章（颜色+图标+文字双编码）</td></tr>
+<tr><td><code>build_schedule_flags_badge_html</code></td><td>⏰/♻/🔇 徽标</td><td>4335</td><td>改名→文字徽标（定时/保活/含静默窗口）</td></tr>
+</tbody></table>
+<h3>4.3 报表页组件</h3>
+<table><thead><tr><th>函数</th><th>作用</th><th>行</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td><code>build_sort_params</code> / <code>build_filter_params</code> / <code>build_cols_param</code> / <code>build_nested_filter_param</code></td><td>URL 参数拼装</td><td>1133-1186</td><td>保持（URL 协议）</td></tr>
+<tr><td><code>build_redis_banners_html</code></td><td>Redis 横幅</td><td>1275</td><td>重构→状态横幅（仅异常出现）</td></tr>
+<tr><td><code>build_debug_section_html</code></td><td>调试折叠区</td><td>1301</td><td>移位→Tab 调试</td></tr>
+<tr><td><code>build_nested_filter_builder_html</code></td><td>嵌套筛选构建器</td><td>1348</td><td>合并→高级筛选抽屉</td></tr>
+<tr><td><code>build_current_rules_section_html</code></td><td>当前规则 JSON 区</td><td>1488</td><td>合并→Tab 规则</td></tr>
+<tr><td><code>build_memo_section_html</code></td><td>备注 Markdown 折叠</td><td>1566</td><td>重构→Tab 备注+数据页摘要（三态废除）</td></tr>
+<tr><td><code>build_result_selector_html</code></td><td>多结果集 tab</td><td>1589</td><td>重构→结果集分段控件</td></tr>
+<tr><td><code>build_cache_badge_html</code></td><td>缓存徽标</td><td>1636</td><td>重构→缓存状态行（术语翻译）</td></tr>
+<tr><td><code>build_sort_bar_html</code></td><td>排序条</td><td>1688</td><td>保留→排序 chips 行</td></tr>
+<tr><td><code>build_table_header_html</code> / <code>build_table_body_html</code></td><td>表格</td><td>1725/1832</td><td>重构→通用数据表组件（吸附/排序/快速筛选保留）</td></tr>
+<tr><td><code>build_controls_bar_html</code></td><td>控制栏（页大小/导出/面板按钮）</td><td>1859</td><td>重构→数据页工具行 + 统一导出对话框</td></tr>
+<tr><td><code>build_field_settings_panel_html</code></td><td>字段设置面板</td><td>1990</td><td>重构→列设置抽屉</td></tr>
+<tr><td><code>build_sort_settings_panel_html</code></td><td>排序设置面板</td><td>2037</td><td>重构→排序抽屉（同组件族）</td></tr>
+<tr><td><code>build_filter_form_html</code> / <code>build_clear_filters_href</code> / <code>build_filter_action_html</code></td><td>筛选 form/清除</td><td>2099-2124</td><td>保留→快速筛选行组件（清除入工具行）</td></tr>
+<tr><td><code>build_report_switcher_html</code></td><td>报表切换器</td><td>2156</td><td>重构→详情头部紧凑 select（整卡废除）</td></tr>
+<tr><td><code>build_api_urls_section_html</code></td><td>API URL 折叠区</td><td>4177</td><td>移位→Tab 接口</td></tr>
+</tbody></table>
+<h3>4.4 配置页组件</h3>
+<table><thead><tr><th>函数</th><th>作用</th><th>行</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td><code>build_pool_form_html</code> / <code>build_pool_section_html</code></td><td>连接池表单/列表</td><td>2285/2438</td><td>form 保留→分区表单；section 移位→/config/pools 列表页</td></tr>
+<tr><td><code>build_user_form_html</code> / <code>build_user_section_html</code></td><td>用户表单/列表</td><td>2383/2482</td><td>form 保留→分区表单；section 移位→/config/users 列表页</td></tr>
+<tr><td><code>build_category_opts_html</code> / <code>build_category_manage_section_html</code> / <code>build_category_section_html</code></td><td>分类下拉/管理/报表分组</td><td>2408/2520/2588</td><td>opts 保留；manage 移位→报表配置左树；section 删除（分组表废除，右栏统一列表）</td></tr>
+<tr><td><code>build_api_endpoints_list_html</code></td><td>API 列表</td><td>2865</td><td>重构→行卡片+展开列表</td></tr>
+<tr><td><code>build_api_endpoint_form_html</code></td><td>端点表单</td><td>3382</td><td>重构→分区表单</td></tr>
+<tr><td><code>build_api_endpoint_preview_help_html</code></td><td>预览帮助</td><td>3355</td><td>保留→表单内帮助</td></tr>
+<tr><td><code>build_api_key_manage_html</code></td><td>Key 管理（主 form 外）</td><td>3855</td><td>保留（主 form 外门禁保持）</td></tr>
+<tr><td><code>render_audit_page</code></td><td>审计页整页</td><td>3933</td><td>重构→统一筛选条+通用表格</td></tr>
+<tr><td><code>build_scheduler_page_html</code> / <code>build_scheduler_task_form_html</code></td><td>调度页/任务表单</td><td>4454/4746</td><td>page 重构→列表主导；form 拆分独立表单页</td></tr>
+</tbody></table>
+<h2>5. README「功能特性」46 项 → UI 承载映射</h2>
+<table><thead><tr><th>特性</th><th>UI 承载</th><th>来源</th><th>新方案去向</th></tr></thead><tbody>
+<tr><td>连接池管理（CRUD/调序/复制）</td><td>/config 连接池区</td><td>README F1</td><td>移位→/config/pools 独立页（视觉统一）</td></tr>
+<tr><td>用户管理（PBKDF2）</td><td>/config 用户区</td><td>README F2</td><td>移位→/config/users 独立页</td></tr>
+<tr><td>报表配置（SQL/池/页大小/备注/分类/复制）</td><td>报表编辑表单</td><td>README F3</td><td>重构→编辑表单分区</td></tr>
+<tr><td>分类树管理（无限层级/调序）</td><td>/config/reports 分类区块</td><td>README F4</td><td>移位→报表配置页左栏树</td></tr>
+<tr><td>批量操作（删除/缓存/池/分类、全选反选）</td><td>/config/reports 批量栏</td><td>README F5</td><td>重构→浮出批量条（功能全保留）</td></tr>
+<tr><td>SQL 格式化 &amp; 高亮预览 + 未保存预览</td><td>报表编辑表单</td><td>README F6</td><td>保留→SQL 分区</td></tr>
+<tr><td>分页表格（内存分页/总页数/跳转）</td><td>报表详情分页</td><td>README F7</td><td>保留→通用分页组件</td></tr>
+<tr><td>悬浮表头</td><td>报表表格</td><td>README F8</td><td>保留→通用表格吸附表头（sticky+阴影令牌化重设计完成）</td></tr>
+<tr><td>多字段排序（列头+面板）</td><td>排序条+排序面板</td><td>README F9</td><td>保留→排序 chips + 排序抽屉</td></tr>
+<tr><td>多字段筛选（10 操作符+统一语法+帮助）</td><td>表格筛选行+帮助弹窗</td><td>README F10</td><td>保留→快速筛选 + 高级筛选抽屉 + 统一帮助抽屉</td></tr>
+<tr><td>字段设置（拖拽/显隐）</td><td>字段设置面板</td><td>README F11</td><td>重构→列设置抽屉</td></tr>
+<tr><td>CSV 导出（BOM）</td><td>控制栏导出</td><td>README F12</td><td>保留→统一导出对话框</td></tr>
+<tr><td>JSON 导出（智能去引号面板）</td><td>导出 details</td><td>README F13</td><td>保留→导出对话框选项组</td></tr>
+<tr><td>字符集切换（GBK/UTF-8）</td><td>导出 charset</td><td>README F14</td><td>保留→导出对话框</td></tr>
+<tr><td>ZIP 压缩包</td><td>导出 zip</td><td>README F15</td><td>保留→导出对话框</td></tr>
+<tr><td>多结果集 tab（独立筛选排序）</td><td>结果集 tab</td><td>README F16</td><td>保留→结果集分段控件（状态协议不变）</td></tr>
+<tr><td>报表即 API（Key/CORS/预设/模板）</td><td>端点表单+Key 管理</td><td>README F17</td><td>保留→端点分区表单 + Key 区块</td></tr>
+<tr><td>API 静态文件缓存（.json）</td><td>端点表单静态区</td><td>README F18</td><td>UI 保留→请求输出区状态；非 UI 部分保持</td></tr>
+<tr><td>配置存储双引擎</td><td>无 UI（app_config）</td><td>README F19</td><td>保持（非 UI）</td></tr>
+<tr><td>站点标识（favicon/前缀）</td><td>/config 站点标识区</td><td>README F20</td><td>保留→概览设置区块（视觉统一）</td></tr>
+<tr><td>三层查询缓存</td><td>徽标/横幅/调试区可见</td><td>README F21</td><td>保留→缓存状态行 + 状态横幅 + 调试分区（术语翻译）</td></tr>
+<tr><td>报表定时执行（完整调度能力）</td><td>/config/scheduler + 编辑表单折叠区</td><td>README F22</td><td>重构→调度列表 + 独立表单页 + 编辑「调度与保活」分区</td></tr>
+<tr><td>缓存保活</td><td>编辑表单保活折叠区 + ♻ 徽标</td><td>README F23</td><td>移位→编辑「调度与保活」分区 + 列表保活徽标</td></tr>
+<tr><td>编辑-查看双向关联</td><td>详情/编辑互跳按钮</td><td>README F24</td><td>保留→统一操作组位置</td></tr>
+<tr><td>健康检查端点</td><td>无 UI</td><td>README F25</td><td>保持（非 UI）</td></tr>
+<tr><td>API 接口独立管理页</td><td>/config/api-endpoints</td><td>README F26</td><td>重构→行卡片列表（同 URL）</td></tr>
+<tr><td>Session 滑动过期</td><td>登录过期提示（间接 UI）</td><td>README F27</td><td>保持（登录过期提示语义）</td></tr>
+<tr><td>导出支持排序</td><td>导出携带 sort 参数</td><td>README F28</td><td>保持（协议）</td></tr>
+<tr><td>全量输出护栏（开关/max_rows/横幅）</td><td>编辑表单 + 报表页横幅</td><td>README F29</td><td>保留→编辑「输出护栏」分区 + 详情状态横幅</td></tr>
+<tr><td>事务性 SQL 执行</td><td>无 UI（执行层）</td><td>README F30</td><td>保持（非 UI）</td></tr>
+<tr><td>错误日志独立输出</td><td>无 UI</td><td>README F31</td><td>保持（非 UI）</td></tr>
+<tr><td>审计日志自动轮转</td><td>无 UI（/audit 展示）</td><td>README F32</td><td>保持（非 UI；/audit 展示不变）</td></tr>
+<tr><td>ThreadingHTTPServer</td><td>无 UI</td><td>README F33</td><td>保持（非 UI）</td></tr>
+<tr><td>全局异常兜底</td><td>500 错误页</td><td>README F34</td><td>重构→统一错误页</td></tr>
+<tr><td>Redis 可观测性</td><td>日志（间接）</td><td>README F35</td><td>保持（非 UI）</td></tr>
+<tr><td>纯标准库</td><td>技术约束</td><td>README F36</td><td>保持（约束）</td></tr>
+<tr><td>预设/JSON 模板（README 独立章节）</td><td>端点表单模板区 + DEBUG 导入卡</td><td>README API 模板章节</td><td>保留→端点模板分区 + 概览 DEBUG 卡</td></tr>
+<tr><td>筛选语法说明（filter_help）</td><td>帮助弹窗（报表/审计/构建器）</td><td>README 页面说明</td><td>保留→统一帮助抽屉（内容源不变）</td></tr>
+<tr><td>审计四类 type + 筛选导出清理</td><td>/audit</td><td>02/07 卷</td><td>保留→审计页筛选条与操作区</td></tr>
+<tr><td>登录限流/过期/next</td><td>/login</td><td>02 卷</td><td>保留→登录页（协议不变）</td></tr>
+</tbody></table>
+<h2>6. 遗漏自查（T1 验收用）</h2>
+<p>✅ - [x] INDEX §2 路由总表 17 行全部列于 §1（R1–R17）</p>
+<p>✅ - [x] INDEX §3 页面地图全部条目落入 §2（login/根/report/preview/export/config 全家/audit/health/api/favicon）</p>
+<p>✅ - [x] README 功能特性 46 行全部落入 §5（含非 UI 条目显式标注）</p>
+<p>✅ - [x] 06 卷交互模式 7 条 + 组件库清单全部落入 §3/§4</p>
+<p>✅ - [x] 源码补查：render.py build_*/render_* 全量、onclick/localStorage 清单、config.py handler 清单、report.py 页面函数</p>
+<p>✅ - [x] 「新方案去向」无空缺 —— 由 T3 完成后勾选</p></div>
+  </section>
+
+  </div><!-- /.main -->
+</div><!-- /#app-shell -->
+
+<!-- ===== 浮层：遮罩 / 抽屉 / 对话框 / toast ===== -->
+<div class="backdrop" id="backdrop"></div>
+
+<aside class="drawer" id="drawer-cols" role="dialog" aria-modal="true" aria-label="列设置">
+  <div class="drawer-head"><h3>列设置</h3><button class="x" data-close>×</button></div>
+  <div class="drawer-body">
+    <div class="btn-group" style="margin-bottom:12px">
+      <button class="btn btn-sm btn-secondary" data-demo="已全选列">全选</button>
+      <button class="btn btn-sm btn-secondary" data-demo="已全不选">全不选</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>显示</th><th>列</th><th class="right">顺序</th></tr></thead>
+        <tbody>
+          <tr><td><input type="checkbox" checked></td><td class="mono">id</td><td><div class="ops"><button class="btn btn-sm btn-ghost">↑</button><button class="btn btn-sm btn-ghost">↓</button></div></td></tr>
+          <tr><td><input type="checkbox" checked></td><td class="mono">customer</td><td><div class="ops"><button class="btn btn-sm btn-ghost">↑</button><button class="btn btn-sm btn-ghost">↓</button></div></td></tr>
+          <tr><td><input type="checkbox" checked></td><td class="mono">amount</td><td><div class="ops"><button class="btn btn-sm btn-ghost">↑</button><button class="btn btn-sm btn-ghost">↓</button></div></td></tr>
+          <tr><td><input type="checkbox" checked></td><td class="mono">created_at</td><td><div class="ops"><button class="btn btn-sm btn-ghost">↑</button><button class="btn btn-sm btn-ghost">↓</button></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="help">应用后写入 URL <code>cols</code> 与 localStorage <code>sqlreport_cols_{id}</code>（协议不变）。</p>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn btn-secondary" data-close>取消</button>
+    <button class="btn btn-primary" data-demo="列设置已应用" data-close>应用</button>
+  </div>
+</aside>
+
+<aside class="drawer" id="drawer-sort" role="dialog" aria-modal="true" aria-label="排序">
+  <div class="drawer-head"><h3>排序</h3><button class="x" data-close>×</button></div>
+  <div class="drawer-body">
+    <div class="rule-row">
+      <select class="select"><option>id ↑</option><option>customer</option><option>amount</option></select>
+      <button class="btn btn-sm btn-ghost">↑</button><button class="btn btn-sm btn-ghost">↓</button><button class="btn btn-sm btn-ghost">✕</button>
+    </div>
+    <button class="btn btn-sm btn-secondary" style="margin-top:8px">+ 添加排序列</button>
+    <p class="help" style="margin-top:10px">多列组合排序：sort/dir 可重复参数协议不变。</p>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn btn-secondary" data-close>取消</button>
+    <button class="btn btn-primary" data-demo="排序已应用" data-close>应用</button>
+  </div>
+</aside>
+
+<aside class="drawer" id="drawer-filter" role="dialog" aria-modal="true" aria-label="高级筛选">
+  <div class="drawer-head"><h3>高级筛选</h3><button class="x" data-close>×</button></div>
+  <div class="drawer-body">
+    <div class="tabs" style="margin-bottom:12px">
+      <button class="tab active">可视化构建</button>
+      <button class="tab" data-demo="切换到规则预览视图">规则预览</button>
+    </div>
+    <div class="rule-group">
+      <div class="ghead">满足 <select class="select" style="width:auto;height:24px;font-size:12px"><option>全部 (AND)</option><option>任一 (OR)</option></select></div>
+      <div class="rule-row">
+        <select class="select"><option>customer</option></select>
+        <select class="select"><option>包含</option></select>
+        <input class="input" value="o">
+        <button class="btn btn-sm btn-ghost">✕</button>
+      </div>
+      <div class="btn-group" style="margin-top:6px">
+        <button class="btn btn-sm btn-secondary">+ 条件</button>
+        <button class="btn btn-sm btn-secondary">+ 分组</button>
+      </div>
+    </div>
+    <p class="help">原「嵌套构建器抽屉 + 当前规则 JSON 区 + 排序面板」三入口收敛为：本抽屉（构建）+ 规则页签（JSON 导入导出）。</p>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn btn-secondary" data-demo="已清除嵌套筛选" data-close>清除筛选</button>
+    <button class="btn btn-primary" data-demo="高级筛选已应用（nested_filter 协议不变）" data-close>应用</button>
+  </div>
+</aside>
+
+<aside class="drawer wide" id="drawer-help" role="dialog" aria-modal="true" aria-label="筛选语法帮助">
+  <div class="drawer-head"><h3>筛选语法帮助</h3><button class="x" data-close>×</button></div>
+  <div class="drawer-body">
+    <p class="help">全站唯一帮助入口；内容源仍为 <code>filter_help.py</code>（实施期后端注入）。</p>
+    <h4 style="margin:12px 0 6px;font-size:14px">操作符</h4>
+    <table class="help-tbl">
+      <tr><th>操作符</th><th>说明</th></tr>
+      <tr><td>包含 / 不包含</td><td>不区分大小写；支持通配</td></tr>
+      <tr><td>等于 / 不等于</td><td>区分大小写，整值匹配</td></tr>
+      <tr><td>大于 / 小于 / ≥ / ≤</td><td>数值或 ISO 日期；不可比的值静默跳过</td></tr>
+      <tr><td>为空 / 非空</td><td>空值判断</td></tr>
+    </table>
+    <h4 style="margin:12px 0 6px;font-size:14px">值表达式</h4>
+    <table class="help-tbl">
+      <tr><th>写法</th><th>含义</th></tr>
+      <tr><td><code>*</code></td><td>任意字符（可多次）</td></tr>
+      <tr><td><code>a,b</code></td><td>英文逗号 = 或</td></tr>
+      <tr><td><code>\* \, \\</code></td><td>转义为字面量</td></tr>
+    </table>
+    <p>多列之间为「且」；审计页关键字中 <code>%</code> <code>_</code> 按字面匹配。报表页 / 导出 / API 预设 / 审计页共用同一语法。</p>
+    <h4 style="margin:12px 0 6px;font-size:14px">嵌套表达式</h4>
+    <div class="code-block">{"op":"and","conditions":[
+  {"col":"customer","op":"contains","value":"张"}
+]}</div>
+    <p class="help">日期函数：<code>now()</code> <code>today()</code> <code>yesterday()</code> <code>date_add</code> <code>date_sub</code>。</p>
+  </div>
+  <div class="drawer-foot"><button class="btn btn-secondary" data-close>关闭</button></div>
+</aside>
+
+<!-- 导出对话框 -->
+<div class="modal wide" id="modal-export" role="dialog" aria-modal="true" aria-label="导出">
+  <div class="modal-head"><h3>导出 · 订单概览</h3></div>
+  <div class="modal-body">
+    <p class="help" style="margin-bottom:10px">导出当前筛选、排序与列设置的完整结果集（不分页）。</p>
+    <fieldset class="fs">
+      <legend>格式</legend>
+      <div class="check-group">
+        <label class="check"><input type="radio" name="ex-fmt" checked> CSV（UTF-8 BOM）</label>
+        <label class="check"><input type="radio" name="ex-fmt"> JSON</label>
+        <label class="check"><input type="checkbox"> 打包为 ZIP</label>
+      </div>
+    </fieldset>
+    <fieldset class="fs">
+      <legend>字符集</legend>
+      <div class="check-group">
+        <label class="check"><input type="radio" name="ex-cs" checked> GBK（Excel 中文推荐）</label>
+        <label class="check"><input type="radio" name="ex-cs"> UTF-8</label>
+      </div>
+    </fieldset>
+    <fieldset class="fs">
+      <legend>智能去引号（仅 JSON）</legend>
+      <div class="check-group">
+        <label class="check"><input type="checkbox"> 十进制数字</label>
+        <label class="check"><input type="checkbox"> 科学计数法</label>
+        <label class="check"><input type="checkbox"> 千分位数字</label>
+      </div>
+      <p class="help">输出永远为合法 JSON（RFC 8259）。</p>
+    </fieldset>
+    <fieldset class="fs">
+      <legend>列范围</legend>
+      <label class="check"><input type="checkbox" checked> 应用自定义字段（4 列 · 见列设置）</label>
+    </fieldset>
+    <div class="banner banner-warn mb0" style="margin-top:4px">
+      <svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v4m0 4h.01M10.3 4.3 2.6 18a1.5 1.5 0 0 0 1.3 2.2h16.2a1.5 1.5 0 0 0 1.3-2.2L13.7 4.3a1.5 1.5 0 0 0-2.6 0z"/></svg>
+      <div>「允许导出全部行」关闭时，超过 100,000 行将截断并在文件中标记。</div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-secondary" data-close>取消</button>
+    <button class="btn btn-primary" data-demo="导出已开始（GET /export 协议不变）" data-close>导出</button>
+  </div>
+</div>
+
+<!-- 确认弹层（动态文案） -->
+<div class="modal" id="modal-confirm" role="dialog" aria-modal="true" aria-label="确认">
+  <div class="modal-head"><h3 id="confirm-title">确认操作</h3></div>
+  <div class="modal-body"><p id="confirm-text">…</p></div>
+  <div class="modal-foot">
+    <button class="btn btn-secondary" data-close>取消</button>
+    <button class="btn btn-danger" id="confirm-ok">确认</button>
+  </div>
+</div>
+
+<div class="toast-zone" id="toast-zone" aria-live="polite"></div>
+<div class="loading-mask" id="loading-mask"><div class="box"><span class="spinner"></span>提交中…</div></div>
+
+<script>
+/* ============ 原型路由与交互（确认稿专用，非生产代码） ============ */
+(function(){
+  var PAGES = {
+    '#/login': 'view-login',
+    '#/report': 'page-report',
+    '#/report/detail': 'page-detail',
+    '#/config': 'page-config',
+    '#/config/pools': 'page-pools',
+    '#/config/pools/new': 'page-pools',
+    '#/config/users': 'page-users',
+    '#/config/reports': 'page-reports',
+    '#/config/reports/1/edit': 'page-report-edit',
+    '#/config/api-endpoints': 'page-api',
+    '#/config/api-endpoints/1/edit': 'page-api-edit',
+    '#/config/scheduler': 'page-scheduler',
+    '#/config/scheduler/new': 'page-scheduler-new',
+    '#/audit': 'page-audit',
+    '#/appendix': 'page-appendix'
+  };
+  var NAV_FOR = {
+    '#/report':'#/report','#/report/detail':'#/report',
+    '#/config':'#/config','#/config/reports':'#/config/reports','#/config/reports/1/edit':'#/config/reports',
+    '#/config/pools':'#/config/pools','#/config/pools/new':'#/config/pools',
+    '#/config/users':'#/config/users',
+    '#/config/api-endpoints':'#/config/api-endpoints','#/config/api-endpoints/1/edit':'#/config/api-endpoints',
+    '#/config/scheduler':'#/config/scheduler','#/config/scheduler/new':'#/config/scheduler',
+    '#/audit':'#/audit','#/appendix':'#/appendix'
+  };
+
+  var RC_DATA = [
+    {t:'订单概览',c:'经营分析',d:'基础单结果集报表示例，用于验收分页/筛选/排序。',tags:['定时','保活','2 个 API'],id:1},
+    {t:'销售多维统计',c:'区域销售',d:'多结果集报表：验收 result_mode=all 与 CSV 限制。',tags:['定时','1 个 API'],id:2},
+    {t:'缓存命中率报表',c:'经营分析',d:'验收缓存优先 + 缓存保活（TTL 24h）。',tags:['保活','1 个 API'],id:3},
+    {t:'数据维护-写入示例',c:'经营分析',d:'验收写护栏（allow_write）与危险操作确认。',tags:['写护栏'],id:4},
+    {t:'全量导出报表',c:'未分类',d:'验收全量输出护栏与截断标记。',tags:['全量导出'],id:5},
+    {t:'临时查询',c:'未分类',d:'临时分析用 SQL，不入分类。',tags:[],id:6},
+    {t:'Markdown备注报表',c:'财务核算',d:'备注支持 Markdown / mermaid 渲染。',tags:['Markdown'],id:7}
+  ];
+
+  function $(s,r){return (r||document).querySelector(s)}
+  function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
+
+  /* ---- toast ---- */
+  function toast(msg, kind){
+    var z = $('#toast-zone');
+    var el = document.createElement('div');
+    el.className = 'toast' + (kind?(' '+kind):'');
+    el.textContent = msg;
+    z.appendChild(el);
+    setTimeout(function(){ el.remove(); }, 2600);
+  }
+
+  /* ---- 浮层 ---- */
+  var openLayer = null;
+  function openOverlay(id){
+    closeOverlay();
+    var el = document.getElementById(id);
+    if(!el) return;
+    el.classList.add('on');
+    $('#backdrop').classList.add('on');
+    openLayer = el;
+    var f = el.querySelector('button, input, select, textarea, [tabindex]');
+    if(f) f.focus();
+  }
+  function closeOverlay(){
+    if(openLayer){ openLayer.classList.remove('on'); openLayer = null; }
+    $('#backdrop').classList.remove('on');
+  }
+  $('#backdrop').addEventListener('click', closeOverlay);
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeOverlay();
+  });
+
+  /* ---- 路由 ---- */
+  function applyRoute(){
+    var h = location.hash || '#/report';
+    if(!PAGES[h]) h = '#/report';
+    var isLogin = (h === '#/login');
+    $('#app-shell').style.display = isLogin ? 'none' : 'flex';
+    var lv = $('#view-login');
+    lv.style.display = isLogin ? 'block' : 'none';
+    $$('.page').forEach(function(p){ p.classList.remove('active'); });
+    if(!isLogin){
+      var id = PAGES[h];
+      var sec = document.getElementById(id);
+      if(sec) sec.classList.add('active');
+      var nav = NAV_FOR[h];
+      $$('.nav-item').forEach(function(b){
+        b.classList.toggle('active', b.getAttribute('data-route') === nav);
+      });
+      window.scrollTo(0,0);
+      if(h === '#/appendix' && window.__APPENDIX_READY__) { /* already injected */ }
+    }
+  }
+  window.addEventListener('hashchange', applyRoute);
+
+  /* ---- 全局委托 ---- */
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-route]');
+    if(t){ e.preventDefault(); location.hash = t.getAttribute('data-route'); return; }
+
+    var open = e.target.closest('[data-open]');
+    if(open){ openOverlay(open.getAttribute('data-open')); return; }
+
+    var cl = e.target.closest('[data-close]');
+    if(cl){ 
+      if(cl.hasAttribute('data-demo')) toast(cl.getAttribute('data-demo'), 'ok');
+      closeOverlay(); return; }
+
+    var demo = e.target.closest('[data-demo]');
+    if(demo){ toast(demo.getAttribute('data-demo'), 'ok'); return; }
+
+    var conf = e.target.closest('[data-confirm]');
+    if(conf){
+      $('#confirm-text').textContent = conf.getAttribute('data-confirm');
+      $('#confirm-ok').className = 'btn ' + (conf.getAttribute('data-danger') === '1' ? 'btn-danger' : 'btn-primary');
+      $('#confirm-ok').setAttribute('data-demo', '已确认执行（POST + flash 协议不变）');
+      openOverlay('modal-confirm');
+      return;
+    }
+
+    var cp = e.target.closest('[data-copy]');
+    if(cp){
+      var btn = cp;
+      var old = btn.textContent;
+      if(navigator.clipboard) navigator.clipboard.writeText(btn.getAttribute('data-copy')).catch(function(){});
+      btn.textContent = '已复制';
+      btn.style.color = 'var(--ok)';
+      setTimeout(function(){ btn.textContent = old; btn.style.color=''; }, 1500);
+      return;
+    }
+
+    var tab = e.target.closest('#detail-tabs .tab, [data-tab]');
+    if(tab){
+      var key = tab.getAttribute('data-tab');
+      if(key){
+        $$('#detail-tabs .tab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-tab') === key); });
+        $$('#page-detail .tabpanel').forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-panel') === key); });
+      }
+      return;
+    }
+
+    var tg = e.target.closest('[data-toggle-api]');
+    if(tg){
+      var row = tg.closest('.api-row');
+      var more = row.querySelector('.api-more');
+      if(more){
+        var on = more.classList.toggle('on');
+        tg.textContent = on ? '收起 ▴' : '展开 ▾';
+      }
+      return;
+    }
+
+    var seg = e.target.closest('.segment button');
+    if(seg){
+      $$('.segment button', seg.parentNode).forEach(function(b){ b.classList.remove('active'); });
+      seg.classList.add('active');
+      return;
+    }
+
+    var dc = e.target.closest('[data-demo][data-close]');
+    /* handled above via data-close */
+  });
+
+  /* confirm ok */
+  $('#confirm-ok').addEventListener('click', function(){
+    var m = this.getAttribute('data-demo');
+    closeOverlay();
+    if(m) toast(m, 'ok');
+  });
+
+  /* ---- 报表中心数据 ---- */
+  function badgeFor(tag){
+    if(tag === '定时') return '<span class="badge badge-warn">定时</span>';
+    if(tag === '保活') return '<span class="badge badge-ok">保活</span>';
+    if(tag === 'Markdown') return '<span class="badge badge-info">Markdown</span>';
+    if(tag === '写护栏') return '<span class="badge badge-danger">写护栏</span>';
+    if(tag === '全量导出') return '<span class="badge badge-warn">全量导出</span>';
+    if(tag.indexOf('API') >= 0) return '<span class="badge badge-info">'+tag+'</span>';
+    return '<span class="badge badge-neutral">'+tag+'</span>';
+  }
+  function cardHTML(r){
+    return '<a class="report-card" href="#/report/detail" data-c="'+r.c+'" data-kw="'+(r.t+' '+r.d).toLowerCase()+'">'+
+      '<div class="t">'+r.t+'</div>'+
+      '<div class="meta">'+r.c+'</div>'+
+      '<div class="desc">'+r.d+'</div>'+
+      '<div class="tags">'+r.tags.map(badgeFor).join('')+'</div></a>';
+  }
+  function renderRC(){
+    $('#rc-grid').innerHTML = RC_DATA.map(cardHTML).join('');
+    $('#rc-recent').innerHTML = [RC_DATA[0], RC_DATA[2]].map(cardHTML).join('');
+    filterRC();
+  }
+  var rcCat = 'all', rcKw = '';
+  function filterRC(){
+    var n = 0;
+    $$('#rc-grid .report-card').forEach(function(a){
+      var okCat = (rcCat === 'all') || (a.getAttribute('data-c') === rcCat);
+      var okKw = !rcKw || a.getAttribute('data-kw').indexOf(rcKw) >= 0;
+      var show = okCat && okKw;
+      a.style.display = show ? '' : 'none';
+      if(show) n++;
+    });
+    $('#rc-empty').style.display = n ? 'none' : 'block';
+    $('#rc-grid').style.display = n ? '' : 'none';
+  }
+  $('#rc-search').addEventListener('input', function(){ rcKw = this.value.trim().toLowerCase(); filterRC(); });
+  $('#rc-clear').addEventListener('click', function(){
+    rcKw=''; rcCat='all'; $('#rc-search').value='';
+    $$('#rc-tree .cat, #rc-tree .leaf').forEach(function(x){x.classList.remove('active')});
+    $('#rc-tree .cat[data-cat=all]').classList.add('active');
+    filterRC();
+  });
+  $$('#rc-tree .cat, #rc-tree .leaf').forEach(function(node){
+    node.addEventListener('click', function(){
+      $$('#rc-tree .cat, #rc-tree .leaf').forEach(function(x){x.classList.remove('active')});
+      node.classList.add('active');
+      rcCat = node.getAttribute('data-c') || 'all';
+      filterRC();
+      var kids = node.nextElementSibling;
+      if(kids && kids.classList.contains('kids')) kids.classList.toggle('on');
+    });
+  });
+
+  /* ---- 报表配置：搜索 + 批量 ---- */
+  $('#rp-search').addEventListener('input', function(){
+    var kw = this.value.trim().toLowerCase();
+    $$('#rp-table tbody tr').forEach(function(tr){
+      var name = (tr.getAttribute('data-name')||'').toLowerCase();
+      tr.style.display = !kw || name.indexOf(kw) >= 0 || tr.textContent.toLowerCase().indexOf(kw) >= 0 ? '' : 'none';
+    });
+  });
+  function refreshBatch(){
+    var n = $$('#rp-table .rp-check:checked').length;
+    $('#batchbar').classList.toggle('on', n > 0);
+    $('#batch-count').textContent = n;
+    $$('#rp-table tbody tr').forEach(function(tr){
+      var c = tr.querySelector('.rp-check');
+      tr.classList.toggle('selected', !!(c && c.checked));
+    });
+    var all = $('#rp-all');
+    var total = $$('#rp-table .rp-check').length;
+    all.checked = n > 0 && n === total;
+    all.indeterminate = n > 0 && n < total;
+  }
+  $$('#rp-table .rp-check').forEach(function(c){ c.addEventListener('change', refreshBatch); });
+  $('#rp-all').addEventListener('change', function(){
+    $$('#rp-table .rp-check').forEach(function(c){ c.checked = $('#rp-all').checked; });
+    refreshBatch();
+  });
+  $('#batch-cancel').addEventListener('click', function(){
+    $$('#rp-table .rp-check, #rp-all').forEach(function(c){ c.checked = false; });
+    refreshBatch();
+  });
+
+  /* ---- 护栏开关联动 ---- */
+  var allowAll = $('#allow-all');
+  if(allowAll){
+    allowAll.addEventListener('change', function(){
+      $('#maxrows-field').style.display = this.checked ? 'none' : 'block';
+      if(this.checked){
+        toast('开启「允许导出全部行」保存前将要求确认', 'ok');
+      }
+    });
+    $('#maxrows-field').style.display = allowAll.checked ? 'none' : 'block';
+  }
+
+  /* ---- 跳页防误触 ---- */
+  var jump = $('#jump-page');
+  if(jump){
+    jump.addEventListener('change', function(){
+      var v = parseInt(this.value, 10);
+      if(!v || v < 1 || v > 1){
+        toast('演示数据仅 1 页：跳转页超出范围（原型拦截）', 'err');
+        this.value = '';
+      } else {
+        toast('跳转到第 '+v+' 页（生产：URL page 参数）', 'ok');
+      }
+    });
+  }
+
+  /* ---- 刷新按钮 loading ---- */
+  var rf = $('#btn-refresh');
+  if(rf) rf.addEventListener('click', function(){
+    var b = this;
+    b.classList.add('loading');
+    $('#loading-mask').classList.add('on');
+    setTimeout(function(){
+      b.classList.remove('loading');
+      $('#loading-mask').classList.remove('on');
+      toast('数据已刷新（重建缓存协议不变）', 'ok');
+    }, 700);
+  });
+
+  /* ---- 普通表单提交演示（提交遮罩） ---- */
+  $('#login-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    $('#loading-mask').classList.add('on');
+    setTimeout(function(){
+      $('#loading-mask').classList.remove('on');
+      location.hash = '#/report';
+    }, 500);
+  });
+
+  /* ---- 键盘：Tab 组件左右键 ---- */
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    var t = e.target.closest('#detail-tabs .tab');
+    if(!t) return;
+    var tabs = $$('#detail-tabs .tab');
+    var i = tabs.indexOf(t);
+    var n = e.key === 'ArrowRight' ? (i+1) % tabs.length : (i-1+tabs.length) % tabs.length;
+    tabs[n].click(); tabs[n].focus();
+    e.preventDefault();
+  });
+
+  /* init */
+  renderRC();
+  applyRoute();
+  if(!location.hash) location.hash = '#/report';
+})();
+</script>
+
+
+
+</body>
+</html>
