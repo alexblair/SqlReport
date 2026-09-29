@@ -18,8 +18,9 @@
 
 以下约束对**每个任务**都生效：
 
-1. **只动执行链路后端**：`server.py` / `report.py` / `result_transform.py` / `query_executor.py` / `redis_cache.py` / `config_db.py`。**禁止修改 `render.py` 与前端 JS**（spec §2.2）。
-2. **Redis 冻结清单**（spec §3）：`ReportSnapshot` 格式与 `_SNAPSHOT_VERSION=2`、`build_snapshot_key` / `build_lock_key` / `compute_config_version`、TTL 与 refresh-ahead、SETNX 锁与 `wait_for_lock`、过期快照兜底、`cache_info.source` 全部取值与 `fresh` 标记——**逐字不动**。
+1. **只动执行链路后端**：`server.py` / `report.py` / `result_transform.py` / `query_executor.py` / `redis_cache.py` / `config_db.py` / `export.py`（C-4 经用户 2026-09-29 决策追加）。**禁止修改 `render.py` 与前端 JS**（spec §2.2）。
+2. **Redis 冻结清单**（spec §3）：`ReportSnapshot` 格式与 `_SNAPSHOT_VERSION=2`、`build_snapshot_key` / `build_lock_key` / `compute_config_version`、TTL 与 refresh-ahead、SETNX 锁与 `wait_for_lock`、过期快照兜底、`cache_info.source` 全部取值与 `fresh` 标记——**逐字不动**。C-4 **只调用** `execute_report`，**不修改它**。
+2b. **测试与压测日志落 `perf-logs/`**（已 gitignore），**不要用 `/tmp`** —— 本环境 `/tmp` 会被周期清空，且 `nohup` 后台进程活不过单次 bash 调用，起服务+压测必须在同一条命令内完成。
 3. **一切测试、运行、造数、压测必须在仓库根的 `venv` 中执行**，先 `source venv/bin/activate`。禁止系统 Python。
 4. **测试框架是 `unittest`**，命令形如 `python -m unittest tests.test_x -v`。**禁止用 pytest。**
 5. **所有用户可感知文字用简体中文**：脚本输出、提交说明、报告、注释。
@@ -470,6 +471,94 @@ git commit -m "perf(C-1): 大数据集逐行一致性验证 + 收益对比回填
 
 ---
 
+### T4b: C-4 — 导出复用 `execute_report`
+
+**Files:**
+- Create: `tests/test_export_cache_path.py`
+- Modify: `export.py`（`_load_and_transform` / `export_report_to_csv` / `export_report_to_json` / `handle_export`）
+
+**Interfaces:**
+- Consumes: T0 的性能数据与报表；T1–T3 的成果（C-1 让 transform 更快，放大 C-4 收益）
+- Produces:
+  - `_load_and_transform(..., *, report_id=None, report_config=None, conn=None)` —— 新增三个**关键字参数且都有默认值**。`report_id=None` 时**保持改前的自带连接行为**（旧调用方与既有测试不受影响）
+  - `export_report_to_csv` / `export_report_to_json` 同样新增这三个关键字参数
+  - `handle_export` 把已有的 `report_id` 与 `report_config` 传下去
+  - **不修改 `report.execute_report` 一行** —— 本任务只调用它
+
+⚠️ **本任务的核心风险是安全护栏，不是性能**：`report_config` 必须传进去，
+否则 `execute_report` 的 `limit_rows` 恒为 False，**全量输出护栏失效**。
+
+- [ ] **Step 1: 写失败的测试**
+
+`tests/test_export_cache_path.py`：
+
+- `test_export_uses_execute_report`：**核心用例**。patch `export.report.execute_report` 为 `MagicMock`（返回构造好的 `ReportResult`），调 `export_report_to_csv(...)` 并传 `report_id` / `report_config`，断言 `execute_report` 被调用 1 次。
+- `test_export_without_report_id_keeps_legacy_path`：`report_id=None` 时断言**不调用** `execute_report`，行为与改前一致。
+- `test_max_rows_guard_not_bypassed`：**安全护栏**。构造 `report_config = {"allow_all_output": 0, "max_rows": 50, ...}`，断言传给 `execute_report` 的 `report` 参数**就是**这个 dict（不是 None），且 `page=1` / `active_index` / `page_size` 符合 spec §5 C-4 的表。
+- `test_truncated_flag_from_report_result`：`execute_report` 返回 `truncated=True` 时，`export_report_to_csv` 输出**末尾含** `# 注意：查询结果超过 50 行上限` 注释行，且 `_truncated_out` 被写入 True。
+- `test_all_rows_page_size_sentinel`：断言传入的 `page_size` 是 `_EXPORT_ALL_ROWS_PAGE_SIZE` 且 ≥ 10**9。
+- `test_result_index_clamped`：多结果集场景，`result_index` 越界时取到第 0 个结果集。
+- `test_write_guard_still_403`：`allow_write=0` 且 SQL 含写语句时，`handle_export` 仍返回 403（**不依赖 `execute_report` 的 `PermissionError`**）。
+- `test_read_timeout_not_set`：断言没有给 `execute_report` 传 `read_timeout`。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+source venv/bin/activate && python -m unittest tests.test_export_cache_path -v > perf-logs/t4b-1.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-1.log
+```
+
+Expected: `FAILED`（`export_report_to_csv` 还不接受 `report_id`）。
+
+- [ ] **Step 3: 实现 `_load_and_transform` 走 `execute_report`**
+
+顶部加 `_EXPORT_ALL_ROWS_PAGE_SIZE = 2**31 - 1`，注释写明：Python 切片对超大 stop
+自动截到末尾，10 亿行以上的报告不可能存在。
+
+`_load_and_transform` 改为分支（`report_id is not None` 走新路径，否则保留改前代码）：
+
+```
+result = report.execute_report(
+    report_id=report_id, sql_query=sql_query, pool_config=pool_config,
+    page=1, page_size=_EXPORT_ALL_ROWS_PAGE_SIZE,
+    filters=filters or [], sorts=sorts or [],
+    active_index=result_index, report=report_config,
+    nested_filter=nested_filter, conn=conn)
+idx = result_index if result_index < len(result.results) else 0
+res = result.results[idx]
+all_columns, rows = res["columns"], res["rows"]
+truncated = bool(result.truncated)
+```
+
+**筛选 / 排序 / nested_filter 三步在新分支里删掉** —— `execute_report` 内部已经做过，
+再做一遍是重复计算（AGENTS #3）。`select_columns` 与 `column_indices` **保留**
+（那是导出特有的列投影，`execute_report` 不做）。
+
+- [ ] **Step 4: `handle_export` 传参**
+
+在两处 `export_report_to_json` / `export_report_to_csv` 调用中补上
+`report_id=report_id, report_config=report_config, conn=conn`。
+
+- [ ] **Step 5: 跑测试确认通过 + L1**
+
+```bash
+source venv/bin/activate && python -m unittest tests.test_export_cache_path tests.test_export tests.test_max_rows tests.test_output_limit tests.test_api_endpoint tests.test_report > perf-logs/t4b-2.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-2.log
+```
+
+Expected: `OK`。**`test_max_rows` / `test_output_limit` 必须绿** —— 它们是全量输出护栏的既有守卫，若变红说明护栏被绕过，**立即回滚**（spec §7）。
+
+- [ ] **Step 6: 跑 bench 采集 C-4 后数据并回填 spec §10**
+
+看 **S7（导出 CSV）**：预期 1519.7ms → 约 286ms。同时确认其余 11 个场景**无回退**。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add export.py tests/test_export_cache_path.py docs/compose/spec/
+git commit -m "perf(C-4): 导出复用 execute_report，不再绕过三层缓存"
+```
+
+---
+
 ### T5: C-2 — MySQL 有界连接池
 
 **Files:**
@@ -608,7 +697,11 @@ Expected: `OK`。
 
 - [ ] **Step 6: 跑 bench 采集 C-3 后数据并回填 spec §10**
 
-重点看 **S2（翻页）** —— 这应是全任务提升最大的一项。同时确认 S5（Redis 路径）的 `cache_info.source` 仍正确显示 `redis`。
+重点看 **S9（排序后翻页）与 S10（筛选后翻页）** —— 这应是全任务提升最大的一项。
+**不要看 S2**：无筛选无排序时 `filter_rows`/`sort_rows` 早返回，普通翻页本就没有
+transform 成本（见 spec §10.2 第 1 条），C-3 对它无效是预期而非失败。
+
+同时确认 S5（Redis 路径）的 `cache_info.source` 仍正确显示 `redis`。
 
 - [ ] **Step 7: 提交**
 
@@ -692,11 +785,12 @@ git add -A && git commit -m "docs: 性能优化知识库同步 + 计划执行记
 
 > 由实施阶段回填。
 
-- [ ] T0 Phase 0 测量基础设施 —— 待执行
+- [ ] T0 Phase 0 测量基础设施 —— ✅ 已完成（基线冻结于 spec §10.1）
 - [ ] T1 C-1a `execute_report` 去重 —— 待执行
 - [ ] T2 C-1b transform 类型快速路径 —— 待执行
 - [ ] T3 C-1c filter/sort 单趟化 —— 待执行
 - [ ] T4 C-1 收口验证与收益测量 —— 待执行
+- [ ] T4b C-4 导出复用 `execute_report` —— 待执行（基线后追加，用户 2026-09-29 决策）
 - [ ] T5 C-2 MySQL 连接池 —— 待执行
-- [ ] T6 C-3 派生态缓存 —— 待执行
+- [ ] T6 C-3 派生态缓存 —— 待执行（主战场为 S9/S10，非 S2）
 - [ ] T7 知识库同步与收尾 —— 待执行

@@ -27,6 +27,7 @@ SqlReport 的报表执行链路在数据量上升后响应明显变慢。本次�
 | `query_executor.py` | MySQL 连接获取方式、结果行包装 |
 | `redis_cache.py` | **仅在实测证明是热点时**；§3 列出的快照格式、键构造、TTL/保活、锁、兜底语义全部冻结，其余实现细节（连接管理、JSON 序列化效率）可优化 |
 | `config_db.py` | 仅在实测证明是热点时 |
+| `export.py` | **C-4（2026-09-29 基线后经用户决策追加）**：`_load_and_transform` 的数据来源 |
 
 「冻结」约束的是**对外可观察的缓存语义**，不是整个文件不可改。改动后快照 JSON 必须逐字节一致（§6.1 第 3 条），这是判定边界。
 
@@ -161,7 +162,58 @@ DEBUG 配置 `app_config.debug.json` 保持原样（端口 1000、Redis 6379 已
 
 **这是唯一有真实设计风险的一段，单独实施、单独验证**，不与 C-1 / C-2 捆绑。
 
+### C-4 导出复用 execute_report（基线后追加 · 2026-09-29）
+
+**触发**：§10.2 第 2 条。导出 S7 的 1519.7ms 是全站最大热点（第二名的 15 倍），
+根因是 `export.py:73-81` 的 `_load_and_transform` 直接
+`db.create_mysql_connection()` + `db.execute_mysql_query()`，
+**完全不经过 L1 `QueryCache` / L2 Redis / L3 静态缓存**。
+
+**佐证这不是特例而是异类**：`api_handler.py:454` 的 API 路径**已经在调用
+`report.execute_report`**（走缓存 + 分页）。只有导出绕开了。让导出复用
+`execute_report` 是回到「单一实现来源」，而非新增机制。
+
+**改法**：`handle_export` 把已有的 `report_id` 与 `report_config` 向下传给
+`_load_and_transform` → `export_report_to_csv` / `export_report_to_json`；
+`_load_and_transform` 改为调用 `report.execute_report(...)` 取数，
+不再自己建连接查 MySQL。
+
+**关键风险控制 —— 不修改 `execute_report`**：本段只**调用** `execute_report`，
+一行都不改它。Redis 契约全部留在原函数内，不受本次改动影响。
+
+调用形态要点：
+
+| 参数 | 取值 | 理由 |
+|------|------|------|
+| `report` | `report_config` | 必须传，否则 `limit_rows` 恒为 False，**全量输出护栏失效**（安全回归） |
+| `page` / `page_size` | `1` / `_EXPORT_ALL_ROWS_PAGE_SIZE = 2**31 - 1` | 导出要全量行；Python 切片对超大 stop 自动截到末尾，10 亿行以上的报告不可能存在 |
+| `active_index` | `result_index` | 多结果集时取用户选中的那个 |
+| `filters` / `sorts` / `nested_filter` | 原样透传 | 三个 transform 函数本来就是共用的，不重复实现 |
+| `read_timeout` | 不传（None） | 与现状一致（导出不设查询超时） |
+| `refresh` / `force_rebuild` | 不传（False） | 导出沿用既有缓存，不主动失效 |
+
+**语义等价性核对**（改前逐条确认，改后由测试锁定）：
+
+1. **max_rows 护栏** —— 导出的 `export_limit` 条件
+   （`allow_all_output=0` 且 `max_rows>0`）与 `execute_report` 的 `limit_rows`
+   条件**字面相同**。差别只在 `execute_report` 对**每个**结果集截断、导出只对
+   选中那个截断——对导出的输出而言结果一致。截断标记改从
+   `ReportResult.truncated` 取，驱动既有的 `# 注意：查询结果超过 N 行上限`
+   尾注与 `X-Export-Truncated` 响应头。
+2. **写护栏** —— `handle_export` 自己的 403 判定在调用之前，导出根本到不了
+   `execute_report`；`execute_report` 的 `PermissionError` 分支在此路径不会被触达。
+3. **缓存副作用** —— `allow_all_output=0` 的报表，导出经 `execute_report` 后
+   写入的截断快照与报表页写入的是同一份。**这不是新增污染，而是让导出的缓存
+   行为与页面一致**（改前导出截断完全不落缓存，两条路径行为分叉）。
+4. **多结果集越界** —— 现状 `if result_index >= len(results): result_index = 0`；
+   `execute_report` 内部已做同样的 clamp，取 `results[result_index]` 即可。
+
+**预期收益**：热导出 1519.7ms → 约 286ms（transform 15.1 + 行投影 64.2 +
+`rows_to_csv` 207.0），约 **5.3 倍**。行投影与 CSV 序列化不动（`rows_to_csv` 是
+三处共用的统一实现，见 AGENTS #3）。
+
 ## 6. 验证策略
+
 
 ### 6.1 Redis 契约守卫
 
@@ -185,6 +237,7 @@ DEBUG 配置 `app_config.debug.json` 保持原样（端口 1000、Redis 6379 已
 | C-1 第 3–6 项 | 静默改变行序/行内容 | 该项退回原实现，只保留已验证项 |
 | C-2 | scheduler 场景回归（慢查询被 30s 截断）；连接泄漏耗尽池 | 出现 scheduler 回归即弃用整段（收益有限，不值得冒险） |
 | C-3 | 内存占用不可接受；派生态与 L1 生命周期脱钩 | LRU 降到 4 组合，或只对单结果集启用；无法保证生命周期脱钩则弃用整段 |
+| C-4 | 导出输出与改前不一致（行数/顺序/截断标记）；全量输出护栏被绕过 | 任何一条语义等价性核对项不成立即弃用整段，回滚到自带连接的实现。**护栏失效是安全问题，不是性能问题，必须立即回滚** |
 | 全部 | 渲染（`render.py`）成为新瓶颈 | **超出本任务范围**，需回到用户重新确认是否扩展到 UI 层 |
 
 ## 8. 知识库同步义务
@@ -196,6 +249,7 @@ DEBUG 配置 `app_config.debug.json` 保持原样（端口 1000、Redis 6379 已
 | `result_transform.py` 的 transform 内部实现 | `docs/compose/knowledge/03-report-transform.md` |
 | `query_executor.py` 连接获取方式 | `docs/compose/knowledge/01-architecture.md` |
 | `report.py` 缓存判定链 | `docs/compose/knowledge/07-cache-scheduler-audit.md` |
+| `export.py` 改为走 `execute_report`（C-4） | `docs/compose/knowledge/03-report-transform.md`（导出的数据来源与缓存关系） |
 | 新增测试入口 / 压测脚本约定 | `docs/compose/knowledge/08-testing-conventions.md` |
 | 掌握状态 | `learn/sqlreport-kb/course-state.md` |
 
@@ -210,6 +264,9 @@ DEBUG 配置 `app_config.debug.json` 保持原样（端口 1000、Redis 6379 已
 | **C-1 + C-2 + 派生态缓存** | ✅ 采纳 | 拿到 SQL 下推的大部分收益（重复访问场景），完全不动 Redis 快照语义 |
 | 产品内常驻性能埋点 | ❌ 否决 | 用户选择一次性脚本，产品面零新增，回归风险最低 |
 | 产品内管理端性能页 | ❌ 否决 | 产品面新增过大，超出「执行层面」范围 |
+| **C-4 导出复用 `execute_report`** | ✅ 采纳（范围追加） | 基线测出导出 1519.7ms 为全站最大热点（第二名 15 倍），根因是绕过三层缓存。用户 2026-09-29 决策纳入范围。API 路径已在用 `execute_report`，导出复用它是回到单一实现来源 |
+| C-4 只修缓存绕过、不动 CSV 序列化 | ⚠️ 部分采纳 | `rows_to_csv` 是导出/API/审计页三处共用的统一实现，改它会波及三处；且它只占导出的 13.5%，收益主要来自缓存复用 |
+| C-4 重构 `execute_report` 抽出取数函数 | ❌ 否决 | 会动到 Redis 契约所在的函数，回归面与本任务「不动 Redis 语义」的硬约束相悖。C-4 只**调用** `execute_report`，不修改它 |
 
 ## 10. 执行记录
 
