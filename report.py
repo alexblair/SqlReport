@@ -78,20 +78,38 @@ import markdown_render
 # ===================================================================
 
 
+# 派生态缓存（C-3）：每个 CachedResult 最多保留多少个 (筛选,排序) 组合的结果。
+# 每个条目是一个 N 长度的行指针列表（复用原始行，不拷贝行数据），
+# 10 万行 ≈ 800KB/条目，故取 8 条作上限（≈6.4MB/报表）。
+_DERIVED_CACHE_MAX = 8
+
+
 class CachedResult:
-    """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据（支持多结果集）。"""
+    """单次报表查询的缓存结果，保存原始 SQL 返回的全量数据（支持多结果集）。
+
+    `derived` 是**派生态缓存**（C-3）：键为 (filters, sorts, nested_filter) 的
+    规范化元组，值为「已筛选已排序的全量行列表」。它挂在本对象上而不是独立的
+    全局缓存，因此天然与 L1 同生共死——L1 每次 set 新建 CachedResult，旧对象
+    连同派生态一起被回收；L1 TTL 过期或逐出，派生态随之消失。派生态绝不会
+    比 L1 活得久，严格保持「进程内看不到别的进程经 scheduler 刷新 Redis
+    快照」这一既有语义。
+
+    该字段**绝不进入任何序列化路径**（Redis 快照只取 results/sql_query/
+    updated_at/config_version/truncated）。
+    """
 
     __slots__ = ("results", "sql_query", "timestamp", "source",
-                 "source_timestamp", "truncated")
+                 "source_timestamp", "truncated", "derived")
 
     def __init__(self, results: list[dict], sql_query: str,
                  source: str = None, source_timestamp: float = None,
-                 truncated: bool = False):
+                 truncated: bool = False, derived: dict = None):
         """
         results: [{"columns": [...], "rows": [...]}, ...]
         source: 数据原始来源（redis / mysql），F5 刷新后保留源头信息
         source_timestamp: 原始来源的时间戳（Redis 快照的 updated_at）
         truncated: 写入时是否发生过 max_rows 截断（PH-06 全量输出护栏）
+        derived: 派生态缓存，键为 (filters, sorts, nested_filter) 规范化元组
         """
         self.results = results
         self.sql_query = sql_query
@@ -99,6 +117,7 @@ class CachedResult:
         self.source = source
         self.source_timestamp = source_timestamp
         self.truncated = truncated
+        self.derived = derived if derived is not None else {}
 
 
 class QueryCache:
@@ -1269,15 +1288,40 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     # 对每个结果集独立执行筛选、排序、分页
     report_results = []
+    # C-3 派生态：仅在「未跳过缓存读取」时启用。写报表每轮数据都会变，
+    # 复用派生态会返回上一轮的旧行序；force_rebuild 是保活「先算后换」，
+    # 同样不该复用旧派生态。
+    derived_store = None
+    if not skip_cache_read:
+        _entry = cache.get(report_id, sql_query)
+        if _entry is not None:
+            derived_store = _entry.derived
+    derived_key = None
+    if derived_store is not None:
+        derived_key = (
+            tuple(tuple(f) for f in (filters or [])),
+            tuple(tuple(s) for s in (sorts or [])),
+            json.dumps(nested_filter, sort_keys=True, default=str)
+            if nested_filter else None,
+        )
+
     for i, res in enumerate(all_results):
         columns = res["columns"]
         all_rows = res["rows"]
 
-        filtered = filter_rows(all_rows, columns, filters or [])
-        if nested_filter:
-            # 嵌套筛选（FR-005 与既有 filters 并存；FR-006 纯函数不污染缓存）
-            filtered = filter_rows_nested(filtered, columns, nested_filter)
-        sorted_rows = sort_rows(filtered, columns, sorts or [])
+        if derived_store is not None:
+            entry_key = (derived_key, i)
+            sorted_rows = derived_store.get(entry_key)
+            if sorted_rows is None:
+                sorted_rows = _transform_rows(all_rows, columns, filters,
+                                              sorts, nested_filter)
+                derived_store[entry_key] = sorted_rows
+                # LRU 上限：超出则淘汰最早插入的组合，防止乱点筛选撑爆内存
+                while len(derived_store) > _DERIVED_CACHE_MAX:
+                    derived_store.pop(next(iter(derived_store)))
+        else:
+            sorted_rows = _transform_rows(all_rows, columns, filters,
+                                          sorts, nested_filter)
 
         total = len(sorted_rows)
         if active_index == -1 or i == active_index:
@@ -1294,6 +1338,15 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
     return ReportResult(report_results, active_index, page, page_size,
                         cache_info=cache_info, truncated=truncated_flag)
+
+
+def _transform_rows(all_rows, columns, filters, sorts, nested_filter):
+    """筛选 → 嵌套筛选 → 排序。派生态缓存的「计算」部分（纯函数）。"""
+    filtered = filter_rows(all_rows, columns, filters or [])
+    if nested_filter:
+        # 嵌套筛选（FR-005 与既有 filters 并存；FR-006 纯函数不污染缓存）
+        filtered = filter_rows_nested(filtered, columns, nested_filter)
+    return sort_rows(filtered, columns, sorts or [])
 
 
 def _cache_matches_limit_policy(truncated: bool, limit_rows: bool) -> bool:
