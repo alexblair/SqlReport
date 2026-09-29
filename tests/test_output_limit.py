@@ -120,6 +120,8 @@ class TestConfigDbOutputLimit(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):
@@ -169,6 +171,8 @@ class TestReportFormOutputLimit(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):
@@ -289,6 +293,8 @@ class TestExportOutputLimit(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         self.pool_id = _add_pool(self.conn)
         self.mock_pool = {"host": "h", "port": 3306,
                           "user": "u", "password": "p", "database": "d"}
@@ -378,6 +384,8 @@ class TestApiTruncatedFlag(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         self.pool_id = _add_pool(self.conn)
         self.rid = db.add_report(self.conn, "API报表", "SELECT 1", 20, self.pool_id)
         self.endpoint = {
@@ -472,6 +480,8 @@ class TestReportPageBanner(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):

@@ -215,6 +215,13 @@ class BaseReportTest(BaseConfigTest):
         """创建基础环境后插入连接池、分类、报表种子数据。"""
         super().setUp()
 
+        # report.execute_report 读写进程级 L1 缓存（report._query_cache，
+        # 键为 report_id）。各用例的种子报表 id 恒为 1，不清空则后一个用例会
+        # 读到前一个用例写入的缓存条目。导出改走 execute_report 后（C-4），
+        # 这一隔离问题在导出用例上暴露出来，故在基类统一清一次。
+        import report as _report
+        _report._query_cache.clear()
+
         # 添加测试连接池
         self.conn.execute(
             "INSERT INTO connection_pools (name,host,port,user,password,database,sort_order) "

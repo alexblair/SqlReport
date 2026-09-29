@@ -361,6 +361,28 @@ P50/P95 · 数据量 `perf_text` 10 万行 / `perf_wide` 5 万行 / `perf_multi_
 结论：§2.1 的条件性范围**本轮全部不启用**。若将来数据量增长一个数量级导致
 S5/S8 显著抬升，再按 §2.1 重新评估。
 
+### 10.5 C-4 实施结果：导出复用 `execute_report`
+
+| 指标 | 改前 | 改后 | 变化 |
+|------|------|------|------|
+| S7 导出 CSV **P50** | 1519.7ms | **359.2ms** | **-76.4%（4.2 倍）** |
+| S7 导出 CSV P95 | 1596.3ms | 387.6ms | -75.7% |
+| S7 冷路径（预热） | 1505.7ms | 396.6ms | -73.7% |
+
+其余 11 个场景无回退；`cache_info.source` 断言（S1 预热 mysql→正式 process、
+S5 全 redis）全部通过。
+
+359.2ms 的构成与 §10.2 的预测一致：transform 13.2 + 行投影 64.2 +
+`rows_to_csv` 207.0 ≈ 285ms，加上 HTTP 与配置库开销。**主导项 `rows_to_csv`
+按设计未动**——它是导出/API/审计页三处共用的统一实现。
+
+**连带修正的测试隔离问题**：导出改走 `execute_report` 后会读写进程级 L1 缓存
+（`report._query_cache`，键为 `report_id`）。既有导出测试各用同一个
+`report_id=1` 且 mock 的是 `db.execute_mysql_query`，导致前一个用例写入的缓存
+被后一个用例读到，40 个用例失败。已在 `tests/test_export.py`、
+`tests/test_output_limit.py` 的各 `setUp` 与 `tests/test_base.py` 的
+`BaseReportTest.setUp` 中统一清空缓存。**这本身就是缓存生效的证据**。
+
 ---
 
 

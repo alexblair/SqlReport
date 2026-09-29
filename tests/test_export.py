@@ -18,6 +18,7 @@ import sqlite3
 import db
 import app_config
 import export
+import report
 import server as srv
 from tests import BaseReportTest
 
@@ -67,6 +68,11 @@ class TestExportToCSV(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -322,6 +328,11 @@ class TestJSONExport(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -485,6 +496,11 @@ class TestExportCharset(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -574,6 +590,11 @@ class TestExportJSONNoQuotes(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -690,6 +711,11 @@ class TestExportSmartQuotes(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -886,6 +912,11 @@ class TestExportZip(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -1155,6 +1186,8 @@ class TestExportParameterCombinations(unittest.TestCase):
     def setUp(self):
         """创建内存 SQLite config_db，添加连接池和报表"""
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -1759,6 +1792,11 @@ class TestExportResultIndex(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         # 两条 SELECT：do_execute 第 0 次为 (id,)，第 1 次为 (name,)
         db.add_report(self.conn, "订单报表",
@@ -1858,6 +1896,11 @@ class TestExportPoolNotFound(unittest.TestCase):
 
     def setUp(self):
         self.conn = _make_conn()
+        # C-4 起导出走 report.execute_report，会读写进程级 L1 缓存
+        # （report._query_cache，键为 report_id）。各用例都用同一个
+        # report_id=1，先前用例写入的缓存条目会被后续用例读到，
+        # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
+        report._query_cache.clear()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         # 关闭 FK 约束，插入指向不存在连接池（999）的报表
         self.conn.execute("PRAGMA foreign_keys=OFF")

@@ -43,11 +43,17 @@ import zipfile
 from typing import Optional, Union
 import db
 import app_config
+import report
 from render import format_cell
 from report import (parse_filters, parse_sorts, parse_result_index,
                    WRITE_DENIED_MESSAGE, parse_nested_filter)
 from query_executor import sql_contains_write
 from result_transform import filter_rows, sort_rows, select_columns, column_indices, filter_rows_nested
+
+
+# 导出取「全量行」用的 page_size 哨兵。Python 切片对超大 stop 会自动截到末尾，
+# 10 亿行以上的报告不可能存在（内存先耗尽），故该值等价于「不翻页」。
+_EXPORT_ALL_ROWS_PAGE_SIZE = 2 ** 31 - 1
 
 
 def _load_and_transform(sql_query: str, pool_config: dict,
@@ -56,49 +62,78 @@ def _load_and_transform(sql_query: str, pool_config: dict,
                         result_index: int = 0,
                         sorts=None,
                         max_rows: int = None,
-                        nested_filter=None) -> tuple:
+                        nested_filter=None,
+                        *, report_id: int = None,
+                        report_config: dict = None,
+                        conn=None) -> tuple:
     """
     执行查询并应用内存变换，返回导出所需的数据。
 
-    两导出函数（CSV / JSON）共用的头部流程：
-    连接 → 查询 → 多结果集越界回退 → 截断至 max_rows → 内存筛选 → 排序 →
-    输出列确定（自定义列回退全部列）→ 列索引映射。
+    两条数据来源（C-4）：
+
+    1. **report_id 不为 None（生产路径）** —— 交给 `report.execute_report` 取数，
+       复用 L1 进程缓存 / L2 Redis 快照，与报表页面、API 端点同源。改前本函数
+       直接建连接查 MySQL、完全绕过三层缓存；基线实测导出 1519.7ms 是全站
+       最大热点（spec §10.2 第 2 条）。
+    2. **report_id 为 None（旧路径）** —— 自行建连接查 MySQL，行为与 C-4 之前
+       完全一致，供不带报表上下文的旧调用方与既有测试使用。
+
+    两导出函数（CSV / JSON）共用的后续流程：
+    截断 → 内存筛选 → 排序 → 输出列确定（自定义列回退全部列）→ 列索引映射。
 
     返回 (output_columns, display_indices, rows, truncated)：
       output_columns — 最终输出列名列表（按用户自定义顺序）
       display_indices — output_columns 在 all_columns 中的索引列表
       rows — 已筛选/排序的行数据列表
       truncated — 查询结果是否发生过 max_rows 截断（False 表示未截断）
+
+    ⚠️ report_config 必须传：execute_report 的全量输出护栏
+    （allow_all_output / max_rows）由 report 参数驱动，传 None 等于护栏失效。
     """
-    conn = db.create_mysql_connection(pool_config)
-    try:
-        results = db.execute_mysql_query(conn, sql_query)
-        if result_index >= len(results):
-            result_index = 0
-        all_columns = results[result_index]["columns"]
-        rows = results[result_index]["rows"]
-    finally:
-        conn.close()
+    if report_id is not None:
+        result = report.execute_report(
+            report_id=report_id, sql_query=sql_query, pool_config=pool_config,
+            page=1, page_size=_EXPORT_ALL_ROWS_PAGE_SIZE,
+            filters=filters or [], sorts=sorts or [],
+            active_index=result_index, report=report_config,
+            nested_filter=nested_filter, conn=conn)
+        # 越界回退 0（execute_report 内部已 clamp，这里再兜一层防御）
+        idx = result_index if 0 <= result_index < len(result.results) else 0
+        res = result.results[idx]
+        all_columns = res["columns"]
+        rows = res["rows"]
+        # 截断 / 筛选 / 排序 / 嵌套筛选均已由 execute_report 应用，不得重复
+        truncated = bool(result.truncated)
+    else:
+        _conn = db.create_mysql_connection(pool_config)
+        try:
+            results = db.execute_mysql_query(_conn, sql_query)
+            if result_index >= len(results):
+                result_index = 0
+            all_columns = results[result_index]["columns"]
+            rows = results[result_index]["rows"]
+        finally:
+            _conn.close()
 
-    # PH-07 全量输出护栏：与报表页面/API 一致，原始行截断后再筛选/排序
-    truncated = False
-    if max_rows is not None and max_rows > 0 and len(rows) > max_rows:
-        rows = rows[:max_rows]
-        truncated = True
+        # PH-07 全量输出护栏：与报表页面/API 一致，原始行截断后再筛选/排序
+        truncated = False
+        if max_rows is not None and max_rows > 0 and len(rows) > max_rows:
+            rows = rows[:max_rows]
+            truncated = True
 
-    # 应用内存筛选（与报表页面的筛选逻辑一致）
-    filtered = filter_rows(rows, all_columns, filters or [])
-    # 嵌套筛选（FR-013）：在普通筛选之上叠加 AND/OR 条件树
-    if nested_filter:
-        filtered = filter_rows_nested(filtered, all_columns, nested_filter)
-    # 应用排序（与报表页面的筛选逻辑一致）
-    if sorts:
-        filtered = sort_rows(filtered, all_columns, sorts)
+        # 应用内存筛选（与报表页面的筛选逻辑一致）
+        rows = filter_rows(rows, all_columns, filters or [])
+        # 嵌套筛选（FR-013）：在普通筛选之上叠加 AND/OR 条件树
+        if nested_filter:
+            rows = filter_rows_nested(rows, all_columns, nested_filter)
+        # 应用排序（与报表页面的筛选逻辑一致）
+        if sorts:
+            rows = sort_rows(rows, all_columns, sorts)
 
     # 确定输出列（按用户自定义顺序，无效列名回退全部列）
     output_columns = select_columns(all_columns, columns)
     display_indices = column_indices(output_columns, all_columns)
-    return output_columns, display_indices, filtered, truncated
+    return output_columns, display_indices, rows, truncated
 
 
 def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
@@ -139,7 +174,10 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
                          sorts=None,
                          max_rows: int = None,
                          _truncated_out: list = None,
-                         nested_filter=None) -> str:
+                         nested_filter=None,
+                         *, report_id: int = None,
+                         report_config: dict = None,
+                         conn=None) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
@@ -159,7 +197,8 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
-        max_rows=max_rows, nested_filter=nested_filter)
+        max_rows=max_rows, nested_filter=nested_filter,
+        report_id=report_id, report_config=report_config, conn=conn)
     if truncated and _truncated_out is not None:
         _truncated_out.append(True)
 
@@ -182,7 +221,10 @@ def export_report_to_json(sql_query: str, pool_config: dict,
                           sorts=None,
                           max_rows: int = None,
                           _truncated_out: list = None,
-                          nested_filter=None) -> str:
+                          nested_filter=None,
+                          *, report_id: int = None,
+                          report_config: dict = None,
+                          conn=None) -> str:
     """
     执行查询并将结果导出为 JSON 字符串。
 
@@ -214,7 +256,8 @@ def export_report_to_json(sql_query: str, pool_config: dict,
     """
     output_columns, display_indices, filtered, truncated = _load_and_transform(
         sql_query, pool_config, filters, columns, result_index, sorts,
-        max_rows=max_rows, nested_filter=nested_filter)
+        max_rows=max_rows, nested_filter=nested_filter,
+        report_id=report_id, report_config=report_config, conn=conn)
     if truncated and _truncated_out is not None:
         _truncated_out.append(True)
 
@@ -449,13 +492,15 @@ def handle_export(conn, query: str,
                 smart_quote_flags=smart_quote_flags,
                 columns=custom_columns, result_index=result_index,
                 sorts=sorts, max_rows=export_limit,
-                _truncated_out=truncated_sink, nested_filter=nested_filter)
+                _truncated_out=truncated_sink, nested_filter=nested_filter,
+                report_id=report_id, report_config=report_config, conn=conn)
         else:
             content = export_report_to_csv(
                 report_config["sql_query"], pool_config, filters,
                 custom_columns, result_index, sorts=sorts,
                 max_rows=export_limit, _truncated_out=truncated_sink,
-                nested_filter=nested_filter)
+                nested_filter=nested_filter,
+                report_id=report_id, report_config=report_config, conn=conn)
     except Exception as e:
         return 500, f"导出失败: {e}", {}
 
