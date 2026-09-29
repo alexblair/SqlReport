@@ -23,15 +23,20 @@
 
 | 文件 | 作用 |
 |------|------|
-| `app_config.json` | 主配置（**不入库**，模板 example） |
-| `app_config.debug.json` | DEBUG **深合并**（dict 递归；**list 整段覆盖**） |
-| `CONFIG_FILE` / `DEBUG_CONFIG_FILE` | 显式 CONFIG_FILE 且未设 DEBUG_CONFIG_FILE → **跳过** debug |
+| `app_config.json` | 主配置（**不入库**，模板 `app_config.example.json`） |
+| `app_config.debug.json` | DEBUG **深合并**（dict 递归；**list 整段覆盖**），模板 `app_config.debug.example.json` |
+| `CONFIG_FILE` / `DEBUG_CONFIG_FILE` | 显式 CONFIG_FILE 且未设 DEBUG_CONFIG_FILE → **跳过** debug 叠加 |
 
 关键 API：`get_config/reload_config/is_debug_mode`、`get_server_config`（HOST/PORT env 最高）、`get_trust_xff`、`get_active_db_config`、`get_redis_config`、`serialize_json` / `serialize_smart_quotes`。
 
-分段：`server{host,port,trust_xff}` `log` `error_log` `redis` `static_cache` `file_permissions` `audit_db` `config_db[]`。
+分段：`server{host,port,trust_xff}` `log` `error_log` `redis` `static_cache` `file_permissions` `audit_db` `config_db[]`、`test_mysql`（性能/集成测试数据源）。
 
-测试在 `tests/__init__.py` 把 `DEBUG_CONFIG_FILE` 指到不存在路径——勿依赖仓库根 debug 配置。
+### 测试与 DEBUG 的隔离（硬性）
+
+- 测试进程隔离在 `tests/_bootstrap.py`（由 `tests/__init__.py` 调用）：`DEBUG_CONFIG_FILE` 指到不存在路径、vendor 落点与站点标识库重定向到临时目录、**Redis 强制关闭**。**勿在测试里依赖仓库根 debug 配置或真实 Redis。**
+- **一切 `discover` 必须带 `-t .`**，否则测试模块被当顶层模块导入、`tests/__init__.py` 不执行、上述隔离全部失效（会连生产 Redis）。`tests/test_test_isolation.py` 是金丝雀会报警。详见 `08-testing-conventions.md`。
+- **真层集成测试**（`tests/integration/`）：仅当 DEBUG 配置存在时运行；MySQL 未配置/连不上则 skip，**不视为失败**。
+- 敏感/运行时文件均在 `.gitignore`（`app_config*.json` 非 example、`config.db`、`audit.db`、`venv/`、`static_cache/`、`run-logs/`、`perf-logs/`、`static/vendor/self@*/` 等）——**不要提交**。
 
 ## 双引擎配置库
 
@@ -41,24 +46,32 @@
 - Schema + 双侧迁移 + `tests/test_base.py` DDL **三处同步**（见 04 卷）  
 - `db.py` 仅 re-export；新代码 `import config_db` / `query_executor`
 
-## 模块地图（摘要）
+## 模块地图（真正影响写法的部分）
 
-| 模块 | 行约 | 职责 |
+单包扁平布局，**无 monorepo**；入口只有 `server.py`。行数为 2026-09-29 实测。
+
+| 职责 | 模块 | 要点 |
 |------|------|------|
-| server | 1110 | 路由/鉴权/vend 静态 |
-| config | 2833 | /config* CRUD |
-| config_db | 2530 | DAL+迁移 |
-| report | 1903 | 报表页+execute_report |
-| result_transform | 598 | 筛选排序列纯函数 |
-| export | 503 | CSV/JSON/ZIP |
-| api_handler | 1074 | API+静态 json |
-| render | 4968 | 全站 UI |
-| query_executor | 490 | 事务+写检测 |
-| scheduler | 734 | 定时任务 |
-| auth/audit_*/branding | — | 认证审计品牌 |
-| redis_cache/static_cache | — | L2/静态缓存 |
+| 路由 / HTTP | `server.py` | `ROUTES` **按列表顺序首次匹配**；`needs_auth` / `needs_db` 在 `RouteEntry` 上声明。新 URL 必须进 `ROUTES`，注意与既有正则的先后关系 |
+| 配置页 CRUD | `config.py` | `/config*` 表单与页面 |
+| 配置数据访问 + 表结构 | `config_db.py` | 建表 DDL、**双引擎迁移**、全部配置表 DAL |
+| 兼容转发层 | `db.py` | 仅 re-export；**新代码直接 `import config_db` / `query_executor`** |
+| 报表页 | `report.py` | 分页/排序/筛选 URL 解析（`parse_filters` / `parse_sorts` / `parse_nested_filter`）、`execute_report`、派生态缓存 |
+| 结果变换（纯函数） | `result_transform.py` | **页面 / 导出 / API / 预设共用**的筛选排序列选择；勿在别处重写匹配语义 |
+| 筛选语法说明 | `filter_help.py` | 帮助弹窗单一来源，与 `parse_filter_expr` 行为对齐 |
+| 导出 | `export.py` | CSV/JSON/ZIP；数据来源走 `execute_report`（复用缓存） |
+| API | `api_handler.py` | API Key、CORS、静态 `.json`、预设与 JSON 模板 |
+| MySQL 执行 | `query_executor.py` | 事务多语句、连接池；`sql_contains_write` + 报表 `allow_write` 写护栏 |
+| HTML / CSS / JS | `render.py` | **全站 UI 单一来源**（见 `06-ui-interactions.md`） |
+| 缓存 | `redis_cache.py` / `static_cache.py` | L1 进程 → L2 Redis → DB；API `.json` 静态缓存 |
+| 定时任务 | `scheduler.py` | 进程内 daemon 线程，无外部调度器 |
+| 认证 / 审计 / 品牌 | `auth.py` / `audit_db.py`+`audit_page.py` / `branding.py` | branding 用**实例本地**独立 SQLite，不进配置库 |
+| 应用配置 | `app_config.py` + `app_config.json` | 见「应用配置」节 |
 
-完整表见 `INDEX.md`。
+路由/鉴权细节见 `02-routing-auth.md`；筛选/排序/导出/护栏语义见 `03-report-transform.md`；
+表结构变更三处同步见 `04-config-data.md`；缓存与调度见 `07-cache-scheduler-audit.md`。
+
+**改任何模块前先读它对应的那一卷**，不要在本表里猜细节。
 
 ## 缓存分层
 
@@ -94,7 +107,14 @@ API 静态：static_cache/api/**.json + config_version + TTL；NGINX 可直出
 
 ## 运行时勿提交
 
-`app_config.json`、`config.db`、`audit.db`、`venv/`、`static_cache/`、`perf-logs/`、`static/vendor/self@*/`、`.codegraph/`、`docs/`、`AGENTS.md`、`.mimocode/`（见 `.gitignore`）。
+## 运行时勿提交
+
+`app_config*.json`（非 example）、`config.db`、`audit.db`、`venv/`、`static_cache/`、
+`run-logs/`、`perf-logs/`、`static/vendor/self@*/`、`.codegraph/`、`AGENTS.md`、
+`.mimocode/`（见 `.gitignore`）。
+
+**注意**：`docs/`（spec / plan / 知识库）**已从 `.gitignore` 移除、随任务正常提交**；
+`MEMORY.md` 同样入库。勿把它们当忽略物。
 
 ## 易踩坑
 

@@ -16,10 +16,16 @@
 | 4 | 配置数据层 | `04-config-data.md` | 完成（explore-2 增补） |
 | 5 | API | `05-api.md` | 完成（explore-1 增补） |
 | 6 | UI 交互 | `06-ui-interactions.md` | 完成（ui-redesign T9 重写 + R2-D：API 列表 api-row 卡片/详情五页签对齐 page-detail——qf-row 快筛、结果集 segment、分页恒显、规则双卡、调试磁贴、备注卡片；**emoji→SVG 图标系统（_icon 函数）、CSS 按钮类补齐、侧栏 button→a 语义修复**；**2026-09-29 侧栏三态收缩（全高手柄+localStorage 记忆+小屏自适应）与当前登录用户名注入**；**R3 侧栏账号区吸底/两行修复 + 报表配置页列表/卡片双视图与列宽预算、截图数值断言校验法（易踩坑 #14–15）**） |
-| 7 | 缓存调度审计 | `07-cache-scheduler-audit.md` | 完成 |
-| 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因） |
+| 7 | 缓存调度审计 | `07-cache-scheduler-audit.md` | 完成（2026-09-29 补 L1 派生态缓存与导出并入缓存链路的说明） |
+| 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因；2026-09-29 从 AGENTS.md 迁入两败必停全文 + L2 分段命令表 + `-t .` 陷阱 + 性能工具链） |
+| 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7，自 AGENTS.md 迁入） |
 
 入口：`docs/compose/knowledge/README.md` + `INDEX.md`
+
+**文档结构约定（2026-09-29 起）**：`AGENTS.md` 只保留「每次任务都要读」的最小集
+（硬性约束条目 + **§0 入口引导路由表** + 环境命令 + 收尾检查单，约 141 行）。
+凡「只在特定类型任务才需要」的流程全文一律在本库分卷；AGENTS.md §0 路由表登记
+「什么时候读哪一卷 / 改完必更新哪一卷」。新增内容时先判断它属于最小集还是分卷。
 
 ## 概念掌握表
 
@@ -75,7 +81,7 @@
 
 ```text
 slug=sqlreport-kb
-chapters=0..8 done
+chapters=0..9 done
 kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写死绝对路径
 index=codegraph ok (100 files, 6037 nodes)
 sources=code+AGENTS+README+4 explore agents
@@ -83,4 +89,7 @@ gaps=none blocking
 last_sync=2026-09-29 执行层性能优化（spec 2026-09-29-execution-layer-performance-design.md）
            同步 01/03/07/08 分卷：连接池、派生态缓存、导出并入缓存、
            transform 性能要点、discover -t . 隔离、性能工具链
+last_sync=2026-09-29 AGENTS.md 瘦身重构（395 → 141 行）
+           新建 09-agent-workflow.md；01/02/03/04/06/08 迁入对应 AGENTS.md 内容；
+           AGENTS.md §0 新增「任务类型 → 先读/改完必更新」入口引导路由表
 ```

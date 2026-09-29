@@ -137,6 +137,15 @@ report.allow_write 与 sql_contains_write(sql)
 - 10 万行实测（重复同筛选/排序）：排序 76.1→16.1ms，筛选 95.3→15.5ms。
   **首次**访问仍是 O(N)，与基线同量级。
 
+## 统一筛选 / 排序 / 输出语义（三处调用方一致，禁止单边修改）
+
+- **值匹配表达式**：`result_transform.parse_filter_expr`（`*` 通配、英文逗号「或」、`\` 转义）；操作符集合以代码为准，帮助文案在 `filter_help.py`（筛选语法三件套：改语法必须同改 `parse_filter_expr` + `filter_help` + `test_filter_help`）。
+- **嵌套筛选**：URL 参数 `nested_filter`（JSON），`validate_nested_filter` 校验。
+- **全量输出护栏**：`max_rows`、截断标记在报表页 / 导出 / API 必须行为一致。
+- **审计页关键字**共用同一套匹配语义（`audit_page` / `audit_db`），改语义要全链路对齐测试。
+- **分页/排序/筛选 URL 解析**在 `report.py`：`parse_filters`（`f_{col}` + `op_{col}`）、`parse_sorts`（`sort` + `dir`）、`parse_nested_filter`、`parse_result_index`、`parse_result_names`。
+- **改任一处前先看本卷的「transform 实现的性能要点」与「派生态缓存」两节**——C-1/C-3 已在这些函数上做过有测试锁定的优化，不可凭直觉重写。
+
 ## 易踩坑
 
 1. **禁止**在 export/api 重写匹配语义

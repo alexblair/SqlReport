@@ -25,7 +25,10 @@
 `/health`：公开，`{"status":"ok","uptime":int}`。  
 客户端 IP：默认 socket；`trust_xff` 才信 XFF 首 IP。
 
-## 路由表（`server.py` `ROUTES` :244-263）
+## 路由表（`server.py` `ROUTES`）
+
+> ⚠️ **`ROUTES` 按列表顺序首次匹配**——新 URL 必须进 `ROUTES`，且注意与既有正则的先后关系。
+> 改路由前先读 `server.py` 的 `ROUTES` 与 `ReportHandler._handle*`，再改业务模块。
 
 | 方法 | 模式 | auth | db | handler |
 |------|------|------|----|---------|
@@ -82,14 +85,20 @@ preview 路由 `conn=None`——config 不能假设总有连接。
 - 每次进 `/audit` 前 `_rotate_expired`；`retention_days<=0` 不清理  
 - **POST 体只能读一次**：`_log_web_access(request_body=None)` 危险，须传 `form_body` 或 `""`
 
+## 鉴权边界
+
+- **Session Cookie**：除公开路由（`/login`、`/health`、`/api/`、静态 vendor 等）外均需认证。
+- **API 不走 Session**：`Authorization: Bearer <key>` 或 `?api_key=`，常数时间比较见 `api_handler._validate_api_key`。
+- `RouteEntry.needs_auth` / `needs_db` 决定是否走 `_authenticate()` 与是否开配置库连接；`needs_db=False` 的 handler 收到 `conn=None`。
+
 ## 易踩坑
 
-1. 新路由插错顺序被宽正则吞掉  
-2. flash 必须 quote 才能进 Location  
-3. Cookie 无 Secure——HTTPS 靠反代  
-4. `operation` 默认不记 IP；只有 web_access/api 经 server 链路带 IP  
-5. keyword 不搜 status/body  
-6. 轮转依赖 ISO timestamp 文本比较  
+1. 新路由插错顺序被宽正则吞掉（**`ROUTES` 首次匹配**）
+2. flash 必须 quote 才能进 Location
+3. Cookie 无 Secure——HTTPS 靠反代
+4. `operation` 默认不记 IP；只有 web_access/api 经 server 链路带 IP
+5. keyword 不搜 status/body
+6. 轮转依赖 ISO timestamp 文本比较
 
 ---
-最后核对：explore-1 报告
+最后核对：explore-1 报告 + 2026-09-29 从 AGENTS.md 迁入「路由与鉴权」要点

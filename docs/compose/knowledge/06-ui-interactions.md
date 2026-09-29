@@ -1,7 +1,8 @@
 # UI 体系与交互（ui-redesign 重构后 · render 单一来源）
 
-> 与根 `AGENTS.md` 硬性 #11、「UI / 视觉 / 交互任务流程」对齐。
-> 最后同步：ui-redesign 特性（`docs/compose/spec/ui-redesign.md`，T7.1–T7.11 已实施）。
+> 与根 `AGENTS.md` 硬性 #11 对齐（完整流程见本卷「UI / 视觉 / 交互任务流程」）。
+> 最后同步：ui-redesign 特性（`docs/compose/spec/ui-redesign.md`，T7.1–T7.11 已实施）
+> + 2026-09-29 从 AGENTS.md 迁入「统一 UI 体系」与 UI 任务流程完整四阶段。
 
 ## 原则
 
@@ -11,11 +12,41 @@
 - 危险操作：统一确认（`confirm` 文案模板：动词+对象+影响范围）；无第二套框架
 - 品牌：侧栏/登录/浏览器标题统一 **SqlReport**（branding 前缀仍只改 `<title>`）
 
-## UI 确认稿 → 实施（硬性 #11，已完成一轮）
+## 统一 UI 体系（必须复用）
 
-1. 先可交互 HTML 确认：`docs/compose/spec/ui-redesign-prototype.html`（用户已确认）
-2. 严格按确认稿实施；确认稿素材与截图在 `docs/compose/spec/shots/`
-3. 绝对禁止：交付与确认不符、混乱 DOM/CSS 直塞、确认稿原样粘进 `render.py`
+- 页面骨架：`render.render_page_header(...)` + 区块 `build_*` + `render.render_page_footer()`。
+- 表格、分页、筛选条、排序面板、字段设置、确认删除等已有 `build_*` 函数；**新页面只拼装，不新写一套 class/布局**。
+- 公共样式/脚本：`_BASE_CSS` / `_COMMON_CSS` / `_COMMON_JS`（及按钮、flash 等切片）。启动时 `ensure_common_assets()` 写入 `static/vendor/self@{sha256前8位}/common.css|js`，由 `/static/vendor/` 直出。
+- 页面特有 CSS 通过 `render_page_header(extra_css=...)` 追加，**不要改全局公共块来塞局部样式**。
+- 测试会把 vendor 根重定向到临时目录（`tests/_bootstrap.py`），勿依赖真实 `static/vendor/self@*` 路径断言。
+
+## UI / 视觉 / 交互任务流程（硬性 #11）
+
+适用：设计稿落地、UI 优化、视觉与交互改版、新页面或区块的交互示意——凡「用户会看到的界面怎么变」都算。
+
+| 阶段 | 必须动作 | 禁止 |
+|------|----------|------|
+| ① 确认素材 | 产出**可交互 HTML**（可点开、可点选/切换等关键交互可演示）交给用户确认 | 只给口头描述、静态截图或 markdown 草图就当已确认 |
+| ② 用户确认 | 等待用户明确确认（或按确认稿修订后再确认） | 未确认就改 `server`/`render`/`config` 等生产代码 |
+| ③ 实施 | **严格按已确认的 HTML/确认结论**落到 `render_page_header` + `build_*` + `extra_css` | 随意发挥、擅自改布局/文案/交互，与确认稿不一致 |
+| ④ 一致性 | 确认稿与生产实现都复用全局视觉：`_BASE_CSS`/`_COMMON_CSS`/`_COMMON_JS`、既有 class、按钮/表单/表格/折叠等 `build_*` 形态 | 把外部草稿或一次性混乱 DOM/CSS 直接拷进生产 |
+
+**确认素材要求**（做 HTML 确认稿时）：
+
+1. **全局视觉特性**：页壳、导航、色彩/字号/间距、按钮与表单样式尽量对齐站内现状；局部差异用页面级 `extra_css` 表达，不另起第二套设计语言。
+2. **组件语义对齐**：结构按既有 `build_*` 输出的 DOM 形态示意（勿嵌套 form、勿发明新 class 体系）；确认后实现时仍以 `render` 单一来源拼装，**不是**把确认稿 HTML 原样粘贴进 Python 字符串了事。
+3. **可交互**：与本次相关的点击、折叠、切换、hover/禁用等至少可演示；纯静态不可点的稿不能单独充当「已确认」。
+4. **路径可移植**：确认稿路径/引用同样禁止写死主目录（硬性 #10）；确认稿属过程素材，不并入生产 `static/` 被服务直出，除非另有明确交付要求。
+
+**完成后自检（绝对禁止项）**：
+
+- [ ] 用户确认过的要点（布局、文案、交互、状态）在实现中均可一一对应，**无交付与确认不符**。
+- [ ] 生产 HTML 仍由 `render` + `build_*` 拼装，公共 class/CSS 来自 `_COMMON_*`，**无混乱 DOM/CSS 直塞**、无破坏全站一致。
+- [ ] 未把「确认稿原样字符串」当成实现捷径绕过组件体系。
+- [ ] 相关本卷已随变更同步（及必要时 `tests/test_render.py` HTML 结构用例）。
+
+**先例**：`docs/compose/spec/ui-redesign-prototype.html`（用户已确认的一轮完整走通），
+素材与截图在 `docs/compose/spec/shots/`。
 
 ## 骨架与资产
 

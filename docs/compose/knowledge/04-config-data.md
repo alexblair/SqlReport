@@ -75,13 +75,23 @@ POST form → config.handle_* / handle_request
 `POST /config/test-cases/import` → `preset_cases.import_preset_from_file`  
 upsert 不删多余行；可覆盖测试池连接字段。
 
+## 表结构变更（易漏，必须三处同步）
+
+改配置表字段时，`config_db.py` 内通常要**同时**：
+
+1. 更新 `_SQLITE_SCHEMA` / `_MYSQL_SCHEMA`；
+2. 在 `_init_sqlite_migrations` **和** `_init_mysql_migrations` 各加幂等 `ALTER`；
+3. 同步 `tests/test_base.py` 中硬编码 DDL（单元测试基类故意不 import `db` 以免循环依赖；集成测试 `tests/integration/base.py` 用 `config_db._get_schema_sql`）。
+
+漏任一侧会造成引擎间或测试/生产 schema 漂移——且症状往往只在另一引擎或真层才暴露。
+
 ## 易踩坑
 
-1. 改表 **三处+test_base** 同步  
-2. 新代码用 `config_db` 不用 `db` 当业务 DAL  
-3. 新 `/config` 路径进主正则或独立前缀  
-4. 删除安全先看 `test_deletion_safety`  
-5. flash 勿回显明文密码  
+1. 改表 **三处 + test_base** 同步（见上节）
+2. 新代码用 `config_db` 不用 `db` 当业务 DAL
+3. 新 `/config` 路径进主正则或独立前缀
+4. 删除安全先看 `test_deletion_safety`
+5. flash 勿回显明文密码
 
 ---
-最后核对：explore-2 报告
+最后核对：explore-2 报告 + 2026-09-29 从 AGENTS.md 迁入「表结构变更」节
