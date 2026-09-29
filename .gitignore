@@ -19,6 +19,11 @@ venv/
 # 运行日志
 run.log
 
+# 性能测试运行产物（压测日志、基线 JSON、服务运行日志）。
+# 本环境 /tmp 会被周期清空，且 nohup 后台进程活不过单次 bash 调用，
+# 故性能测试产物统一落仓库内此目录并忽略。
+perf-logs/
+
 # 配置（含密码）
 app_config.json
 app_config.debug.json
