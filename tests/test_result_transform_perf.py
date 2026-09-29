@@ -133,5 +133,106 @@ class TestDecimalSemanticsInFilterAndSort(unittest.TestCase):
             [(Decimal("10.50"),), (Decimal("2.25"),), (None,)])
 
 
+class TestSortFilterCharacterization(unittest.TestCase):
+    """T3 前置：改代码**之前**先把这些行为钉死。
+
+    下面的期望值不是推导出来的，是用未改动的实现实测出来的真实行序
+    （见 spec §10.2 第 1 条的教训：性能判断必须先量）。
+    C-1c 的错误模式是静默换行序，所以这些断言精确到「哪一行排第几位」。
+    """
+
+    COLS = ["v"]
+    MIXED = [None, 3, "2.5", "abc", 1.5, "", -2, "0", "10"]
+
+    def _rows(self):
+        return [(v,) for v in self.MIXED]
+
+    def test_sort_ascending_exact_order(self):
+        """✅ 实测行序：数值组升序 → 文本组升序 → None 恒最后。
+
+        注意 '0' 与 '10' 是「数字字符串」，_try_float 成功 → 进数值组，
+        按数值排在 1.5/2.5/3 之间，不是按字符串排在 '2.5' 之后。
+        """
+        rows = [(v,) for v in self.MIXED]
+        self.assertEqual(
+            [r[0] for r in sort_rows(rows, self.COLS, [("v", "asc")])],
+            [-2, "0", 1.5, "2.5", 3, "10", "", "abc", None])
+
+    def test_sort_descending_exact_order(self):
+        """✅ 实测行序：降序时数值组与文本组各自降序，但 None 仍在最后。"""
+        rows = [(v,) for v in self.MIXED]
+        self.assertEqual(
+            [r[0] for r in sort_rows(rows, self.COLS, [("v", "desc")])],
+            ["10", 3, "2.5", 1.5, "0", -2, "abc", "", None])
+
+    def test_none_always_last_both_directions(self):
+        """✅ Positive: None 不受升降序影响（模块 docstring 的领域约定）。"""
+        rows = [(None,), (1,), (None,), (2,)]
+        for direction in ("asc", "desc"):
+            out = [r[0] for r in sort_rows(rows, self.COLS, [("v", direction)])]
+            self.assertEqual(out[-1], None, f"{direction} 时 None 应在最后")
+
+    def test_sort_multi_key_priority_and_stability(self):
+        """✅ 实测：主键 b 升序；b 相同则按 a 降序；完全相同的行保持输入次序。
+
+        sorts=[("b","asc"),("a","desc")] 的优先级是 b 最高、a 次之
+        （调用方按「从低优先级到高优先级」传入）。
+        """
+        rows = [("a1", 1), ("a1", 2), ("a1", 2), ("a2", 1), ("a1", 3)]
+        self.assertEqual(
+            sort_rows(rows, ["a", "b"], [("b", "asc"), ("a", "desc")]),
+            [("a2", 1), ("a1", 1), ("a1", 2), ("a1", 2), ("a1", 3)])
+
+    def test_sort_single_key_preserves_input_order_for_ties(self):
+        """✅ Positive: 同 key 的行保持输入相对次序（稳定排序）。"""
+        rows = [("a1", 1), ("a1", 2), ("a1", 2), ("a2", 1), ("a1", 3)]
+        self.assertEqual(
+            sort_rows(rows, ["a", "b"], [("a", "asc")]),
+            [("a1", 1), ("a1", 2), ("a1", 2), ("a1", 3), ("a2", 1)])
+
+    def test_filter_multiple_conditions_are_anded(self):
+        """✅ Positive: 多条件是 AND，不是 OR。"""
+        rows = [("alice", 10), ("bob", 20), ("carol", 30)]
+        cols = ["name", "age"]
+        out = filter_rows(rows, cols, [("name", "contains", "o"),
+                                       ("age", "gt", "15")])
+        self.assertEqual(out, [("bob", 20), ("carol", 30)])
+
+    def test_unknown_column_filter_is_skipped_not_rows_dropped(self):
+        """✅ Positive: 未知列的筛选条件被静默跳过（不丢行）。"""
+        rows = [("alice", 10), ("bob", 20)]
+        self.assertEqual(
+            filter_rows(rows, ["name", "age"], [("nope", "eq", "x")]), rows)
+
+    def test_unknown_column_sort_is_skipped(self):
+        """✅ Positive: 未知列的排序键被静默跳过，保持原序。"""
+        rows = [("bob", 20), ("alice", 10)]
+        self.assertEqual(sort_rows(rows, ["name", "age"], [("nope", "asc")]), rows)
+
+    def test_no_filters_returns_same_object(self):
+        """✅ Positive: 无筛选时返回原对象（不做无谓拷贝）。"""
+        rows = [(1,), (2,)]
+        self.assertIs(filter_rows(rows, ["v"], None), rows)
+        self.assertIs(filter_rows(rows, ["v"], []), rows)
+
+    def test_no_sorts_returns_same_object(self):
+        """✅ Positive: 无排序时返回原对象。"""
+        rows = [(1,), (2,)]
+        self.assertIs(sort_rows(rows, ["v"], None), rows)
+        self.assertIs(sort_rows(rows, ["v"], []), rows)
+
+    def test_numeric_string_sorts_numerically_not_lexically(self):
+        """✅ 实测：数字字符串按**数值**排序，不是按字典序。
+
+        输入 ['9','100','10'] → 实测 ['9','10','100']（数值序 9<10<100）。
+        若退化成字典序，结果应是 ['100','10','9']。返回值仍是原始字符串，
+        变的只是行的先后。
+        """
+        rows = [("9",), ("100",), ("10",)]
+        self.assertEqual(
+            [r[0] for r in sort_rows(rows, ["v"], [("v", "asc")])],
+            ["9", "10", "100"])
+
+
 if __name__ == "__main__":
     unittest.main()

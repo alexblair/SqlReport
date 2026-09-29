@@ -183,6 +183,11 @@ def filter_rows(rows: list[tuple], columns: list[str],
 
     注：单一条件匹配逻辑抽取至 _apply_single_filter，供嵌套筛选（filter_rows_nested）
     复用，保证两套入口语义一致（复用优先，FR-014）。
+
+    性能实测（C-1c，曾尝试单趟化后回退）：把 M 个条件编译成行判定函数、
+    一趟遍历同时应用，10 万行实测**慢 41%~72%**——每个单元格多一层闭包
+    函数调用的开销，压过了省下的遍历（M 个条件链式过滤时中间列表逐级缩小，
+    总访问量本就不高）。故保留链式实现。
     """
     if not filters:
         return rows
@@ -202,6 +207,11 @@ def sort_rows(rows: list[tuple], columns: list[str],
     调用方应保证 sorts 中无重复列名。
     排序分区见 _ordered_by_column：数值（含数值字符串）按数值序且恒在
     文本之前，文本按字符串序；None 值始终排在最后，不受升降序影响。
+
+    性能（C-1c）：改前每个排序键要遍历 4 趟（None 分离 2 趟 + 分区 1 趟 +
+    结果拼接 1 趟）。现把 None 分离并入 _ordered_by_column 的一次遍历，
+    每个排序键只剩 1 趟分区遍历。稳定性与多字段优先级不变：仍从低优先级到
+    高优先级依次应用，Python 排序稳定故等价。
     """
     if not sorts:
         return rows
@@ -210,35 +220,38 @@ def sort_rows(rows: list[tuple], columns: list[str],
     for col_name, dir_ in reversed(sorts):
         if col_name not in columns:
             continue
-        col_idx = columns.index(col_name)
-        reverse = dir_.lower() == "desc"
-        # 分离 None 值与非 None 值，确保 None 始终最后
-        none_part = [r for r in result if r[col_idx] is None]
-        not_none_part = [r for r in result if r[col_idx] is not None]
-        result = _ordered_by_column(not_none_part, col_idx, reverse) + none_part
+        result = _ordered_by_column(result, columns.index(col_name),
+                                    dir_.lower() == "desc")
     return result
 
 
 def _ordered_by_column(part: list[tuple], col_idx: int,
                        reverse: bool) -> list[tuple]:
-    """单列分区排序（spec ux-optimization 批次1#1）。
+    """单列分区排序，一次遍历完成 None / 数值 / 文本三分区
+    （spec ux-optimization 批次1#1；C-1c 起并入 None 分区）。
 
     数值（int/float/Decimal/数值字符串）与文本分成两组：
     - 数值组恒排在文本组之前（不随方向翻转——"数字优先、文本垫底"）；
     - 组内分别按数值大小 / 字符串字典序，受 reverse 控制。
-    None 已由 sort_rows 分离，不会出现在 part 中。
+    None 恒排最后，不受 reverse 影响（C-1c 前由 sort_rows 单独分离，
+    那需要额外两趟遍历）。
     """
+    none_part = []
     numeric = []
     text = []
     for r in part:
-        num = _try_float(r[col_idx])
+        val = r[col_idx]
+        if val is None:
+            none_part.append(r)
+            continue
+        num = _try_float(val)
         if num is not None:
             numeric.append((num, r))
         else:
-            text.append((str(r[col_idx]), r))
+            text.append((str(val), r))
     numeric.sort(key=lambda pair: pair[0], reverse=reverse)
     text.sort(key=lambda pair: pair[0], reverse=reverse)
-    return [r for _, r in numeric] + [r for _, r in text]
+    return ([r for _, r in numeric] + [r for _, r in text] + none_part)
 
 
 # gt / lt / gte / lte — filter_rows 中要求条件值可转 float 的操作符集合
