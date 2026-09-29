@@ -21,6 +21,7 @@ import math
 import re
 import datetime
 import calendar
+from decimal import Decimal
 
 # ---------------------------------------------------------------------------
 
@@ -45,6 +46,11 @@ def _try_float(val):
     """
     if val is None:
         return None
+    # 已是 int/float 的值走快速路径，避免每次都构造一次 ValueError 再捕获。
+    # bool 不在此特判之列：既有代码对 bool 无特殊处理（float(True)==1.0），
+    # 快速路径不得改变这一既有行为。
+    if isinstance(val, (int, float)):
+        return val if math.isfinite(val) else None
     try:
         num = float(val)
     except (ValueError, TypeError):
@@ -305,7 +311,12 @@ def _parse_numeric_or_date(s):
         return (None, None)
     if isinstance(s, bool):
         return (None, None)
-    if isinstance(s, (int, float)):
+    # 数值快速路径：int / float / Decimal 免去 str().strip() + 日期正则 + float()
+    # 三连。Decimal 必须在此列——MySQL 的 DECIMAL 列返回 decimal.Decimal，
+    # 不加会让每个金额单元格都走最慢的解析路径（性能基线 S3/S4 的主要来源）。
+    # 快速路径内仍保留 isfinite 检查：Decimal('Infinity') 转 float 得 inf，
+    # 必须与既有 NaN/Inf 语义一致按不可比较处理。
+    if isinstance(s, (int, float, Decimal)):
         num = float(s)
         return (num, None) if math.isfinite(num) else (None, None)
     s = str(s).strip()
