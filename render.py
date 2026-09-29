@@ -134,10 +134,15 @@ _COMMON_CSS = """
   margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
   padding:0 6px; border-radius:var(--r-full);
 }
+/* 确认稿 r3：账号区吸底（视觉规范 §2）。注意：生产每个导航组后各有一个
+   .spacer（确认稿只有 1 个），故 spacer 必须保持固定小间距，吸底改由
+   .account 的 margin-top:auto 实现——曾因 spacer 设 flex:1 导致 4 个 spacer
+   各伸展 283px、组间大段空白（R3 反馈）。 */
 .sidebar .spacer { flex:0 0 1.5em; min-height:24px; }
 .account {
   border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
   display:flex; align-items:center; gap:8px; font-size:13px;
+  margin-top:auto; /* 吸底：与组间 spacer 解耦，避免组间被撑开 */
 }
 .account .avatar {
   width:28px; height:28px; border-radius:50%; background:#334155; display:grid; place-items:center;
@@ -148,12 +153,79 @@ _COMMON_CSS = """
   margin-left:auto; color:#94a3b8; font-size:12px; text-decoration:none;
 }
 .account .out:hover { color:#fff; }
+.account .out-icon { display:none; }
+
+/* ===== 侧栏收缩：全高手柄 + 三态（确认稿 v2） ===== */
+/* 手柄：侧栏最右侧整条竖边，任意高度可点；箭头随指针高度移动 */
+.sb-handle {
+  position:absolute; top:0; bottom:0; right:0; width:14px; padding:0; border:0;
+  background:transparent; cursor:pointer; z-index:5; font:inherit;
+}
+.sb-handle:hover { background:rgba(255,255,255,.10); }
+.sb-handle:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #818cf8; }
+.sb-arrow {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  display:grid; place-items:center; pointer-events:none;
+  transition:top .08s linear;
+}
+.sb-arrow svg { width:11px; height:18px; color:#94a3b8; transition:transform .15s ease;
+  transform:rotate(180deg); }
+.sb-handle:hover .sb-arrow svg { color:#fff; }
+/* 箭头方向 = 下一步动作：展开态 ‹（收起）；sb-rail 态 ›（展开） */
+html.sb-rail .sb-arrow svg { transform:none; }
+
+/* 三态视觉（桌面）：默认/sb-wide = 240px；sb-rail = 64px 图标条 */
+html.sb-rail .sidebar { width:64px; flex-basis:64px; }
+html.sb-rail .main { margin-left:64px; }
+html.sb-rail .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+html.sb-rail .sidebar .brand .name, html.sb-rail .sidebar .nav-group,
+html.sb-rail .sidebar .nav-item span, html.sb-rail .sidebar .nav-badge,
+html.sb-rail .sidebar .who, html.sb-rail .sidebar .account .out { display:none; }
+html.sb-rail .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+/* 确认稿 r3 区一：rail 态账号区改纵向两行（头像上、退出图标下），
+   64px 宽内不溢出、不与手柄箭头挤团（原横排 28+26 超宽重叠） */
+html.sb-rail .account {
+  flex-direction:column; justify-content:center; align-items:center;
+  gap:6px; padding:10px 8px;
+}
+html.sb-rail .account .avatar { width:26px; height:26px; font-size:11px; }
+html.sb-rail .account .out-icon {
+  display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+  color:#94a3b8; text-decoration:none; flex:0 0 26px;
+}
+html.sb-rail .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+html.sb-rail .account .out-icon svg { width:15px; height:15px; }
+
+/* 自适应（≤1024px）：默认 = 64px 图标条；sb-wide = 240px 覆盖层（主区不挤推） */
 @media (max-width: 1024px) {
-  .sidebar { width:64px; flex-basis:64px; }
-  .sidebar .brand .name, .sidebar .nav-group, .sidebar .nav-item span,
-  .sidebar .nav-badge, .account .who, .account .out { display:none; }
-  .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
-  .main { margin-left:64px; }
+  html:not(.sb-wide) .sidebar { width:64px; flex-basis:64px; }
+  html:not(.sb-wide) .main { margin-left:64px; }
+  html:not(.sb-wide) .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+  html:not(.sb-wide) .sidebar .brand .name,
+  html:not(.sb-wide) .sidebar .nav-group,
+  html:not(.sb-wide) .sidebar .nav-item span,
+  html:not(.sb-wide) .sidebar .nav-badge,
+  html:not(.sb-wide) .sidebar .who,
+  html:not(.sb-wide) .sidebar .account .out { display:none; }
+  html:not(.sb-wide) .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+  html:not(.sb-wide) .account {
+    flex-direction:column; justify-content:center; align-items:center;
+    gap:6px; padding:10px 8px;
+  }
+  html:not(.sb-wide) .account .avatar { width:26px; height:26px; font-size:11px; }
+  html:not(.sb-wide) .account .out-icon {
+    display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+    color:#94a3b8; text-decoration:none; flex:0 0 26px;
+  }
+  html:not(.sb-wide) .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+  html:not(.sb-wide) .account .out-icon svg { width:15px; height:15px; }
+  html:not(.sb-wide) .sb-arrow svg { transform:none; }
+  html.sb-wide .sidebar { width:240px; flex-basis:240px; box-shadow:var(--sh-2); z-index:60; }
+  html.sb-wide .main { margin-left:64px; }
+}
+/* 触屏：手柄加宽保证触控命中 */
+@media (pointer: coarse) {
+  .sb-handle { width:28px; }
 }
 body {
   background: var(--bg-app); color: #1e293b; min-height: 100vh;
@@ -728,7 +800,8 @@ function showFlashWarn(msg) {
 function initConfigFilter() {
   /* 合并页检索过滤框（spec ux-optimization 批次6#21）：纯前端 tr 文本
      contains 匹配显隐；空查询恢复全部。表头行（含 th）不过滤，避免表头
-     被误藏破坏表格结构；分类树区块非 tr 不参与。 */
+     被误藏破坏表格结构；分类树区块非 tr 不参与。
+     确认稿 r3：卡片视图（.rpt-card）同规则参与过滤，两视图一致。 */
   var input = document.getElementById('config-filter-input');
   if (!input) return;
   input.addEventListener('input', function() {
@@ -740,6 +813,13 @@ function initConfigFilter() {
       if (!q) { tr.style.display = ''; continue; }
       var text = (tr.innerText || tr.textContent || '').toLowerCase();
       tr.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+    }
+    var cards = document.querySelectorAll('.section .rpt-card');
+    for (var j = 0; j < cards.length; j++) {
+      var card = cards[j];
+      if (!q) { card.style.display = ''; continue; }
+      var ctext = (card.innerText || card.textContent || '').toLowerCase();
+      card.style.display = ctext.indexOf(q) >= 0 ? '' : 'none';
     }
   });
 }
@@ -849,9 +929,74 @@ function initSqlEditorTabIndent() {
     });
   });
 }
+function sbIsRail() {
+  /* 当前视觉状态：状态类 + 视口联合判定（防小屏状态错位） */
+  var el = document.documentElement;
+  if (el.classList.contains('sb-rail')) return true;
+  if (el.classList.contains('sb-wide')) return false;
+  return !!(window.matchMedia && window.matchMedia('(max-width:1024px)').matches);
+}
+function sbStoreWrite(v) {
+  /* 收缩状态记忆（浏览器本地）；写失败不阻断切换，向 UI 明示 */
+  try { localStorage.setItem('sqlreport_sidebar_collapsed', v); return null; }
+  catch (e) {
+    var name = (e && e.name) || String(e);
+    console.warn('侧栏收缩状态无法写入 localStorage：', name);
+    showFlashWarn('侧栏收缩状态写入失败（' + name + '）：本页切换仍有效，刷新后不保留。');
+    return null;
+  }
+}
+function initSidebarHandle() {
+  /* 全高手柄：侧栏最右边整条竖边任意高度可点；箭头随指针高度移动。
+     data-sb-bound 保证 initPage 重复调用时幂等（无刷新换页复用）。 */
+  var handle = document.querySelector('.sb-handle');
+  if (!handle || handle.getAttribute('data-sb-bound')) return;
+  handle.setAttribute('data-sb-bound', '1');
+  var arrow = handle.querySelector('.sb-arrow');
+  handle.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    var el = document.documentElement;
+    if (sbIsRail()) {
+      el.classList.remove('sb-rail');
+      el.classList.add('sb-wide');
+      sbStoreWrite('0');
+    } else {
+      el.classList.remove('sb-wide');
+      el.classList.add('sb-rail');
+      sbStoreWrite('1');
+    }
+    handle.title = sbIsRail() ? '展开侧栏' : '收起侧栏';
+  });
+  handle.addEventListener('mousemove', function (ev) {
+    if (!arrow) return;
+    var rect = handle.getBoundingClientRect();
+    var y = Math.max(12, Math.min(rect.height - 12, ev.clientY - rect.top));
+    /* 确认稿 r3 区一：rail 态箭头不进入账号区——纵向范围钳制在账号区之上，
+       避免箭头与头像/退出图标挤团（账号区在侧栏底部） */
+    if (sbIsRail()) {
+      var account = document.querySelector('.sidebar .account');
+      if (account) {
+        var accTop = account.getBoundingClientRect().top - rect.top;
+        y = Math.min(y, Math.max(12, accTop - 14));
+      }
+    }
+    arrow.style.top = y + 'px';
+  });
+  handle.addEventListener('mouseleave', function () {
+    if (arrow) arrow.style.top = '50%';
+  });
+  handle.title = sbIsRail() ? '展开侧栏' : '收起侧栏';
+  /* 读失败（引导脚本记下）向 UI 明示一次，不静默降级 */
+  if (window.__sbStorageErr) {
+    showFlashWarn('侧栏收缩状态记忆不可用（' + window.__sbStorageErr
+      + '）：切换仅本页有效，刷新后回默认态。');
+    window.__sbStorageErr = null;
+  }
+}
 function initPage() {
   /* 页面初始化（DOMContentLoaded 与无刷新换页后共用；需幂等） */
   initApiUrls();
+  initSidebarHandle();
   initCatTree();
   initFlashMessages();
   initAnchorRowHighlight();
@@ -929,6 +1074,9 @@ function initAnchorRowHighlight() {
   if (!/^(report|pool|user)-\d+$/.test(id)) return;
   var row = document.getElementById(id);
   if (row) row.classList.add('row-highlight');
+  /* 确认稿 r3：卡片视图下行锚点（#report-N）对应卡片副本一并高亮 */
+  var card = document.getElementById('report-card-' + id.replace(/^report-/, ''));
+  if (card) card.classList.add('row-highlight');
 }
 /* ---- 批次5#18：慢查询 loading 遮罩 ----
    仅在触发查询的 form submit 与「重建缓存」按钮 click 时显示；
@@ -1094,11 +1242,22 @@ function fmt(t) {
 # 公共模板
 # ---------------------------------------------------------------------------
 
+# 侧栏收缩记忆引导：在 CSS 应用前读 localStorage 设状态类，避免闪烁。
+# 存储被禁（预览沙箱等）不阻断渲染——降级默认态并记错误名，交 initPage
+# 以既有 flash-warn 向 UI 明示（确认稿承诺：读写异常不再静默吞掉）。
+_SIDEBAR_BOOTSTRAP_JS = (
+    '<script>(function(){try{var v=localStorage.getItem("sqlreport_sidebar_collapsed");'
+    'if(v==="1")document.documentElement.classList.add("sb-rail");'
+    'else if(v==="0")document.documentElement.classList.add("sb-wide");'
+    '}catch(e){window.__sbStorageErr=(e&&e.name)||"StorageError";}})();</script>'
+)
+
 _PAGE_HEADER_TEMPLATE = string.Template("""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+$sidebar_bootstrap
 $favicon_link
 <title>$title</title>
 $common_css_assets
@@ -1245,11 +1404,32 @@ def _nav_is_active(key: str, active: str) -> bool:
     return False
 
 
+# 请求级当前登录用户名：server 认证成功后注入、每请求入口复位。
+# ThreadingHTTPServer 每请求一线程，threading.local 天然隔离无串号。
+_request_ctx = threading.local()
+
+
+def set_request_user(user) -> None:
+    """设置当前请求的登录用户名（None=无会话/公开页）。"""
+    _request_ctx.user = user
+
+
+def get_request_user():
+    """读取当前请求登录用户名；未设置时返回 None。"""
+    return getattr(_request_ctx, "user", None)
+
+
 def _build_sidebar_html(active: str = "", nav_badges: dict = None,
                         current_user: str = None) -> str:
-    """构建侧栏 HTML（含分组导航与账户区）。active 为 None/空时不高亮。"""
+    """构建侧栏 HTML（含分组导航与账户区）。active 为 None/空时不高亮。
+
+    current_user 未显式传入时回退读取请求级上下文（server 认证后经
+    set_request_user 注入；每请求一线程的 threading.local 隔离）。
+    """
     active = active or ""
     nav_badges = nav_badges or {}
+    if current_user is None:
+        current_user = get_request_user()
     parts = ['<aside class="sidebar" aria-label="主导航">',
              '  <a class="brand" href="/report"><span class="logo">SR</span>'
              '<span class="name">SqlReport</span></a>']
@@ -1272,7 +1452,21 @@ def _build_sidebar_html(active: str = "", nav_badges: dict = None,
         parts.append(f'    <span class="avatar">{initial}</span>'
                      f'<span class="who">{html_mod.escape(current_user)}</span>')
     parts.append('    <a class="out" href="/logout">退出</a>')
+    parts.append('    <a class="out-icon" href="/logout" title="退出'
+                 + (f'（{html_mod.escape(current_user)}）' if current_user else '')
+                 + '" aria-label="退出">'
+                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" '
+                 'stroke-linecap="round" stroke-linejoin="round">'
+                 '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>'
+                 '<polyline points="16,17 21,12 16,7"/>'
+                 '<line x1="21" y1="12" x2="9" y2="12"/></svg></a>')
     parts.append('  </div>')
+    # 全高竖边手柄：整条右边任意高度可点，箭头随指针移动（确认稿 v2）
+    parts.append('  <button class="sb-handle" type="button" title="收起侧栏" '
+                 'aria-label="收起或展开侧栏"><span class="sb-arrow">'
+                 '<svg viewBox="0 0 12 18" fill="none" stroke="currentColor" stroke-width="1.8" '
+                 'stroke-linecap="round" stroke-linejoin="round">'
+                 '<polyline points="4,3 9,9 4,15"/></svg></span></button>')
     parts.append('</aside>')
     return "\n".join(parts)
 
@@ -1343,6 +1537,7 @@ def render_page_header(title: str = "SqlReport",
     full_title = f"{prefix}{title}" if prefix else title
     return _PAGE_HEADER_TEMPLATE.substitute(
         title=full_title.replace("$", "$$"),
+        sidebar_bootstrap=_SIDEBAR_BOOTSTRAP_JS,
         favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=common_css_assets,
         extra_css=extra_css.replace("$", "$$"),
@@ -2985,7 +3180,8 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
 
 def build_category_manage_section_html(all_cats, cat_tree,
                                        show_report_add: bool = True,
-                                       report_counts: dict = None) -> str:
+                                       report_counts: dict = None,
+                                       total_reports: int = None) -> str:
     """渲染分类管理区块（分类树 + 排序 + CRUD，纯数据 → HTML，无 DB 调用）
 
     ui-redesign R2-A：左树按已确认原型改为 flex 行——图标 + 名称 + 报表数角标 +
@@ -2993,6 +3189,9 @@ def build_category_manage_section_html(all_cats, cat_tree,
     （toggleCatNode）；不再使用 ├─ 文本引导线。
     config-reports-merge：区块整体可折叠
     （localStorage 记忆折叠状态，标题栏按钮折叠时仍可见）。
+    确认稿 r3：树顶渲染「全部报表 N」静态高亮首行（total_reports=全量报表数，
+    None 时不渲染，向后兼容）；左树头部收敛为「折叠标题 + 仅新增分类」单行形态
+    （新增报表入口保留在页头与未分类区，show_report_add 参数保留仅作签名兼容）。
     """
     counts = report_counts or {}
 
@@ -3015,10 +3214,10 @@ def build_category_manage_section_html(all_cats, cat_tree,
         return f"""<div class="cat"{kids_attr}>
   <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
   <span class="nm" title="{name}">{name}</span>
-  {count_html}
   <span class="ops">
     {move_btns}{edit_btn}{del_btn}
   </span>
+  {count_html}
 </div>"""
 
     def _render_tree(nodes):
@@ -3038,17 +3237,26 @@ def build_category_manage_section_html(all_cats, cat_tree,
 
     report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-ghost btn-sm")
                       if show_report_add else "")
+    # 确认稿 r3：树顶「全部报表 N」静态高亮首行（列表 SVG 图标，沿用 R2-A 图标体系）
+    all_row = ""
+    if total_reports is not None:
+        all_row = ('<div class="cat active" aria-current="true">'
+                   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                   'stroke-width="1.5" aria-hidden="true">'
+                   '<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/>'
+                   '<line x1="4" y1="17" x2="20" y2="17"/></svg>'
+                   f'<span class="nm">全部报表</span><span class="cnt">{total_reports}</span></div>')
     return f"""<div class="section" id="sec-categories">
 <div class="section-title">
-  <button type="button" id="cat-tree-toggle" class="btn btn-outline btn-sm"
+  <button type="button" id="cat-tree-toggle" class="btn btn-ghost btn-sm tree-toggle"
           onclick="toggleCatTree(this)">▼ 报表分类</button>
   <span class="actions">
     {_link_btn("/config/categories/add", "新增分类", "btn btn-ghost btn-sm")}
-    {report_add_btn}
   </span>
 </div>
 <div id="cat-tree-content">
 <div class="tree" role="tree">
+  {all_row}
   {cat_list_html}
 </div>
 </div>
@@ -3113,23 +3321,25 @@ def build_category_section_html(cat_reports, unclassified_reports, all_cats,
      onclick="batchDeleteReports()">批量删除报表</button>
 </div>
 <script>
-function batchUpdatePool() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
+/* 确认稿 r3：列表/卡片双形态共享勾选——按 value 去重收集 id */
+function pickedReportIds() {{
+  var boxes = document.querySelectorAll('.report-checkbox:checked');
+  var seen = {{}}, ids = [];
+  for (var i = 0; i < boxes.length; i++) {{
+    var v = boxes[i].value;
+    if (!seen[v]) {{ seen[v] = 1; ids.push(v); }}
   }}
+  return ids;
+}}
+function batchUpdatePool() {{
+  var ids = pickedReportIds();
   if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var poolId = document.getElementById('batch_pool_id').value;
   if (!poolId) {{ showFlashWarn('请选择目标连接池'); return; }}
   submitBatchPost('/config/reports/batch-pool', ids, [{{name: 'pool_id', value: poolId}}]);
 }}
 function batchSetCategory() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
+  var ids = pickedReportIds();
   if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var catId = document.getElementById('batch_cat_id').value;
   if (!catId) {{ showFlashWarn('请选择目标分类'); return; }}
@@ -3142,11 +3352,7 @@ function toggleTtlInput() {{
   inp.style.opacity = cb.checked ? '1' : '0.5';
 }}
 function batchUpdateCache() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
+  var ids = pickedReportIds();
   if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   var cacheSwitch = document.getElementById('batch_cache_switch').value;
   var modifyTtl = document.getElementById('batch_modify_ttl').checked;
@@ -3163,26 +3369,63 @@ function batchUpdateCache() {{
   submitBatchPost('/config/reports/batch-cache', ids, extra);
 }}
 function batchDeleteReports() {{
-  var checkboxes = document.querySelectorAll('.report-checkbox:checked');
-  var ids = [];
-  for (var i = 0; i < checkboxes.length; i++) {{
-    ids.push(checkboxes[i].value);
-  }}
+  var ids = pickedReportIds();
   if (ids.length === 0) {{ showFlashWarn('请至少选择一项'); return; }}
   if (!confirm(`确定批量删除 ${{ids.length}} 个报表？该操作不可撤销`)) return;
   submitBatchPost('/config/reports/batch-delete', ids, []);
 }}
 function updateBatchCount() {{
-  var n = document.querySelectorAll('.report-checkbox:checked').length;
+  /* 双形态同一报表各有一份勾选框：只把可见形态当选择源，
+     再把选择镜像到全部副本，保证切换视图后勾选不丢、计数不翻倍 */
+  var boxes = document.querySelectorAll('.report-checkbox');
+  var sel = window.__rptSel = window.__rptSel || {{}};
+  var i, b;
+  for (i = 0; i < boxes.length; i++) {{
+    b = boxes[i];
+    if (b.offsetParent === null) continue;
+    if (b.checked) sel[b.value] = 1; else delete sel[b.value];
+  }}
+  var n = 0;
+  for (var k in sel) {{ if (Object.prototype.hasOwnProperty.call(sel, k)) n++; }}
+  for (i = 0; i < boxes.length; i++) {{
+    boxes[i].checked = !!sel[boxes[i].value];
+  }}
   document.getElementById('batch_count').textContent = n;
   var bar = document.getElementById('batch-bar');
   if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
 }}
+/* 确认稿 r3：「列表/卡片」全局开关——作用于全部层级分组（.view-list/.view-card），
+   默认列表、localStorage 记忆；层级仅靠分组头缩进与左侧层级线表达 */
+function setReportsView(v, save) {{
+  var lists = document.querySelectorAll('.view-list');
+  var cards = document.querySelectorAll('.view-card');
+  var i;
+  for (i = 0; i < lists.length; i++) lists[i].classList.toggle('hidden', v !== 'list');
+  for (i = 0; i < cards.length; i++) cards[i].classList.toggle('hidden', v !== 'card');
+  var btns = document.querySelectorAll('#rpt-view-seg button[data-view]');
+  for (i = 0; i < btns.length; i++) {{
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-view') === v);
+  }}
+  if (save) {{
+    try {{ localStorage.setItem('sqlreport_reports_view', v); }} catch (e) {{}}
+  }}
+  updateBatchCount();
+}}
+(function () {{
+  var v = null;
+  try {{ v = localStorage.getItem('sqlreport_reports_view'); }} catch (e) {{}}
+  setReportsView(v === 'card' ? 'card' : 'list', false);
+}})();
 </script>"""
 
     def _render_report_rows(report_list, in_category=False):
-        """渲染报表列表行（含调序按钮）"""
+        """渲染报表列表行 + 卡片（确认稿 r3：一次数据准备，输出两形态）
+
+        返回 (rows_html, cards_html)——rows 给 .view-list 表格、cards 给
+        .view-card 卡片网格；两形态同受页头「列表/卡片」全局开关控制。
+        """
         rows = ""
+        cards = ""
         total = len(report_list)
         for idx, r in enumerate(report_list):
             rpt_id = r["id"]
@@ -3192,11 +3435,14 @@ function updateBatchCount() {{
                 pool = pools_map.get(pool_id)
                 if pool:
                     pool_name = pool["name"]
-            pool_badge = (
-                f'<span class="badge badge-pool">{_escape(pool_name)}</span>'
-                if pool_name
-                else '<span style="color:#dc2626;font-size:13px">连接池已删除</span>'
-            )
+            # 确认稿 r3 反馈②：连接池由圆角胶囊 badge 改单行 chip（6px 圆角 +
+            # 状态点 + 截断 + title 全名），长池名不再包成圆饼
+            if pool_name:
+                pool_cell = (f'<span class="pool-chip" title="{_escape(pool_name)}">'
+                             f'<span class="dot"></span><span class="txt">{_escape(pool_name)}</span></span>')
+            else:
+                pool_cell = ('<span class="pool-chip gone" title="连接池已删除">'
+                             '<span class="dot"></span><span class="txt">连接池已删除</span></span>')
             move_btns = build_move_buttons_html(rpt_id, "reports", idx, total)
             memo_raw = r.get("memo") or ""
             if memo_raw:
@@ -3205,9 +3451,11 @@ function updateBatchCount() {{
                     memo_display += "..."
                 # 批次6#27h：截断展示补 title 全文，悬浮可读完整备注
                 memo_title_attr = f' title="{_escape(memo_raw)}"'
+                memo_plain = memo_display
             else:
                 memo_display = '<span style="color:#cbd5e1">—</span>'
                 memo_title_attr = ""
+                memo_plain = "—"
 
             prefer_cache = int(r.get("prefer_cache", 1))
             prefer_cache_display = (
@@ -3217,6 +3465,13 @@ function updateBatchCount() {{
             )
             cache_ttl_hours = int(r.get("cache_ttl_hours", 0))
             cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span style="color:#cbd5e1">—</span>'
+            # 卡片徽标用纯文本（避免 0 TTL 时嵌入 span）
+            if not prefer_cache:
+                card_cache_badge = '<span class="badge badge-neutral">不缓存</span>'
+            elif cache_ttl_hours:
+                card_cache_badge = f'<span class="badge badge-ok">缓存 {cache_ttl_hours}h</span>'
+            else:
+                card_cache_badge = '<span class="badge badge-ok">缓存 永久</span>'
 
             # API 接口列
             eps = (api_endpoints_map or {}).get(rpt_id, [])
@@ -3241,33 +3496,57 @@ function updateBatchCount() {{
                     tooltip_lines.append(f"  [{ep_status}] {ep_name} ({ep_path}) - {ep_format}, {ep_key}")
                 tooltip = "\\n".join(tooltip_lines)
                 api_cell = f'<a href="/config/reports/{rpt_id}/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="{_escape(tooltip)}">🔌 {summary}</a>'
+                api_plain = f'🔌 {summary}'
             else:
                 api_cell = '<span style="color:#cbd5e1;font-size:13px">—</span>'
+                api_plain = "—"
+
+            # 确认稿 r3 反馈①：SQL 摘要窄列单行截断，完整 SQL 悬浮 title 预览
+            sql_full = _escape(r["sql_query"])
+            sql_short = _escape(r["sql_query"][:80]) + ("..." if len(r["sql_query"]) > 80 else "")
+            # 操作列图标化（确认稿 r3）：✎ 编辑 / ⧉ 复制 / 🗑 删除，title 无障碍提示
+            ops_html = (f"""{move_btns}
+    {_link_btn(f"/config/reports/{rpt_id}/edit", "✎", "btn btn-outline btn-sm btn-icon", title="编辑")}
+    {_link_btn(f"/config/reports/{rpt_id}/copy", "⧉", "btn btn-outline btn-sm btn-icon", title="复制")}
+    {build_delete_form_html(f"/config/reports/{rpt_id}/delete", _report_delete_confirm(r, api_endpoints_map), button_cls=" btn-icon", label="🗑", btn_title="删除报表")}""")
+            sched_badge = build_schedule_flags_badge_html(
+                (schedules_map or {}).get(rpt_id, {}).get('enabled'), r.get('keepalive_enabled'))
 
             rows += f"""<tr id="report-{rpt_id}">
   <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
-   <td><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a>{build_schedule_flags_badge_html((schedules_map or {}).get(rpt_id, {}).get('enabled'), r.get('keepalive_enabled'))}</strong></td>
-  <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;" title="{_escape(r['sql_query'])}">
-    <code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px;color:#475569">{_escape(r['sql_query'][:80])}{'...' if len(r['sql_query']) > 80 else ''}</code>
+  <td class="name-cell"><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a>{sched_badge}</strong></td>
+  <td class="sql-cell" title="{sql_full}">
+    <code>{sql_short}</code>
   </td>
-  <td>{r['default_page_size']}</td>
-  <td>{pool_badge}</td>
-  <td style="text-align:center">{prefer_cache_display}</td>
-  <td style="text-align:center">{cache_ttl_display}</td>
-  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;color:#64748b;font-size:13px"{memo_title_attr}>{memo_display}</td>
-  <td style="text-align:center;white-space:nowrap">{api_cell}</td>
-  <td class="ops-cell">
-    {move_btns}
-    {_link_btn(f"/config/reports/{rpt_id}/edit", "编辑")}
-    {_link_btn(f"/config/reports/{rpt_id}/copy", "复制")}
-    {build_delete_form_html(f"/config/reports/{rpt_id}/delete", _report_delete_confirm(r, api_endpoints_map))}
-  </td>
+  <td class="cfg-group">{r['default_page_size']}</td>
+  <td class="cfg-group">{prefer_cache_display}</td>
+  <td class="cfg-group">{cache_ttl_display}</td>
+  <td>{pool_cell}</td>
+  <td class="memo-cell"{memo_title_attr}>{memo_display}</td>
+  <td class="api-cell">{api_cell}</td>
+  <td class="ops-cell">{ops_html}</td>
 </tr>"""
-        return rows
+
+            cards += f"""<div class="rpt-card" id="report-card-{rpt_id}">
+  <input type="checkbox" class="report-checkbox rc-pick" value="{rpt_id}" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id={rpt_id}" target="_blank" rel="noopener">{_escape(r['name'])}</a>{sched_badge}</span></div>
+  <div class="rc-sql" title="{sql_full}">{sql_short}</div>
+  <div class="rc-meta">{pool_cell}
+    {card_cache_badge}
+    <span class="badge badge-info">分页 {r['default_page_size']}</span>
+  </div>
+  <div class="rc-memo"{memo_title_attr}>备注：{memo_plain}</div>
+  <div class="rc-foot">
+    <span class="rc-ops">{ops_html}</span>
+    <a class="rc-api" href="/config/reports/{rpt_id}/edit#api-endpoints" title="{_escape(r['name'])} 的 API 接口">{api_plain}</a>
+  </div>
+</div>"""
+        return rows, cards
 
     cat_areas = build_category_manage_section_html(
         all_cats, cat_tree, show_report_add=True,
-        report_counts={e["id"]: len(e.get("reports") or []) for e in cat_reports})
+        report_counts={e["id"]: len(e.get("reports") or []) for e in cat_reports},
+        total_reports=len(all_reports or []))
 
     report_lookup: dict[int, list] = {entry["id"]: entry.get("reports", []) for entry in cat_reports}
     tab_html = ""
@@ -3281,14 +3560,20 @@ function updateBatchCount() {{
                 continue
             inner = ""
             if reports:
-                rows = _render_report_rows(reports, in_category=True)
-                inner += f"""<div class="table-wrap">
+                rows, cards = _render_report_rows(reports, in_category=True)
+                # 确认稿 r3：列表/卡片双形态同受页头全局开关控制（.view-list/.view-card）
+                inner += f"""<div class="table-wrap view-list">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
 </tr></thead><tbody>
 {rows}
 </tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+{cards}
 </div>"""
             if has_children:
                 inner += _render_report_sections(node["children"], depth + 1)
@@ -3300,28 +3585,33 @@ function updateBatchCount() {{
                 nest_style = f'margin-left:{24 * depth}px;border-left:3px solid #c7d2fe;'
             html += f"""<div class="section" style="{nest_style}">
 <div class="section-title">
-  <span>{icon} {_escape(node['name'])}{count_html}</span>
+  <span class="ico">{icon}</span><span>{_escape(node['name'])}{count_html}</span>
 </div>
 {inner}
 </div>"""
         return html
 
     tab_html = _render_report_sections(cat_tree)
-    uncat_rows = _render_report_rows(unclassified_reports)
+    uncat_rows, uncat_cards = _render_report_rows(unclassified_reports)
     # 批次5#17：未分类区块不再内联批量操作条（页面级单实例移至列表容器之后）
     uncat_section = f"""<div class="section">
 
 <div class="section-title">
-  <span>{_icon("list")} 未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
+  <span class="ico">{_icon("list")}</span><span>未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
   <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
 </div>
-<div class="table-wrap">
+<div class="table-wrap view-list">
 <table><thead><tr>
   <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
-  <th>名称</th><th>SQL 查询</th><th>默认分页</th><th>连接池</th><th>缓存</th><th>TTL</th><th>备注</th><th>API 接口</th><th>操作</th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
 </tr></thead><tbody>
 {uncat_rows or build_empty_row_html(10, "暂无未分类报表")}
 </tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+{uncat_cards or '<div class="empty-state">暂无未分类报表</div>'}
 </div>
 </div>"""
 
@@ -4648,6 +4938,7 @@ def render_audit_page(
         audit_common_assets = f"<style>{_COMMON_CSS}</style>"
     html = _PAGE_HEADER_TEMPLATE.substitute(
         title=_get_branding_prefix() + "SqlReport - 审计日志",
+        sidebar_bootstrap=_SIDEBAR_BOOTSTRAP_JS,
         favicon_link='<link rel="icon" href="/favicon.ico">',
         common_css_assets=audit_common_assets,
         extra_css=extra_css.replace("$", "$$"),

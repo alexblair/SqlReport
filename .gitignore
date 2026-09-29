@@ -72,3 +72,6 @@ tests/regression/
 
 # Playwright CLI 本地产物（日志/会话，不提交）
 .playwright-cli/
+
+# UI 截图用 Chrome 调试 profile（临时本地产物，不提交）
+docs/compose/spec/shots/**/.chrome-*/

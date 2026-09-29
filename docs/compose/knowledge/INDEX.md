@@ -65,7 +65,7 @@
 | `/config` | 概览仪表盘：统计磁贴、快捷入口、`grid-2`（左系统状态｜右导入演示数据 DEBUG 卡）、站点标识独立行（移出卡，去卡中卡）、首部署引导 |
 | `/config/pools*` | 连接池**独立列表页** + 表单（表 6 列含「关联报表」＝渲染层按 pool_id 分组，不改 DB；测试连接/复制/移动/破坏半径披露） |
 | `/config/users*` | 用户**独立列表页** + 表单（表 3 列：用户名｜角色说明｜操作——users 表无 role 字段，按平权管理员实义渲染，不虚构角色；会话清理/禁删自身） |
-| `/config/reports*` | 报表配置：页头搜索 + **左分类树右报表表** + 勾选浮出批量条；`#sec-categories` 兼容 |
+| `/config/reports*` | 报表配置：页头搜索 + **左分类树右报表表** + 勾选浮出批量条 + **R3 列表/卡片双视图全局开关（`#rpt-view-seg`，localStorage `sqlreport_reports_view` 记忆，两视图共享勾选）**；`#sec-categories` 兼容 |
 | `/config/reports/add\|{id}/edit\|copy` | page-head+crumb 分区表单（基础/SQL/缓存与护栏/调度与保活，主 form 内 `.grid-2` 双栏）+ sticky 保存底栏（formbar 在 form 底）；表单下接口列表（api-row），端点/Key/预览联动 |
 | `/config/api-endpoints` | API 列表（page-head：h1+统计+「+ 新建接口」→首张报表 `api_endpoints/new`，无报表回 `/config/reports/add`；`div.api-row` 主行+`api-more` 展开区真卡片，`.path-chip` 路径徽标）；端点表单分区（基本信息/调用地址/请求与输出/模板）+ Key 区（主 form 外） |
 | `/config/scheduler` | 定时任务**列表主导**：7 列单表（任务名/关联报表/计划/下次执行/上次结果/状态/操作），**无「最近执行记录」第二表**（执行历史到审计日志查询），表下 help；全局停用横幅 |
@@ -88,7 +88,7 @@
 | 写护栏文案 | `report.WRITE_DENIED_MESSAGE` 等 | report / export / api / config 编辑 |
 | 用户可见术语（缓存/品牌等） | `docs/compose/spec/ui-redesign-visual-spec.md` §5 术语表 | render 缓存徽标/横幅、标题 |
 | 全量输出护栏 | `allow_all_output` + `max_rows` | report / export / api |
-| 页面骨架/CSS/JS | `render.render_page_header/footer`（侧栏页壳 `_NAV_GROUPS`）、`_BASE/_COMMON_*`（设计令牌）、hash 含 CSS+JS | 全站 |
+| 页面骨架/CSS/JS | `render.render_page_header/footer`（侧栏页壳 `_NAV_GROUPS`、**侧栏三态收缩 `.sb-handle` 全高手柄 + `sqlreport_sidebar_collapsed` 记忆 + 请求级用户名上下文 `set_request_user`**）、`_BASE/_COMMON_*`（设计令牌）、hash 含 CSS+JS | 全站 |
 | 表单 flash/302 模式 | 各 `handle_*` 返回 `(code, url, headers)` | config/report |
 
 ## 5. 审计四类 type（速查）

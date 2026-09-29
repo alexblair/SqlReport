@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 import report as report_mod
+import render as render_mod
 from filter_help import FILTER_HINT_SUFFIX
 from render import (
     render_page_header, render_page_footer, render_navbar,
@@ -2671,3 +2672,76 @@ class TestCurrentRulesIncludeNestedFilter(unittest.TestCase):
         self.assertIsNotNone(m, "未找到 applyRulesJson 函数")
         body = m.group(1)
         self.assertIn("nested_filter", body, "applyRulesJson 未处理 nested_filter")
+
+
+class TestSidebarCollapseAndUser(unittest.TestCase):
+    """侧栏全高手柄收缩 + 当前用户名注入（确认稿 v2 → 生产落地）"""
+
+    def tearDown(self):
+        render_mod.set_request_user(None)
+
+    # ---- 问题2：全高手柄 ----
+
+    def test_sidebar_has_full_height_handle(self):
+        """侧栏含全高竖边手柄与跟随箭头"""
+        result = render_page_header()
+        self.assertIn('<button class="sb-handle"', result)
+        self.assertIn('class="sb-arrow"', result)
+
+    def test_header_storage_bootstrap_before_style(self):
+        """head 内联记忆脚本在 <style> 之前设状态类（避免闪烁）"""
+        result = render_page_header()
+        self.assertIn('sqlreport_sidebar_collapsed', result)
+        self.assertLess(result.index('<head>'),
+                        result.index('sqlreport_sidebar_collapsed'))
+        self.assertLess(result.index('sqlreport_sidebar_collapsed'),
+                        result.index('<style>'))
+
+    # ---- 问题1：localStorage 记忆（JS/CSS 单一来源） ----
+
+    def test_common_css_tri_state_rules(self):
+        """公共 CSS 含三态收缩规则、手柄样式、小屏与触屏适配"""
+        self.assertIn('html.sb-rail .sidebar', _COMMON_CSS)
+        self.assertIn('html.sb-wide .sidebar', _COMMON_CSS)
+        self.assertIn('.sb-handle', _COMMON_CSS)
+        self.assertIn('@media (max-width: 1024px)', _COMMON_CSS)
+        self.assertIn('pointer: coarse', _COMMON_CSS)
+
+    def test_common_js_handle_init(self):
+        """公共 JS 含手柄初始化与记忆读写，并挂入 initPage"""
+        self.assertIn('function initSidebarHandle(', _COMMON_JS)
+        self.assertIn('sqlreport_sidebar_collapsed', _COMMON_JS)
+        self.assertIn('initSidebarHandle();', _COMMON_JS)
+
+    # ---- 问题2：当前用户名 ----
+
+    def test_request_user_context_shows_username(self):
+        """请求级上下文注入后，侧栏账户区显示用户名与头像首字母"""
+        render_mod.set_request_user("张三")
+        result = render_page_header()
+        self.assertIn('class="who">张三</span>', result)
+        self.assertIn('<span class="avatar"', result)
+
+    def test_no_username_without_context(self):
+        """无上下文（未登录/公开页）时不显示用户名"""
+        render_mod.set_request_user(None)
+        result = render_page_header()
+        self.assertNotIn('class="who"', result)
+
+    def test_explicit_current_user_wins(self):
+        """显式传参优先于上下文（向后兼容既有调用方）"""
+        render_mod.set_request_user("李四")
+        result = render_page_header(current_user="王五")
+        self.assertIn('class="who">王五</span>', result)
+        self.assertNotIn("李四", result)
+
+    def test_account_area_keeps_logout_and_exit_icon(self):
+        """无论是否显示用户名，退出链接与折叠态退出图标恒在"""
+        result = render_page_header()
+        self.assertIn('href="/logout"', result)
+        self.assertIn('class="out-icon"', result)
+
+    def test_storage_errors_surfaced_to_ui(self):
+        """读写异常不静默：引导脚本记错误名，公共 JS 用既有 flash-warn 向 UI 明示"""
+        self.assertIn("__sbStorageErr", render_mod._SIDEBAR_BOOTSTRAP_JS)
+        self.assertIn("showFlashWarn('侧栏收缩状态", _COMMON_JS)

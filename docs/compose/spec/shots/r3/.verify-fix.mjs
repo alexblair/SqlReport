@@ -1,0 +1,31 @@
+const [url,label]=process.argv.slice(2);
+const t=await(await fetch('http://127.0.0.1:9333/json/new?'+encodeURIComponent('about:blank'),{method:'PUT'})).json();
+const ws=new WebSocket(t.webSocketDebuggerUrl);
+let id=0;const p=new Map();
+const send=(m,q={})=>new Promise((res,rej)=>{const i=++id;p.set(i,{res,rej});ws.send(JSON.stringify({id:i,method:m,params:q}));setTimeout(()=>{if(p.has(i)){p.delete(i);rej(new Error('timeout'));}},30000);});
+ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id&&p.has(m.id)){const q=p.get(m.id);p.delete(m.id);m.error?q.rej(new Error(m.error.message)):q.res(m.result);}};
+await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
+await send('Page.enable');await send('Runtime.enable');
+await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1600,deviceScaleFactor:1,mobile:false});
+await send('Page.navigate',{url});
+await new Promise(r=>setTimeout(r,1500));
+await send('Runtime.evaluate',{awaitPromise:true,expression:"(async function(){if(document.fonts&&document.fonts.ready)await document.fonts.ready;await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});return 1;})()"});
+const expr=`JSON.stringify((function(){
+  var out={};
+  var tds=Array.from(document.querySelectorAll('.view-list:not(.hidden) tbody tr:first-child td'));
+  out.cellBg=tds.map(function(t){return getComputedStyle(t).backgroundColor;});
+  out.cellBorderLeft=tds.map(function(t){return getComputedStyle(t).borderLeftWidth+' '+getComputedStyle(t).borderLeftColor;});
+  var nested=document.querySelector('.split > div .section[style*="border-left"]');
+  if(nested){var nc=getComputedStyle(nested);
+    out.nested={radius:nc.borderRadius,border:nc.borderTopWidth+' '+nc.borderLeftWidth+' '+nc.borderBottomWidth+' '+nc.borderRightWidth,overflow:nc.overflow,bg:nc.backgroundColor};
+    var nt=nested.querySelector('.section-title');var ntc=getComputedStyle(nt);
+    out.nestedTitle={radius:ntc.borderRadius,border:ntc.borderTopWidth,bg:ntc.backgroundColor};
+    var tw=nested.querySelector('.table-wrap');var twc=getComputedStyle(tw);
+    out.nestedTable={radius:twc.borderRadius,border:twc.borderTopWidth+' '+twc.borderLeftWidth};
+  }
+  return out;
+})())`;
+const r=await send('Runtime.evaluate',{expression:expr,returnByValue:true});
+console.log('==='+label+'===');
+console.log(r.result.value);
+process.exit(0);

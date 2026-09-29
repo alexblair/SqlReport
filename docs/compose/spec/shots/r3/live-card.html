@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){try{var v=localStorage.getItem("sqlreport_sidebar_collapsed");if(v==="1")document.documentElement.classList.add("sb-rail");else if(v==="0")document.documentElement.classList.add("sb-wide");}catch(e){window.__sbStorageErr=(e&&e.name)||"StorageError";}})();</script>
+<link rel="icon" href="/favicon.ico">
+<title>SqlReport - 报表管理</title>
+<style>
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#ffffff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#ffffff;
+  --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+  --danger:#dc2626; --danger-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --r-sm:6px; --r-md:10px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===== 侧栏页壳（ui-redesign T7.1） ===== */
+.app { display:flex; min-height:100vh; }
+.sidebar {
+  width:240px; flex:0 0 240px; background:var(--sidebar-bg); color:var(--sidebar-ink);
+  position:fixed; inset:0 auto 0 0; display:flex; flex-direction:column; z-index:40;
+}
+.main { margin-left:240px; flex:1; min-width:0; display:flex; flex-direction:column; }
+.sidebar .brand {
+  display:flex; align-items:center; gap:10px; padding:18px 18px 14px;
+  color:#fff; font-weight:700; font-size:16px; letter-spacing:-.2px; text-decoration:none;
+}
+.sidebar .brand:hover { text-decoration:none; }
+.sidebar .brand .logo {
+  width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:13px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:800;
+}
+.nav-group { padding:6px 12px 2px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
+.nav-item {
+   display:flex; align-items:center; gap:10px; margin:1px 10px; padding:6px 12px;
+   border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
+   border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
+   cursor:pointer; box-sizing:border-box;
+}
+.nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
+.nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
+.nav-item.nav-active::before {
+   content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
+}
+.nav-item svg { width:16px; height:16px; flex:0 0 16px; opacity:.9; }
+.nav-item a { color:inherit; text-decoration:none; }
+.nav-item a:hover { text-decoration:none; }
+.nav-item a:focus-visible { box-shadow:var(--focus-ring); border-radius:8px; }
+.nav-badge {
+  margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
+  padding:0 6px; border-radius:var(--r-full);
+}
+/* 确认稿 r3：账号区吸底（视觉规范 §2）。注意：生产每个导航组后各有一个
+   .spacer（确认稿只有 1 个），故 spacer 必须保持固定小间距，吸底改由
+   .account 的 margin-top:auto 实现——曾因 spacer 设 flex:1 导致 4 个 spacer
+   各伸展 283px、组间大段空白（R3 反馈）。 */
+.sidebar .spacer { flex:0 0 1.5em; min-height:24px; }
+.account {
+  border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
+  display:flex; align-items:center; gap:8px; font-size:13px;
+  margin-top:auto; /* 吸底：与组间 spacer 解耦，避免组间被撑开 */
+}
+.account .avatar {
+  width:28px; height:28px; border-radius:50%; background:#334155; display:grid; place-items:center;
+  color:#e2e8f0; font-size:12px; font-weight:700;
+}
+.account .who { color:#e2e8f0; font-weight:600; }
+.account .out {
+  margin-left:auto; color:#94a3b8; font-size:12px; text-decoration:none;
+}
+.account .out:hover { color:#fff; }
+.account .out-icon { display:none; }
+
+/* ===== 侧栏收缩：全高手柄 + 三态（确认稿 v2） ===== */
+/* 手柄：侧栏最右侧整条竖边，任意高度可点；箭头随指针高度移动 */
+.sb-handle {
+  position:absolute; top:0; bottom:0; right:0; width:14px; padding:0; border:0;
+  background:transparent; cursor:pointer; z-index:5; font:inherit;
+}
+.sb-handle:hover { background:rgba(255,255,255,.10); }
+.sb-handle:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #818cf8; }
+.sb-arrow {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  display:grid; place-items:center; pointer-events:none;
+  transition:top .08s linear;
+}
+.sb-arrow svg { width:11px; height:18px; color:#94a3b8; transition:transform .15s ease;
+  transform:rotate(180deg); }
+.sb-handle:hover .sb-arrow svg { color:#fff; }
+/* 箭头方向 = 下一步动作：展开态 ‹（收起）；sb-rail 态 ›（展开） */
+html.sb-rail .sb-arrow svg { transform:none; }
+
+/* 三态视觉（桌面）：默认/sb-wide = 240px；sb-rail = 64px 图标条 */
+html.sb-rail .sidebar { width:64px; flex-basis:64px; }
+html.sb-rail .main { margin-left:64px; }
+html.sb-rail .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+html.sb-rail .sidebar .brand .name, html.sb-rail .sidebar .nav-group,
+html.sb-rail .sidebar .nav-item span, html.sb-rail .sidebar .nav-badge,
+html.sb-rail .sidebar .who, html.sb-rail .sidebar .account .out { display:none; }
+html.sb-rail .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+/* 确认稿 r3 区一：rail 态账号区改纵向两行（头像上、退出图标下），
+   64px 宽内不溢出、不与手柄箭头挤团（原横排 28+26 超宽重叠） */
+html.sb-rail .account {
+  flex-direction:column; justify-content:center; align-items:center;
+  gap:6px; padding:10px 8px;
+}
+html.sb-rail .account .avatar { width:26px; height:26px; font-size:11px; }
+html.sb-rail .account .out-icon {
+  display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+  color:#94a3b8; text-decoration:none; flex:0 0 26px;
+}
+html.sb-rail .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+html.sb-rail .account .out-icon svg { width:15px; height:15px; }
+
+/* 自适应（≤1024px）：默认 = 64px 图标条；sb-wide = 240px 覆盖层（主区不挤推） */
+@media (max-width: 1024px) {
+  html:not(.sb-wide) .sidebar { width:64px; flex-basis:64px; }
+  html:not(.sb-wide) .main { margin-left:64px; }
+  html:not(.sb-wide) .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+  html:not(.sb-wide) .sidebar .brand .name,
+  html:not(.sb-wide) .sidebar .nav-group,
+  html:not(.sb-wide) .sidebar .nav-item span,
+  html:not(.sb-wide) .sidebar .nav-badge,
+  html:not(.sb-wide) .sidebar .who,
+  html:not(.sb-wide) .sidebar .account .out { display:none; }
+  html:not(.sb-wide) .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+  html:not(.sb-wide) .account {
+    flex-direction:column; justify-content:center; align-items:center;
+    gap:6px; padding:10px 8px;
+  }
+  html:not(.sb-wide) .account .avatar { width:26px; height:26px; font-size:11px; }
+  html:not(.sb-wide) .account .out-icon {
+    display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+    color:#94a3b8; text-decoration:none; flex:0 0 26px;
+  }
+  html:not(.sb-wide) .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+  html:not(.sb-wide) .account .out-icon svg { width:15px; height:15px; }
+  html:not(.sb-wide) .sb-arrow svg { transform:none; }
+  html.sb-wide .sidebar { width:240px; flex-basis:240px; box-shadow:var(--sh-2); z-index:60; }
+  html.sb-wide .main { margin-left:64px; }
+}
+/* 触屏：手柄加宽保证触控命中 */
+@media (pointer: coarse) {
+  .sb-handle { width:28px; }
+}
+body {
+  background: var(--bg-app); color: #1e293b; min-height: 100vh;
+}
+.container { width:100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
+/* 宽屏利用率：视口越宽容器越宽（1440 → 1680 → 1920 → 2400） */
+@media (min-width: 1700px) { .container { max-width: 1680px; } }
+@media (min-width: 2100px) { .container { max-width: 1920px; } }
+@media (min-width: 2600px) { .container { max-width: 2400px; } }
+/* 窄屏：页面容器 padding 收窄；表格横向滚动由全局 .table-wrap 规则统一保证 */
+@media (max-width: 640px) {
+  .container { padding: 12px; }
+}
+/* ===== ui-redesign 共享布局与组件（T7.3+） ===== */
+.page-head { display:flex; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+.page-head h1 { font-size:20px; line-height:28px; font-weight:700; letter-spacing:-.2px; margin:0; }
+.page-head .sub { font-size:13px; color:var(--ink-3); margin-top:2px; }
+.page-head .actions { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.split { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .split { grid-template-columns:minmax(0,1fr); } }
+.grid-stat { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+.stat-tile { background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-1); padding:16px 18px; }
+.stat-tile .num { font-size:20px; font-weight:700; letter-spacing:-.3px; font-variant-numeric:tabular-nums; }
+.stat-tile .lbl { font-size:13px; color:var(--ink-3); margin-top:2px; }
+.search-box { position:relative; }
+.search-box svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-3); }
+.search-box .input { padding-left:32px; }
+.tree { font-size:14px; }
+.tree .cat { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:var(--r-sm); color:var(--ink-2); font-weight:600; cursor:pointer; user-select:none; }
+.tree .cat:hover { background:var(--bg-hover); }
+.tree .cat.active { background:var(--brand-soft); color:var(--brand); }
+.tree .cat .cnt { margin-left:auto; font-size:12px; color:var(--ink-3); font-weight:500; }
+.tree .cat svg { width:14px; height:14px; color:var(--ink-3); flex:0 0 14px; }
+.tree .cat [data-chevron] { transition:transform .12s; }
+.tree .kids { display:none; }
+.tree .kids.on { display:block; }
+/* ui-redesign R2-A：报表配置左树（分类管理）——按已确认原型的 flex 行形态 */
+.tree .kids { padding-left:14px; }
+.tree .cat .nm { min-width:0; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tree .cat .ops { display:flex; align-items:center; gap:2px; flex:0 0 auto; opacity:.55; transition:opacity .12s; }
+.tree .cat:hover .ops { opacity:1; }
+.tree .cat .ops form { display:inline; margin:0; }
+.tree .cat .ops .btn { height:22px; min-width:22px; padding:0 4px; font-size:12px; }
+.tree .cat .ops .btn-outline, .tree .cat .ops .btn-ghost { background:transparent; border-color:transparent; color:var(--ink-3); }
+.tree .cat .ops .btn-outline:hover, .tree .cat .ops .btn-ghost:hover { background:var(--brand-soft); color:var(--brand); }
+.tree .cat .ops .btn-danger { background:transparent; border-color:transparent; color:var(--ink-3); }
+.tree .cat .ops .btn-danger:hover { background:var(--danger-soft); color:var(--danger); }
+/* 区块标题行：flex 化（消除 inline 挤压/重叠；.actions 靠右） */
+.section-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.section-title .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.report-card { background:#fff; border:1px solid var(--line); border-radius:var(--r-md); padding:14px 16px; box-shadow:var(--sh-1); display:flex; flex-direction:column; gap:6px; transition:border-color .12s, box-shadow .12s; cursor:pointer; text-decoration:none; }
+.report-card:hover { border-color:#c7d2fe; box-shadow:var(--sh-pop,0 4px 12px rgba(15,23,42,.10)); text-decoration:none; }
+.report-card .t { font-weight:600; color:var(--ink); font-size:15px; }
+.report-card .meta { font-size:12px; color:var(--ink-3); }
+.report-card .desc { font-size:13px; color:var(--ink-3); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.report-card .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
+.badge { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--r-full); font-size:12px; font-weight:600; line-height:18px; }
+.badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.75; }
+.badge-ok { background:#ecfdf5; color:#047857; }
+.badge-warn { background:#fffbeb; color:#b45309; }
+.badge-danger { background:#fef2f2; color:#b91c1c; }
+.badge-info { background:#eff6ff; color:#1d4ed8; }
+.badge-neutral { background:#f8fafc; color:#64748b; border:1px solid var(--line); }
+.muted { color:var(--ink-3); }
+/* 报表编辑：sticky 保存底栏（T7.7；按钮位于主 form 内，htmlcheck 门禁保持） */
+.formbar { position:sticky; bottom:0; margin:16px 0 0; padding:12px 16px; background:rgba(255,255,255,.95); backdrop-filter:blur(6px); border-top:1px solid var(--line); display:flex; align-items:center; gap:12px; z-index:20; box-shadow:0 -4px 16px rgba(15,23,42,.06); border-radius:0 0 var(--r-md) var(--r-md); }
+.formbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.formbar .cancel { color:var(--ink-3); text-decoration:none; font-size:13px; }
+.formbar .cancel:hover { color:var(--ink); }
+.config-form .form-section { grid-column:1 / -1; }
+.form-section { font-size:13px; font-weight:700; color:var(--ink-3); letter-spacing:.02em; border-bottom:1px solid var(--line); padding-bottom:6px; margin-top:8px; }
+/* API 行卡片（R2-D：api-main 主行 + api-more 展开区，与原型 page-api 统一为一套） */
+.api-row { border:1px solid var(--line); border-radius:var(--r-md); background:#fff; margin-bottom:10px; overflow:hidden; transition:border-color .12s, box-shadow .12s; }
+.api-row:hover { border-color:#c7d2fe; box-shadow:var(--sh-1); }
+.api-main { display:flex; gap:12px; align-items:center; padding:12px 14px; flex-wrap:wrap; cursor:pointer; }
+.api-main .name { font-weight:600; min-width:140px; color:#4f46e5; text-decoration:none; }
+.api-main .name:hover { text-decoration:underline; }
+.api-main .path-chip { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; background:var(--bg-subtle); border:1px solid var(--line); padding:2px 8px; border-radius:var(--r-sm); color:var(--ink-2); overflow-wrap:anywhere; }
+.api-main .ops { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.api-more { display:none; border-top:1px dashed var(--line); padding:12px 14px; background:var(--bg-subtle); font-size:13px; }
+.api-more.on { display:block; }
+.api-meta { display:flex; gap:14px; flex-wrap:wrap; color:#475569; font-size:12.5px; margin-bottom:4px; }
+.api-desc { color:#475569; overflow-wrap:anywhere; }
+.api-desc .lbl { font-weight:500; color:#64748b; margin-right:6px; }
+.api-help { margin:6px 0 0 0; font-size:12.5px; color:#64748b; }
+/* ===== 详情页：页头/Tab/工具行/抽屉/对话框（T7.4） ===== */
+.crumb { font-size:12px; color:var(--ink-3); margin-bottom:4px; }
+.crumb a { color:var(--ink-3); }
+.crumb a:hover { color:var(--brand); }
+.summary-line { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-3); margin-bottom:10px; flex-wrap:wrap; }
+.memo-bar { display:flex; gap:8px; align-items:center; background:var(--bg-subtle); border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:8px 12px; font-size:13px; color:var(--ink-2); margin-bottom:12px; }
+.memo-bar .txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:16px; flex-wrap:wrap; }
+.tab { border:0; background:none; padding:9px 14px; font-size:14px; font-weight:500; color:var(--ink-3); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; font-family:inherit; }
+.tab:hover { color:var(--ink); }
+.tab.active { color:var(--brand); border-bottom-color:var(--brand); font-weight:600; }
+.tabpanel { display:none; }
+.tabpanel.active { display:block; }
+.toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 12px; background:#fff; border:1px solid var(--line); border-radius:var(--r-md); margin-bottom:12px; }
+.toolbar .grow { flex:1; }
+.toolbar .meta { font-size:13px; color:var(--ink-3); }
+.toolbar .sep { width:1px; height:20px; background:var(--line); }
+.segment { display:inline-flex; background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:2px; gap:2px; }
+.segment button { border:0; background:transparent; padding:4px 12px; font-size:13px; color:var(--ink-2); border-radius:4px; cursor:pointer; font-family:inherit; }
+.segment button.active { background:#fff; color:var(--brand); font-weight:600; box-shadow:var(--sh-1); }
+.backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:50; opacity:0; pointer-events:none; transition:opacity .2s; }
+.backdrop.on { opacity:1; pointer-events:auto; }
+.side-panel {
+  position:fixed; top:0; right:0; bottom:0; width:420px; max-width:92vw; background:#fff;
+  z-index:60; box-shadow:var(--sh-2); transform:translateX(105%); transition:transform .2s ease-out;
+  overflow:auto; padding:16px 18px; border-radius:14px 0 0 14px; display:none;
+}
+.side-panel.on { display:block; transform:none; }
+.side-panel .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.side-panel .panel-head h3 { margin:0; font-size:15px; color:var(--ink); }
+.modal {
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-46%) scale(.98); width:560px; max-width:92vw;
+  background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-2); z-index:60; opacity:0; pointer-events:none;
+  transition:opacity .2s, transform .2s; max-height:88vh; overflow:auto;
+}
+.modal.on { opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+.modal .modal-head { padding:16px 18px 0; }
+.modal .modal-head h3 { margin:0; font-size:16px; }
+.modal .modal-body { padding:12px 18px 4px; font-size:14px; color:var(--ink-2); }
+.modal .modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:14px 18px 16px; }
+fieldset.fs { border:1px solid var(--line); border-radius:var(--r-sm); padding:12px 14px; margin-bottom:12px; }
+fieldset.fs legend { font-size:12px; font-weight:700; color:var(--ink-3); padding:0 6px; }
+.check-group { display:flex; flex-wrap:wrap; gap:10px 16px; }
+.check { display:inline-flex; align-items:center; gap:6px; font-size:14px; color:var(--ink-2); cursor:pointer; }
+/* ui-redesign R2-D：双栏布局与卡片头（原型 grid-2 / card-head 的生产唯一定义） */
+.grid-2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .grid-2 { grid-template-columns:minmax(0,1fr); } }
+.card-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.card-head .form-section, .card-head h2 {
+  margin:0; padding:0; border-bottom:0; font-size:15px; font-weight:700;
+  color:var(--ink); letter-spacing:-.1px;
+}
+.card-head .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+/* ui-redesign R2-D：排除规则可视化行/组（原型 rule-row / rule-group 的生产唯一定义） */
+.rule-group { border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:10px 12px; margin-bottom:8px; background:var(--bg-subtle); }
+.rule-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+/* ui-redesign R2-D：三栏统计磁贴/快捷入口网格（原型 grid-3 的生产唯一定义） */
+.grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width: 1024px) { .grid-3 { grid-template-columns:minmax(0,1fr); } }
+/* ui-redesign R2-D：SQL / 规则代码块（原型 code-block 的生产唯一定义） */
+.code-block { background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:10px 12px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px; line-height:20px; color:var(--ink-2); overflow:auto; white-space:pre-wrap; }
+.card {
+  background: #fff; border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  padding: 20px; margin-bottom: 16px; animation: fadeUp 0.3s ease-out;
+}
+h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.3px; }
+h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600;
+  text-decoration: none; cursor: pointer; transition: background 0.12s, border-color 0.12s; border: none;
+}
+.btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,0.35); }
+.btn-primary:hover { background: #4338ca; }
+.btn-secondary { background: #fff; border-color: var(--line-strong); color: var(--ink-2); box-shadow: var(--sh-1); }
+.btn-secondary:hover { background: var(--bg-hover); border-color: var(--ink-3); }
+.btn-success { background: #059669; color: #fff; box-shadow: 0 1px 2px rgba(5,150,105,0.3); }
+.btn-success:hover { background: #047857; }
+.btn-danger { background: #dc2626; color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,0.3); }
+.btn-danger:hover { background: #b91c1c; }
+.btn-outline { background: transparent; color: #475569; border: 1px solid var(--line-strong); }
+.btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--bg-hover); }
+.btn-link { background: none; border: none; color: var(--brand); height: auto; padding: 0; font-weight: 500; }
+.btn-link:hover { text-decoration: underline; }
+.btn-sm { height: 26px; padding: 0 10px; font-size: 13px; }
+.btn-icon { width: 34px; padding: 0; }
+.btn-icon.btn-sm { width: 26px; }
+.btn-group { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
+.btn.loading { position: relative; color: transparent; }
+.btn.loading::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+table {
+  border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
+}
+th {
+  background: var(--bg-subtle); color: var(--ink-2); font-weight: 600; font-size: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 5;
+}
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+/* ui-redesign R2-D：表头第二行快筛行（原型 qf-row；筛选输入迁出 th，协议不变） */
+tr.qf-row td { background: var(--bg-subtle); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+tr.qf-row td .filter-row { margin-top: 0; }
+tbody tr:hover { background: var(--bg-hover); }
+tbody tr:last-child td { border-bottom: none; }
+.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid var(--line); border-radius: var(--r-md); }
+.flash {
+  padding: 12px 14px; border-radius: var(--r-md); margin-bottom: 14px;
+  font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
+  border: 1px solid transparent;
+}
+.flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.flash-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+/* 批次5#14：flash × 关闭按钮（flex 布局下 margin-left:auto 推至右侧）与淡出过渡 */
+.flash-close { cursor: pointer; margin-left: auto; font-size: 16px; line-height: 1; opacity: 0.6; user-select: none; }
+.flash-close:hover { opacity: 1; }
+.flash.fading-out { opacity: 0; transition: opacity 0.5s ease; }
+/* 批次5#16：锚点目标行高亮——背景淡黄 2 秒渐隐 */
+@keyframes rowHighlightFade { from { background: #fef9c3; } to { background: transparent; } }
+.row-highlight { animation: rowHighlightFade 2s ease forwards; }
+/* 批次5#18：慢查询 loading 全屏遮罩 + CSS 动画圆环 spinner */
+.query-loading-overlay {
+  position: fixed; inset: 0; background: rgba(255,255,255,0.7); z-index: 9999;
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; font-size: 15px; color: #475569;
+}
+.query-loading-overlay.show { display: flex; }
+.query-loading-overlay .spinner {
+  width: 42px; height: 42px; border: 4px solid #e2e8f0; border-top-color: #4f46e5;
+  border-radius: 50%; animation: querySpin 0.8s linear infinite;
+}
+@keyframes querySpin { to { transform: rotate(360deg); } }
+/* 批次5#17：批量操作条全局浮动（sticky 底部吸附，显隐由 JS 按选中数切换） */
+.batch-float {
+  position: sticky; bottom: 0; z-index: 50;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+  box-shadow: 0 -4px 12px rgba(15,23,42,0.08); padding: 10px 14px; margin-top: 16px;
+}
+.empty-state { text-align: center; color: #64748b; padding: 32px 14px; font-size: 14px; }
+.empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+.sql-hl-keyword { font-weight:700; color:#7c3aed; }
+.sql-hl-string { color:#059669; }
+.sql-hl-number { color:#d97706; }
+.sql-hl-comment { color:#94a3b8; font-style:italic; }
+.sql-hl-function { font-weight:600; color:#2563eb; }
+.pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
+.pagination a, .pagination .page-btn, .pagination .page-span {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 28px; padding: 0 8px; border-radius: var(--r-sm);
+  font-size: 13px; text-decoration: none; color: #475569; transition: background 0.12s;
+}
+.pagination a { background: #fff; border: 1px solid #e2e8f0; }
+.pagination a:hover { background: #f1f5f9; border-color: #cbd5e1; }
+.pagination .active { background: #4f46e5 !important; color: #fff !important; border-color: #4f46e5 !important; font-weight: 600; }
+.pagination .disabled { color: #cbd5e1; background: transparent; border: none; cursor: default; }
+.jump-box { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; }
+.jump-box input {
+  width: 64px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
+  font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
+}
+ .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+ .hidden { display: none !important; }
+ /* 排序设置面板（T7.7；sort-item/sort-up/sort-down/drag-handle/sort-num 唯一定义） */
+ .sort-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; cursor:grab; user-select:none; }
+ .sort-item .drag-handle { color:#94a3b8; font-size:14px; cursor:grab; flex-shrink:0; }
+ .sort-item .sort-num { font-weight:700; font-size:11px; color:#4f46e5; min-width:20px; }
+ .sort-item .sort-up, .sort-item .sort-down { padding:2px 6px; font-size:11px; border:1px solid #e2e8f0; border-radius:4px; cursor:pointer; background:#fff; color:#475569; }
+ .sort-item .sort-up:disabled, .sort-item .sort-down:disabled { opacity:0.4; cursor:not-allowed; }
+ .sort-item .sort-remove { padding:2px 6px; font-size:11px; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#dc2626; }
+ .sort-bar { margin-bottom:10px; font-size:13px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+ .sort-tag { display:inline-flex; align-items:center; gap:3px; background:#eef2ff; color:#4f46e5; border-radius:4px; padding:2px 8px; font-size:12px; border:1px solid #c7d2fe; }
+ .sort-prio { font-size:10px; color:#4f46e5; font-weight:700; margin-left:2px; }
+ .sort-link { color:var(--ink-2); text-decoration:none; }
+ .sort-link:hover { color:var(--brand); }
+ .compact-switch { width:auto; height:28px; font-size:13px; font-weight:500; display:inline-block; margin-left:8px; vertical-align:middle; max-width:280px; }
+ 
+.btn-mini {
+  font-size: 12px; border-radius: 4px; cursor: pointer;
+}
+.btn-mini-solid { padding: 4px 10px; border: none; }
+.btn-mini-primary { background: #4f46e5; color: #fff; }
+.btn-mini-success { background: #059669; color: #fff; }
+.btn-mini-disabled {
+  padding: 4px 10px; background: #e2e8f0; color: #94a3b8;
+  /* 找茬 L4：禁用态保持浅色 #94a3b8 与可用态拉开对比度，
+     不参与批次6#27d 的辅助文字加深替换 */
+  border: none; cursor: not-allowed;
+}
+.btn-mini-outline {
+  padding: 3px 10px; background: #fff; border: 1px solid #cbd5e1; white-space: nowrap;
+}
+.btn-mini-outline-light { padding: 4px 10px; background: #fff; border: 1px solid #e2e8f0; }
+.btn-mini-outline-key { padding: 2px 8px; background: #fff; border: 1px solid #cbd5e1; color: #475569; }
+.btn-mini-outline-accent { padding: 2px 8px; background: #fff; border: 1px solid #cbd5e1; color: #4f46e5; }
+.btn-mini-s { padding: 2px 8px; font-size: 12px; }
+.btn-mini-m { padding: 3px 10px; font-size: 12px; }
+
+.flash-warn { background: #fefce8 !important; color: #92400e !important; }
+
+/* 合并页检索过滤框（spec ux-optimization 批次6#21） */
+.config-filter-box {
+  margin-bottom: 12px;
+}
+.config-filter-input {
+  width: 100%; padding: 9px 14px; font-size: 14px;
+  border: 2px solid #e2e8f0; border-radius: 8px; outline: none;
+  background: #fff; color: #1e293b; box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.config-filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
+/* 总览页「最近查看」快捷卡片（批次6#22） */
+.recent-reports { margin-bottom: 16px; }
+.recent-title { font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600; }
+.recent-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+.recent-card {
+  display: inline-block; max-width: 240px; padding: 6px 14px;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 999px;
+  color: #4f46e5; text-decoration: none; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recent-card:hover { border-color: #4f46e5; background: #eef2ff; }
+</style>
+<style>
+  form.config-form { max-width: 1200px; }
+  @media (min-width: 1100px) {
+    form.config-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-flow: dense;
+      column-gap: 32px;
+      row-gap: 16px;
+    }
+    form.config-form label { margin-top: 0; }
+    form.config-form .span-full { grid-column: 1 / -1; }
+  }
+  .config-form label {
+    display: block; margin-top: 16px; font-weight: 600; color: #334155; font-size: 14px;
+  }
+  .config-form label:first-child { margin-top: 0; }
+  .config-form input[type=text],
+  .config-form input[type=password],
+  .config-form input[type=number],
+  .config-form textarea,
+  .config-form select {
+    width: 100%; padding: 10px 14px; margin-top: 6px;
+    border: 2px solid #e2e8f0; border-radius: 8px;
+    font-size: 14px; color: #1e293b; outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: #f8fafc;
+  }
+  .config-form input:focus,
+  .config-form textarea:focus,
+  .config-form select:focus {
+    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); background: #fff;
+  }
+  .config-form textarea { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; resize: vertical; min-height: 100px; }
+  .config-form .form-actions { margin-top: 24px; display: flex; align-items: center; gap: 12px; }
+  .config-form .form-actions .cancel { color: #64748b; text-decoration: none; font-size: 14px; font-weight: 500; }
+  .config-form .form-actions .cancel:hover { color: #334155; }
+  .config-form select { cursor: pointer; }
+  /* 定时任务表单：宽屏进一步利用宽度（仅 .sched-form 作用域，不影响其他 config-form） */
+  @media (min-width: 1700px) {
+    form.config-form.sched-form { max-width: 1680px; }
+  }
+  @media (min-width: 2100px) {
+    form.config-form.sched-form { max-width: 1920px; }
+  }
+  .config-form .field-hint {
+    display: block; margin-top: 2px; font-weight: 400;
+    color: #94a3b8; font-size: 12px;
+  }
+  .config-form .check-inline {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 400; margin: 4px 18px 4px 0; cursor: pointer;
+  }
+  .config-form .muted { color: #94a3b8; }
+  .sched-reports-wrap {
+    max-height: 300px; overflow: auto;
+    border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
+  }
+  table.sched-reports { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.sched-reports thead th {
+    position: sticky; top: 0; background: #f1f5f9;
+    text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e8f0;
+    color: #334155; font-weight: 600;
+  }
+  table.sched-reports tbody td {
+    padding: 6px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
+  }
+  table.sched-reports tbody tr:last-child td { border-bottom: none; }
+  table.sched-reports .bind-col { width: 56px; text-align: center; }
+  .sql-textarea {
+    width: 100%; padding: 10px 14px; margin-top: 6px;
+    border: 2px solid #e2e8f0; border-radius: 8px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px; line-height: 1.5; resize: vertical; min-height: 120px;
+    color: #1e293b; outline: none; background: #f8fafc; tab-size: 4;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .sql-textarea:focus {
+    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); background: #fff;
+  }
+  .sql-preview {
+    display: none; margin-top: 8px; padding: 10px 14px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px; line-height: 1.5; tab-size: 4; white-space: pre-wrap; word-wrap: break-word;
+    border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;
+  }
+  .sql-preview.show { display: block; }
+  .memo-preview {
+    display: none; margin-top: 8px; padding: 12px 14px;
+    border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff;
+    font-size: 14px; line-height: 1.7;
+  }
+  .memo-preview.show { display: block; }
+  /* .memo-preview 内 markdown 排版（pre/code/列表/表格等）统一由 .md-body
+     （_MD_CSS，追加在 _CONFIG_MD_EXTRA_CSS 末尾）负责，避免双实现漂移 */
+  .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .section + .section { margin-top: 8px; }
+  .ops-cell { white-space: nowrap; }
+  .ops-cell form { display: inline; }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 600;
+  }
+  .badge-pool { background: #eef2ff; color: #4f46e5; }
+  /* 连接池表单「测试连接」结果（批次：ajax 不刷新，内联提示） */
+  .config-form .form-actions .test-result {
+    font-size: 13px; font-weight: 500; align-self: center;
+  }
+  .config-form .form-actions .test-result.ok { color: #16a34a; }
+  .config-form .form-actions .test-result.err { color: #dc2626; }
+
+  /* ---- 分组标题：卡片头形态（图标 chip + 计数 + 右侧操作） ---- */
+  #sec-reports .split > div .section-title {
+    background: var(--bg-surface); border: 1px solid var(--line);
+    border-radius: var(--r-md) var(--r-md) 0 0; border-bottom: 0;
+    padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--ink);
+    gap: 8px;
+  }
+  #sec-reports .split > div .section-title .ico {
+    width: 26px; height: 26px; border-radius: var(--r-sm);
+    background: var(--brand-soft); color: var(--brand);
+    display: grid; place-items: center; flex: 0 0 26px;
+  }
+  #sec-reports .split > div .section-title .ico svg { width: 15px; height: 15px; }
+  #sec-reports .split > div .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  /* 表格/卡片容器与分组标题拼接成整卡 */
+  #sec-reports .section > .table-wrap,
+  #sec-reports .section > .rpt-grid { border-radius: 0 0 var(--r-md) var(--r-md); }
+  #sec-reports .section > .table-wrap { border-top: 0; }
+  /* 嵌套子分类：整组内缩成「完整子卡片」——标题与表格同属一个包裹块，
+     消除旧 border-left:0 hack 造成的半截圆角割裂。
+     margin-left 仍由模板 inline style 控制（测试锁定该串），故容器样式用 !important。 */
+  #sec-reports .split > div .section[style*="border-left"] {
+    border: 1px solid var(--line) !important;
+    border-left: 3px solid #c7d2fe !important;
+    border-radius: var(--r-md) !important;
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+  #sec-reports .split > div .section[style*="border-left"] > .section-title {
+    border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
+    background: var(--bg-subtle);
+  }
+  #sec-reports .split > div .section[style*="border-left"] > .table-wrap,
+  #sec-reports .split > div .section[style*="border-left"] > .rpt-grid {
+    border: 0; border-radius: 0; max-height: none;
+  }
+
+  /* ---- 左树（确认稿 r3 基准：13px 行、hover 才显操作组、计数 600、单行头部） ---- */
+  #sec-reports .tree { font-size: 13px; }
+  #sec-reports .tree .cat { padding: 5px 8px; font-size: 13px; line-height: 22px; }
+  #sec-reports .tree .cat .nm { flex: 0 1 auto; }
+  #sec-reports .tree .cat .cnt { font-weight: 600; }
+  #sec-reports .tree .cat .ops { display: none; }
+  #sec-reports .tree .cat:hover .ops { display: inline-flex; }
+  #sec-reports .tree .cat .ops .btn { height: 22px; min-width: 22px; padding: 0 4px; font-size: 12px; }
+  /* 折叠钮 = 粗体标题形态（确认稿：报表分类 13px bold 文本，非描边按钮） */
+  #sec-reports .tree-toggle {
+    font-size: 13px; font-weight: 700; color: var(--ink); padding: 0;
+    height: auto; letter-spacing: 0;
+  }
+  #sec-reports .tree-toggle:hover { background: transparent; color: var(--brand); }
+  /* 左栏标题保持普通 flex 行（不套卡片头）；右侧动作右贴 */
+  #sec-reports aside.card .section-title { background: transparent; border: 0; border-radius: 0; padding: 0; margin-bottom: 8px; font-size: 13px; }
+  #sec-reports aside.card .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+  /* ---- 列表视图：列组与截断（确认稿 r3 反馈①②） ---- */
+  /* 列宽收紧：右栏实际可用宽约 876px（1440 - 侧栏240 - 内边距48 - 左树260 - 间距16），
+     10 列必须在此宽度内放下，否则出现横向滚动条、操作列被挤出（截图校验实测缺陷） */
+  #sec-reports th { padding: 8px 5px; }
+  #sec-reports td { padding: 8px 5px; }
+  #sec-reports th.sql-head { width: 112px; }
+  #sec-reports td.sql-cell { max-width: 112px; }
+  #sec-reports td.sql-cell code {
+    display: inline-block; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
+    padding: 2px 6px; border-radius: 4px; color: var(--ink-2); cursor: help;
+  }
+  /* 名称列允许换行（与确认稿一致，靠换行吸收长名而不是撑宽列） */
+  #sec-reports td.name-cell { min-width: 60px; max-width: 200px; }
+  #sec-reports td.memo-cell {
+    max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--ink-3); font-size: 13px;
+  }
+  /* API 列允许换行收缩（原 nowrap 会把整表撑出滚动条） */
+  #sec-reports td.api-cell { text-align: center; font-size: 13px; max-width: 56px; }
+  /* 配置三列（默认分页/缓存/TTL）同底色归组，与其余列视觉分区 */
+  /* 配置三列（默认分页/缓存/TTL）归组：弃用浅蓝底色块（与整表白底冲突、
+     观感「脏」），改为 1px 竖分隔线表达分组，保持全表配色统一 */
+  #sec-reports td.cfg-group { text-align: center; font-variant-numeric: tabular-nums; }
+  #sec-reports td.sql-cell + td,
+  #sec-reports th.sql-head + th { border-left: 1px solid var(--line); }
+  #sec-reports td.cfg-group + td:not(.cfg-group),
+  #sec-reports th.cfg-group + th:not(.cfg-group) { border-left: 1px solid var(--line); }
+
+  /* 连接池 chip：单行截断 + 状态点 + 6px 圆角（替换会包成圆饼的 full 圆角徽标） */
+  #sec-reports .pool-chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 96px;
+    padding: 3px 9px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--bg-subtle); font-size: 12px; font-weight: 600; color: var(--ink-2);
+    line-height: 18px; white-space: nowrap; overflow: hidden; cursor: default;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+  }
+  #sec-reports .pool-chip:hover { border-color: #c7d2fe; background: var(--brand-soft); color: var(--brand); }
+  #sec-reports .pool-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: 0 0 6px; }
+  #sec-reports .pool-chip .txt { overflow: hidden; text-overflow: ellipsis; }
+  #sec-reports .pool-chip.gone { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+  #sec-reports .pool-chip.gone .dot { background: var(--danger); }
+
+  /* 操作列：图标按钮收拢间距（复用公共 .btn 体系） */
+  #sec-reports .ops-cell { text-align: right; }
+  #sec-reports .ops-cell .btn { padding: 0 6px; }
+  #sec-reports .ops-cell form { display: inline; }
+
+  /* ---- 卡片视图（确认稿 r3：与列表同数据的另一形态） ---- */
+  #sec-reports .rpt-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+    gap: 12px; padding: 14px; background: var(--bg-surface);
+    border: 1px solid var(--line); border-top: 0;
+  }
+  #sec-reports .rpt-card {
+    position: relative; display: flex; flex-direction: column; gap: 8px;
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--bg-surface); padding: 12px 14px 10px;
+    transition: box-shadow 0.12s ease-out, transform 0.12s ease-out, border-color 0.12s;
+  }
+  #sec-reports .rpt-card:hover { border-color: #c7d2fe; box-shadow: var(--sh-2); transform: translateY(-2px); }
+  #sec-reports .rpt-card .rc-pick { position: absolute; top: 10px; right: 10px; margin: 0; }
+  #sec-reports .rpt-card .rc-top { display: flex; align-items: flex-start; gap: 8px; padding-right: 22px; }
+  #sec-reports .rpt-card .rc-name { font-weight: 600; font-size: 14px; line-height: 20px; flex: 1; min-width: 0; }
+  #sec-reports .rpt-card .rc-name a { color: var(--brand); text-decoration: none; }
+  #sec-reports .rpt-card .rc-name a:hover { text-decoration: underline; }
+  #sec-reports .rpt-card .rc-sql {
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
+  }
+  #sec-reports .rpt-card .rc-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #sec-reports .rpt-card .rc-memo {
+    font-size: 12px; color: var(--ink-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #sec-reports .rpt-card .rc-foot {
+    display: flex; align-items: center; gap: 6px; margin-top: auto;
+    border-top: 1px dashed var(--line); padding-top: 8px;
+  }
+  #sec-reports .rpt-card .rc-ops { display: inline-flex; gap: 4px; align-items: center; }
+  #sec-reports .rpt-card .rc-ops .btn { padding: 0 7px; }
+  #sec-reports .rpt-card .rc-ops form { display: inline; }
+  #sec-reports .rpt-card .rc-api { margin-left: auto; font-size: 12px; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  #sec-reports .rpt-card .rc-api:hover { text-decoration: underline; }
+  #sec-reports .rpt-grid .empty-state { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar" aria-label="主导航">
+  <a class="brand" href="/report"><span class="logo">SR</span><span class="name">SqlReport</span></a>
+  <div class="nav-group">分析</div>
+  <a class="nav-item" href="/report" title="报表中心"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6"/></svg><span>报表中心</span></a>
+  <div class="spacer"></div>
+  <div class="nav-group">管理</div>
+  <a class="nav-item" href="/config" title="概览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>概览</span></a>
+  <a class="nav-item nav-active" href="/config/reports" title="报表配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg><span>报表配置</span><span class="nav-badge">7</span></a>
+  <a class="nav-item" href="/config/pools" title="连接池"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg><span>连接池</span><span class="nav-badge">2</span></a>
+  <a class="nav-item" href="/config/users" title="用户"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3.5"/><path d="M3 19c.5-3 2.8-4.5 6-4.5S14.5 16 15 19"/></svg><span>用户</span><span class="nav-badge">1</span></a>
+  <div class="spacer"></div>
+  <div class="nav-group">服务</div>
+  <a class="nav-item" href="/config/api-endpoints" title="API 接口"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1L13 19.1"/></svg><span>API 接口</span><span class="nav-badge">6</span></a>
+  <a class="nav-item" href="/config/scheduler" title="定时任务"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>定时任务</span><span class="nav-badge">2</span></a>
+  <div class="spacer"></div>
+  <div class="nav-group">治理</div>
+  <a class="nav-item" href="/audit" title="审计日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 4h6l1 2h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3l1-2z"/><path d="M8 11h8M8 15h5"/></svg><span>审计日志</span></a>
+  <div class="spacer"></div>
+  <div class="account">
+    <span class="avatar">A</span><span class="who">admin</span>
+    <a class="out" href="/logout">退出</a>
+    <a class="out-icon" href="/logout" title="退出（admin）" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></a>
+  </div>
+  <button class="sb-handle" type="button" title="收起侧栏" aria-label="收起或展开侧栏"><span class="sb-arrow"><svg viewBox="0 0 12 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,3 9,9 4,15"/></svg></span></button>
+</aside>
+<main class="main">
+<div class="container">
+<div class="page-head"><div><h1>报表配置</h1><div class="sub">报表管理 · 左栏分类树，右栏报表列表；勾选行后浮出批量操作</div></div><div class="actions"><div class="segment" id="rpt-view-seg" role="group" aria-label="视图切换"><button type="button" data-view="list" class="active" onclick="setReportsView('list', true)">列表视图</button><button type="button" data-view="card" onclick="setReportsView('card', true)">卡片视图</button></div><a class="btn btn-secondary" href="/config/categories/add">+ 新增分类</a><a class="btn btn-primary" href="/config/reports/add">+ 新增报表</a></div></div><div class="config-filter-box" id="config-filter-box"><input type="text" id="config-filter-input" class="config-filter-input" data-filter-scope="merge-tr" autocomplete="off" placeholder="🔍 输入关键字过滤当前页配置项（连接池 / 用户 / 报表 / 分类），清空恢复全部"></div><div id="sec-reports"><div class="split"><aside class="card" style="padding:12px"><div class="section" id="sec-categories">
+<div class="section-title">
+  <button type="button" id="cat-tree-toggle" class="btn btn-ghost btn-sm tree-toggle"
+          onclick="toggleCatTree(this)">▼ 报表分类</button>
+  <span class="actions">
+    <a href="/config/categories/add" class="btn btn-ghost btn-sm">新增分类</a>
+  </span>
+</div>
+<div id="cat-tree-content">
+<div class="tree" role="tree">
+  <div class="cat active" aria-current="true"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg><span class="nm">全部报表</span><span class="cnt">7</span></div>
+  <div class="cat" data-kids="cat-kids-1" onclick="toggleCatNode(event,this)">
+  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+  <span class="nm" title="经营分析">经营分析</span>
+  <span class="ops">
+    <form method="post" action="/config/categories/1/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> <a href="/config/categories/1/edit" class="btn btn-ghost btn-sm btn-icon" title="编辑">✎</a>  <form method="post" action="/config/categories/1/delete" style="display:inline"
+        onsubmit="return confirm('确定删除分类 经营分析？分类下的报表和子分类将变为未分类。')">
+    <button type="submit" class="btn btn-danger btn-sm" title="删除">✕</button>
+  </form>
+  </span>
+  <span class="cnt">3</span>
+</div><div class="kids on" id="cat-kids-1"><div class="cat">
+  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+  <span class="nm" title="区域销售">区域销售</span>
+  <span class="ops">
+    <a href="/config/categories/3/edit" class="btn btn-ghost btn-sm btn-icon" title="编辑">✎</a>  <form method="post" action="/config/categories/3/delete" style="display:inline"
+        onsubmit="return confirm('确定删除分类 区域销售？分类下的报表和子分类将变为未分类。')">
+    <button type="submit" class="btn btn-danger btn-sm" title="删除">✕</button>
+  </form>
+  </span>
+  <span class="cnt">1</span>
+</div></div><div class="cat">
+  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+  <span class="nm" title="财务核算">财务核算</span>
+  <span class="ops">
+    <form method="post" action="/config/categories/2/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> <a href="/config/categories/2/edit" class="btn btn-ghost btn-sm btn-icon" title="编辑">✎</a>  <form method="post" action="/config/categories/2/delete" style="display:inline"
+        onsubmit="return confirm('确定删除分类 财务核算？分类下的报表和子分类将变为未分类。')">
+    <button type="submit" class="btn btn-danger btn-sm" title="删除">✕</button>
+  </form>
+  </span>
+  <span class="cnt">1</span>
+</div>
+</div>
+</div>
+</div></aside><div><div class="section" style="">
+<div class="section-title">
+  <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 3a1 1 0 011-1h4l2 2h5a1 1 0 011 1v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg></span><span>经营分析 <span style="font-weight:400;font-size:14px;color:#64748b">(3 个报表)</span></span>
+</div>
+<div class="table-wrap view-list">
+<table><thead><tr>
+  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+</tr></thead><tbody>
+<tr id="report-1">
+  <td><input type="checkbox" class="report-checkbox" value="1" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=1" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">订单概览</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></strong></td>
+  <td class="sql-cell" title="SELECT id, customer, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 100">
+    <code>SELECT id, customer, amount, created_at FROM orders ORDER BY created_at DESC LIM...</code>
+  </td>
+  <td class="cfg-group">20</td>
+  <td class="cfg-group"><span style="color:#059669;font-weight:600">是</span></td>
+  <td class="cfg-group">1h</td>
+  <td><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span></td>
+  <td class="memo-cell" title="# 订单概览
+基础单结果集报表示例，用于验收分页/筛选/排序。"># 订单概览
+基础单结果集报表...</td>
+  <td class="api-cell"><a href="/config/reports/1/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="  [启用] 订单概览API (/api/orders) - json, 无 Key\n  [启用] 订单概览-智能去引号 (/api/orders/noquote) - json, 无 Key">🔌 2 个接口 (2启用)</a></td>
+  <td class="ops-cell"><form method="post" action="/config/reports/1/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/1/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/1/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/1/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 订单概览？其下 2 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr><tr id="report-3">
+  <td><input type="checkbox" class="report-checkbox" value="3" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=3" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">缓存命中率报表</a> <span style="margin-left:4px;font-size:13px"><span title="已开启缓存保活"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,8 4.5,5.5 7,8"/><path d="M11 2.5A5.5 5.5 0 0114 7h-2a3.5 3.5 0 00-3.5-3.5"/></svg></span></span></strong></td>
+  <td class="sql-cell" title="SELECT * FROM cache_stats ORDER BY hit_rate DESC">
+    <code>SELECT * FROM cache_stats ORDER BY hit_rate DESC</code>
+  </td>
+  <td class="cfg-group">20</td>
+  <td class="cfg-group"><span style="color:#059669;font-weight:600">是</span></td>
+  <td class="cfg-group">24h</td>
+  <td><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span></td>
+  <td class="memo-cell" title="验收缓存优先 + 缓存保活（keepalive）。">验收缓存优先 + 缓存保活（k...</td>
+  <td class="api-cell"><a href="/config/reports/3/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="  [启用] 缓存命中率API (/api/cache/stats) - json, 无 Key">🔌 1 个接口 (1启用)</a></td>
+  <td class="ops-cell"><form method="post" action="/config/reports/3/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> <form method="post" action="/config/reports/3/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/3/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/3/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/3/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 缓存命中率报表？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr><tr id="report-4">
+  <td><input type="checkbox" class="report-checkbox" value="4" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=4" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">数据维护-写入示例</a></strong></td>
+  <td class="sql-cell" title="UPDATE orders SET status = &#x27;done&#x27; WHERE id = 1; SELECT id, customer, status FROM orders WHERE id = 1">
+    <code>UPDATE orders SET status = &#x27;done&#x27; WHERE id = 1; SELECT id, customer, status FROM...</code>
+  </td>
+  <td class="cfg-group">20</td>
+  <td class="cfg-group"><span style="color:#64748b">否</span></td>
+  <td class="cfg-group"><span style="color:#cbd5e1">—</span></td>
+  <td><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span></td>
+  <td class="memo-cell" title="验收写护栏（allow_write=1）放行写语句：先 UPDATE 再回查受影响的行。">验收写护栏（allow_wri...</td>
+  <td class="api-cell"><span style="color:#cbd5e1;font-size:13px">—</span></td>
+  <td class="ops-cell"><form method="post" action="/config/reports/4/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> 
+    <a href="/config/reports/4/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/4/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/4/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 数据维护-写入示例？')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr>
+</tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+<div class="rpt-card" id="report-card-1">
+  <input type="checkbox" class="report-checkbox rc-pick" value="1" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=1" target="_blank" rel="noopener">订单概览</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></span></div>
+  <div class="rc-sql" title="SELECT id, customer, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 100">SELECT id, customer, amount, created_at FROM orders ORDER BY created_at DESC LIM...</div>
+  <div class="rc-meta"><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span>
+    <span class="badge badge-ok">缓存 1h</span>
+    <span class="badge badge-info">分页 20</span>
+  </div>
+  <div class="rc-memo" title="# 订单概览
+基础单结果集报表示例，用于验收分页/筛选/排序。">备注：# 订单概览
+基础单结果集报表...</div>
+  <div class="rc-foot">
+    <span class="rc-ops"><form method="post" action="/config/reports/1/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/1/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/1/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/1/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 订单概览？其下 2 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/1/edit#api-endpoints" title="订单概览 的 API 接口">🔌 2 个接口 (2启用)</a>
+  </div>
+</div><div class="rpt-card" id="report-card-3">
+  <input type="checkbox" class="report-checkbox rc-pick" value="3" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=3" target="_blank" rel="noopener">缓存命中率报表</a> <span style="margin-left:4px;font-size:13px"><span title="已开启缓存保活"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,8 4.5,5.5 7,8"/><path d="M11 2.5A5.5 5.5 0 0114 7h-2a3.5 3.5 0 00-3.5-3.5"/></svg></span></span></span></div>
+  <div class="rc-sql" title="SELECT * FROM cache_stats ORDER BY hit_rate DESC">SELECT * FROM cache_stats ORDER BY hit_rate DESC</div>
+  <div class="rc-meta"><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span>
+    <span class="badge badge-ok">缓存 24h</span>
+    <span class="badge badge-info">分页 20</span>
+  </div>
+  <div class="rc-memo" title="验收缓存优先 + 缓存保活（keepalive）。">备注：验收缓存优先 + 缓存保活（k...</div>
+  <div class="rc-foot">
+    <span class="rc-ops"><form method="post" action="/config/reports/3/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> <form method="post" action="/config/reports/3/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/3/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/3/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/3/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 缓存命中率报表？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/3/edit#api-endpoints" title="缓存命中率报表 的 API 接口">🔌 1 个接口 (1启用)</a>
+  </div>
+</div><div class="rpt-card" id="report-card-4">
+  <input type="checkbox" class="report-checkbox rc-pick" value="4" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=4" target="_blank" rel="noopener">数据维护-写入示例</a></span></div>
+  <div class="rc-sql" title="UPDATE orders SET status = &#x27;done&#x27; WHERE id = 1; SELECT id, customer, status FROM orders WHERE id = 1">UPDATE orders SET status = &#x27;done&#x27; WHERE id = 1; SELECT id, customer, status FROM...</div>
+  <div class="rc-meta"><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span>
+    <span class="badge badge-neutral">不缓存</span>
+    <span class="badge badge-info">分页 20</span>
+  </div>
+  <div class="rc-memo" title="验收写护栏（allow_write=1）放行写语句：先 UPDATE 再回查受影响的行。">备注：验收写护栏（allow_wri...</div>
+  <div class="rc-foot">
+    <span class="rc-ops"><form method="post" action="/config/reports/4/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> 
+    <a href="/config/reports/4/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/4/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/4/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 数据维护-写入示例？')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/4/edit#api-endpoints" title="数据维护-写入示例 的 API 接口">—</a>
+  </div>
+</div>
+</div><div class="section" style="margin-left:24px;border-left:3px solid #c7d2fe;">
+<div class="section-title">
+  <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="10" width="3" height="4" rx.5"/><rect x="6.5" y="6" width="3" height="8" rx.5"/><rect x="11" y="2" width="3" height="12" rx.5"/></svg></span><span>区域销售 <span style="font-weight:400;font-size:14px;color:#64748b">(1 个报表)</span></span>
+</div>
+<div class="table-wrap view-list">
+<table><thead><tr>
+  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+</tr></thead><tbody>
+<tr id="report-2">
+  <td><input type="checkbox" class="report-checkbox" value="2" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=2" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">销售多维统计</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></strong></td>
+  <td class="sql-cell" title="SELECT region, SUM(amount) AS total FROM sales GROUP BY region; SELECT category, COUNT(*) AS cnt FROM sales GROUP BY category">
+    <code>SELECT region, SUM(amount) AS total FROM sales GROUP BY region; SELECT category,...</code>
+  </td>
+  <td class="cfg-group">50</td>
+  <td class="cfg-group"><span style="color:#64748b">否</span></td>
+  <td class="cfg-group"><span style="color:#cbd5e1">—</span></td>
+  <td><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span></td>
+  <td class="memo-cell" title="多结果集报表：验收 result_names 与多结果集切换。">多结果集报表：验收 resul...</td>
+  <td class="api-cell"><a href="/config/reports/2/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="  [启用] 销售多维API (/api/sales/multi) - json, 无 Key">🔌 1 个接口 (1启用)</a></td>
+  <td class="ops-cell">
+    <a href="/config/reports/2/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/2/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/2/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 销售多维统计？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr>
+</tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+<div class="rpt-card" id="report-card-2">
+  <input type="checkbox" class="report-checkbox rc-pick" value="2" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=2" target="_blank" rel="noopener">销售多维统计</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></span></div>
+  <div class="rc-sql" title="SELECT region, SUM(amount) AS total FROM sales GROUP BY region; SELECT category, COUNT(*) AS cnt FROM sales GROUP BY category">SELECT region, SUM(amount) AS total FROM sales GROUP BY region; SELECT category,...</div>
+  <div class="rc-meta"><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span>
+    <span class="badge badge-neutral">不缓存</span>
+    <span class="badge badge-info">分页 50</span>
+  </div>
+  <div class="rc-memo" title="多结果集报表：验收 result_names 与多结果集切换。">备注：多结果集报表：验收 resul...</div>
+  <div class="rc-foot">
+    <span class="rc-ops">
+    <a href="/config/reports/2/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/2/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/2/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 销售多维统计？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/2/edit#api-endpoints" title="销售多维统计 的 API 接口">🔌 1 个接口 (1启用)</a>
+  </div>
+</div>
+</div>
+</div>
+</div><div class="section" style="">
+<div class="section-title">
+  <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="10" width="3" height="4" rx.5"/><rect x="6.5" y="6" width="3" height="8" rx.5"/><rect x="11" y="2" width="3" height="12" rx.5"/></svg></span><span>财务核算 <span style="font-weight:400;font-size:14px;color:#64748b">(1 个报表)</span></span>
+</div>
+<div class="table-wrap view-list">
+<table><thead><tr>
+  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+</tr></thead><tbody>
+<tr id="report-7">
+  <td><input type="checkbox" class="report-checkbox" value="7" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=7" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">Markdown备注报表</a></strong></td>
+  <td class="sql-cell" title="SELECT id, note FROM memos">
+    <code>SELECT id, note FROM memos</code>
+  </td>
+  <td class="cfg-group">20</td>
+  <td class="cfg-group"><span style="color:#059669;font-weight:600">是</span></td>
+  <td class="cfg-group"><span style="color:#cbd5e1">—</span></td>
+  <td><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span></td>
+  <td class="memo-cell" title="## 备注说明
+- 支持 **加粗**
+- 支持 `行内代码`
+- 支持列表">## 备注说明
+- 支持 **...</td>
+  <td class="api-cell"><span style="color:#cbd5e1;font-size:13px">—</span></td>
+  <td class="ops-cell">
+    <a href="/config/reports/7/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/7/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/7/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 Markdown备注报表？')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr>
+</tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+<div class="rpt-card" id="report-card-7">
+  <input type="checkbox" class="report-checkbox rc-pick" value="7" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=7" target="_blank" rel="noopener">Markdown备注报表</a></span></div>
+  <div class="rc-sql" title="SELECT id, note FROM memos">SELECT id, note FROM memos</div>
+  <div class="rc-meta"><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span>
+    <span class="badge badge-ok">缓存 永久</span>
+    <span class="badge badge-info">分页 20</span>
+  </div>
+  <div class="rc-memo" title="## 备注说明
+- 支持 **加粗**
+- 支持 `行内代码`
+- 支持列表">备注：## 备注说明
+- 支持 **...</div>
+  <div class="rc-foot">
+    <span class="rc-ops">
+    <a href="/config/reports/7/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/7/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/7/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 Markdown备注报表？')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/7/edit#api-endpoints" title="Markdown备注报表 的 API 接口">—</a>
+  </div>
+</div>
+</div>
+</div><div class="section">
+
+<div class="section-title">
+  <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/></svg></span><span>未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">(2 个报表)</span></span>
+  <span class="actions"><a href="/config/reports/add" class="btn btn-primary btn-sm">新增报表</a></span>
+</div>
+<div class="table-wrap view-list">
+<table><thead><tr>
+  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
+  <th>名称</th><th class="sql-head">SQL 查询</th>
+  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+</tr></thead><tbody>
+<tr id="report-5">
+  <td><input type="checkbox" class="report-checkbox" value="5" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=5" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">全量导出报表</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></strong></td>
+  <td class="sql-cell" title="SELECT * FROM big_table">
+    <code>SELECT * FROM big_table</code>
+  </td>
+  <td class="cfg-group">100</td>
+  <td class="cfg-group"><span style="color:#64748b">否</span></td>
+  <td class="cfg-group"><span style="color:#cbd5e1">—</span></td>
+  <td><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span></td>
+  <td class="memo-cell" title="验收全量输出（allow_all_output=1）与 max_rows 上限。">验收全量输出（allow_al...</td>
+  <td class="api-cell"><a href="/config/reports/5/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="  [启用] 全量导出API (/api/export/big) - json, 无 Key">🔌 1 个接口 (1启用)</a></td>
+  <td class="ops-cell"><form method="post" action="/config/reports/5/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/5/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/5/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/5/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 全量导出报表？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr><tr id="report-6">
+  <td><input type="checkbox" class="report-checkbox" value="6" onchange="updateBatchCount()"></td>
+  <td class="name-cell"><strong><a href="/report?id=6" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">临时查询</a></strong></td>
+  <td class="sql-cell" title="SELECT 1 AS ok">
+    <code>SELECT 1 AS ok</code>
+  </td>
+  <td class="cfg-group">20</td>
+  <td class="cfg-group"><span style="color:#64748b">否</span></td>
+  <td class="cfg-group"><span style="color:#cbd5e1">—</span></td>
+  <td><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span></td>
+  <td class="memo-cell" title="无分类归属报表，验收未分类分支。">无分类归属报表，验收未分类分支...</td>
+  <td class="api-cell"><a href="/config/reports/6/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="  [禁用] 临时查询API (/api/ping) - json, 无 Key">🔌 1 个接口 (1禁用)</a></td>
+  <td class="ops-cell"><form method="post" action="/config/reports/6/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> 
+    <a href="/config/reports/6/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/6/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/6/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 临时查询？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></td>
+</tr>
+</tbody></table>
+</div>
+<div class="rpt-grid view-card hidden">
+<div class="rpt-card" id="report-card-5">
+  <input type="checkbox" class="report-checkbox rc-pick" value="5" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=5" target="_blank" rel="noopener">全量导出报表</a> <span style="margin-left:4px;font-size:13px"><span title="已配置定时执行"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg></span></span></span></div>
+  <div class="rc-sql" title="SELECT * FROM big_table">SELECT * FROM big_table</div>
+  <div class="rc-meta"><span class="pool-chip" title="从库-报表"><span class="dot"></span><span class="txt">从库-报表</span></span>
+    <span class="badge badge-neutral">不缓存</span>
+    <span class="badge badge-info">分页 100</span>
+  </div>
+  <div class="rc-memo" title="验收全量输出（allow_all_output=1）与 max_rows 上限。">备注：验收全量输出（allow_al...</div>
+  <div class="rc-foot">
+    <span class="rc-ops"><form method="post" action="/config/reports/5/move-down" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="下移">↓</button></form> 
+    <a href="/config/reports/5/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/5/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/5/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 全量导出报表？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/5/edit#api-endpoints" title="全量导出报表 的 API 接口">🔌 1 个接口 (1启用)</a>
+  </div>
+</div><div class="rpt-card" id="report-card-6">
+  <input type="checkbox" class="report-checkbox rc-pick" value="6" onchange="updateBatchCount()" title="勾选以批量操作">
+  <div class="rc-top"><span class="rc-name"><a href="/report?id=6" target="_blank" rel="noopener">临时查询</a></span></div>
+  <div class="rc-sql" title="SELECT 1 AS ok">SELECT 1 AS ok</div>
+  <div class="rc-meta"><span class="pool-chip" title="主库-交易"><span class="dot"></span><span class="txt">主库-交易</span></span>
+    <span class="badge badge-neutral">不缓存</span>
+    <span class="badge badge-info">分页 20</span>
+  </div>
+  <div class="rc-memo" title="无分类归属报表，验收未分类分支。">备注：无分类归属报表，验收未分类分支...</div>
+  <div class="rc-foot">
+    <span class="rc-ops"><form method="post" action="/config/reports/6/move-up" style="display:inline"><button type="submit" class="btn btn-outline btn-sm" title="上移">↑</button></form> 
+    <a href="/config/reports/6/edit" class="btn btn-outline btn-sm btn-icon" title="编辑">✎</a>
+    <a href="/config/reports/6/copy" class="btn btn-outline btn-sm btn-icon" title="复制">⧉</a>
+        <form method="post" action="/config/reports/6/delete" style="display:inline"
+          onsubmit="return confirm('确定删除报表 临时查询？其下 1 个 API 接口将一并删除')">
+      <button type="submit" class="btn btn-danger btn-sm btn-icon" title="删除报表">🗑</button>
+    </form></span>
+    <a class="rc-api" href="/config/reports/6/edit#api-endpoints" title="临时查询 的 API 接口">🔌 1 个接口 (1禁用)</a>
+  </div>
+</div>
+</div>
+</div>
+<div class="batch-bar batch-float" id="batch-bar" style="display:none;position:sticky;bottom:0;align-items:center;gap:12px;flex-wrap:wrap;z-index:50">
+  <span style="font-size:14px;color:#475569;font-weight:500">
+    已选 <span id="batch_count">0</span> 项
+  </span>
+  <select id="batch_pool_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+    <option value="">-- 请选择 --</option><option value="1">主库-交易</option><option value="2">从库-报表</option>
+  </select>
+  <button type="button" class="btn btn-primary btn-sm"
+    onclick="batchUpdatePool()">批量修改连接池</button>
+  <select id="batch_cat_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+    <option value="">-- 请选择分类 --</option><option value="1">经营分析</option><option value="2">财务核算</option><option value="3">　区域销售</option><option value="-1">无分类</option>
+  </select>
+   <button type="button" class="btn btn-success btn-sm"
+    onclick="batchSetCategory()">批量设置分类</button>
+   <select id="batch_cache_switch" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+     <option value="">不改变</option>
+     <option value="1">启用缓存</option>
+     <option value="0">关闭缓存</option>
+   </select>
+   <input type="checkbox" id="batch_modify_ttl" onchange="toggleTtlInput()">
+   <label for="batch_modify_ttl" style="font-size:13px">修改TTL</label>
+   <input type="number" id="batch_cache_ttl" value="0" min="0" step="1"
+     style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;width:80px;opacity:0.5"
+     disabled>
+   <span style="font-size:12px;color:#64748b">小时（0=永久）</span>
+   <button type="button" class="btn btn-info btn-sm"
+     onclick="batchUpdateCache()">批量更新缓存配置</button>
+   <button type="button" class="btn btn-danger btn-sm"
+     onclick="batchDeleteReports()">批量删除报表</button>
+</div>
+<script>
+/* 确认稿 r3：列表/卡片双形态共享勾选——按 value 去重收集 id */
+function pickedReportIds() {
+  var boxes = document.querySelectorAll('.report-checkbox:checked');
+  var seen = {}, ids = [];
+  for (var i = 0; i < boxes.length; i++) {
+    var v = boxes[i].value;
+    if (!seen[v]) { seen[v] = 1; ids.push(v); }
+  }
+  return ids;
+}
+function batchUpdatePool() {
+  var ids = pickedReportIds();
+  if (ids.length === 0) { showFlashWarn('请至少选择一项'); return; }
+  var poolId = document.getElementById('batch_pool_id').value;
+  if (!poolId) { showFlashWarn('请选择目标连接池'); return; }
+  submitBatchPost('/config/reports/batch-pool', ids, [{name: 'pool_id', value: poolId}]);
+}
+function batchSetCategory() {
+  var ids = pickedReportIds();
+  if (ids.length === 0) { showFlashWarn('请至少选择一项'); return; }
+  var catId = document.getElementById('batch_cat_id').value;
+  if (!catId) { showFlashWarn('请选择目标分类'); return; }
+  submitBatchPost('/config/reports/batch-set-category', ids, [{name: 'category_id', value: catId === '-1' ? '' : catId}]);
+}
+function toggleTtlInput() {
+  var cb = document.getElementById('batch_modify_ttl');
+  var inp = document.getElementById('batch_cache_ttl');
+  inp.disabled = !cb.checked;
+  inp.style.opacity = cb.checked ? '1' : '0.5';
+}
+function batchUpdateCache() {
+  var ids = pickedReportIds();
+  if (ids.length === 0) { showFlashWarn('请至少选择一项'); return; }
+  var cacheSwitch = document.getElementById('batch_cache_switch').value;
+  var modifyTtl = document.getElementById('batch_modify_ttl').checked;
+  if (cacheSwitch === '' && !modifyTtl) {
+    showFlashWarn('请选择缓存开关或勾选修改TTL');
+    return;
+  }
+  if (!confirm(`确定批量更新 ${ids.length} 个报表的缓存配置？`)) return;
+  var extra = [{name: 'cache_switch', value: cacheSwitch}];
+  if (modifyTtl) {
+    extra.push({name: 'modify_ttl', value: '1'});
+    extra.push({name: 'cache_ttl_hours', value: document.getElementById('batch_cache_ttl').value});
+  }
+  submitBatchPost('/config/reports/batch-cache', ids, extra);
+}
+function batchDeleteReports() {
+  var ids = pickedReportIds();
+  if (ids.length === 0) { showFlashWarn('请至少选择一项'); return; }
+  if (!confirm(`确定批量删除 ${ids.length} 个报表？该操作不可撤销`)) return;
+  submitBatchPost('/config/reports/batch-delete', ids, []);
+}
+function updateBatchCount() {
+  /* 双形态同一报表各有一份勾选框：只把可见形态当选择源，
+     再把选择镜像到全部副本，保证切换视图后勾选不丢、计数不翻倍 */
+  var boxes = document.querySelectorAll('.report-checkbox');
+  var sel = window.__rptSel = window.__rptSel || {};
+  var i, b;
+  for (i = 0; i < boxes.length; i++) {
+    b = boxes[i];
+    if (b.offsetParent === null) continue;
+    if (b.checked) sel[b.value] = 1; else delete sel[b.value];
+  }
+  var n = 0;
+  for (var k in sel) { if (Object.prototype.hasOwnProperty.call(sel, k)) n++; }
+  for (i = 0; i < boxes.length; i++) {
+    boxes[i].checked = !!sel[boxes[i].value];
+  }
+  document.getElementById('batch_count').textContent = n;
+  var bar = document.getElementById('batch-bar');
+  if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
+}
+/* 确认稿 r3：「列表/卡片」全局开关——作用于全部层级分组（.view-list/.view-card），
+   默认列表、localStorage 记忆；层级仅靠分组头缩进与左侧层级线表达 */
+function setReportsView(v, save) {
+  var lists = document.querySelectorAll('.view-list');
+  var cards = document.querySelectorAll('.view-card');
+  var i;
+  for (i = 0; i < lists.length; i++) lists[i].classList.toggle('hidden', v !== 'list');
+  for (i = 0; i < cards.length; i++) cards[i].classList.toggle('hidden', v !== 'card');
+  var btns = document.querySelectorAll('#rpt-view-seg button[data-view]');
+  for (i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-view') === v);
+  }
+  if (save) {
+    try { localStorage.setItem('sqlreport_reports_view', v); } catch (e) {}
+  }
+  updateBatchCount();
+}
+(function () {
+  var v = null;
+  try { v = localStorage.getItem('sqlreport_reports_view'); } catch (e) {}
+  setReportsView(v === 'card' ? 'card' : 'list', false);
+})();
+</script></div></div></div></div>
+</main>
+</div>
+<script>
+function toggleSection(btn, label) {
+  var content = btn.nextElementSibling;
+  var hidden = content.classList.toggle("hidden");
+  btn.textContent = hidden ? "\u25b6 " + label : "\u25bc " + label;
+}
+function toggleCatTree(btn) {
+  var content = document.getElementById("cat-tree-content");
+  if (!content) return;
+  var collapsed = content.classList.toggle("hidden");
+  btn.textContent = (collapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
+  try { localStorage.setItem("cat_tree_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+}
+function toggleCatNode(ev, row) {
+  if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button")) return;
+  var id = row.getAttribute("data-kids");
+  if (!id) return;
+  var kids = document.getElementById(id);
+  if (kids) kids.classList.toggle("on");
+}
+function apiToggleMore(btn) {
+  var row = btn && btn.closest && btn.closest(".api-row");
+  if (!row) return;
+  var more = row.querySelector(".api-more");
+  if (!more) return;
+  var on = more.classList.toggle("on");
+  btn.textContent = on ? "收起 ▴" : "展开 ▾";
+}
+function apiMainClick(ev, main) {
+  if (!ev || !ev.target || !ev.target.closest) return;
+  if (ev.target.closest("a, button, form, input, label")) return;
+  var btn = main.querySelector(".api-more-btn");
+  if (btn) apiToggleMore(btn);
+}
+function initCatTree() {
+  var content = document.getElementById("cat-tree-content");
+  var btn = document.getElementById("cat-tree-toggle");
+  if (!content || !btn) return;
+  var collapsed = "0";
+  try { collapsed = localStorage.getItem("cat_tree_collapsed") || "0"; } catch (e) {}
+  var isCollapsed = collapsed === "1";
+  if (isCollapsed) content.classList.add("hidden");
+  btn.textContent = (isCollapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
+}
+function selectAllInSection(el) {
+  var section = el.closest('.section');
+  if (!section) return;
+  var c = section.querySelectorAll('.report-checkbox');
+  for (var i = 0; i < c.length; i++) {
+    c[i].checked = el.checked;
+  }
+  updateBatchCount();
+}
+function submitBatchPost(actionUrl, ids, extraFields) {
+  var form = document.createElement('form');
+  form.method = 'POST';
+  form.action = actionUrl;
+  ids.forEach(function(id) {
+    var inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'report_ids'; inp.value = id;
+    form.appendChild(inp);
+  });
+  extraFields.forEach(function(f) {
+    var inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = f.name; inp.value = f.value;
+    form.appendChild(inp);
+  });
+  document.body.appendChild(form);
+  form.submit();
+  return false;
+}
+function buildApiUrl(path, kind) {
+  var origin = window.location.origin;
+  if (kind === 'full') {
+    return origin + path + '?fetch_all=true';
+  } else if (kind === 'static') {
+    return origin + path + '.json';
+  }
+  return origin + path;
+}
+function toggleFilterInput(inputName, select) {
+  var input = document.getElementsByName(inputName)[0];
+  if (!input) return;
+  var val = select.value;
+  if (val === 'nofilter' || val === 'isempty' || val === 'notempty') {
+    input.style.display = 'none';
+    input.disabled = true;
+  } else {
+    input.style.display = '';
+    input.disabled = false;
+  }
+}
+function copyRulesJson() {
+  copyToClipboard('current-rules-json');
+}
+function copyToClipboard(elementId) {
+  var el = document.getElementById(elementId);
+  if (!el) return;
+  var text = el.value || el.textContent || el.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() {
+      var btn = el.nextElementSibling;
+      if (btn && btn.tagName === 'BUTTON') {
+        var originalText = btn.textContent;
+        btn.textContent = '已复制';
+        btn.style.color = '#059669';
+        setTimeout(function() {
+          btn.textContent = originalText;
+          btn.style.color = '';
+        }, 2000);
+      }
+    }).catch(function() {
+      fallbackCopyText(text, el);
+    });
+  } else {
+    fallbackCopyText(text, el);
+  }
+}
+function fallbackCopyText(text, el) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    var btn = el.nextElementSibling;
+    if (btn && btn.tagName === 'BUTTON') {
+      var originalText = btn.textContent;
+      btn.textContent = '已复制';
+      btn.style.color = '#059669';
+      setTimeout(function() {
+        btn.textContent = originalText;
+        btn.style.color = '';
+      }, 2000);
+    }
+  } catch (err) {
+    console.error('复制失败:', err);
+  }
+  document.body.removeChild(ta);
+}
+function initApiUrls() {
+  var els = document.querySelectorAll('.api-url-code');
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    var path = el.getAttribute('data-path') || '';
+    var kind = el.getAttribute('data-kind') || 'base';
+    el.textContent = buildApiUrl(path, kind);
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  initApiUrls();
+});
+document.addEventListener('DOMContentLoaded', function() {
+  initCatTree();
+});
+function showFlashWarn(msg) {
+  /* 行内警告提示条（spec ux-optimization 批次6#27e）：替代阻塞式弹窗。
+     复用 .flash-warn 样式，5 秒后自动隐藏；容器缺失时降级 console.warn。 */
+  var box = document.getElementById('js-flash-warn');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'js-flash-warn';
+    box.className = 'flash-warn';
+    box.setAttribute('role', 'alert');
+    var container = document.querySelector('.container');
+    if (!container) { console.warn(msg); return; }
+    container.insertBefore(box, container.firstChild);
+  }
+  box.textContent = msg;
+  box.style.display = '';
+  clearTimeout(showFlashWarn._timer);
+  showFlashWarn._timer = setTimeout(function() { box.style.display = 'none'; }, 5000);
+}
+function initConfigFilter() {
+  /* 合并页检索过滤框（spec ux-optimization 批次6#21）：纯前端 tr 文本
+     contains 匹配显隐；空查询恢复全部。表头行（含 th）不过滤，避免表头
+     被误藏破坏表格结构；分类树区块非 tr 不参与。
+     确认稿 r3：卡片视图（.rpt-card）同规则参与过滤，两视图一致。 */
+  var input = document.getElementById('config-filter-input');
+  if (!input) return;
+  input.addEventListener('input', function() {
+    var q = input.value.trim().toLowerCase();
+    var rows = document.querySelectorAll('.section tr');
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      if (tr.querySelector('th')) continue;
+      if (!q) { tr.style.display = ''; continue; }
+      var text = (tr.innerText || tr.textContent || '').toLowerCase();
+      tr.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+    }
+    var cards = document.querySelectorAll('.section .rpt-card');
+    for (var j = 0; j < cards.length; j++) {
+      var card = cards[j];
+      if (!q) { card.style.display = ''; continue; }
+      var ctext = (card.innerText || card.textContent || '').toLowerCase();
+      card.style.display = ctext.indexOf(q) >= 0 ? '' : 'none';
+    }
+  });
+}
+function saveRecentVisit(reportId, reportName) {
+  /* 最近查看记录（spec ux-optimization 批次6#22）：localStorage 去重保序，
+     最多保留 8 条；存储异常静默（隐私模式等场景不阻断页面）。 */
+  try {
+    var list = JSON.parse(localStorage.getItem('sqlreport_recent') || '[]');
+    if (!Array.isArray(list)) list = [];
+    list = list.filter(function(it) { return it && it.id !== reportId; });
+    list.unshift({id: reportId, name: String(reportName || ''), ts: Date.now()});
+    localStorage.setItem('sqlreport_recent', JSON.stringify(list.slice(0, 8)));
+  } catch (e) {}
+}
+function initRecentReports() {
+  /* 总览页「最近查看」快捷卡片（批次6#22）：无记录不插入任何内容。 */
+  var mount = document.getElementById('recent-reports-mount');
+  if (!mount) return;
+  var list;
+  try { list = JSON.parse(localStorage.getItem('sqlreport_recent') || '[]'); } catch (e) { list = []; }
+  if (!Array.isArray(list)) return;
+  var cards = '';
+  list.forEach(function(it) {
+    if (!it || !it.id) return;
+    var name = String(it.name || ('#' + it.id))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    cards += '<a class="recent-card" href="/report?id=' + encodeURIComponent(it.id)
+           + '" title="' + name + '">' + name + '</a>';
+  });
+  if (!cards) return;
+  mount.innerHTML = '<div class="recent-reports"><div class="recent-title">'
+                  + '\ud83d\udd52 \u6700\u8fd1\u67e5\u770b</div><div class="recent-cards">'
+                  + cards + '</div></div>';
+}
+function applyStoredCols(reportId) {
+  /* 列设置 localStorage 记忆（spec ux-optimization 批次6#25）：
+     URL 显式 cols 参数优先——存在即写入记忆并直接返回（分享语义不被覆盖）；
+     URL 无 cols 且有记忆时以记忆值前端隐藏 th/td（服务端仍渲染全列）。 */
+  var params = new URLSearchParams(window.location.search);
+  var colsParam = params.get('cols');
+  var key = 'sqlreport_cols_' + reportId;
+  if (colsParam) {
+    try { localStorage.setItem(key, colsParam); } catch (e) {}
+    return;
+  }
+  var stored = null;
+  try { stored = localStorage.getItem(key); } catch (e) {}
+  if (!stored) return;
+  var visible = {};
+  stored.split(',').forEach(function(c) { visible[c] = true; });
+  /* 找茬 M1：过期记忆自愈——记忆列名与页面现有 data-col 无任何交集时
+     （SQL 列结构已变更），清除记忆并放弃应用，避免全列被隐死局。 */
+  var wraps = document.querySelectorAll('.table-wrap');
+  if (!wraps.length) return;
+  var anyOverlap = false;
+  Array.prototype.forEach.call(wraps, function(wrap) {
+    Array.prototype.forEach.call(
+      wrap.querySelectorAll('thead tr [data-col]'), function(th) {
+        if (th.getAttribute('data-col') in visible) anyOverlap = true;
+      });
+  });
+  if (!anyOverlap) {
+    try { localStorage.removeItem(key); } catch (e) {}
+    return;
+  }
+  /* 找茬 L5：多结果集（result_mode=all）下逐表应用，不再只作用首表。 */
+  Array.prototype.forEach.call(wraps, function(wrap) {
+    applyStoredColsToTable(wrap, visible);
+  });
+}
+function applyStoredColsToTable(wrap, visible) {
+  var headRows = wrap.querySelectorAll('thead tr');
+  if (!headRows.length) return;
+  var hideIdx = [];
+  Array.prototype.forEach.call(headRows[0].children, function(th, i) {
+    var col = th.getAttribute('data-col');
+    if (col !== null && !(col in visible)) { th.style.display = 'none'; hideIdx.push(i); }
+  });
+  if (!hideIdx.length) return;
+  /* ui-redesign R2-D：表头改为「排序行 + qf-row 快筛行」两行，隐藏列需同步 */
+  Array.prototype.forEach.call(headRows, function(row, ri) {
+    if (ri === 0) return;
+    hideIdx.forEach(function(i) {
+      var cell = row.children[i];
+      if (cell) cell.style.display = 'none';
+    });
+  });
+  var bodyRows = wrap.querySelectorAll('tbody tr');
+  Array.prototype.forEach.call(bodyRows, function(tr) {
+    if (tr.children.length === 1 && tr.children[0].colSpan) return;
+    hideIdx.forEach(function(i) {
+      var td = tr.children[i];
+      if (td) td.style.display = 'none';
+    });
+  });
+}
+function initSqlEditorTabIndent() {
+  /* SQL 编辑器 Tab 缩进（spec ux-optimization 批次6#23）：仅对带
+     data-tab-indent 标记的 sql-editor 生效；Tab 拦截后经 setRangeText
+     插入两空格（execCommand 已废弃，不使用）。 */
+  var tas = document.querySelectorAll('textarea.sql-editor[data-tab-indent="1"]');
+  Array.prototype.forEach.call(tas, function(ta) {
+    ta.addEventListener('keydown', function(e) {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end');
+    });
+  });
+}
+function sbIsRail() {
+  /* 当前视觉状态：状态类 + 视口联合判定（防小屏状态错位） */
+  var el = document.documentElement;
+  if (el.classList.contains('sb-rail')) return true;
+  if (el.classList.contains('sb-wide')) return false;
+  return !!(window.matchMedia && window.matchMedia('(max-width:1024px)').matches);
+}
+function sbStoreWrite(v) {
+  /* 收缩状态记忆（浏览器本地）；写失败不阻断切换，向 UI 明示 */
+  try { localStorage.setItem('sqlreport_sidebar_collapsed', v); return null; }
+  catch (e) {
+    var name = (e && e.name) || String(e);
+    console.warn('侧栏收缩状态无法写入 localStorage：', name);
+    showFlashWarn('侧栏收缩状态写入失败（' + name + '）：本页切换仍有效，刷新后不保留。');
+    return null;
+  }
+}
+function initSidebarHandle() {
+  /* 全高手柄：侧栏最右边整条竖边任意高度可点；箭头随指针高度移动。
+     data-sb-bound 保证 initPage 重复调用时幂等（无刷新换页复用）。 */
+  var handle = document.querySelector('.sb-handle');
+  if (!handle || handle.getAttribute('data-sb-bound')) return;
+  handle.setAttribute('data-sb-bound', '1');
+  var arrow = handle.querySelector('.sb-arrow');
+  handle.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    var el = document.documentElement;
+    if (sbIsRail()) {
+      el.classList.remove('sb-rail');
+      el.classList.add('sb-wide');
+      sbStoreWrite('0');
+    } else {
+      el.classList.remove('sb-wide');
+      el.classList.add('sb-rail');
+      sbStoreWrite('1');
+    }
+    handle.title = sbIsRail() ? '展开侧栏' : '收起侧栏';
+  });
+  handle.addEventListener('mousemove', function (ev) {
+    if (!arrow) return;
+    var rect = handle.getBoundingClientRect();
+    var y = Math.max(12, Math.min(rect.height - 12, ev.clientY - rect.top));
+    /* 确认稿 r3 区一：rail 态箭头不进入账号区——纵向范围钳制在账号区之上，
+       避免箭头与头像/退出图标挤团（账号区在侧栏底部） */
+    if (sbIsRail()) {
+      var account = document.querySelector('.sidebar .account');
+      if (account) {
+        var accTop = account.getBoundingClientRect().top - rect.top;
+        y = Math.min(y, Math.max(12, accTop - 14));
+      }
+    }
+    arrow.style.top = y + 'px';
+  });
+  handle.addEventListener('mouseleave', function () {
+    if (arrow) arrow.style.top = '50%';
+  });
+  handle.title = sbIsRail() ? '展开侧栏' : '收起侧栏';
+  /* 读失败（引导脚本记下）向 UI 明示一次，不静默降级 */
+  if (window.__sbStorageErr) {
+    showFlashWarn('侧栏收缩状态记忆不可用（' + window.__sbStorageErr
+      + '）：切换仅本页有效，刷新后回默认态。');
+    window.__sbStorageErr = null;
+  }
+}
+function initPage() {
+  /* 页面初始化（DOMContentLoaded 与无刷新换页后共用；需幂等） */
+  initApiUrls();
+  initSidebarHandle();
+  initCatTree();
+  initFlashMessages();
+  initAnchorRowHighlight();
+  initQueryLoadingOverlay();
+  initConfigFilter();
+  initRecentReports();
+  initSqlEditorTabIndent();
+}
+document.addEventListener('DOMContentLoaded', initPage);
+function applyRulesJson() {
+  var ta = document.getElementById('current-rules-json');
+  if (!ta) return;
+  var text = ta.value.trim();
+  if (!text) { showFlashWarn('请输入规则 JSON'); return; }
+  var rules;
+  try { rules = JSON.parse(text); } catch (e) {
+    showFlashWarn('JSON 格式错误: ' + e.message); return;
+  }
+  var params = new URLSearchParams(window.location.search);
+  var keysToRemove = [];
+    params.forEach(function(_, k) {
+      if (k.startsWith('f_') || k.startsWith('op_') || k.startsWith('s_')
+          || k === 'sort' || k === 'dir' || k === 'cols' || k === 'page'
+          || k === 'nested_filter') {
+        keysToRemove.push(k);
+      }
+    });
+  keysToRemove.forEach(function(k) { params.delete(k); });
+  if (rules.filters && rules.filters.length) {
+    rules.filters.forEach(function(f) {
+      params.set('f_' + f.col, f.val || '');
+      if (f.op && f.op !== 'contains') params.set('op_' + f.col, f.op);
+    });
+  }
+  if (rules.sorts && rules.sorts.length) {
+    rules.sorts.forEach(function(s) {
+      params.append('sort', s.col);
+      params.append('dir', s.dir || 'asc');
+    });
+  }
+  if (rules.columns) params.set('cols', rules.columns);
+  if (rules.nested_filter && typeof rules.nested_filter === 'object'
+      && Object.keys(rules.nested_filter).length) {
+    params.set('nested_filter', encodeURIComponent(JSON.stringify(rules.nested_filter)));
+  }
+   params.set('page', '1');
+   navigateTo('?' + params.toString());
+ }
+ /* ---- 批次5#14：flash 自动消失 + × 关闭 + 剥 flash 参数 ---- */
+function initFlashMessages() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.has('flash')) {
+    params.delete('flash');
+    var qs = params.toString();
+    window.history.replaceState(null, '',
+      window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+  }
+  var flashes = document.querySelectorAll('.flash');
+  for (var i = 0; i < flashes.length; i++) {
+    (function(f) {
+      var closeBtn = f.querySelector('.flash-close');
+      if (closeBtn) closeBtn.addEventListener('click', function() { f.remove(); });
+      if (f.getAttribute('data-autohide') === '1') {
+        setTimeout(function() {
+          f.classList.add('fading-out');
+          setTimeout(function() { f.remove(); }, 600);
+        }, 6000);
+      }
+    })(flashes[i]);
+  }
+}
+/* ---- 批次5#16：锚点目标行高亮（#report-N / #pool-N / #user-N）---- */
+function initAnchorRowHighlight() {
+  var id = window.location.hash.substring(1);
+  if (!/^(report|pool|user)-\d+$/.test(id)) return;
+  var row = document.getElementById(id);
+  if (row) row.classList.add('row-highlight');
+  /* 确认稿 r3：卡片视图下行锚点（#report-N）对应卡片副本一并高亮 */
+  var card = document.getElementById('report-card-' + id.replace(/^report-/, ''));
+  if (card) card.classList.add('row-highlight');
+}
+/* ---- 批次5#18：慢查询 loading 遮罩 ----
+   仅在触发查询的 form submit 与「重建缓存」按钮 click 时显示；
+   不用 beforeunload（会误伤导出下载），导出表单同样排除。 */
+ function initQueryLoadingOverlay() {
+  var overlay = document.getElementById('query-loading-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'query-loading-overlay';
+    overlay.className = 'query-loading-overlay';
+    overlay.innerHTML = '<div class="spinner"></div><div>查询中…请稍候</div>';
+    document.body.appendChild(overlay);
+  }
+  var showOverlay = function() { overlay.classList.add('show'); };
+  var forms = document.querySelectorAll('form');
+  for (var i = 0; i < forms.length; i++) {
+    if (forms[i].hasAttribute('data-ov-bound')) continue;
+    var action = forms[i].getAttribute('action') || '';
+    if (action.indexOf('/export') !== -1) continue;
+    /* 仅同页提交与报表查询端点（精确匹配，防止 /config/reports/* 批量操作误伤） */
+    if (action === '' || action === '/report' || action.indexOf('/report?') === 0) {
+      forms[i].setAttribute('data-ov-bound', '1');
+      forms[i].addEventListener('submit', showOverlay);
+    }
+  }
+  var refreshBtns = document.querySelectorAll('.btn-refresh[type="submit"]');
+  for (var j = 0; j < refreshBtns.length; j++) {
+    if (refreshBtns[j].hasAttribute('data-ov-bound')) continue;
+    refreshBtns[j].setAttribute('data-ov-bound', '1');
+    refreshBtns[j].addEventListener('click', showOverlay);
+  }
+}
+/* ---- 批次5#20：跳页钳制 + 回车原生提交 ---- */
+ function goPage(evt, baseUrl, current, totalPages) {
+  evt.preventDefault();
+  var input = document.getElementById('jump_page');
+  var p = parseInt(input.value, 10);
+  if (isNaN(p)) p = current;
+  if (p < 1) p = 1;
+  if (p > totalPages) p = totalPages;
+  input.value = p;
+  navigateTo(baseUrl + '&page=' + p);
+  return false;
+}
+ /* ---- 无刷新导航：history.pushState + fetch 替换 <main> 内容 ---- */
+ function _swapMain(html, url, replace) {
+   var parser = new DOMParser();
+   var doc = parser.parseFromString(html, 'text/html');
+   var newMain = doc.querySelector('main.main');
+   var oldMain = document.querySelector('main.main');
+   if (newMain && oldMain) { oldMain.innerHTML = newMain.innerHTML; }
+   var newTitle = doc.querySelector('title');
+   if (newTitle) document.title = newTitle.textContent;
+   if (url) {
+     if (replace) { history.replaceState(null, '', url); }
+     else { history.pushState(null, '', url); }
+   }
+   if (typeof initPage === 'function') { initPage(); }
+ }
+ function navigateTo(url, replace) {
+   fetch(url)
+     .then(function(r) { return r.text(); })
+     .then(function(html) { _swapMain(html, url, replace); })
+     .catch(function() { window.location.href = url; });
+ }
+ window.addEventListener('popstate', function() {
+   fetch(window.location.href)
+     .then(function(r) { return r.text(); })
+     .then(function(html) { _swapMain(html, null, false); })
+     .catch(function() {});
+ });
+ /* ---- 上移/下移箭头无刷新（/config/{section}/{id}/move-up|move-down）：
+        fetch POST 跟随 302 后原位换 <main>，保持滚动位置（不跳顶）。
+        服务端无 JS 时仍走原生提交兜底。 ---- */
+ document.addEventListener('submit', function(e) {
+   var form = e.target;
+   if (!form || form.tagName !== 'FORM') return;
+   var action = form.getAttribute('action') || '';
+   if (!/\/move-(up|down)$/.test(action)) return;
+   e.preventDefault();
+   fetch(action, { method: 'POST', body: new FormData(form) })
+     .then(function(r) {
+       return r.text().then(function(html) { _swapMain(html, r.url, false); });
+     })
+     .catch(function() { form.submit(); });
+ });
+ </script>
+<script>setReportsView("card", false);</script></body>
+</html>

@@ -416,6 +416,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _handle(self, method: str):
         """基于路由表分发请求"""
         self._session_token = None
+        # 请求级用户名复位（公开页/未登录为 None；认证成功后重新注入）
+        render.set_request_user(None)
         parsed = urllib.parse.urlparse(self.path)
         raw_path = parsed.path.rstrip("/") or "/"
         path = urllib.parse.unquote(raw_path)
@@ -488,6 +490,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         # 滑动过期：刷新 session 时间戳 + 下行 cookie Max-Age
         auth.refresh_session(token)
         self._session_token = token
+        # 注入当前登录用户名，供侧栏账户区等渲染层读取
+        render.set_request_user(user)
         return True
 
     def _get_current_user(self) -> str | None:

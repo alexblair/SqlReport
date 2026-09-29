@@ -1,0 +1,8 @@
+[4:4:0929/195251.740408:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+[4:4:0929/195251.740555:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+[4:18:0929/195251.810445:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/e6b00246-e812-4192-9b32-6581598ce426
+[4:4:0929/195252.031809:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.systemd1.Manager.StartTransientUnit: object_path= /org/freedesktop/systemd1: org.freedesktop.DBus.Error.InvalidArgs: Process 4 is a kernel thread, refusing.
+[4:18:0929/195252.066729:ERROR:crypto/nss_util.cc:256] Error initializing NSS with a persistent database (sql:/root/.pki/nssdb): NSS error code: -8126
+[4:4:0929/195252.112156:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.NetworkManager.GetDevices: object_path= /org/freedesktop/NetworkManager: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.NetworkManager was not provided by any .service files

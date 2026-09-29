@@ -1,0 +1,13 @@
+[4:4:0929/184847.698876:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+[4:4:0929/184847.699027:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+[4:16:0929/184847.774938:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:208] open /root/.config/google-chrome-for-testing/Crash Reports/settings.dat: Read-only file system (30)
+[4:4:0929/184847.775284:ERROR:chrome/browser/net/system_network_context_manager.cc:1002] Cannot use V8 Proxy resolver in single process mode.
+[4:4:0929/184847.811753:ERROR:chrome/browser/net/system_network_context_manager.cc:1002] Cannot use V8 Proxy resolver in single process mode.
+[4:4:0929/184848.024357:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.systemd1.Manager.StartTransientUnit: object_path= /org/freedesktop/systemd1: org.freedesktop.DBus.Error.InvalidArgs: Process 4 is a kernel thread, refusing.
+[4:16:0929/184848.060287:ERROR:crypto/nss_util.cc:256] Error initializing NSS with a persistent database (sql:/root/.pki/nssdb): NSS error code: -8126
+[4:4:0929/184848.095510:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.NetworkManager.GetDevices: object_path= /org/freedesktop/NetworkManager: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.NetworkManager was not provided by any .service files
+[4:4:0929/184848.124334:ERROR:mojo/public/cpp/bindings/lib/interface_endpoint_client.cc:748] Message 7 rejected by interface blink.mojom.WidgetHost
+[4:70:0929/184848.357050:ERROR:third_party/blink/renderer/platform/fonts/linux/font_unique_name_lookup_linux.cc:21] @font-face src: local() instantiation only available when connected to browser process.
+[4:70:0929/184848.357116:ERROR:third_party/blink/renderer/platform/fonts/linux/font_unique_name_lookup_linux.cc:21] @font-face src: local() instantiation only available when connected to browser process.
+[4:70:0929/184848.459143:ERROR:third_party/blink/renderer/platform/fonts/linux/font_unique_name_lookup_linux.cc:21] @font-face src: local() instantiation only available when connected to browser process.
+[4:70:0929/184848.459192:ERROR:third_party/blink/renderer/platform/fonts/linux/font_unique_name_lookup_linux.cc:21] @font-face src: local() instantiation only available when connected to browser process.

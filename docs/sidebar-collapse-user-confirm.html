@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>确认稿 v2 · 侧栏全高手柄 + 当前用户名 + 自适应</title>
+<!-- 记忆脚本：生产实现位于 <head> 最前，CSS 应用前设好状态类，避免闪烁。
+     三态：sb-rail=用户收起 / sb-wide=用户展开 / 无类=默认（桌面展开、小屏图标条） -->
+<script>
+(function () {
+  try {
+    var v = localStorage.getItem("sqlreport_sidebar_collapsed");
+    if (v === "1") document.documentElement.classList.add("sb-rail");
+    else if (v === "0") document.documentElement.classList.add("sb-wide");
+  } catch (e) { /* 存储不可用：按默认态渲染，pill 会明确提示 */ }
+})();
+</script>
+<style>
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#ffffff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#ffffff;
+  --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --warn:#d97706; --warn-soft:#fffbeb; --danger:#dc2626;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --r-sm:6px; --r-md:10px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg-app); color: #1e293b; min-height: 100vh; }
+
+/* ===== 侧栏页壳（复刻 _COMMON_CSS 现状） ===== */
+.app { display:flex; min-height:100vh; }
+.sidebar {
+  width:240px; flex:0 0 240px; background:var(--sidebar-bg); color:var(--sidebar-ink);
+  position:fixed; inset:0 auto 0 0; display:flex; flex-direction:column; z-index:40;
+}
+.main { margin-left:240px; flex:1; min-width:0; display:flex; flex-direction:column; }
+.sidebar .brand {
+  display:flex; align-items:center; gap:10px; padding:18px 18px 14px;
+  color:#fff; font-weight:700; font-size:16px; letter-spacing:-.2px; text-decoration:none;
+}
+.sidebar .brand .logo {
+  width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:13px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:800; flex:0 0 28px;
+}
+.nav-group { padding:6px 12px 2px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
+.nav-item {
+   display:flex; align-items:center; gap:10px; margin:1px 10px; padding:6px 12px;
+   border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
+   border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
+   cursor:pointer; box-sizing:border-box;
+}
+.nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
+.nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
+.nav-item.nav-active::before {
+   content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
+}
+.nav-item svg { width:16px; height:16px; flex:0 0 16px; opacity:.9; }
+.sidebar .spacer { flex:0 0 1.5em; min-height:24px; }
+.account {
+  border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
+  display:flex; align-items:center; gap:8px; font-size:13px;
+}
+.account .avatar {
+  width:28px; height:28px; border-radius:50%; background:#334155; display:grid; place-items:center;
+  color:#e2e8f0; font-size:12px; font-weight:700; flex:0 0 28px;
+}
+.account .who { color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.account .out { margin-left:auto; color:#94a3b8; font-size:12px; text-decoration:none; }
+.account .out:hover { color:#fff; }
+.account .out-icon { display:none; }
+
+/* ===== 新增：侧栏最右侧整条竖边手柄（全高可点，任何高度都能切换） ===== */
+.sb-handle {
+  position:absolute; top:0; bottom:0; right:0; width:14px; padding:0; border:0;
+  background:transparent; cursor:pointer; z-index:5;
+}
+.sb-handle:hover { background:rgba(255,255,255,.10); }
+.sb-handle:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #818cf8; }
+.sb-arrow {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  display:grid; place-items:center; pointer-events:none;
+  transition:top .08s linear;
+}
+.sb-arrow svg { width:11px; height:18px; color:#94a3b8; transition:transform .15s ease; }
+.sb-handle:hover .sb-arrow svg { color:#fff; }
+
+/* ===== 三态视觉（桌面）：默认/ sb-wide = 240px；sb-rail = 64px ===== */
+html.sb-rail .sidebar { width:64px; flex-basis:64px; }
+html.sb-rail .main { margin-left:64px; }
+html.sb-rail .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+html.sb-rail .sidebar .brand .name,
+html.sb-rail .sidebar .nav-group,
+html.sb-rail .sidebar .nav-item span,
+html.sb-rail .sidebar .nav-badge,
+html.sb-rail .sidebar .who,
+html.sb-rail .sidebar .account .out { display:none; }
+html.sb-rail .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+html.sb-rail .account { justify-content:center; padding:12px 8px; gap:6px; }
+html.sb-rail .account .out-icon {
+  display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+  color:#94a3b8; text-decoration:none; flex:0 0 26px;
+}
+html.sb-rail .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+html.sb-rail .account .out-icon svg { width:15px; height:15px; }
+
+/* 手柄箭头方向 = 下一步动作：展开态 ‹（点此收起）；sb-rail ›（点此展开） */
+.sb-arrow svg { transform:rotate(180deg); }
+html.sb-rail .sb-arrow svg { transform:none; }
+
+/* ===== 自适应（≤1024px）：默认 = 64px 图标条；sb-wide = 240px 覆盖层 ===== */
+@media (max-width: 1024px) {
+  html:not(.sb-wide) .sidebar { width:64px; flex-basis:64px; }
+  html:not(.sb-wide) .main { margin-left:64px; }
+  html:not(.sb-wide) .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+  html:not(.sb-wide) .sidebar .brand .name,
+  html:not(.sb-wide) .sidebar .nav-group,
+  html:not(.sb-wide) .sidebar .nav-item span,
+  html:not(.sb-wide) .sidebar .nav-badge,
+  html:not(.sb-wide) .sidebar .who,
+  html:not(.sb-wide) .sidebar .account .out { display:none; }
+  html:not(.sb-wide) .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
+  html:not(.sb-wide) .account { justify-content:center; padding:12px 8px; gap:6px; }
+  html:not(.sb-wide) .account .out-icon {
+    display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
+    color:#94a3b8; text-decoration:none; flex:0 0 26px;
+  }
+  html:not(.sb-wide) .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
+  html:not(.sb-wide) .account .out-icon svg { width:15px; height:15px; }
+  /* 小屏展开 = 覆盖层：主区仍按 64px 图标条布局，不挤推、不跳版 */
+  html.sb-wide .sidebar { width:240px; flex-basis:240px; box-shadow:var(--sh-2); z-index:60; }
+  html.sb-wide .main { margin-left:64px; }
+  html:not(.sb-wide) .sb-arrow svg { transform:none; }
+}
+/* 触屏：手柄加宽保证触控命中 */
+@media (pointer: coarse) {
+  .sb-handle { width:28px; }
+}
+
+/* ===== 主区演示内容 ===== */
+.container { width:100%; max-width:1440px; margin:0 auto; padding:24px; }
+h1 { font-size:24px; font-weight:700; color:var(--ink); }
+.muted { color:var(--ink-3); font-size:13px; }
+.card { background:var(--bg-surface); border:1px solid var(--line); border-radius:var(--r-md);
+  padding:16px; margin-top:16px; box-shadow:var(--sh-1); }
+.note { background:var(--warn-soft); border:1px solid #fde68a; color:#92400e; border-radius:var(--r-md);
+  padding:10px 14px; font-size:13px; margin-top:12px; }
+.howto li { margin:6px 0 6px 18px; font-size:14px; color:var(--ink-2); }
+.state-pill { display:inline-block; padding:2px 10px; border-radius:var(--r-full); font-size:12px;
+  background:var(--brand-soft); color:var(--brand); font-weight:600; margin-left:8px; }
+.state-pill.bad { background:var(--warn-soft); color:var(--warn); }
+.demo-reset { margin-top:14px; font-size:12px; color:var(--ink-3); background:none;
+  border:1px solid var(--line-strong); border-radius:var(--r-sm); padding:4px 10px; cursor:pointer; }
+.demo-reset:hover { background:var(--bg-hover); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="主导航">
+    <a class="brand" href="#"><span class="logo">SR</span><span class="name">SqlReport</span></a>
+
+    <div class="nav-group">分析</div>
+    <a class="nav-item nav-active" href="#" title="报表中心">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <span>报表中心</span></a>
+    <div class="spacer"></div>
+
+    <div class="nav-group">管理</div>
+    <a class="nav-item" href="#" title="概览">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>概览</span></a>
+    <a class="nav-item" href="#" title="报表配置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      <span>报表配置</span></a>
+    <a class="nav-item" href="#" title="连接池">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+      <span>连接池</span></a>
+    <a class="nav-item" href="#" title="用户">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>
+      <span>用户</span></a>
+    <div class="spacer"></div>
+
+    <div class="nav-group">服务</div>
+    <a class="nav-item" href="#" title="API 接口">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg>
+      <span>API 接口</span></a>
+    <a class="nav-item" href="#" title="定时任务">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,14"/></svg>
+      <span>定时任务</span></a>
+    <div class="spacer"></div>
+
+    <div class="nav-group">治理</div>
+    <a class="nav-item" href="#" title="审计日志">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="14,3 14,9 20,9"/></svg>
+      <span>审计日志</span></a>
+    <div class="spacer"></div>
+
+    <!-- 账户区：展开态 = 头像 + 用户名 + 退出；图标条态 = 头像(hover 显示名) + 退出图标 -->
+    <div class="account">
+      <span class="avatar" title="admin">A</span>
+      <span class="who">admin</span>
+      <a class="out" href="#">退出</a>
+      <a class="out-icon" href="#" title="退出（admin）" aria-label="退出">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </a>
+    </div>
+
+    <!-- 全高竖边手柄：整条右边任意高度可点；箭头跟随指针高度 -->
+    <button class="sb-handle" id="sbHandle" type="button" title="收起侧栏" aria-label="收起或展开侧栏">
+      <span class="sb-arrow" id="sbArrow">
+        <svg viewBox="0 0 12 18" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round"><polyline points="4,3 9,9 4,15"/></svg>
+      </span>
+    </button>
+  </aside>
+
+  <div class="main">
+    <div class="container">
+      <p class="muted">报表中心</p>
+      <h1>侧栏全高手柄 + 当前用户名 · 确认稿 v2</h1>
+      <p class="muted">连接池：威渔台只读-online　<span class="state-pill" id="statePill">状态读取中…</span></p>
+
+      <div class="note">⚠ 本确认稿为过程素材（不进生产 static/）：演示内容均为静态占位，最终生产 HTML 由 render + build_* 拼装。</div>
+
+      <div class="card">
+        <strong>请这样确认（对应你提出的 3 个问题）：</strong>
+        <ol class="howto">
+          <li><b>[问题2]</b> 侧栏<b>最右边一整条竖边</b>就是手柄——在<b>任意高度</b>点击都可切换；箭头会跟随你的鼠标所在高度移动。展开时箭头 ‹（点击收起），收起时箭头 ›（点击展开），<b>两个方向都能点</b>。</li>
+          <li><b>[问题1]</b> 状态徽标现在会明确区分：「localStorage = 0 / 1」「默认(未设置)」「<b>不可用（异常名）</b>」「<b>写入失败</b>」。如果你的预览环境禁用了存储，徽标会直接亮黄提示而不是假装 0——请留意徽标显示哪种情况告诉我。生产环境（http 直连服务）存储可用。</li>
+          <li><b>[问题3]</b> 自适应：把浏览器窗口拖窄到 ≤1024px（或按 F12 用设备模式）→ 默认 64px 图标条；点竖边手柄展开为 240px <b>覆盖层</b>（阴影浮在内容上，主区不挤推、不跳版）；箭头方向随状态自动切换。触屏粗指针下手柄加宽到 28px。</li>
+          <li>刷新页面/重开标签页：状态保持且无闪烁；折叠态底部圆圈头像悬停显示用户名，旁边小图标是<b>退出</b>（title 已标注），不再与展开箭头混淆。</li>
+        </ol>
+        <button class="demo-reset" id="demoReset" type="button">重置演示状态（清除 localStorage）</button>
+      </div>
+
+      <div class="card">
+        <strong>与生产实现的对应关系（确认要点）</strong>
+        <ol class="howto">
+          <li>手柄：侧栏内全高 <code>&lt;button class="sb-handle"&gt;</code>（宽 14px，触屏 28px），唯一点击监听器（无嵌套监听，根除双重 toggle 类 bug）；箭头位置随 mousemove 更新。</li>
+          <li>三态：`sb-rail`（收起）/ `sb-wide`（展开）/ 无类（默认：桌面展开、≤1024px 图标条）；切换方向由「当前视觉状态 + matchMedia」判定，杜绝小屏状态错位。</li>
+          <li>记忆：<code>localStorage["sqlreport_sidebar_collapsed"]</code>（1/0），<code>&lt;head&gt;</code> 内联脚本先设类再渲染；读写异常不再静默吞掉，向 UI 明示；跨注销/登录永久保留。</li>
+          <li>用户名：server 认证后经请求级上下文（threading.local）注入渲染层，页面调用零改动；无会话时不显示账户名。</li>
+        </ol>
+      </div>
+
+      <div class="card" style="min-height:320px">
+        <strong>占位内容（示意主区随侧栏收缩变宽 / 小屏不跳版）</strong>
+        <p class="muted" style="margin-top:8px">共 1710 行，86 页 · 表格等生产内容略。切换手柄观察本卡片宽度变化；拖窄窗口观察小屏覆盖层行为。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var KEY = "sqlreport_sidebar_collapsed";
+  var handle = document.getElementById("sbHandle");
+  var arrow = document.getElementById("sbArrow");
+  var pill = document.getElementById("statePill");
+  var reset = document.getElementById("demoReset");
+
+  // 当前视觉状态：类 + 视口联合判定（防小屏状态错位）
+  function isRail() {
+    var el = document.documentElement;
+    if (el.classList.contains("sb-rail")) return true;
+    if (el.classList.contains("sb-wide")) return false;
+    return !!(window.matchMedia && window.matchMedia("(max-width:1024px)").matches);
+  }
+  // 存储读：不再静默——区分可用值 / 未设置 / 不可用
+  function storeRead() {
+    try {
+      var v = localStorage.getItem(KEY);
+      if (v === "1" || v === "0") return { ok: true, val: v };
+      return { ok: true, val: null }; // 未设置
+    } catch (e) { return { ok: false, err: (e && e.name) || "Error" }; }
+  }
+  function storeWrite(v) {
+    try { localStorage.setItem(KEY, v); return null; }
+    catch (e) { return (e && e.name) || "Error"; }
+  }
+  var lastWriteErr = null;
+  function paint() {
+    var rail = isRail();
+    var r = storeRead();
+    var mem;
+    if (!r.ok) mem = "⚠ localStorage 不可用（" + r.err + "）";
+    else if (lastWriteErr) mem = "⚠ localStorage 写入失败（" + lastWriteErr + "）";
+    else mem = "localStorage = " + (r.val === null ? "默认(未设置)" : r.val);
+    pill.textContent = "当前：「" + (rail ? "图标条" : "展开") + "」 · " + mem;
+    pill.className = "state-pill" + ((!r.ok || lastWriteErr) ? " bad" : "");
+    handle.title = rail ? "展开侧栏" : "收起侧栏";
+  }
+  function toggle() {
+    var el = document.documentElement;
+    var rail = isRail();
+    if (rail) { el.classList.remove("sb-rail"); el.classList.add("sb-wide"); lastWriteErr = storeWrite("0"); }
+    else { el.classList.remove("sb-wide"); el.classList.add("sb-rail"); lastWriteErr = storeWrite("1"); }
+    paint();
+  }
+  handle.addEventListener("click", function (ev) { ev.preventDefault(); toggle(); });
+  // 箭头跟随指针高度（任意高度点击都有即时反馈）
+  handle.addEventListener("mousemove", function (ev) {
+    var rect = handle.getBoundingClientRect();
+    var y = Math.max(12, Math.min(rect.height - 12, ev.clientY - rect.top));
+    arrow.style.top = y + "px";
+  });
+  handle.addEventListener("mouseleave", function () { arrow.style.top = "50%"; });
+  reset.addEventListener("click", function () {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    document.documentElement.classList.remove("sb-rail", "sb-wide");
+    lastWriteErr = null;
+    paint();
+  });
+  paint();
+})();
+</script>
+</body>
+</html>

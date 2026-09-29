@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI 修复确认稿 R3 · 侧栏账号区 + 报表配置页改版</title>
+<style>
+/* ===== 设计令牌（取自 ui-redesign-visual-spec.md §1，禁止临场发明第二套） ===== */
+:root{
+  --bg-app:#f3f4f8; --bg-surface:#fff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
+  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#fff;
+  --sidebar-active-bg:rgba(99,102,241,.18);
+  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
+  --line:#e5e7eb; --line-strong:#d1d5db;
+  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --danger:#dc2626; --info:#2563eb;
+  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
+  --r-sm:6px; --r-md:10px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(15,23,42,.06);
+  --sh-2:0 8px 24px rgba(15,23,42,.12);
+  --sh-pop:0 4px 12px rgba(15,23,42,.10);
+  --t-fast:120ms; --t-med:200ms;
+  --fs-title:20px; --fs-h2:16px; --fs-h3:14px; --fs-body:14px; --fs-sm:13px; --fs-xs:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-app);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:var(--fs-body);line-height:22px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--r-sm)}
+
+/* ===== 页壳与演示控件 ===== */
+.page{max-width:1440px;margin:0 auto;padding:24px}
+.page-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.page-head h1{font-size:var(--fs-title);line-height:28px;font-weight:700;margin:0;letter-spacing:-.3px}
+.page-head .sub{color:var(--ink-3);font-size:var(--fs-sm);margin-top:4px}
+.page-head .actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.proto-note{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:var(--r-md);
+  padding:10px 14px;font-size:var(--fs-sm);margin-bottom:16px}
+.proto-note b{color:#78350f}
+.card{background:var(--bg-surface);border-radius:var(--r-md);box-shadow:var(--sh-1);padding:20px;margin-bottom:16px}
+.card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.card-head h2{font-size:var(--fs-h2);line-height:24px;font-weight:600;margin:0}
+.card-head .actions{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.step-tag{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:600;
+  color:var(--brand);background:var(--brand-soft);border-radius:var(--r-full);padding:2px 10px}
+
+/* 分段控件（列表/卡片切换、修复前后切换） */
+.seg{display:inline-flex;background:var(--bg-subtle);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:2px;gap:2px}
+.seg button{border:0;background:transparent;font:inherit;font-size:var(--fs-sm);font-weight:600;
+  color:var(--ink-3);padding:4px 12px;border-radius:4px;cursor:pointer;transition:background var(--t-fast) ease-out}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--bg-surface);color:var(--brand);box-shadow:var(--sh-1)}
+
+/* 按钮（复用生产 .btn 体系） */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;
+  border-radius:var(--r-sm);font-size:14px;font-weight:600;text-decoration:none;cursor:pointer;
+  transition:background var(--t-fast),border-color var(--t-fast);border:none;font-family:inherit}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(79,70,229,.35)}
+.btn-primary:hover{background:var(--brand-hover);text-decoration:none}
+.btn-secondary{background:#fff;border:1px solid var(--line-strong);color:var(--ink-2);box-shadow:var(--sh-1)}
+.btn-secondary:hover{background:var(--bg-hover);text-decoration:none}
+.btn-sm{height:26px;padding:0 10px;font-size:13px}
+.btn-icon{width:26px;padding:0}
+.btn-ghost{background:transparent;color:var(--ink-2)}
+.btn-ghost:hover{background:var(--bg-hover)}
+
+/* 徽标（复用生产 .badge 体系） */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:var(--r-full);
+  font-size:var(--fs-xs);font-weight:600;line-height:18px}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.75}
+.badge-ok{background:var(--ok-soft);color:#047857}
+.badge-warn{background:#fffbeb;color:#b45309}
+.badge-info{background:#eff6ff;color:#1d4ed8}
+.badge-neutral{background:var(--bg-subtle);color:var(--ink-3);border:1px solid var(--line)}
+
+/* =====================================================
+   区一 · 侧栏账号区修复（修复前 / 修复后 可切换）
+   ===================================================== */
+.side-stage{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.side-box{flex:0 0 auto}
+.side-box .cap{font-size:var(--fs-xs);font-weight:600;color:var(--ink-3);margin-bottom:6px}
+.side-box .cap b{color:var(--brand)}
+.side-frame{position:relative;height:430px;border-radius:var(--r-md);overflow:hidden;
+  background:var(--sidebar-bg);box-shadow:var(--sh-1);transition:width var(--t-med) ease-out}
+
+/* 侧栏骨架（与生产同 class 命名） */
+.sidebar{position:relative;display:flex;flex-direction:column;height:100%;width:240px;color:var(--sidebar-ink);
+  transition:width var(--t-med) ease-out}
+.sidebar .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;color:#fff;
+  font-weight:700;font-size:16px;letter-spacing:-.2px}
+.sidebar .brand .logo{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:13px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:800;flex:0 0 28px}
+.sidebar .brand .name{white-space:nowrap}
+.nav-group{padding:6px 12px 2px;font-size:var(--fs-xs);color:#64748b;font-weight:600;letter-spacing:.04em}
+.nav-item{display:flex;align-items:center;gap:10px;margin:1px 10px;padding:6px 12px;border-radius:8px;
+  color:var(--sidebar-ink);font-size:14px;border:0;background:transparent;width:calc(100% - 20px);
+  text-align:left;position:relative;cursor:pointer;transition:background var(--t-fast)}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav-item.nav-active{background:var(--sidebar-active-bg);color:#fff;font-weight:600}
+.nav-item.nav-active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;
+  border-radius:2px;background:#818cf8}
+.nav-item svg{width:16px;height:16px;flex:0 0 16px;opacity:.9}
+.nav-badge{margin-left:auto;font-size:11px;background:rgba(255,255,255,.1);padding:0 6px;border-radius:var(--r-full)}
+.sidebar .spacer{flex:1 1 auto;min-height:12px}
+
+/* 账号区：展开态 = 头像+用户名+退出（与确认稿 r2 一致） */
+.account{border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;display:flex;align-items:center;
+  gap:8px;font-size:var(--fs-sm)}
+.account .avatar{width:28px;height:28px;border-radius:50%;background:#334155;display:grid;place-items:center;
+  color:#e2e8f0;font-size:12px;font-weight:700;flex:0 0 28px}
+.account .who{color:#e2e8f0;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.account .out{margin-left:auto;color:#94a3b8;font-size:var(--fs-xs);text-decoration:none;white-space:nowrap}
+.account .out:hover{color:#fff}
+.account .out-icon{display:none}
+
+/* 收起手柄（生产同款） */
+.sb-handle{position:absolute;top:0;bottom:0;right:0;width:14px;border:0;background:transparent;
+  cursor:pointer;z-index:5;padding:0}
+.sb-handle:hover{background:rgba(255,255,255,.10)}
+.sb-arrow{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;place-items:center;
+  pointer-events:none}
+.sb-arrow svg{width:11px;height:18px;color:#94a3b8;transition:transform var(--t-med) ease}
+.side-box[data-state="wide"] .sb-arrow svg{transform:rotate(180deg)}
+
+/* ---------- rail（64px）态 ---------- */
+.side-frame.rail .sidebar{width:64px}
+.side-frame.rail .brand{justify-content:center;padding:18px 8px 14px}
+.side-frame.rail .brand .name,.side-frame.rail .nav-group,.side-frame.rail .nav-item span,
+.side-frame.rail .nav-badge,.side-frame.rail .who,.side-frame.rail .out{display:none}
+.side-frame.rail .nav-item{justify-content:center;margin:2px 8px;padding:8px}
+
+/* rail 态 · 修复前：横排溢出（复现缺陷：头像+退出图标+手柄箭头挤成一团） */
+.side-frame.rail.fix-before .account{justify-content:center;padding:12px 8px;gap:6px}
+.side-frame.rail.fix-before .account .out-icon{display:grid;place-items:center;width:26px;height:26px;
+  border-radius:6px;color:#94a3b8;flex:0 0 26px}
+/* 缺陷演示：账号区宽度不减、无让位 → 与手柄箭头重叠 */
+.side-frame.rail.fix-before .account{padding-right:8px}
+.side-frame.rail.fix-before .sb-arrow{top:auto;bottom:26px}
+
+/* rail 态 · 修复后：纵向两行（头像上、退出图标下），手柄箭头独立居中不侵入 */
+.side-frame.rail.fix-after .account{flex-direction:column;gap:6px;padding:10px 8px;justify-content:center}
+.side-frame.rail.fix-after .account .avatar{width:26px;height:26px;flex-basis:26px;font-size:11px}
+.side-frame.rail.fix-after .account .out-icon{display:grid;place-items:center;width:26px;height:26px;
+  border-radius:6px;color:#94a3b8;flex:0 0 26px;transition:background var(--t-fast)}
+.side-frame.rail.fix-after .account .out-icon:hover{background:rgba(255,255,255,.1);color:#fff}
+.side-frame.rail.fix-after .account .out-icon svg{width:15px;height:15px}
+/* 手柄箭头保持整条竖边可点，但箭头停在侧栏垂直中部、与账号区上下错开 */
+.side-frame.rail.fix-after .sb-arrow{top:42%;bottom:auto}
+.side-frame.rail.fix-after .account{border-top:1px solid rgba(255,255,255,.08)}
+
+/* =====================================================
+   区二 · 报表配置页（列表 / 卡片 双视图）
+   ===================================================== */
+.split{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1024px){.split{grid-template-columns:minmax(0,1fr)}}
+
+/* 左树（R2-A 形态，取自生产样式基调） */
+.tree .cat{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:var(--r-sm);
+  font-size:var(--fs-sm);cursor:pointer;color:var(--ink-2)}
+.tree .cat:hover{background:var(--bg-hover)}
+.tree .cat.on{background:var(--brand-soft);color:var(--brand);font-weight:600}
+.tree .cat .cnt{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);font-weight:600}
+.tree .cat .ops{display:none;gap:2px}
+.tree .cat:hover .ops{display:inline-flex}
+.tree .child{margin-left:16px;border-left:2px solid var(--line);padding-left:6px}
+
+/* 分组标题（卡片头形态） */
+.section{margin-bottom:16px}
+.section-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg-surface);
+  border:1px solid var(--line);border-radius:var(--r-md) var(--r-md) 0 0;border-bottom:0;
+  padding:10px 14px;font-size:var(--fs-h3);font-weight:600}
+.section-title .ico{width:26px;height:26px;border-radius:var(--r-sm);background:var(--brand-soft);
+  color:var(--brand);display:grid;place-items:center;flex:0 0 26px}
+.section-title .cnt{font-weight:500;font-size:var(--fs-xs);color:var(--ink-3)}
+.section-title .actions{margin-left:auto;display:flex;gap:6px;align-items:center}
+.section.nest{margin-left:24px;border-left:3px solid #c7d2fe;padding-left:10px}
+
+/* 列表视图表格（保留全部 10 列，仅重排版） */
+.table-wrap{overflow:auto;max-height:none;border:1px solid var(--line);border-radius:0 0 var(--r-md) var(--r-md);
+  background:var(--bg-surface)}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:var(--fs-body)}
+th{background:var(--bg-subtle);color:var(--ink-2);font-weight:600;font-size:var(--fs-xs);padding:9px 12px;
+  border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;position:sticky;top:0;z-index:5}
+td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+tbody tr{transition:background var(--t-fast)}
+tbody tr:hover{background:var(--bg-hover)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.picked{background:var(--brand-soft)}
+/* 配置三列（默认分页/缓存/TTL）同底色分区：列组视觉归并 */
+th.cfg-group,td.cfg-group{background:#f5f7fb}
+th.cfg-group{background:#eef1f7}
+tbody tr:hover td.cfg-group{background:#eaeff7}
+td.cfg-group{text-align:center;font-variant-numeric:tabular-nums}
+td.num{text-align:center;font-variant-numeric:tabular-nums}
+/* SQL 摘要列：窄列单行截断（反馈①），完整 SQL 悬浮 title 预览 */
+.sql-cell{width:170px;max-width:170px}
+.sql-cell code{font-size:var(--fs-xs);background:var(--bg-subtle);border:1px solid var(--line);
+  padding:2px 6px;border-radius:4px;color:var(--ink-2);display:inline-block;max-width:154px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;cursor:help}
+th.sql-head{width:170px}
+.name-cell{min-width:150px}
+.name-cell a{font-weight:600}
+/* 连接池 chip（反馈②）：单行 + 截断 + 6px 圆角 + 状态点，替换会包成圆饼的 full 圆角 badge */
+.pool-chip{display:inline-flex;align-items:center;gap:6px;max-width:150px;padding:3px 9px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-subtle);
+  font-size:var(--fs-xs);font-weight:600;color:var(--ink-2);line-height:18px;cursor:default;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color var(--t-fast)}
+.pool-chip:hover{border-color:#c7d2fe;background:var(--brand-soft);color:var(--brand)}
+.pool-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:0 0 6px}
+.pool-chip .txt{overflow:hidden;text-overflow:ellipsis}
+.pool-chip.gone{border-color:#fecaca;background:#fef2f2;color:var(--danger)}
+.memo-cell{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3);
+  font-size:var(--fs-sm)}
+.ops-cell{white-space:nowrap;text-align:right}
+.ops-cell .grp{display:inline-flex;gap:4px;align-items:center}
+/* 操作列图标化：文字按钮 → 图标按钮组（悬浮 title 提示） */
+.icon-btn{width:26px;height:26px;display:inline-grid;place-items:center;border-radius:var(--r-sm);
+  border:1px solid var(--line-strong);background:#fff;color:var(--ink-2);font-size:13px;cursor:pointer;
+  text-decoration:none;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast);
+  padding:0;line-height:1;font-family:inherit}
+.icon-btn:hover{background:var(--bg-hover);border-color:var(--ink-3);color:var(--ink);text-decoration:none}
+.icon-btn.danger{color:var(--danger);border-color:#fecaca}
+.icon-btn.danger:hover{background:#fef2f2;border-color:var(--danger)}
+.icon-btn[disabled],.icon-btn.off{opacity:.35;pointer-events:none}
+
+/* 卡片视图 */
+.rpt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:12px;
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:0 0 var(--r-md) var(--r-md);padding:14px}
+.rpt-card{position:relative;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-surface);
+  padding:12px 14px 10px;transition:box-shadow var(--t-fast) ease-out,transform var(--t-fast) ease-out,
+  border-color var(--t-fast);display:flex;flex-direction:column;gap:8px}
+.rpt-card:hover{box-shadow:var(--sh-2);transform:translateY(-2px);border-color:#c7d2fe}
+.rpt-card.picked{border-color:var(--brand);background:var(--brand-soft)}
+.rpt-card .rc-top{display:flex;align-items:flex-start;gap:8px}
+.rpt-card .rc-name{font-weight:600;font-size:var(--fs-body);line-height:20px;flex:1;min-width:0}
+.rpt-card .rc-pick{position:absolute;top:10px;right:10px;margin:0}
+.rpt-card .rc-sql{font-size:var(--fs-xs);background:var(--bg-subtle);border:1px solid var(--line);
+  border-radius:4px;padding:4px 8px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpt-card .rc-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.rpt-card .rc-memo{font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpt-card .rc-foot{display:flex;align-items:center;gap:6px;border-top:1px dashed var(--line);padding-top:8px;
+  margin-top:auto}
+.rpt-card .rc-foot .grp{display:inline-flex;gap:4px}
+.rpt-card .rc-foot .api{margin-left:auto;font-size:var(--fs-xs);color:var(--brand)}
+.rpt-card .rc-dim{color:#cbd5e1;font-size:var(--fs-xs)}
+
+/* 批量条（复用生产 batch-bar，勾选后浮出） */
+.batch-bar{position:sticky;bottom:0;display:none;align-items:center;gap:12px;flex-wrap:wrap;z-index:50;
+  background:#0f172a;color:#e2e8f0;border-radius:var(--r-md);padding:10px 14px;margin-top:12px;
+  box-shadow:var(--sh-2);font-size:var(--fs-sm)}
+.batch-bar.show{display:flex}
+.batch-bar select,.batch-bar input{padding:5px 8px;border:1px solid #334155;border-radius:var(--r-sm);
+  background:#1e293b;color:#e2e8f0;font-size:var(--fs-sm);font-family:inherit}
+.batch-bar label{font-size:var(--fs-xs);color:#94a3b8}
+.batch-bar .b-main{background:#4f46e5;color:#fff;border:0;border-radius:var(--r-sm);padding:5px 10px;
+  font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit}
+.batch-bar .b-warn{background:#dc2626;color:#fff;border:0;border-radius:var(--r-sm);padding:5px 10px;
+  font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit}
+
+/* 搜索过滤框（现状形态保留） */
+.filter-box{display:flex;align-items:center;gap:8px;background:var(--bg-surface);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:8px 12px;margin-bottom:16px;box-shadow:var(--sh-1)}
+.filter-box input{flex:1;border:0;outline:none;font:inherit;font-size:var(--fs-body);background:transparent;color:var(--ink)}
+.filter-box input::placeholder{color:#9ca3af}
+
+.hidden{display:none !important}
+.hint{font-size:var(--fs-xs);color:var(--ink-3);margin-top:6px}
+@media (prefers-reduced-motion: reduce){*{transition-duration:.01ms !important;animation-duration:.01ms !important}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div>
+      <h1>UI 修复确认稿 R3 · 侧栏账号区 + 报表配置页改版</h1>
+      <div class="sub">全部可交互：切换「修复前/修复后」「展开/收起」「列表/卡片」、勾选行浮出批量条——确认后才改生产代码</div>
+    </div>
+    <div class="actions">
+      <span class="step-tag">过程素材 · 不入生产 static</span>
+    </div>
+  </div>
+
+  <div class="proto-note">
+    <b>修复范围（已与用户确认的结论）：</b>
+    ① 侧栏 rail 态账号区「头像+退出图标+手柄箭头」挤团重叠 → 修复后纵向两行、手柄箭头独立让位（保留退出图标）；
+    ② 报表配置页结构性重排 → 功能/层级/全部 10 列不变，列表视图重排版 + 新增卡片视图，右上分段控件<b>全局切换全部层级</b>、默认列表、localStorage 记忆；
+    ③ 反馈修订 → SQL 摘要窄列 + 悬浮 title 预览；连接池改单行 chip（6px 圆角 + 截断 + 状态点）；子分类分组与顶层同受全局开关控制，层级只用缩进+层级线表达。
+    样式取值全部来自 <b>ui-redesign-visual-spec.md</b> 令牌，组件沿用生产 .btn/.badge/.card/.table 体系。
+  </div>
+
+  <!-- ================= 区一 · 侧栏账号区 ================= -->
+  <div class="card">
+    <div class="card-head">
+      <span class="step-tag">区一</span>
+      <h2>侧栏账号区修复（截图一）</h2>
+      <div class="actions">
+        <div class="seg" id="seg-fix">
+          <button data-fix="before">修复前</button>
+          <button data-fix="after" class="on">修复后</button>
+        </div>
+        <div class="seg" id="seg-state">
+          <button data-state="wide" class="on">展开 240px</button>
+          <button data-state="rail">收起 64px</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-stage">
+      <div class="side-box" id="side-box" data-state="wide" data-fix="after">
+        <div class="cap" id="side-cap"><b>修复后</b> · 展开态（240px）：头像 + 用户名 + 退出，与确认稿 r2 一致</div>
+        <div class="side-frame" id="side-frame">
+          <aside class="sidebar">
+            <a class="brand" href="#"><span class="logo">SR</span><span class="name">SqlReport</span></a>
+            <div class="nav-group">分析</div>
+            <button class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg><span>报表中心</span></button>
+            <div class="nav-group">管理</div>
+            <button class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>概览</span></button>
+            <button class="nav-item nav-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 5h16M4 12h16M4 19h10"/></svg><span>报表配置</span><span class="nav-badge">34</span></button>
+            <button class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/></svg><span>连接池</span></button>
+            <button class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><span>用户</span></button>
+            <div class="spacer"></div>
+            <div class="account">
+              <span class="avatar">A</span>
+              <span class="who">admin</span>
+              <a class="out" href="#">退出</a>
+              <a class="out-icon" href="#" title="退出（admin）" aria-label="退出">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              </a>
+            </div>
+            <button class="sb-handle" type="button" title="收起侧栏" aria-label="收起或展开侧栏">
+              <span class="sb-arrow"><svg viewBox="0 0 12 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,3 9,9 4,15"/></svg></span>
+            </button>
+          </aside>
+        </div>
+        <div class="hint" id="side-hint">点「收起 64px」再看账号区：修复前后差异在 rail 态最明显。</div>
+      </div>
+
+      <div style="flex:1;min-width:280px">
+        <div class="cap" style="font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px">对照说明</div>
+        <table style="border-radius:var(--r-md);border:1px solid var(--line);background:#fff">
+          <thead><tr><th>状态</th><th>账号区形态</th><th>手柄箭头</th></tr></thead>
+          <tbody>
+            <tr><td>展开 240px</td><td>头像 + 用户名 + 「退出」文字（两态相同）</td><td>右缘垂直居中，整条竖边可点</td></tr>
+            <tr><td>收起 64px · <b style="color:var(--danger)">修复前</b></td><td>头像 28 + 图标 26 横排超出 64px 可用宽 → 与箭头挤团重叠（复现截图一）</td><td>箭头压在账号行上</td></tr>
+            <tr><td>收起 64px · <b style="color:var(--ok)">修复后</b></td><td>纵向两行：头像在上、退出图标在下，各 26px 居中，行距 6px</td><td>箭头停在侧栏 42% 高度，与账号区上下错开、不再重叠</td></tr>
+          </tbody>
+        </table>
+        <div class="hint">交互：切换到「修复前 + 收起 64px」即可复现截图一的挤团现象；hover 退出图标有底色反馈。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 区二 · 报表配置页 ================= -->
+  <div class="card">
+    <div class="card-head">
+      <span class="step-tag">区二</span>
+      <h2>报表配置页改版（截图二）</h2>
+      <div class="actions">
+        <div class="seg" id="seg-view">
+          <button data-view="list" class="on">列表视图</button>
+          <button data-view="card">卡片视图</button>
+        </div>
+        <a class="btn btn-secondary btn-sm" href="#">+ 新增分类</a>
+        <a class="btn btn-primary btn-sm" href="#">+ 新增报表</a>
+      </div>
+    </div>
+
+    <div class="page-head" style="margin-bottom:12px">
+      <div>
+        <h1 style="font-size:18px">报表配置</h1>
+        <div class="sub">报表管理 · 左栏分类树，右栏报表列表；勾选行后浮出批量操作</div>
+      </div>
+    </div>
+
+    <div class="filter-box">
+      <span style="color:var(--ink-3)">🔍</span>
+      <input placeholder="输入关键字过滤当前页配置项（连接池 / 用户 / 报表 / 分类），清空恢复全部">
+    </div>
+
+    <div class="split">
+      <!-- 左树 -->
+      <aside class="card" style="padding:12px;margin:0">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <b style="font-size:13px">报表分类</b>
+          <a class="btn btn-ghost btn-sm" style="margin-left:auto" href="#">+ 新增分类</a>
+        </div>
+        <div class="tree">
+          <div class="cat on"><span>☰</span><span>全部报表</span><span class="cnt">34</span></div>
+          <div class="cat"><span>📁</span><span>咸渔台</span>
+            <span class="ops"><button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button><button class="icon-btn" title="编辑">✎</button><button class="icon-btn danger" title="删除">✕</button></span>
+            <span class="cnt">1</span></div>
+          <div class="cat"><span>📁</span><span>日常统计</span>
+            <span class="ops"><button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button><button class="icon-btn" title="编辑">✎</button><button class="icon-btn danger" title="删除">✕</button></span>
+            <span class="cnt">3</span></div>
+          <div class="cat"><span>📁</span><span>大屏数据</span>
+            <span class="ops"><button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button><button class="icon-btn" title="编辑">✎</button><button class="icon-btn danger" title="删除">✕</button></span>
+            <span class="cnt">7</span></div>
+          <div class="child">
+            <div class="cat"><span>📄</span><span>2楼大屏</span><span class="cnt">4</span></div>
+            <div class="cat"><span>📄</span><span>阳光反腐大屏</span><span class="cnt">2</span></div>
+          </div>
+          <div class="cat"><span>📁</span><span>基座表</span>
+            <span class="ops"><button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button><button class="icon-btn" title="编辑">✎</button><button class="icon-btn danger" title="删除">✕</button></span>
+            <span class="cnt">8</span></div>
+          <div class="cat"><span>📁</span><span>汇筑旧表</span>
+            <span class="ops"><button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button><button class="icon-btn" title="编辑">✎</button><button class="icon-btn danger" title="删除">✕</button></span>
+            <span class="cnt">4</span></div>
+          <div class="cat"><span>🗂</span><span>未分类</span><span class="cnt">1</span></div>
+        </div>
+        <div class="hint">左树操作按钮 hover 浮出（现状 R2-A 形态保留）</div>
+      </aside>
+
+      <!-- 右栏：分组报表 -->
+      <div>
+        <!-- 分组一 -->
+        <div class="section">
+          <div class="section-title">
+            <span class="ico">📊</span><span>日常统计</span><span class="cnt">(3 个报表)</span>
+            <span class="actions"><a class="btn btn-ghost btn-sm" href="#">+ 新增报表</a></span>
+          </div>
+
+          <!-- 列表视图（保留全部 10 列） -->
+          <div class="table-wrap view-list">
+            <table>
+              <thead><tr>
+                <th style="width:36px"><input type="checkbox" class="pick-all" title="全选本组"></th>
+                <th>名称</th><th class="sql-head">SQL 查询</th>
+                <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+                <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td><input type="checkbox" class="rpt-pick"></td>
+                  <td class="name-cell"><a href="#">处置商缴纳保证金记录-不带审核判断</a></td>
+                  <td class="sql-cell"><code title="-- 处置商缴纳保证金记录 不含审批&#10;SELECT d.dispatcher_id, d.user_id, d.create_time&#10;FROM dispatch_record d&#10;WHERE d.status = 1">-- 处置商缴纳保证金记录 不含 审批 SELECT …</code></td>
+                  <td class="cfg-group">50</td><td class="cfg-group"><span class="badge badge-ok">是</span></td><td class="cfg-group">6h</td>
+                  <td><span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span></td>
+                  <td class="memo-cell" title="记录处置商的保证金缴纳记录，可…">记录处置商的保证金缴纳记录，可…</td>
+                  <td><span class="rc-dim">—</span></td>
+                  <td class="ops-cell"><span class="grp">
+                    <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                    <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                    <button class="icon-btn danger" title="删除">🗑</button></span></td>
+                </tr>
+                <tr>
+                  <td><input type="checkbox" class="rpt-pick"></td>
+                  <td class="name-cell"><a href="#">带创建时间的项目清单</a></td>
+                  <td class="sql-cell"><code title="SELECT mi.mch_no, mi.mch_name AS '项目名称', CONCAT_WS('-', …) AS full_name FROM mch_info mi">SELECT mi.mch_no, mi.mch_name AS …</code></td>
+                  <td class="cfg-group">20</td><td class="cfg-group"><span class="badge badge-ok">是</span></td><td class="cfg-group">6h</td>
+                  <td><span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span></td>
+                  <td class="memo-cell" title="—">—</td>
+                  <td><span class="rc-dim">—</span></td>
+                  <td class="ops-cell"><span class="grp">
+                    <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                    <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                    <button class="icon-btn danger" title="删除">🗑</button></span></td>
+                </tr>
+                <tr>
+                  <td><input type="checkbox" class="rpt-pick"></td>
+                  <td class="name-cell"><a href="#">溯源: 项目建立人与建立时间</a></td>
+                  <td class="sql-cell"><code title="SELECT t.mch_no, t.mch_name, t.created_at, bu.real_name, bu.created_by FROM t_project t LEFT JOIN base_user bu ON …">SELECT t.mch_no, t.mch_name, t.created…</code></td>
+                  <td class="cfg-group">20</td><td class="cfg-group"><span class="badge badge-ok">是</span></td><td class="cfg-group">6h</td>
+                  <td><span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span></td>
+                  <td class="memo-cell" title="用于排查项目的创建时间和人员。">用于排查项目的创建时间和人员。</td>
+                  <td><span class="rc-dim">—</span></td>
+                  <td class="ops-cell"><span class="grp">
+                    <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                    <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                    <button class="icon-btn danger" title="删除">🗑</button></span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 卡片视图（同一份数据的另一形态） -->
+          <div class="rpt-grid view-card hidden">
+            <div class="rpt-card">
+              <input type="checkbox" class="rc-pick rpt-pick">
+              <div class="rc-top"><span class="rc-name"><a href="#">处置商缴纳保证金记录-不带审核判断</a></span></div>
+              <div class="rc-sql" title="-- 处置商缴纳保证金记录 不含 审批 SELECT d.dispatcher_id…">-- 处置商缴纳保证金记录 不含 审批 SELECT d.dispatcher_id…</div>
+              <div class="rc-meta">
+                <span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span>
+                <span class="badge badge-ok">缓存 6h</span>
+                <span class="badge badge-info">分页 50</span>
+              </div>
+              <div class="rc-memo" title="记录处置商的保证金缴纳记录，可…">备注：记录处置商的保证金缴纳记录，可…</div>
+              <div class="rc-foot">
+                <span class="grp">
+                  <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                  <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                  <button class="icon-btn danger" title="删除">🗑</button>
+                </span>
+                <span class="api">API —</span>
+              </div>
+            </div>
+            <div class="rpt-card">
+              <input type="checkbox" class="rc-pick rpt-pick">
+              <div class="rc-top"><span class="rc-name"><a href="#">带创建时间的项目清单</a></span></div>
+              <div class="rc-sql">SELECT mi.mch_no, mi.mch_name AS '项目名称', CONCAT_WS(…</div>
+              <div class="rc-meta">
+                <span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span>
+                <span class="badge badge-ok">缓存 6h</span>
+                <span class="badge badge-info">分页 20</span>
+              </div>
+              <div class="rc-memo">备注：—</div>
+              <div class="rc-foot">
+                <span class="grp">
+                  <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                  <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                  <button class="icon-btn danger" title="删除">🗑</button>
+                </span>
+                <span class="api">API —</span>
+              </div>
+            </div>
+            <div class="rpt-card">
+              <input type="checkbox" class="rc-pick rpt-pick">
+              <div class="rc-top"><span class="rc-name"><a href="#">溯源: 项目建立人与建立时间</a></span></div>
+              <div class="rc-sql">SELECT t.mch_no, t.mch_name, t.created_at, bu.real_name, …</div>
+              <div class="rc-meta">
+                <span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span>
+                <span class="badge badge-ok">缓存 6h</span>
+                <span class="badge badge-info">分页 20</span>
+              </div>
+              <div class="rc-memo" title="用于排查项目的创建时间和人员。">备注：用于排查项目的创建时间和人员。</div>
+              <div class="rc-foot">
+                <span class="grp">
+                  <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                  <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                  <button class="icon-btn danger" title="删除">🗑</button>
+                </span>
+                <span class="api">API —</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 分组二（子分类嵌套：缩进 + 左层级线；形态随全局开关统一切换） -->
+        <div class="section nest">
+          <div class="section-title">
+            <span class="ico">🖥</span><span>2楼大屏</span><span class="cnt">(2 个报表 · 子分类示例)</span>
+          </div>
+          <div class="table-wrap view-list">
+            <table>
+              <thead><tr>
+                <th style="width:36px"><input type="checkbox" class="pick-all" title="全选本组"></th>
+                <th>名称</th><th class="sql-head">SQL 查询</th>
+                <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
+                <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td><input type="checkbox" class="rpt-pick"></td>
+                  <td class="name-cell"><a href="#">竞价列表 V2（20260602）</a></td>
+                  <td class="sql-cell"><code title="WITH -- 待备订单：90天内各种状态的订单上架信息&#10;hiddpre AS (SELECT shelf_apply_id, …)&#10;SELECT … FROM hiddpre">WITH -- 待备订单 一90天内 各种状态…</code></td>
+                  <td class="cfg-group">10</td><td class="cfg-group"><span class="badge badge-ok">是</span></td><td class="cfg-group">6h</td>
+                  <td><span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span></td>
+                  <td class="memo-cell">—</td>
+                  <td><a href="#" style="font-size:12px">🔌 1 个接口 (1 启用)</a></td>
+                  <td class="ops-cell"><span class="grp">
+                    <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                    <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                    <button class="icon-btn danger" title="删除">🗑</button></span></td>
+                </tr>
+                <tr>
+                  <td><input type="checkbox" class="rpt-pick"></td>
+                  <td class="name-cell"><a href="#">99条物资 ⇄</a></td>
+                  <td class="sql-cell"><code title="SELECT 物资名称, 规格型号, 单价, 可交易数量, 物资所在区域, is_… FROM material_stock">SELECT 物资名称 、 规格型号 、 单价…</code></td>
+                  <td class="cfg-group">100</td><td class="cfg-group"><span class="badge badge-ok">是</span></td><td class="cfg-group">1h</td>
+                  <td><span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span></td>
+                  <td class="memo-cell">—</td>
+                  <td><a href="#" style="font-size:12px">🔌 1 个接口 (1 启用)</a></td>
+                  <td class="ops-cell"><span class="grp">
+                    <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                    <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                    <button class="icon-btn danger" title="删除">🗑</button></span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rpt-grid view-card hidden" style="border-radius:0 0 var(--r-md) var(--r-md)">
+            <div class="rpt-card">
+              <input type="checkbox" class="rc-pick rpt-pick">
+              <div class="rc-top"><span class="rc-name"><a href="#">竞价列表 V2（20260602）</a></span></div>
+              <div class="rc-sql">WITH -- 待备订单 一90天内 各种状态的订单上架信息 hiddpre AS (…</div>
+              <div class="rc-meta">
+                <span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span>
+                <span class="badge badge-ok">缓存 6h</span>
+                <span class="badge badge-info">分页 10</span>
+              </div>
+              <div class="rc-memo">备注：—</div>
+              <div class="rc-foot">
+                <span class="grp">
+                  <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                  <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                  <button class="icon-btn danger" title="删除">🗑</button>
+                </span>
+                <span class="api">🔌 1 个接口 (1 启用)</span>
+              </div>
+            </div>
+            <div class="rpt-card">
+              <input type="checkbox" class="rc-pick rpt-pick">
+              <div class="rc-top"><span class="rc-name"><a href="#">99条物资 ⇄</a></span></div>
+              <div class="rc-sql">SELECT 物资名称 、 规格型号 、 单价 、 可交易数量 、 物资所在区域…</div>
+              <div class="rc-meta">
+                <span class="pool-chip" title="咸渔台只读-online"><span class="dot"></span><span class="txt">咸渔台只读-online</span></span>
+                <span class="badge badge-ok">缓存 1h</span>
+                <span class="badge badge-info">分页 100</span>
+              </div>
+              <div class="rc-memo">备注：—</div>
+              <div class="rc-foot">
+                <span class="grp">
+                  <button class="icon-btn" title="上移">↑</button><button class="icon-btn" title="下移">↓</button>
+                  <a class="icon-btn" href="#" title="编辑">✎</a><a class="icon-btn" href="#" title="复制">⧉</a>
+                  <button class="icon-btn danger" title="删除">🗑</button>
+                </span>
+                <span class="api">🔌 1 个接口 (1 启用)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 批量条（勾选任意行后浮出；两视图通用） -->
+        <div class="batch-bar" id="batch-bar">
+          <span>已选 <b id="batch-count">0</b> 项</span>
+          <select><option>-- 请选择 --</option><option>咸渔台只读-online</option><option>咸渔台开发-online</option></select>
+          <button class="b-main">批量修改连接池</button>
+          <select><option>-- 请选择分类 --</option><option>日常统计</option><option>大屏数据</option><option>无分类</option></select>
+          <button class="b-main">批量设置分类</button>
+          <select><option>不改变</option><option>启用缓存</option><option>关闭缓存</option></select>
+          <button class="b-main">批量更新缓存配置</button>
+          <button class="b-warn">批量删除报表</button>
+        </div>
+
+        <div class="hint">
+          交互提示：① 右上「列表 / 卡片」切换<b>作用于全部层级</b>——任一时刻全页只有一种形态，子分类仅靠「分组头缩进 + 左侧层级线」表达，选择写入 localStorage（刷新保持）；
+          ② 勾选任意行/卡 → 底部浮出批量条，两种视图共享同一勾选计数（隐藏形态的副本不计数）；
+          ③ SQL 摘要列为窄列单行截断，<b>悬浮可预览完整 SQL</b>（title）；连接池为单行 chip + 截断 + 悬浮看全名，不再包成圆饼。
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  /* ---- 区一：侧栏 修复前后 × 展开/收起 ---- */
+  var box = document.getElementById('side-box');
+  var frame = document.getElementById('side-frame');
+  var cap = document.getElementById('side-cap');
+  var hint = document.getElementById('side-hint');
+  function renderSide(){
+    var st = box.dataset.state, fx = box.dataset.fix;
+    frame.classList.toggle('rail', st === 'rail');
+    frame.classList.toggle('fix-before', fx === 'before');
+    frame.classList.toggle('fix-after', fx === 'after');
+    var stTxt = st === 'rail' ? '收起态（64px）' : '展开态（240px）';
+    var fxTxt = fx === 'before' ? '修复前' : '修复后';
+    var fxCol = fx === 'before' ? 'var(--danger)' : 'var(--ok)';
+    cap.innerHTML = '<b style="color:'+fxCol+'">'+fxTxt+'</b> · '+stTxt+'：' +
+      (st === 'rail'
+        ? (fx === 'before'
+            ? '头像 + 退出图标横排溢出，与手柄箭头挤团重叠（复现截图一）'
+            : '头像/退出图标纵向两行居中，手柄箭头上移让位，互不重叠')
+        : '头像 + 用户名 + 「退出」文字，与确认稿 r2 一致');
+    hint.textContent = st === 'rail'
+      ? (fx === 'before' ? '当前即截图一的缺陷状态：三者挤成一团。' : '当前为修复后状态：两行纵排 + 箭头让位。')
+      : '点「收起 64px」再看账号区：修复前后差异在 rail 态最明显。';
+  }
+  document.getElementById('seg-fix').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-fix]'); if(!b) return;
+    box.dataset.fix = b.dataset.fix;
+    this.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+    renderSide();
+  });
+  document.getElementById('seg-state').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-state]'); if(!b) return;
+    box.dataset.state = b.dataset.state;
+    this.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+    renderSide();
+  });
+  renderSide();
+
+  /* ---- 区二：列表/卡片全局切换（作用于全部层级分组；localStorage 记忆，默认列表） ---- */
+  var KEY = 'sqlreport_reports_view_demo';
+  var segView = document.getElementById('seg-view');
+  function setView(v, save){
+    document.querySelectorAll('.view-list').forEach(function(el){
+      el.classList.toggle('hidden', v !== 'list');
+    });
+    document.querySelectorAll('.view-card').forEach(function(el){
+      el.classList.toggle('hidden', v !== 'card');
+    });
+    segView.querySelectorAll('button').forEach(function(x){
+      x.classList.toggle('on', x.dataset.view === v);
+    });
+    if (save) { try { localStorage.setItem(KEY, v); } catch(e){} }
+    syncPicks();
+  }
+  segView.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-view]'); if(!b) return;
+    setView(b.dataset.view, true);
+  });
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch(e){}
+  setView(saved === 'card' ? 'card' : 'list', false);
+
+  /* ---- 勾选 → 批量条（两视图共享计数；行/卡高亮；隐藏形态的副本不计数） ---- */
+  var bar = document.getElementById('batch-bar');
+  var cnt = document.getElementById('batch-count');
+  function isVisible(el){ return !el.closest('.hidden'); }
+  function syncPicks(){
+    var picks = document.querySelectorAll('.rpt-pick');
+    var n = 0;
+    picks.forEach(function(cb){
+      var host = cb.closest('tr') || cb.closest('.rpt-card');
+      var shown = host && isVisible(host);
+      if (cb.checked && shown) n++;
+      if (host) host.classList.toggle('picked', cb.checked && shown);
+    });
+    cnt.textContent = n;
+    bar.classList.toggle('show', n > 0);
+  }
+  document.addEventListener('change', function(e){
+    if (e.target.classList.contains('rpt-pick')) syncPicks();
+    if (e.target.classList.contains('pick-all')) {
+      var sec = e.target.closest('.section');
+      sec.querySelectorAll('.rpt-pick').forEach(function(cb){
+        var row = cb.closest('tr') || cb.closest('.rpt-card');
+        if (row && isVisible(row)) cb.checked = e.target.checked;
+      });
+      syncPicks();
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -300,6 +300,154 @@ _CONFIG_EXTRA_CSS = """
   .config-form .form-actions .test-result.err { color: #dc2626; }
 """
 
+# 报表配置页专属样式（确认稿 r3：列表/卡片双视图 + 视觉重排）。
+# 作用域一律限定在 #sec-reports 内，避免影响连接池/用户等其他配置页的同名 class。
+_REPORTS_EXTRA_CSS = _CONFIG_EXTRA_CSS + """
+  /* ---- 分组标题：卡片头形态（图标 chip + 计数 + 右侧操作） ---- */
+  #sec-reports .split > div .section-title {
+    background: var(--bg-surface); border: 1px solid var(--line);
+    border-radius: var(--r-md) var(--r-md) 0 0; border-bottom: 0;
+    padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--ink);
+    gap: 8px;
+  }
+  #sec-reports .split > div .section-title .ico {
+    width: 26px; height: 26px; border-radius: var(--r-sm);
+    background: var(--brand-soft); color: var(--brand);
+    display: grid; place-items: center; flex: 0 0 26px;
+  }
+  #sec-reports .split > div .section-title .ico svg { width: 15px; height: 15px; }
+  #sec-reports .split > div .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  /* 表格/卡片容器与分组标题拼接成整卡 */
+  #sec-reports .section > .table-wrap,
+  #sec-reports .section > .rpt-grid { border-radius: 0 0 var(--r-md) var(--r-md); }
+  #sec-reports .section > .table-wrap { border-top: 0; }
+  /* 嵌套子分类：整组内缩成「完整子卡片」——标题与表格同属一个包裹块，
+     消除旧 border-left:0 hack 造成的半截圆角割裂。
+     margin-left 仍由模板 inline style 控制（测试锁定该串），故容器样式用 !important。 */
+  #sec-reports .split > div .section[style*="border-left"] {
+    border: 1px solid var(--line) !important;
+    border-left: 3px solid #c7d2fe !important;
+    border-radius: var(--r-md) !important;
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+  #sec-reports .split > div .section[style*="border-left"] > .section-title {
+    border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
+    background: var(--bg-subtle);
+  }
+  #sec-reports .split > div .section[style*="border-left"] > .table-wrap,
+  #sec-reports .split > div .section[style*="border-left"] > .rpt-grid {
+    border: 0; border-radius: 0; max-height: none;
+  }
+
+  /* ---- 左树（确认稿 r3 基准：13px 行、hover 才显操作组、计数 600、单行头部） ---- */
+  #sec-reports .tree { font-size: 13px; }
+  #sec-reports .tree .cat { padding: 5px 8px; font-size: 13px; line-height: 22px; }
+  #sec-reports .tree .cat .nm { flex: 0 1 auto; }
+  #sec-reports .tree .cat .cnt { font-weight: 600; }
+  #sec-reports .tree .cat .ops { display: none; }
+  #sec-reports .tree .cat:hover .ops { display: inline-flex; }
+  #sec-reports .tree .cat .ops .btn { height: 22px; min-width: 22px; padding: 0 4px; font-size: 12px; }
+  /* 折叠钮 = 粗体标题形态（确认稿：报表分类 13px bold 文本，非描边按钮） */
+  #sec-reports .tree-toggle {
+    font-size: 13px; font-weight: 700; color: var(--ink); padding: 0;
+    height: auto; letter-spacing: 0;
+  }
+  #sec-reports .tree-toggle:hover { background: transparent; color: var(--brand); }
+  /* 左栏标题保持普通 flex 行（不套卡片头）；右侧动作右贴 */
+  #sec-reports aside.card .section-title { background: transparent; border: 0; border-radius: 0; padding: 0; margin-bottom: 8px; font-size: 13px; }
+  #sec-reports aside.card .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+  /* ---- 列表视图：列组与截断（确认稿 r3 反馈①②） ---- */
+  /* 列宽收紧：右栏实际可用宽约 876px（1440 - 侧栏240 - 内边距48 - 左树260 - 间距16），
+     10 列必须在此宽度内放下，否则出现横向滚动条、操作列被挤出（截图校验实测缺陷） */
+  #sec-reports th { padding: 8px 5px; }
+  #sec-reports td { padding: 8px 5px; }
+  #sec-reports th.sql-head { width: 112px; }
+  #sec-reports td.sql-cell { max-width: 112px; }
+  #sec-reports td.sql-cell code {
+    display: inline-block; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
+    padding: 2px 6px; border-radius: 4px; color: var(--ink-2); cursor: help;
+  }
+  /* 名称列允许换行（与确认稿一致，靠换行吸收长名而不是撑宽列） */
+  #sec-reports td.name-cell { min-width: 60px; max-width: 200px; }
+  #sec-reports td.memo-cell {
+    max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--ink-3); font-size: 13px;
+  }
+  /* API 列允许换行收缩（原 nowrap 会把整表撑出滚动条） */
+  #sec-reports td.api-cell { text-align: center; font-size: 13px; max-width: 56px; }
+  /* 配置三列（默认分页/缓存/TTL）同底色归组，与其余列视觉分区 */
+  /* 配置三列（默认分页/缓存/TTL）归组：弃用浅蓝底色块（与整表白底冲突、
+     观感「脏」），改为 1px 竖分隔线表达分组，保持全表配色统一 */
+  #sec-reports td.cfg-group { text-align: center; font-variant-numeric: tabular-nums; }
+  #sec-reports td.sql-cell + td,
+  #sec-reports th.sql-head + th { border-left: 1px solid var(--line); }
+  #sec-reports td.cfg-group + td:not(.cfg-group),
+  #sec-reports th.cfg-group + th:not(.cfg-group) { border-left: 1px solid var(--line); }
+
+  /* 连接池 chip：单行截断 + 状态点 + 6px 圆角（替换会包成圆饼的 full 圆角徽标） */
+  #sec-reports .pool-chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 96px;
+    padding: 3px 9px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--bg-subtle); font-size: 12px; font-weight: 600; color: var(--ink-2);
+    line-height: 18px; white-space: nowrap; overflow: hidden; cursor: default;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+  }
+  #sec-reports .pool-chip:hover { border-color: #c7d2fe; background: var(--brand-soft); color: var(--brand); }
+  #sec-reports .pool-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: 0 0 6px; }
+  #sec-reports .pool-chip .txt { overflow: hidden; text-overflow: ellipsis; }
+  #sec-reports .pool-chip.gone { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+  #sec-reports .pool-chip.gone .dot { background: var(--danger); }
+
+  /* 操作列：图标按钮收拢间距（复用公共 .btn 体系） */
+  #sec-reports .ops-cell { text-align: right; }
+  #sec-reports .ops-cell .btn { padding: 0 6px; }
+  #sec-reports .ops-cell form { display: inline; }
+
+  /* ---- 卡片视图（确认稿 r3：与列表同数据的另一形态） ---- */
+  #sec-reports .rpt-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+    gap: 12px; padding: 14px; background: var(--bg-surface);
+    border: 1px solid var(--line); border-top: 0;
+  }
+  #sec-reports .rpt-card {
+    position: relative; display: flex; flex-direction: column; gap: 8px;
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--bg-surface); padding: 12px 14px 10px;
+    transition: box-shadow 0.12s ease-out, transform 0.12s ease-out, border-color 0.12s;
+  }
+  #sec-reports .rpt-card:hover { border-color: #c7d2fe; box-shadow: var(--sh-2); transform: translateY(-2px); }
+  #sec-reports .rpt-card .rc-pick { position: absolute; top: 10px; right: 10px; margin: 0; }
+  #sec-reports .rpt-card .rc-top { display: flex; align-items: flex-start; gap: 8px; padding-right: 22px; }
+  #sec-reports .rpt-card .rc-name { font-weight: 600; font-size: 14px; line-height: 20px; flex: 1; min-width: 0; }
+  #sec-reports .rpt-card .rc-name a { color: var(--brand); text-decoration: none; }
+  #sec-reports .rpt-card .rc-name a:hover { text-decoration: underline; }
+  #sec-reports .rpt-card .rc-sql {
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
+  }
+  #sec-reports .rpt-card .rc-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #sec-reports .rpt-card .rc-memo {
+    font-size: 12px; color: var(--ink-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #sec-reports .rpt-card .rc-foot {
+    display: flex; align-items: center; gap: 6px; margin-top: auto;
+    border-top: 1px dashed var(--line); padding-top: 8px;
+  }
+  #sec-reports .rpt-card .rc-ops { display: inline-flex; gap: 4px; align-items: center; }
+  #sec-reports .rpt-card .rc-ops .btn { padding: 0 7px; }
+  #sec-reports .rpt-card .rc-ops form { display: inline; }
+  #sec-reports .rpt-card .rc-api { margin-left: auto; font-size: 12px; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  #sec-reports .rpt-card .rc-api:hover { text-decoration: underline; }
+  #sec-reports .rpt-grid .empty-state { grid-column: 1 / -1; }
+"""
+
 # 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
 # + Markdown 排版 CSS（_MD_CSS 必须在 _CONFIG_EXTRA_CSS 之后，保证列表缩进等规则生效）
 _CONFIG_MD_EXTRA_CSS = (_CONFIG_EXTRA_CSS + markdown_render.codehilite_css()
@@ -798,13 +946,21 @@ def render_reports_page(conn, flash: str = None) -> str:
     manage_html, tables_html = _render_category_section_parts(conn)
     header = render_page_header(title="SqlReport - 报表管理",
                                 active_nav="config-reports",
-                                extra_css=_CONFIG_EXTRA_CSS,
+                                extra_css=_REPORTS_EXTRA_CSS,
                                 nav_badges=_nav_badges(conn))
     return (header
             + '<div class="page-head"><div>'
             + '<h1>报表配置</h1>'
             + '<div class="sub">报表管理 · 左栏分类树，右栏报表列表；勾选行后浮出批量操作</div>'
             + '</div><div class="actions">'
+            # 确认稿 r3：列表/卡片全局开关（作用于全部层级；默认列表、localStorage 记忆）
+            # 复用公共 .segment 分段控件（_COMMON_CSS），不另起一套
+            + '<div class="segment" id="rpt-view-seg" role="group" aria-label="视图切换">'
+            + '<button type="button" data-view="list" class="active" '
+            + 'onclick="setReportsView(\'list\', true)">列表视图</button>'
+            + '<button type="button" data-view="card" '
+            + 'onclick="setReportsView(\'card\', true)">卡片视图</button>'
+            + '</div>'
             + '<a class="btn btn-secondary" href="/config/categories/add">+ 新增分类</a>'
             + '<a class="btn btn-primary" href="/config/reports/add">+ 新增报表</a>'
             + '</div></div>'

@@ -1,0 +1,21 @@
+// 标记取证：导航 → 注入唯一文本标记 → 截图（图像内容可反证截图对象）
+const [url, out, mark, w = '1440', h = '1600'] = process.argv.slice(2);
+const list = await (await fetch('http://127.0.0.1:9333/json/new?' + encodeURIComponent('about:blank'), { method: 'PUT' })).json();
+const ws = new WebSocket(list.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+const send = (m, p = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, { res, rej }); ws.send(JSON.stringify({ id: i, method: m, params: p })); setTimeout(() => { if (pending.has(i)) { pending.delete(i); rej(new Error('timeout ' + m)); } }, 30000); });
+ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.rej(new Error(m.error.message)) : p.res(m.result); } };
+await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+await send('Page.enable'); await send('Runtime.enable');
+await send('Emulation.setDeviceMetricsOverride', { width: +w, height: +h, deviceScaleFactor: 1, mobile: false });
+await send('Page.navigate', { url });
+await new Promise(r => setTimeout(r, 2500));
+await send('Runtime.evaluate', { expression: `var d=document.createElement('div');d.id='mk';d.textContent='${mark}';d.style.cssText='position:fixed;top:0;left:0;z-index:99999;background:#ff0000;color:#fff;font-size:30px;font-weight:800;padding:10px 20px';document.body.appendChild(d);` });
+await new Promise(r => setTimeout(r, 500));
+const t = await send('Runtime.evaluate', { expression: 'document.title', returnByValue: true });
+console.log('TITLE', t.result.value);
+const { data } = await send('Page.captureScreenshot', { format: 'png' });
+const fs = await import('node:fs');
+fs.writeFileSync(out, Buffer.from(data, 'base64'));
+console.log('OK', out, fs.statSync(out).size);
+process.exit(0);

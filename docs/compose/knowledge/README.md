@@ -33,6 +33,15 @@
 | [07-cache-scheduler-audit.md](./07-cache-scheduler-audit.md) | 缓存、定时任务、审计 |
 | [08-testing-conventions.md](./08-testing-conventions.md) | 测试、验证顺序、易踩坑清单 |
 
+**跨会话记忆与流程资产**（不在知识库分卷内，但每轮开工必查）：
+
+| 文档 | 内容 |
+|------|------|
+| `MEMORY.md`（仓库根） | **开工必读**：10 条 Rules（证据分级、开工先检索、确认稿结构 diff、脚本自检、编辑三拍、2 败即咨询）+ Discovered 环境事实（CDP 截图管线、预览通道不可信、侧栏 spacer 结构、列宽预算式） |
+| `docs/compose/consult/TEMPLATE.md` | 外部求援模板：2 轮未解即产出自包含咨询 MD，交用户联网回填 |
+| `docs/compose/spec/shots/r3/` | 截图自证管线 `shot-verify.mjs`（像素↔DOM 回验）+ 取证脚本 `.facts/.treediff/.verify-fix` + 终版截图 |
+| `docs/compose/reports/ui-r3-retrospective.md` | 本轮复盘：token 消耗分解、五类典型错误根因、下次会话开工自检清单 |
+
 ## 一句话产品定位
 
 **SqlReport**：纯 Python 标准库 + 极少 pip 依赖的 MySQL 报表引擎——SQL 进，网页报表 + HTTP API 出；无 Django/Flask/React/Node 构建链。

@@ -15,7 +15,7 @@
 | 3 | 报表与变换 | `03-report-transform.md` | 完成（explore-3 增补） |
 | 4 | 配置数据层 | `04-config-data.md` | 完成（explore-2 增补） |
 | 5 | API | `05-api.md` | 完成（explore-1 增补） |
-| 6 | UI 交互 | `06-ui-interactions.md` | 完成（ui-redesign T9 重写 + R2-D：API 列表 api-row 卡片/详情五页签对齐 page-detail——qf-row 快筛、结果集 segment、分页恒显、规则双卡、调试磁贴、备注卡片；**emoji→SVG 图标系统（_icon 函数）、CSS 按钮类补齐、侧栏 button→a 语义修复**） |
+| 6 | UI 交互 | `06-ui-interactions.md` | 完成（ui-redesign T9 重写 + R2-D：API 列表 api-row 卡片/详情五页签对齐 page-detail——qf-row 快筛、结果集 segment、分页恒显、规则双卡、调试磁贴、备注卡片；**emoji→SVG 图标系统（_icon 函数）、CSS 按钮类补齐、侧栏 button→a 语义修复**；**2026-09-29 侧栏三态收缩（全高手柄+localStorage 记忆+小屏自适应）与当前登录用户名注入**；**R3 侧栏账号区吸底/两行修复 + 报表配置页列表/卡片双视图与列宽预算、截图数值断言校验法（易踩坑 #14–15）**） |
 | 7 | 缓存调度审计 | `07-cache-scheduler-audit.md` | 完成 |
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因） |
 

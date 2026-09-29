@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+const expr = fs.readFileSync(process.argv[2],'utf8');
+const t = await (await fetch('http://127.0.0.1:9333/json/new?'+encodeURIComponent('about:blank'),{method:'PUT'})).json();
+const ws = new WebSocket(t.webSocketDebuggerUrl);
+let id=0; const p=new Map();
+const send=(m,q={})=>new Promise((res,rej)=>{const i=++id;p.set(i,{res,rej});ws.send(JSON.stringify({id:i,method:m,params:q}));setTimeout(()=>{if(p.has(i)){p.delete(i);rej(new Error('timeout'));}},30000);});
+ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id&&p.has(m.id)){const q=p.get(m.id);p.delete(m.id);m.error?q.rej(new Error(m.error.message)):q.res(m.result);}};
+await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
+await send('Page.enable');await send('Runtime.enable');
+const r=await send('Runtime.evaluate',{expression:expr,awaitPromise:true,returnByValue:true});
+console.log(r.result.value);
+process.exit(0);

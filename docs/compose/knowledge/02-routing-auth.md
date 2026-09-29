@@ -12,6 +12,8 @@
    Cookie session_id → auth.get_session_user
    无效 → 302 /login?expired=1&next=<urlquote(path)>
    有效 → refresh_session + 记 _session_token
+   + render.set_request_user(user)（侧栏账户区等渲染层取当前用户名；
+     `_handle` 入口先 set_request_user(None) 复位，公开页/未登录为 None）
 5. needs_db → get_config_db → handler → finally close；否则 conn=None
 6. BodyReadError→400；其它→日志+500（详情不进响应体）
 ```
