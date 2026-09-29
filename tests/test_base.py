@@ -221,6 +221,10 @@ class BaseReportTest(BaseConfigTest):
         # 这一隔离问题在导出用例上暴露出来，故在基类统一清一次。
         import report as _report
         _report._query_cache.clear()
+        # C-2 引入的 MySQL 连接池同样是进程级全局：测试注入的假连接被归还
+        # 进池后会泄漏给下一个用例（拿到上一个用例的 mock 数据），故一并清空。
+        import query_executor as _qe
+        _qe.clear_pools()
 
         # 添加测试连接池
         self.conn.execute(

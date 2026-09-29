@@ -19,6 +19,7 @@ import db
 import export
 import api_handler
 import report
+import query_executor
 import redis_cache
 from report import ReportResult
 
@@ -122,6 +123,8 @@ class TestConfigDbOutputLimit(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):
@@ -173,6 +176,8 @@ class TestReportFormOutputLimit(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):
@@ -295,6 +300,8 @@ class TestExportOutputLimit(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool_id = _add_pool(self.conn)
         self.mock_pool = {"host": "h", "port": 3306,
                           "user": "u", "password": "p", "database": "d"}
@@ -386,6 +393,8 @@ class TestApiTruncatedFlag(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool_id = _add_pool(self.conn)
         self.rid = db.add_report(self.conn, "API报表", "SELECT 1", 20, self.pool_id)
         self.endpoint = {
@@ -482,6 +491,8 @@ class TestReportPageBanner(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool_id = _add_pool(self.conn)
 
     def tearDown(self):
@@ -523,6 +534,8 @@ class TestRedisSnapshotPolicy(unittest.TestCase):
 
     def setUp(self):
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         self.pool = {"host": "h", "port": 3306, "user": "u",
                      "password": "p", "database": "d"}
         self.report_cfg = {"prefer_cache": 1, "cache_ttl_hours": 24, "pool_id": 1,
@@ -532,6 +545,8 @@ class TestRedisSnapshotPolicy(unittest.TestCase):
 
     def tearDown(self):
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
 
     @patch("report.db.execute_mysql_query")
     @patch("report.db.create_mysql_connection")

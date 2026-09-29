@@ -12,6 +12,8 @@ query_executor.py — MySQL 查询执行器
 - 纯函数设计，无全局状态
 """
 
+import threading
+
 
 
 # ---------------------------------------------------------------------------
@@ -203,22 +205,8 @@ def _connect_mysql_config() -> _MySQLConnection:
 # ---------------------------------------------------------------------------
 
 
-def create_mysql_connection(pool_config: dict,
-                            read_timeout: int | None = None) -> object:
-    """
-    根据连接池配置创建 MySQL 连接。
-
-    参数 pool_config 需包含 host、port、user、password、database 字段。
-    read_timeout: 读取超时秒数；None = 不设置（连接可用至查询自然结束）。
-    找茬 H1（批次5/6 审查）：仅 Web 交互报表查询路径传 30——调度器后台
-    任务复用本工厂，超时硬编码会把超 30s 的合法重报表定时任务变成必然
-    失败，故默认不限制、由调用方按场景声明。
-    返回 mysql.connector 的 connection 对象。
-
-    注意：
-    - host='localhost' 使用 Unix socket，host='127.0.0.1' 使用 TCP
-    - 如果遇到 auth 插件问题，可在创建连接池时使用 127.0.0.1 替代 localhost
-    """
+def _new_raw_connection(pool_config: dict, read_timeout: int | None = None):
+    """按连接池配置建立一个**真实**的 MySQL 连接（不经池）。"""
     import mysql.connector
 
     config = {
@@ -239,6 +227,174 @@ def create_mysql_connection(pool_config: dict,
         config["host"] = "127.0.0.1"
 
     return mysql.connector.connect(**config)
+
+
+# ---------------------------------------------------------------------------
+# MySQL 有界连接池（C-2）
+# ---------------------------------------------------------------------------
+
+# 池上限。与 ThreadingHTTPServer 的实际并发量级匹配；超出即走直连降级。
+# 作为模块常量而非配置项：避免为性能参数新增配置面。
+_POOL_MAX_SIZE = 8
+
+# key → 可复用连接列表。ThreadingHTTPServer 多线程并发借还，加锁保护。
+_pools: dict[tuple, list] = {}
+_pools_lock = threading.Lock()
+
+
+def _pool_key(pool_config: dict, read_timeout: int | None) -> tuple:
+    """池的分组键。
+
+    ⚠️ **read_timeout 必须在键里**：Web 交互路径传 30s，调度器/API 传 None
+    不限制（批次 5#18 的既有修复：防慢查询定时任务被 30s 砍断）。若把两种
+    连接混进同一个池，调度器的慢报表会拿到 30s 超时的连接而必然失败——
+    这是语义错误，不是性能问题。
+    """
+    return (pool_config["host"], int(pool_config["port"]),
+            pool_config["user"], pool_config["database"], read_timeout)
+
+
+def _is_alive(raw) -> bool:
+    """探活。ping 失败或抛异常一律按「已死」处理。"""
+    try:
+        return bool(raw.ping(reconnect=True))
+    except Exception:
+        return False
+
+
+def _discard(raw) -> None:
+    """真关闭一条不再可用的连接（吞掉关闭异常，不影响主流程）。"""
+    try:
+        raw.close()
+    except Exception:
+        pass
+
+
+def _return_to_pool(key: tuple, raw) -> None:
+    """归还回调：探活后入池，池满或已死则真关闭。
+
+    幂等由 `_PooledConnection._released` 保证，这里只会被调一次。
+    """
+    if not _is_alive(raw):
+        _discard(raw)
+        return
+    with _pools_lock:
+        bucket = _pools.get(key)
+        if bucket is None:
+            bucket = []
+            _pools[key] = bucket
+        if len(bucket) >= _POOL_MAX_SIZE:
+            # 池已满：真关闭。这是防止连接泄漏撑爆的关键。
+            over = True
+        else:
+            bucket.append(raw)
+            over = False
+    if over:
+        _discard(raw)
+
+
+def _take_from_pool(key: tuple):
+    """从池中取一条活连接；池空或全是死连接时返回 None。"""
+    with _pools_lock:
+        bucket = _pools.get(key)
+        if not bucket:
+            return None
+        while bucket:
+            raw = bucket.pop()
+            if _is_alive(raw):
+                return raw
+            _discard(raw)
+    return None
+
+
+def clear_pools() -> None:
+    """关闭并清空全部池连接（测试清理用；生产路径不需要）。"""
+    with _pools_lock:
+        buckets = list(_pools.values())
+        _pools.clear()
+    for bucket in buckets:
+        for raw in bucket:
+            _discard(raw)
+
+
+class _PooledConnection:
+    """池化连接包装：**close() 的语义是「归还池」而非「真关闭」**。
+
+    之所以把归还藏进 close()，是为了让 `report.execute_report` 的
+    `finally: conn.close()` 一行都不用改——Redis 契约与调用链全部不受影响。
+    其余方法原样透传给底层真实连接。
+    """
+
+    __slots__ = ("_raw", "_pool_key", "_released")
+
+    def __init__(self, raw, pool_key: tuple):
+        self._raw = raw
+        self._pool_key = pool_key
+        self._released = False
+
+    def _conn(self):
+        if self._released:
+            raise RuntimeError("MySQL 连接已归还池中，不可继续使用")
+        return self._raw
+
+    # ---- 透传接口（兼容 sqlite3.Connection 与 mysql.connector 子集）----
+
+    def cursor(self, *args, **kwargs):
+        return self._conn().cursor(*args, **kwargs)
+
+    def execute(self, *args, **kwargs):
+        return self._conn().execute(*args, **kwargs)
+
+    def commit(self):
+        return self._conn().commit()
+
+    def rollback(self):
+        return self._conn().rollback()
+
+    def start_transaction(self):
+        return self._conn().start_transaction()
+
+    def ping(self, *args, **kwargs):
+        return self._conn().ping(*args, **kwargs)
+
+    def close(self):
+        """归还池。重复调用无副作用（幂等）。"""
+        if self._released:
+            return
+        self._released = True
+        _return_to_pool(self._pool_key, self._raw)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def create_mysql_connection(pool_config: dict,
+                            read_timeout: int | None = None):
+    """
+    根据连接池配置创建 MySQL 连接（走有界连接池）。
+
+    返回 _PooledConnection：接口与 mysql.connector 的 Connection 兼容，
+    但 **close() 是归还池**。池空、池满、或池中连接已死时自动降级为直连，
+    因此池的任何异常都不会导致功能不可用。
+
+    read_timeout: 读取超时秒数；None = 不设置（连接可用至查询自然结束）。
+    找茬 H1（批次5/6 审查）：仅 Web 交互报表查询路径传 30——调度器后台
+    任务复用本工厂，超时硬编码会把超 30s 的合法重报表定时任务变成必然
+    失败，故默认不限制、由调用方按场景声明。**该值同时是池的分组键**，
+    两种场景的连接不会混用。
+
+    注意：
+    - host='localhost' 使用 Unix socket，host='127.0.0.1' 使用 TCP
+    - 如果遇到 auth 插件问题，可在创建连接池时使用 127.0.0.1 替代 localhost
+    """
+    key = _pool_key(pool_config, read_timeout)
+    raw = _take_from_pool(key)
+    if raw is None:
+        raw = _new_raw_connection(pool_config, read_timeout)
+    return _PooledConnection(raw, key)
 
 
 # ---------------------------------------------------------------------------

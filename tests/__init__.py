@@ -34,6 +34,24 @@ _TEST_BRANDING_DB = os.path.join(_TEST_VENDOR_ROOT, "site_branding.db")
 branding._SITE_DB_PATH = _TEST_BRANDING_DB
 branding.invalidate_site_branding_cache()
 
+# 测试环境隔离 Redis（**重要**）：主 app_config.json 的 redis.enable 为 true
+# （db 6、key_prefix webreport_），测试进程会连到**生产 Redis** 读写真实快照。
+# 任何经 report.execute_report 的路径都可能命中生产快照，使断言依赖进程外的
+# 状态。导出改走 execute_report（C-4）后立刻暴露：report_id=1 的生产快照让导出
+# 用例读到了完全不相关的数据，40+ 用例失败且换个执行顺序就表现不同。
+#
+# 这里把 Redis 配置在测试进程内一律视为「关闭」。需要 Redis 的用例自行 patch
+# redis_cache.get_redis_config 或用 reset_redis_manager 显式注入；实测
+# test_redis_cache* 全部 patch RedisConnectionManager._create_client，
+# 从不连真实服务，因此不受影响。
+import redis_cache as _redis_cache  # noqa: E402
+
+_redis_cache.get_redis_config = lambda: {
+    "enable": False, "key_prefix": "sr_test",
+    "default_ttl_hours": 0, "socket_timeout": 1,
+}
+_redis_cache._redis_manager = None
+
 from .test_base import (make_config_db, init_test_db, BaseConfigTest, BaseReportTest)
 
 __all__ = [

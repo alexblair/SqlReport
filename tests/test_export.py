@@ -19,6 +19,7 @@ import db
 import app_config
 import export
 import report
+import query_executor
 import server as srv
 from tests import BaseReportTest
 
@@ -73,6 +74,8 @@ class TestExportToCSV(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -333,6 +336,8 @@ class TestJSONExport(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -501,6 +506,8 @@ class TestExportCharset(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -595,6 +602,8 @@ class TestExportJSONNoQuotes(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -716,6 +725,8 @@ class TestExportSmartQuotes(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -917,6 +928,8 @@ class TestExportZip(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -1188,6 +1201,8 @@ class TestExportParameterCombinations(unittest.TestCase):
         self.conn = _make_conn()
         # C-4 起导出走 report.execute_report，读写进程级 L1 缓存，逐用例清空
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         db.add_report(self.conn, "订单报表", "SELECT * FROM orders", 20, 1)
         self.mock_pool = {"host": "h", "port": 3306,
@@ -1797,6 +1812,8 @@ class TestExportResultIndex(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         # 两条 SELECT：do_execute 第 0 次为 (id,)，第 1 次为 (name,)
         db.add_report(self.conn, "订单报表",
@@ -1901,6 +1918,8 @@ class TestExportPoolNotFound(unittest.TestCase):
         # report_id=1，先前用例写入的缓存条目会被后续用例读到，
         # 导致拿到上一个用例的 mock 数据。逐用例清空以保持隔离。
         report._query_cache.clear()
+        # C-2 连接池同属进程级全局，一并清空避免假连接跨用例泄漏
+        query_executor.clear_pools()
         db.add_pool(self.conn, "池", "h", 3306, "u", "p", "d")
         # 关闭 FK 约束，插入指向不存在连接池（999）的报表
         self.conn.execute("PRAGMA foreign_keys=OFF")
