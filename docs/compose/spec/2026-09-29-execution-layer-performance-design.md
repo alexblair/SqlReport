@@ -383,6 +383,56 @@ S5 全 redis）全部通过。
 `tests/test_output_limit.py` 的各 `setUp` 与 `tests/test_base.py` 的
 `BaseReportTest.setUp` 中统一清空缓存。**这本身就是缓存生效的证据**。
 
+### 10.6 C-2 实施结果：连接池**本环境实测无收益**（用户 2026-09-29 决策保留）
+
+实现已落地（`_PooledConnection` + 有界池，`close()` 语义为归还），但实测
+**没有收益，反而略慢**：
+
+| 场景 | 连接池 | 全新直连 | 差异 |
+|------|--------|----------|------|
+| 单线程 15 次交错采样 | 83.3ms | 79.7ms | 池慢 3.6ms/次 |
+| 4 并发 × 6 次（总墙钟） | 1087ms | 1060ms | 池慢 2% |
+| 8 并发 × 6 次（总墙钟） | 1880ms | 1847ms | 池慢 3% |
+
+`ping(reconnect=True)` 探活仅 **0.13ms/次**，不是开销来源。
+
+**根因**：本机 MySQL 就在 `127.0.0.1`，直连本身很便宜。§10.2 第 4 条测到的
+113.5ms 是**冷启动首次**连接（含服务端握手与首包延迟），不是稳态成本 ——
+把单次冷样本当作「每次连接的成本」是本设计早期的判断错误。
+
+**用户决策：保留**。本基准只覆盖同机部署；若生产 MySQL 是远程的
+（网络 RTT 5~20ms），连接建立成本会高一个量级，连接池在那里预期有正收益。
+**待验条件**：远程 MySQL 或高并发报表场景下重测；若届时仍无收益，按 §7
+退出条件弃用整段。
+
+### 10.7 附带发现：官方测试入口一直在无隔离状态下运行
+
+排查 C-2 时实测发现（探针：`"tests" in sys.modules`）：
+
+| 入口 | `tests/__init__.py` 是否执行 | 后果 |
+|------|------------------------------|------|
+| `python -m unittest discover -s tests/ -v` | ❌ **否** | 整套测试隔离全部失效 |
+| `python -m unittest discover -s tests/ -t . -v` | ✅ 是 | 隔离生效 |
+| `python -m unittest tests.test_x` | ✅ 是 | 隔离生效 |
+
+`tests/__init__.py` 承载本项目**全部**测试隔离：DEBUG_CONFIG_FILE 重定向、
+vendor 落点重定向、branding 库重定向，以及本次新增的 Redis 隔离。
+不指定 `-t .` 时 discover 把测试模块当顶层模块导入（`test_health` 而非
+`tests.test_health`），包根本不被加载。
+
+**其中最严重的一条**：主 `app_config.json` 的 `redis.enable` 为 `true`
+（db 6、key_prefix `webreport_`），因此官方全量入口下**测试进程一直在连生产
+Redis 并读写真实快照**。C-4 之前导出绕过 `execute_report` 碰不到 Redis，
+所以一直没暴露。
+
+已做：在 `tests/__init__.py` 中把 Redis 配置在测试进程内一律视为「关闭」
+（需要 Redis 的用例自行 patch `redis_cache.get_redis_config` 或用
+`reset_redis_manager` 显式注入；实测 `test_redis_cache*` 全部 patch
+`RedisConnectionManager._create_client`，从不连真实服务）。
+
+**待办**：官方入口应改为 `discover -s tests/ -t . -v`。按用户 2026-09-29 决策，
+本次只记入报告并同步知识库，不改 AGENTS.md。
+
 ---
 
 
