@@ -1061,14 +1061,17 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     # 直接进入 MySQL 查询分支；写路径（进程缓存/快照回填）保持生效。
     # 写报表护栏：含写语句的 SQL 禁止被任何缓存层短路——热快照会让页面
     # 显示写后结果而数据库实际未执行（场景4b），故每次真实执行写 SQL。
-    skip_cache_read = bool(force_rebuild) or sql_contains_write(sql_query)
+    # 整条 SQL 只解析一次：写语句检测要做一次完整的多语句拆分 + 关键词扫描，
+    # 长 SQL / 多语句时代价不低，下面的写护栏复用同一个结果。
+    _has_write = sql_contains_write(sql_query)
+    skip_cache_read = bool(force_rebuild) or _has_write
 
     # PH-05 写操作护栏：实际 SQL 含写语句且报表未开启 allow_write → 拒绝执行。
     # 拦截置于缓存读取之前，防止已缓存结果绕过拦截；裸调用（report=None，测试等）
     # 不拦截，保持历史契约。
     if report is not None \
             and not int(report.get("allow_write", 1) or 0) \
-            and sql_contains_write(sql_query):
+            and _has_write:
         raise PermissionError(WRITE_DENIED_MESSAGE)
 
     # PH-06 全量输出护栏：allow_all_output=0 且 max_rows>0 时结果集截断至 max_rows。
@@ -1091,6 +1094,10 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     snapshot_key = None
     lock_key = None
     redis_prefix = ""
+    mgr = None
+    # 全局 Redis 管理器是单例，一次执行内只取一次，下面各分支复用。
+    # redis_avail 为真必然走过这个分支（prefer_cache 来自 report，report 为
+    # None 时 prefer_cache 恒为 False → redis_avail 恒为 False）。
     if redis_avail and report:
         mgr = redis_cache.get_redis_manager()
         redis_prefix = mgr.key_prefix if mgr else "sr"
@@ -1102,10 +1109,8 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     # 强制刷新：清除各层缓存
     if refresh:
         cache.invalidate(report_id)
-        if redis_avail and snapshot_key:
-            mgr = redis_cache.get_redis_manager()
-            if mgr:
-                mgr.delete_snapshot(snapshot_key)
+        if redis_avail and snapshot_key and mgr:
+            mgr.delete_snapshot(snapshot_key)
         # 静态文件缓存联动：删除该报表全部 API 端点的静态文件（惰性重建）
         if conn is not None:
             try:
@@ -1132,7 +1137,6 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
         # ---- 尝试从 Redis 快照获取 ----
         redis_hit = False
         if redis_avail and snapshot_key and not skip_cache_read:
-            mgr = redis_cache.get_redis_manager()
             if mgr:
                 snapshot = mgr.get_snapshot(snapshot_key)
                 if snapshot is not None and _cache_matches_limit_policy(
@@ -1157,7 +1161,7 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             #（先算后换）；与用户请求触发的锁重建并发时最多重复一次查询，
             # 无正确性影响。
             lock_held = False  # 本进程是否实际持有 Redis 重建锁
-            _mgr = redis_cache.get_redis_manager() if (redis_avail and snapshot_key and lock_key) else None
+            _mgr = mgr if (redis_avail and snapshot_key and lock_key) else None
             if _mgr and not skip_cache_read:
                 lock_held = _mgr.acquire_lock(lock_key)
                 if not lock_held:
