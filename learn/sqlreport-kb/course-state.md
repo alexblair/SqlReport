@@ -45,6 +45,15 @@
 | 测试/脚本对齐最新需求、禁硬编码主目录 | mastered | AGENTS 硬性 #9–#10 + 08 分卷 | 高 | 写测试/脚本/文档 |
 | UI 先可交互 HTML 确认、严格按确认稿、全局视觉一致 | mastered | AGENTS 硬性 #11 + 06 分卷 | 高 | 设计稿/UI 优化 |
 | 同一问题失败 2 次停手、根因优先再改 | mastered | AGENTS 硬性 #12 + 08 分卷 | 高 | 调试/测试卡住时 |
+| L1/L2/L3 + 保活先算后换 | mastered | 07 卷 + spec 2026-09-29 性能设计 §10.1 基线实测 | 高 | 改缓存 |
+| 派生态缓存（C-3）挂 CachedResult、零失效逻辑 | mastered | spec §5 C-3 + §10.8 + tests/test_derived_cache.py | 高 | 改 transform 或加缓存层 |
+| 导出并入三层缓存（C-4） | mastered | spec §5 C-4 + tests/test_export_cache_path.py | 高 | 改导出 |
+| MySQL 连接池：`close()` 语义为归还、read_timeout 进池键 | mastered | 01 卷 + tests/test_mysql_pool.py | 高 | 改 query_executor |
+| Decimal 不在 isinstance 快速路径 → DECIMAL 列退化 | mastered | 03 卷 + verify_transform_equivalence 实测 -27% | 高 | 改 result_transform |
+| `filter_rows` 单趟化反而更慢（闭包调用开销） | mastered | spec §10.3 实测 +41%~72% | 高 | 想优化 filter 时先看 |
+| discover 必须加 `-t .`，否则 tests/__init__.py 不执行 | mastered | 08 卷 + spec §10.7 探针实测 | 高 | 跑全量测试时 |
+| 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #16 + tests/__init__.py | 高 | 写涉及缓存的测试时 |
+| 端到端压测噪声约 ±6%，transform 收益须用隔离 A/B | practiced | spec §10.3 | 中 | 做性能对比时 |
 
 ## 复习队列
 
@@ -70,4 +79,7 @@ kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写
 index=codegraph ok (100 files, 6037 nodes)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
+last_sync=2026-09-29 执行层性能优化（spec 2026-09-29-execution-layer-performance-design.md）
+           同步 01/03/07/08 分卷：连接池、派生态缓存、导出并入缓存、
+           transform 性能要点、discover -t . 隔离、性能工具链
 ```

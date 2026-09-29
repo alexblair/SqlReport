@@ -6,7 +6,7 @@
 
 ```bash
 source venv/bin/activate   # 若已 install
-python -m unittest discover -s tests/ -v          # 官方全量入口（对账用，勿反复跑）
+python -m unittest discover -s tests/ -t . -v     # 官方全量入口（对账用，勿反复跑）
 python -m unittest tests.test_filter_help -v      # 最小范围
 python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session_alive -v
 ```
@@ -14,6 +14,48 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 - **以 `unittest` 为准**；`requirements.txt` 有 `pytest` 但环境未必装，勿默认 pytest
 - discover 含 `tests/bug_hunt/test_static_analysis.py`（ERROR 会失败）
 - 手动破坏性变异（勿当常规）：`python tests/bug_hunt/bug_hunt_mutation.py`
+
+### ⚠️ `-t .` 不能省（2026-09-29 实测）
+
+`tests/__init__.py` 承载本项目**全部**测试隔离。**不带 `-t .` 时 discover 把测试
+模块当顶层模块导入**（`test_health` 而非 `tests.test_health`），包根本不被加载
+（探针实测 `"tests" in sys.modules == False`），于是整套隔离全部失效：
+
+| 入口 | `tests/__init__.py` 是否执行 |
+|------|------------------------------|
+| `discover -s tests/ -v` | ❌ 否 |
+| `discover -s tests/ -t . -v` | ✅ 是 |
+| `python -m unittest tests.test_x` | ✅ 是 |
+
+失效的隔离项：DEBUG_CONFIG_FILE 重定向、本机 `app_config.debug.json` 泄漏、
+vendor 落点重定向（会写真实 `static/vendor/self@*/`）、branding 库重定向、
+**Redis 隔离**。
+
+**其中 Redis 最严重**：主 `app_config.json` 的 `redis.enable` 为 `true`
+（db 6、key_prefix `webreport_`），无隔离时**测试进程会连生产 Redis 读写真实
+快照**，断言依赖进程外状态、换个执行顺序就表现不同。现已在 `tests/__init__.py`
+把 Redis 一律视为「关闭」；需要 Redis 的用例自行 patch
+`redis_cache.get_redis_config` 或用 `reset_redis_manager` 显式注入。
+
+## 性能测量工具链（`scripts/perf/`，2026-09-29）
+
+一次性脚本，**故意不放 `tests/`**——它们会建表、灌数、改真实 MySQL 与真实配置库，
+绝不能被 `discover` 触及或被维护者误当测试跑。
+
+| 脚本 | 作用 |
+|------|------|
+| `check_conn.py` | MySQL/Redis 连通性预检，失败时打印「缺哪个配置键」并非零退出 |
+| `seed_perf_data.py` | 造性能数据（`perf_text` 10 万行含 DECIMAL/混排/NULL 等） |
+| `init_debug_env.py` | 初始化空的 `config.debug.db`，建数据源、4 张性能报表、基准账号、API 端点 |
+| `bench.py` | 12 场景端到端 HTTP 压测，输出 JSON；**并断言 `cache_info.source` 分布** |
+| `verify_transform_equivalence.py` | 以 `git <基线commit>` 的实现为参考，真实数据上逐行比对 transform 语义 |
+
+约定：
+- **产物落 `perf-logs/`（已 gitignore），不要用 `/tmp`** —— 本环境 `/tmp` 会被
+  周期清空，且 `nohup` 后台进程活不过单次 bash 调用；起服务+压测必须在同一条命令内
+- 凭据从 `perf-logs/bench-credentials.txt` 读（`init_debug_env.py` 自动生成）
+- 端到端测量噪声约 **±6%**，小于 ~10% 的差异不可解读；判断 transform 类收益要用
+  隔离 A/B（同进程、多次重复、同一数据），不要用端到端数字
 
 ## 范围递进与全量纪律（硬性）
 
@@ -117,6 +159,9 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 13. **测试/代码/文档硬编码本仓库主目录绝对路径**
 14. **同一问题失败 ≥2 次仍盲目重试**，不先找根因（硬性 #12）
 15. **本机 `app_config.json` 配了 `config_db.engine=mysql` 时，未 patch 引擎的 SQLite 用例会在 `init_db` 走 MySQL 分支**报 `sqlite3.OperationalError: near "="`——`init_db` 内部经 `db._get_engine()` 读配置；单测须按 `test_base` 惯例 `patch("db._get_engine", return_value="sqlite3")`（已修：`test_config_db_migrations/TestInitDbFullMigration`、`test_preset_cases/make_db`）；新增直调 `init_db` 的测试同样要隔离
+16. **discover 忘加 `-t .`** → `tests/__init__.py` 不执行，整套测试隔离失效（含连生产 Redis）。见上文「`-t .` 不能省」
+17. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
+18. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
 
 ## 文档过时线索（AGENTS.md 已提醒）
 
@@ -125,4 +170,4 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 - 文档冲突 → 改文档（中英同步）
 
 ---
-最后核对：`AGENTS.md`（硬性约束 #8–#10、#12–#14 + 测试策略 + 两败必停 + 多子代理协作与验证纪律）+ `tests/` 目录（R2 核对 2026-09-25）；易踩坑 #15（engine=mysql 环境隔离）核对 2026-09-27
+最后核对：`AGENTS.md`（硬性约束 #8–#10、#12–#14 + 测试策略 + 两败必停 + 多子代理协作与验证纪律）+ `tests/` 目录；2026-09-29 执行层性能优化同步（`-t .` 隔离、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #16–#18）

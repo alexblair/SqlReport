@@ -69,8 +69,9 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 | 默认格式 | CSV |
 | 默认字符集 | **gbk**（非 utf8）；GBK 剥 BOM |
 | 变换顺序 | 查询 → 选结果集 → **先 max_rows 截断** → 筛选 → 排序 → 列 |
-| 写护栏 | 403 `WRITE_DENIED_MESSAGE`（独立连接，不经 execute_report） |
-| 截断载体 | 头 `X-Export-Truncated`；CSV 尾注释；JSON `_meta.truncated`（报表名恰为 `_meta` 时跳过 JSON 标记） |
+| **数据来源** | 走 `report.execute_report`（**复用 L1 进程缓存 / L2 Redis 快照**，2026-09-29 C-4 起）。改前自带连接直查 MySQL、完全绕过三层缓存，实测 10 万行导出 1519.7ms → 复用缓存后 359.2ms。`report_id=None` 时保留旧的直连分支 |
+| 写护栏 | 403 `WRITE_DENIED_MESSAGE`（在调用 execute_report **之前**判定，不依赖其 `PermissionError`） |
+| 截断载体 | 头 `X-Export-Truncated`；CSV 尾注释；JSON `_meta.truncated`（报表名恰为 `_meta` 时跳过 JSON 标记）。截断标记取自 `ReportResult.truncated` |
 | ZIP | tempfile → ZIP_DEFLATED → 读回；内 `{报表名}.csv\|json` |
 | smart_quotes | 1 十进制、2 科学计数法、4 千分位；`json_no_quotes=1` ≡ 全开 |
 
@@ -106,6 +107,36 @@ report.allow_write 与 sql_contains_write(sql)
 `scheduler.exclusions`：`op` 大写 `AND/OR` + `children`；评估失败按**不排除**执行。  
 与 `nested_filter`（`and/or` + `conditions`）结构不同，勿混用。
 
+## transform 实现的性能要点（2026-09-29 C-1/C-3 实测）
+
+| 位置 | 要点 |
+|------|------|
+| `_parse_numeric_or_date` | 快速路径 `isinstance(s, (int, float, Decimal))`。**`Decimal` 必须在内**——MySQL `DECIMAL` 列返回 `decimal.Decimal`，漏了会让每个金额单元格走 `str().strip()` + 日期正则 + `float()` 三连。快速路径内**保留 `isfinite` 检查**（`Decimal('Infinity')`/`('NaN')` 仍按不可比较处理，既有语义不得被绕过）。`bool` 在 `isinstance` 之前单独判掉 |
+| `_try_float` | `int`/`float` 走快速路径，避免文本列每格构造一次 `ValueError` 再捕获。**`bool` 不特判**（既有 `float(True)==1.0`） |
+| `sort_rows` / `_ordered_by_column` | 每个排序键**一趟**遍历完成 None/数值/文本三分区。稳定排序与「从低优先级到高优先级」的调用约定不变 |
+| `filter_rows` | **保持链式多趟，不要单趟化**。实测把 M 个条件编译成行判定函数一趟应用，10 万行反而**慢 41%~72%**（每格多一层闭包调用；且 M 个条件链式过滤时中间列表逐级缩小，总访问量本就不高） |
+| 排序分区语义 | 数值（含数值字符串）恒在文本之前（不随方向翻转）；`None` 恒最后（不受升降序影响）；稳定排序。**这些由 `tests/test_result_transform_perf.py` 逐行钉死** |
+
+改这几处时：**先跑 characterization 测试确认绿，再改，改完必须仍绿**。
+它们的错误模式是静默换行序——不报错，只变用户看到的顺序。
+
+## 派生态缓存（C-3，`report.CachedResult.derived`）
+
+- L1/L2 缓存的是**全量未筛选未排序**数据，故每次请求都要重跑 filter+sort。
+  `CachedResult.derived` 缓存「已筛选已排序的全量行列表」，键为
+  `(filters, sorts, nested_filter)` 规范化元组 + 结果集下标。
+- **挂在 `CachedResult` 上而非独立全局缓存** → 零失效逻辑：L1 每次 `set`
+  新建对象，旧对象连同派生态一起回收；L1 TTL 过期/逐出，派生态随之消失。
+  派生态绝不会比 L1 活得久，严格保持「进程内看不到别的进程经 scheduler
+  刷新 Redis 快照」这一既有语义。
+- **分页切片不缓存**，每次现算（`O(page_size)`）。翻页只有 page 变 →
+  命中率高，这正是设计针对的访问模式。
+- **仅在 `not skip_cache_read` 时启用**：写报表每轮数据都变、force_rebuild
+  是「先算后换」，两者复用派生态都会返回旧行序。
+- LRU 上限 `_DERIVED_CACHE_MAX = 8` 组合/报表。`derived` 绝不进序列化路径。
+- 10 万行实测（重复同筛选/排序）：排序 76.1→16.1ms，筛选 95.3→15.5ms。
+  **首次**访问仍是 O(N)，与基线同量级。
+
 ## 易踩坑
 
 1. **禁止**在 export/api 重写匹配语义
@@ -113,6 +144,10 @@ report.allow_write 与 sql_contains_write(sql)
 3. 截断在筛选**之前**——筛后 N 行 ≠ 导出 N 行
 4. 改筛选语法三件套：`parse_filter_expr` + `filter_help` + `test_filter_help`
 5. 三端写护栏同文案同条件
+6. 导出改走 `execute_report` 后会**读写进程级 L1 缓存**——写导出相关测试时
+   必须清 `report._query_cache`，否则读到别的用例的 mock 数据
+7. 导出必须传 `report_config` 给 `execute_report`，否则**全量输出护栏失效**
+   （`limit_rows` 依赖 `report` 参数非 None）
 
 ---
-最后核对：explore-1/3 报告 + 源码交叉
+最后核对：2026-09-29 执行层性能优化（C-1/C-3/C-4）+ 源码交叉

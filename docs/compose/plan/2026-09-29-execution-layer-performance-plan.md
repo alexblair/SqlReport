@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> 状态: 待执行
+> 状态: 已完成
 > 对应 spec: ../spec/2026-09-29-execution-layer-performance-design.md
 > 最后更新: 2026-09-29
 
@@ -785,12 +785,48 @@ git add -A && git commit -m "docs: 性能优化知识库同步 + 计划执行记
 
 > 由实施阶段回填。
 
-- [ ] T0 Phase 0 测量基础设施 —— ✅ 已完成（基线冻结于 spec §10.1）
-- [ ] T1 C-1a `execute_report` 去重 —— 待执行
-- [ ] T2 C-1b transform 类型快速路径 —— 待执行
-- [ ] T3 C-1c filter/sort 单趟化 —— 待执行
-- [ ] T4 C-1 收口验证与收益测量 —— 待执行
-- [ ] T4b C-4 导出复用 `execute_report` —— 待执行（基线后追加，用户 2026-09-29 决策）
-- [ ] T5 C-2 MySQL 连接池 —— 待执行
-- [ ] T6 C-3 派生态缓存 —— 待执行（主战场为 S9/S10，非 S2）
-- [ ] T7 知识库同步与收尾 —— 待执行
+- [x] T0 Phase 0 测量基础设施 —— ✅ 基线冻结于 spec §10.1（12 场景）
+- [x] T1 C-1a `execute_report` 去重 —— ✅ `14b109a`，6 项新测试 + L1 550 项
+- [x] T2 C-1b transform 类型快速路径 —— ✅ `43d6b86`，14 项新测试 + 459 项
+- [x] T3 C-1c filter/sort 单趟化 —— ✅ `fd6e1d8`，采纳 sort_rows（-7.7%~-11.3%），
+      **filter_rows 单趟化经实测 -41%~-72% 后整段回退**（结论写入 docstring）
+- [x] T4 C-1 收口 —— ✅ `e6074e5`，43 组合 / 2,937,000 行次与优化前逐行一致
+- [x] T4b C-4 导出复用 `execute_report` —— ✅ `9997666`，1519.7ms → 359.2ms（4.2 倍）
+- [x] T5 C-2 MySQL 连接池 —— ✅ `e7042ea`，**实测无收益**（单线程慢 3.6ms/次、
+      4/8 并发各慢 2%/3%），按用户 2026-09-29 决策保留（为远程库部署预留）；
+      连带修复两处测试隔离（生产 Redis、`discover` 缺 `-t .`）
+- [x] T6 C-3 派生态缓存 —— ✅ `d1560d3`，排序 76.1→16.1ms、筛选 95.3→15.5ms
+- [x] T7 知识库同步 + 全量验证 —— ✅ 01/03/07/08 分卷 + course-state 已同步；
+      L2 分段 42 段共 **2881 项全绿**；静态分析 5 项绿；
+      Redis 兜底四项真实验证通过（spec §10.9）
+
+## 成果汇总（10 万行，DEBUG 端到端）
+
+| 场景 | 基线 P50 | 最终 P50 | 变化 |
+|------|---------|---------|------|
+| S3 排序 | 76.1ms | 16.1ms | **-78.8%** |
+| S4 数值筛选 | 95.3ms | 15.5ms | **-83.7%** |
+| S9 排序后翻页 | 73.0ms | 14.6ms | **-80.0%** |
+| S10 筛选后翻页 | 100.8ms | 13.4ms | **-86.7%** |
+| S7 导出 CSV | 1519.7ms | 375.2ms | **-75.3%** |
+| S1/S2/S5/S11/S12 | 12.6~15.6ms | 13.4~17.3ms | 无显著变化（本就无 transform 成本） |
+
+## 计划与实际的偏差（如实记录）
+
+1. **T3 的 `filter_rows` 单趟化被实测否决并回退** —— 计划预期「M+1 趟降到 1 趟」
+   是收益，实测慢 41%~72%。
+2. **C-2 连接池实测无收益**，计划中「113.5ms/次连接」是把**冷启动首次**连接
+   当成了稳态成本。按用户决策保留代码，结论与待验条件写入 spec §10.6。
+3. **C-3 的主战场从 S2 修正为 S9/S10** —— 基线实测发现无筛选无排序时
+   `filter_rows`/`sort_rows` 早返回，普通翻页本就没有 transform 成本。
+4. **范围追加 C-4**（导出）—— 基线测出导出是全站最大热点，用户决策纳入。
+5. **T7 Step 3 的「真停 MySQL」改为「指向无人监听端口」** —— 产生的是真实
+   `InterfaceError`，不需要用户协助停服务。
+
+## 计划外发现（已处理或已记录）
+
+1. **测试进程一直在连生产 Redis**（主 `app_config.json` 的 `redis.enable=true`，
+   db 6 / `webreport_`）—— 已在 `tests/__init__.py` 隔离
+2. **官方入口 `discover -s tests/` 从不加载 `tests/__init__.py`**，整套测试隔离失效
+   —— 已记录，应改用 `-t .`（按用户决策本次不改 AGENTS.md）
+3. `filter_rows` 单趟化的函数调用开销结论（已写入 docstring 防后人重蹈）

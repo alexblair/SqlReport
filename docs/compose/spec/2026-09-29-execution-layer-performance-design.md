@@ -458,6 +458,27 @@ Redis 并读写真实快照**。C-4 之前导出绕过 `execute_report` 碰不�
 - LRU 上限 8 组合/报表（`_DERIVED_CACHE_MAX`）
 - `derived` 绝不进入序列化路径（有专项测试守）
 
+### 10.9 Redis 缓存机制的真实验证（spec §6.1 第 4 条）
+
+`scripts/perf/verify_redis_fallback.py`。**不停止 MySQL、不改用户的 debug 配置** ——
+把数据源端口改到无人监听的 3999，产生真实连接失败（`InterfaceError`）。
+
+| # | 场景 | 结果 |
+|---|------|------|
+| ① | 正常执行（真实 MySQL + 真实 Redis 写入） | `source=redis`，5 行 ✅ |
+| ② | 数据源不可用 + 快照新鲜 | `source=redis`，**L2 直接命中、根本没碰数据源** ✅ |
+| ③ | 数据源不可用 + 无快照 | 正确抛 `InterfaceError`，**不静默返回空/错数据** ✅ |
+| ④ | L2 首读 miss + 数据源不可用 | `source=redis_fallback`、`fresh=False`、行内容与①一致 ✅ |
+
+**一处必须说清的限定**：④ 的触发方式是「让 `get_snapshot` 第一次返回 None」的
+**受控模拟**，不是真的让 Redis 掉线。原因是 `redis_fallback` 分支的本质是
+**尽力而为的重读**（首读 miss → 查 MySQL 失败 → 再读一次快照），真实世界里
+能稳定命中它的序列本就窄（要求两次读之间 Redis 恰好恢复）。Redis、MySQL、
+快照格式与兜底逻辑都是真的，只有「首读 miss」这一步是构造出来的。
+
+顺带修正了本 spec 早期的一处措辞：`_snapshot_is_stale` 判的是**格式版本**
+（v1/v2 淘汰），**不是时效**；TTL 由 Redis 自身的 key 过期管理。
+
 ---
 
 

@@ -67,14 +67,34 @@ L1 process QueryCache (~300s)
   → L2 Redis 快照（版本键+锁+保活）
     → L3 MySQL
 
+L1 之上还有一层请求级 memo：C-3 派生态缓存（`CachedResult.derived`），
+不属于这三层中的任何一层，详见 `03-report-transform.md`。
+
 API 静态：static_cache/api/**.json + config_version + TTL；NGINX 可直出
 ```
 
-详见 `07-cache-scheduler-audit.md`、`05-api.md`。
+缓存分层的完整语义见 `07-cache-scheduler-audit.md`；导出已并入该链路（C-4），
+见 `03-report-transform.md`。
+
+## MySQL 连接获取（`query_executor`）
+
+`create_mysql_connection(pool_config, read_timeout=None)` 走**有界连接池**
+（上限 `_POOL_MAX_SIZE = 8`，模块常量非配置项）。
+
+| 要点 | 说明 |
+|------|------|
+| **`close()` 语义是「归还池」** | 返回 `_PooledConnection`，不是 mysql.connector 的 Connection。正因如此 `report.execute_report` 的 `finally: conn.close()` **一行都不用改**，Redis 契约与调用链不受影响 |
+| **池键含 `read_timeout`** | Web 交互传 30s、调度器/API 传 `None` 不限制（批次 5#18）。混池会让调度器的慢报表拿到 30s 超时的连接而**必然失败**——语义错误，不可合并 |
+| 降级 | 池空 / 池满 / 池中连接已死 → 自动直连。池的任何异常都不导致功能不可用 |
+| 探活 | 归还与借出都 `ping(reconnect=True)`；归还时已死则真关闭不入池。探活约 0.13ms |
+| 实测 | **本机 MySQL（127.0.0.1）下实测无收益**，单线程慢 3.6ms/次、4/8 并发各慢 2%/3%。保留是为远程 MySQL 部署预留（网络 RTT 下连接成本高一个量级） |
+
+写测试时注意：连接池是**进程级全局**，测试注入的假连接归还后会泄漏给下一个
+用例。`BaseReportTest.setUp` 与各导出测试的 `setUp` 已统一 `clear_pools()`。
 
 ## 运行时勿提交
 
-`app_config.json`、`config.db`、`audit.db`、`venv/`、`static_cache/`、`static/vendor/self@*/`、`.codegraph/`、`docs/`、`AGENTS.md`、`.mimocode/`（见 `.gitignore`）。
+`app_config.json`、`config.db`、`audit.db`、`venv/`、`static_cache/`、`perf-logs/`、`static/vendor/self@*/`、`.codegraph/`、`docs/`、`AGENTS.md`、`.mimocode/`（见 `.gitignore`）。
 
 ## 易踩坑
 

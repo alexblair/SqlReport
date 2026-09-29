@@ -59,7 +59,7 @@ keyword 共用 `parse_filter_expr`。
 ## 三层数据流
 
 ```
-/report 或 /api
+/report 或 /api 或 /export
   → execute_report
       force_rebuild 或 SQL含写? 跳过读（写报表禁缓存短路，2026-09-25）
       → L1 QueryCache + 截断策略
@@ -67,10 +67,21 @@ keyword 共用 `parse_filter_expr`。
       → miss → 锁 → MySQL（连接期或查询期失败 → 过期快照兜底
         redis_fallback，fresh=False；兜底也失败才抛）
         → set_snapshot + L1
+      → L1 条目上的派生态 memo（C-3，2026-09-29）：按
+        (filters, sorts, nested_filter) 缓存「已筛选已排序的全量行列表」，
+        分页切片不缓存。与 L1 同生共死，不是新的一层
   → cache_info: process | redis | mysql | redis_fallback
 
 scheduler tick → force_rebuild 预热 L2 + 静态 .json
 ```
+
+**导出（`/export`）自 2026-09-29（C-4）起并入上述链路**——改前它自带连接直查
+MySQL、完全绕过三层缓存，10 万行导出 1519.7ms；并入后 359.2ms。
+详见 `03-report-transform.md`。
+
+**派生态缓存（C-3）不属于三层中的任何一层**，它是挂在 L1 `CachedResult` 上的
+请求级 memo，只在 `not skip_cache_read` 时启用（写报表与 force_rebuild 都
+不复用），LRU 上限 8 组合/报表。详见 `03-report-transform.md`。
 
 ## 易踩坑
 
