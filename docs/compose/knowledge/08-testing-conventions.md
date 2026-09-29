@@ -15,27 +15,48 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 - discover 含 `tests/bug_hunt/test_static_analysis.py`（ERROR 会失败）
 - 手动破坏性变异（勿当常规）：`python tests/bug_hunt/bug_hunt_mutation.py`
 
-### ⚠️ `-t .` 不能省（2026-09-29 实测）
+### ⚠️ `-t .` 不能省（2026-09-29 实测 + 已加金丝雀）
 
-`tests/__init__.py` 承载本项目**全部**测试隔离。**不带 `-t .` 时 discover 把测试
-模块当顶层模块导入**（`test_health` 而非 `tests.test_health`），包根本不被加载
-（探针实测 `"tests" in sys.modules == False`），于是整套隔离全部失效：
+**隔离的单一来源是 `tests/_bootstrap.py`**（由 `tests/__init__.py` 调用
+`_bootstrap.apply()`），包含四项：DEBUG_CONFIG_FILE 重定向、vendor 落点重定向、
+branding 库重定向、**Redis 强制关闭**。
 
-| 入口 | `tests/__init__.py` 是否执行 |
-|------|------------------------------|
+**不带 `-t .` 时 discover 把测试模块当顶层模块导入**（`test_health` 而非
+`tests.test_health`），包根本不被加载（探针实测 `"tests" in sys.modules == False`），
+上述隔离**全部失效**：
+
+| 入口 | 隔离是否生效 |
+|------|--------------|
 | `discover -s tests/ -v` | ❌ 否 |
 | `discover -s tests/ -t . -v` | ✅ 是 |
 | `python -m unittest tests.test_x` | ✅ 是 |
 
-失效的隔离项：DEBUG_CONFIG_FILE 重定向、本机 `app_config.debug.json` 泄漏、
-vendor 落点重定向（会写真实 `static/vendor/self@*/`）、branding 库重定向、
-**Redis 隔离**。
+失效的后果：连**生产 Redis** 读写真实快照（最严重）、写真实
+`static/vendor/self@*/`、读本机 `config.db` 的站点标识、被本机
+`app_config.debug.json` 覆盖。
 
-**其中 Redis 最严重**：主 `app_config.json` 的 `redis.enable` 为 `true`
-（db 6、key_prefix `webreport_`），无隔离时**测试进程会连生产 Redis 读写真实
-快照**，断言依赖进程外状态、换个执行顺序就表现不同。现已在 `tests/__init__.py`
-把 Redis 一律视为「关闭」；需要 Redis 的用例自行 patch
-`redis_cache.get_redis_config` 或用 `reset_redis_manager` 显式注入。
+#### 金丝雀：`tests/test_test_isolation.py`
+
+只改命令不够——**任何人漏一次 `-t .` 就会静默回到危险状态**，且要很久以后才被
+unrelated 的测试失败发现。所以隔离是否生效本身是一条会自己报警的测试：
+
+| 用例 | 检查 |
+|------|------|
+| `test_imported_as_package_module` | **核心判据**：本模块须以 `tests.xxx` 形式导入，否则失败并打印修复命令 |
+| `test_bootstrap_applied` | `_bootstrap.apply()` 已执行 |
+| `test_redis_is_not_reachable` | `redis_available()` 为假、`get_redis_config().enable` 为假、无全局管理器 |
+| `test_debug_config_redirected` | `DEBUG_CONFIG_FILE` 指向隔离路径 |
+| `test_vendor_root_is_temp` / `test_branding_db_is_temp` | 落点在临时目录 |
+
+**判据为什么用「本模块的导入风格」而不是「隔离当前是否生效」**：后者会被自我
+掩盖——金丝雀若 import 了 `tests`，`tests/__init__.py` 就替它装上隔离，于是
+「隔离生效」恒为真、金丝雀形同虚设（第一版就是这么写错的：漏 `-t .` 时它反而
+全绿）。`__name__` 在模块导入时确定，无法被后续导入掩盖。
+
+需要 Redis 的用例自行 patch `redis_cache.get_redis_config` 或用
+`reset_redis_manager` 显式注入（显式注入即显式选择连哪个 Redis）；实测
+`test_redis_cache*` 全部 patch `RedisConnectionManager._create_client`，从不连
+真实服务。
 
 ## 性能测量工具链（`scripts/perf/`，2026-09-29）
 
@@ -124,7 +145,7 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 
 1. L0 相关单测（单文件/单用例）→ 通过后 L1 模块组
 2. 需要完整确认时：L2 按大模块顺序分段跑（见 AGENTS.md）；代码未再变则全量**一次即可**
-3. 可选对账：`python -m unittest discover -s tests/ -v`（仍勿反复）
+3. 可选对账：`python -m unittest discover -s tests/ -t . -v`（仍勿反复）
 4. 知识库同步 + 需要时 bug_hunt 变异脚本
 
 无 CI / 无 lint / 无 typecheck 配置。
@@ -159,9 +180,10 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 13. **测试/代码/文档硬编码本仓库主目录绝对路径**
 14. **同一问题失败 ≥2 次仍盲目重试**，不先找根因（硬性 #12）
 15. **本机 `app_config.json` 配了 `config_db.engine=mysql` 时，未 patch 引擎的 SQLite 用例会在 `init_db` 走 MySQL 分支**报 `sqlite3.OperationalError: near "="`——`init_db` 内部经 `db._get_engine()` 读配置；单测须按 `test_base` 惯例 `patch("db._get_engine", return_value="sqlite3")`（已修：`test_config_db_migrations/TestInitDbFullMigration`、`test_preset_cases/make_db`）；新增直调 `init_db` 的测试同样要隔离
-16. **discover 忘加 `-t .`** → `tests/__init__.py` 不执行，整套测试隔离失效（含连生产 Redis）。见上文「`-t .` 不能省」
-17. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
-18. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
+16. **discover 忘加 `-t .`** → `tests/__init__.py` 不执行，整套测试隔离失效（含连生产 Redis）。有金丝雀 `test_test_isolation` 会失败并给出修复命令。见上文
+17. **金丝雀被自己掩盖** → 断言「隔离是否生效」的测试**不能 import `tests`**（import 了就等于自己装上隔离，断言恒为真）。用「本模块的导入风格」（`__name__` 是否以 `tests.` 开头）这类**导入期确定**的判据
+18. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
+19. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
 
 ## 文档过时线索（AGENTS.md 已提醒）
 

@@ -51,8 +51,9 @@
 | MySQL 连接池：`close()` 语义为归还、read_timeout 进池键 | mastered | 01 卷 + tests/test_mysql_pool.py | 高 | 改 query_executor |
 | Decimal 不在 isinstance 快速路径 → DECIMAL 列退化 | mastered | 03 卷 + verify_transform_equivalence 实测 -27% | 高 | 改 result_transform |
 | `filter_rows` 单趟化反而更慢（闭包调用开销） | mastered | spec §10.3 实测 +41%~72% | 高 | 想优化 filter 时先看 |
-| discover 必须加 `-t .`，否则 tests/__init__.py 不执行 | mastered | 08 卷 + spec §10.7 探针实测 | 高 | 跑全量测试时 |
-| 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #16 + tests/__init__.py | 高 | 写涉及缓存的测试时 |
+| discover 必须加 `-t .`，否则 tests/__init__.py 不执行 | mastered | 08 卷 + spec §10.7 探针实测 + 金丝雀 test_test_isolation | 高 | 跑全量测试时 |
+| 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #16 + tests/_bootstrap.py | 高 | 写涉及缓存的测试时 |
+| 断言「隔离是否生效」的测试不能自己 import tests（自我掩盖） | mastered | 08 卷易踩坑 #17（第一版金丝雀即栽在这） | 高 | 写环境守卫类测试时 |
 | 端到端压测噪声约 ±6%，transform 收益须用隔离 A/B | practiced | spec §10.3 | 中 | 做性能对比时 |
 
 ## 复习队列
