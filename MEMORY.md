@@ -161,4 +161,9 @@
   冻结旧线的可核查依据是 `GET /repos/{o}/{r}/rules/branches/<branch>`（返回 `update`/`deletion`/`non_fast_forward`）
   与真实 push 被拒（`GH013: Repository rule violations found`）；**`git push --dry-run` 不触发规则检查，不能当冻结证据**。
   另：改默认分支（`PATCH /repos/{o}/{r}`）与建 ruleset 都需 admin 权限（本机 PAT 具备）。
-
+- **浅克隆（`--depth 1`）里切另一条分支必须先补 refspec**（2026-10-05 实测）：`git fetch origin V1` 只写 `FETCH_HEAD`、
+  不建 `origin/V1`，紧接着 `git checkout V1` 报 `pathspec 'V1' did not match any file(s) known to git`。
+  正确：`git fetch --depth 1 origin V1:refs/remotes/origin/V1 && git checkout -B V1 origin/V1`（已写进切换指南 Q10）。
+  另：浅克隆里往返切换时 `git status` 会报 branch 与 `origin/*` “diverged 1 and 1”，属浅历史噪音，不影响工作树。
+- **tag `v2.0.0` 在首次交付前被重指过一次**：从 `1e0ea3a` 改指到定稿提交（目的是让「V2 首个正式版」自带版本切换指南）；
+  重指发生在任何用户取用之前（仓库无 Releases、无消费者），**此后不再移动**；`v1-final` 自始至终只指向 `9a975b9`。
