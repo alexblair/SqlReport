@@ -1072,9 +1072,21 @@ class TestFilterInputUX(BaseReportTest):
         return body
 
     def test_th_min_width_rule(self):
-        """表头列保守 min-width（100px）保证窄列输入框可用"""
+        """表头列保守 min-width（156px）保证窄列输入框可用。
+
+        2026-10-05 收紧（复核 I1）：原断言只要求 `\\d+px`（“有个数字”即过），
+        现钉死真实值 156px。公共样式单一来源是 `render._COMMON_CSS`（知识库 06 卷：
+        禁止页面级 `<style>` 补丁），所以在这里断言即等价于页面级断言；
+        另加一条：报表页必须真的带上公共样式（外链 `common.css` 或内联回退），
+        否则再正确的常量也到不了浏览器。
+        """
         body = self._render()
-        self.assertRegex(render._COMMON_CSS, r"th:first-child \+ th\s*\{\s*min-width:\s*\d+px")
+        self.assertRegex(
+            render._COMMON_CSS,
+            r"th:first-child \+ th\s*\{\s*min-width:\s*156px\}")
+        self.assertTrue(
+            "/common.css" in body or "min-width:156px" in body,
+            "报表页未携带公共样式（外链或内联回退均未命中）")
 
     def test_desktop_focus_expand_css(self):
         """桌面：聚焦展开为固定较宽宽度（CSS :focus 展开）"""

@@ -435,8 +435,9 @@ Redis 并读写真实快照**。C-4 之前导出绕过 `execute_report` 碰不�
 `reset_redis_manager` 显式注入；实测 `test_redis_cache*` 全部 patch
 `RedisConnectionManager._create_client`，从不连真实服务）。
 
-**待办**：官方入口应改为 `discover -s tests/ -t . -v`。按用户 2026-09-29 决策，
-本次只记入报告并同步知识库，不改 AGENTS.md。
+**已落地（2026-10-05 订正）**：官方入口现已统一为 `discover -s tests/ -t . -v` ——
+`AGENTS.md` 硬性 #8 与 §4 命令块均已写明，`08-testing-conventions.md` 收录该陷阱。
+原「本次只记入报告并同步知识库，不改 AGENTS.md」的限制已被后续改动取代。
 
 ### 10.8 C-3 实施结果：派生态缓存（**全程最大的一笔收益**）
 

@@ -208,6 +208,8 @@ if (not int(report.get("allow_write", 1) or 0) and sql_contains_write(_sql)) \
   **不允许**出现反方向的误放行
 - 既有缺口（**非本设计引入，也不由本设计修复**）：`SELECT … INTO OUTFILE` / `INTO DUMPFILE` 首关键词是 `SELECT`，
   在 `sql_contains_write` 中一直被当作「读」。如需收紧应另立任务，勿在本设计里顺手夹带
+- 订正（2026-10-05）：该缺口**已另立并落地**——见 `2026-10-05-outfile-write-detect-design.md`
+  （两个判定函数均判写 + 机械门禁；判定规则见该设计 §4.1）。
 
 ## 6. 规则对全部真实报表的验证结果（只读试算）
 

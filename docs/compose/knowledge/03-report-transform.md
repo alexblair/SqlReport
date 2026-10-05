@@ -13,6 +13,7 @@
 
 1. **写护栏在读缓存之前**（约 :997）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**（2026-09-25，2026-09-30 收窄）——热快照不得短路写执行，每次真实跑库，缓存回填照常。
    **判定分两个函数**（2026-09-30，`docs/compose/spec/2026-09-30-write-report-cache-gate-design.md`）：`sql_contains_write`（从严，服务权限与警示）与 `sql_has_persistent_write`（精确，只服务缓存门槛与静态护栏）。会话级语句（`CREATE`/`DROP TEMPORARY TABLE`、`SET @用户变量`）与 CTE 里的 `REPLACE()`/`INSERT()` 字符串函数调用**不再**跳过缓存读。
+   **读白名单不豁免写文件**（2026-10-05，`../spec/2026-10-05-outfile-write-detect-design.md` §4.1）：`SELECT … INTO OUTFILE` / `INTO DUMPFILE` 写的是 **MySQL 服务端磁盘**，首关键词虽是 SELECT 也必须判写；判定挂在**相邻关键词对** `(INTO, OUTFILE|DUMPFILE)` 上并插在读白名单分支**之前**。
 2. 优先 Redis 快照（`prefer_cache`）→ 否则查 MySQL → 写回快照（分布式锁）；预览 SQL 与配置不一致**不写 Redis**
 3. L1 `QueryCache` 进程缓存全量行，键约 `(report_id, sql_query)`
 4. 全量输出护栏：`allow_all_output=0` 且 `max_rows>0` → 截断并 `truncated`；`_cache_matches_limit_policy` 拒绝「已截断但当前要全量」的旧缓存
@@ -94,7 +95,7 @@ report.allow_write 与 sql_contains_write(sql)
 文案: report.WRITE_DENIED_MESSAGE / WRITE_ALLOWED_BANNER（:44-45）
 ```
 
-`sql_contains_write`（query_executor:408）：首词 SELECT/SHOW/DESC/EXPLAIN=读；WITH 扫写集；其余=写；`SET` 也算写；未知首词从严当写。
+`sql_contains_write`（`query_executor.py`；**行号随改动漂移，用 `codegraph node sql_contains_write` 取当前值**）：首词 SELECT/SHOW/DESC/EXPLAIN=读（**例外：`INTO OUTFILE`/`INTO DUMPFILE` 判写**，2026-10-05）；WITH 扫写集；其余=写；`SET` 也算写；未知首词从严当写。
 
 ## 多结果集
 

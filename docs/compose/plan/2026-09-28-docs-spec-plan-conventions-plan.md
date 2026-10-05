@@ -1,5 +1,9 @@
 # 文档约定初始化（spec/plan 落位 + docs 入库）实施计划
 
+> 状态: 已完成（2026-10-05 订正）
+> 备注: 本文件 checkbox 从未逐条回勾；完成判定以 `git ls-files docs/` 非空且 `AGENTS.md` §3 约定节存在为准。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 落地本项目 spec/plan 存储与格式约定——放开 `docs/` 入库、AGENTS.md 新增约定节、存量文档一次性提交。

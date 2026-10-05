@@ -88,7 +88,9 @@
 
 ## 转正式单元测试建议
 
-- 落点：`tests/test_cache_write_scenarios.py`（进 discover）。
+- 落点（2026-10-05 订正）：本「转正式单测」建议**未落地**；四场景实现仍在 `tests/manual_cache_scenarios.py`
+  （`manual_` 前缀不被 `unittest discover` 收集，需显式运行；脚本 docstring 自述为「正式单测的蓝本」）。
+  原写的 `tests/test_cache_write_scenarios.py` 不存在。
 - skip 守卫（对齐 `tests/integration` 模式）：测试 Redis 6390 不可达 →
   `raise unittest.SkipTest("测试 Redis 未启动")`；`config.debug.db` 不存在 → skip。
 - fixture：复制 debug 库与 orders 库到 `tempfile.mkdtemp`（进程内不删，取证友好）；

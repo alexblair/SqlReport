@@ -357,7 +357,7 @@ git commit -m "docs(kb): 同步持久写判定与静态护栏变更，记录两�
   由 `DELETE FROM t` 改为会话级脚本（**断言未改**，原因见 spec §9.4 第 4 条）。
 - T4 完成：本地夹具 + A/B + 三端一致性。新建 `scripts/perf/seed_session_script_report.py`、`scripts/perf/bench_session_script.py`。
   环境裁决：**生产不可用于 T4**（需在 MySQL 建表灌数 + 造 `TRUNCATE+INSERT` 真写夹具，无法只读化）→
-  全程走本地 debug 环境（`DEBUG_CONFIG_FILE=app_config.debug.json1`，**未改名**）。
+  全程走本地 debug 环境（配置文件 `app_config.debug.json` —— `app_config.py:41` 的**默认路径**，不必设 `DEBUG_CONFIG_FILE`；2026-10-05 核实订正：旧写的 `app_config.debug.json1` 不存在）。
   实测：旧臂翻页 **P50 358.19ms / P95 432.05ms**、数据源执行 **21/21**；新臂翻页 **P50 0.12ms / P95 0.17ms**、
   数据源执行 **1/21**；`--check-consumers` 报表页/导出/API 三条真实路径增量均 **0**（`RESULT: PASS`）。
   证据：`perf-logs/T4-seed-*.log`、`perf-logs/T4-old-*.log`、`perf-logs/T4-new-*.log`、`perf-logs/T4-consumers-*.log`。

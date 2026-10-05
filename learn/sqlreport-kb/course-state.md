@@ -65,6 +65,7 @@
 | 端到端压测噪声约 ±6%，transform 收益须用隔离 A/B | practiced | spec §10.3 | 中 | 做性能对比时 |
 | 写判定分工：`sql_contains_write`（从严、权限侧）vs `sql_has_persistent_write`（精确、缓存门槛与静态护栏） | practiced | spec 2026-09-30 §5 | 中 | 动 allow_write / skip_cache_read / 静态护栏时 |
 | 静态护栏是**并集**（权限判定 + 持久写判定），不是替换 | practiced | spec 2026-09-30 §3.3 | 高 | 改静态分支条件时 |
+| `SELECT … INTO OUTFILE`/`INTO DUMPFILE` 属持久写（读白名单不豁免） | mastered | spec 2026-10-05 §4.1 + `tests/test_sql_persistent_write.py::TestSqlHasPersistentWriteIntoFile` | 高 | 改写判定首关键词/关键词集合时 |
 
 ## 复习队列
 
@@ -91,6 +92,9 @@ kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写
 index=codegraph ok (146 files, 6870 nodes, 17278 edges, v1.4.0)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
+last_sync=2026-10-05 收尾轮（OUTFILE/DUMPFILE 写判定缺口修复 + 全项目遗留收口）
+           spec/plan `2026-10-05-outfile-write-detect-*`；03 卷补「读白名单不豁免写文件」；
+           reports/2026-10-05-closeout-decisions.md 记录「裁定不做」6 项
 last_sync=2026-09-29 执行层性能优化（spec 2026-09-29-execution-layer-performance-design.md）
            同步 01/03/07/08 分卷：连接池、派生态缓存、导出并入缓存、
            transform 性能要点、discover -t . 隔离、性能工具链

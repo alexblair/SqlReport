@@ -200,5 +200,83 @@ class TestSqlHasPersistentWriteEdges(unittest.TestCase):
                 self.assertFalse(sql_has_persistent_write(sql))
 
 
+class TestSqlHasPersistentWriteIntoFile(unittest.TestCase):
+    """`SELECT … INTO OUTFILE` / `INTO DUMPFILE` → 必须判写（spec 2026-10-05 §4.3）。
+
+    为什么不能只把 `OUTFILE`/`DUMPFILE` 加进 `_WRITE_STATEMENT_KEYWORDS`：
+    首关键词是 `SELECT` 时，读白名单（`_READ_STATEMENT_KEYWORDS`）在关键词集合
+    判定**之前**就 `continue` 掉了，那条路永远轮不到执行（spec §3 方案 A）。
+    因此判定必须挂在「相邻关键词对」上，且插在读白名单分支之前。
+
+    正向形状同时断言两个函数：只修一条通道 = 只堵住权限旁路或只堵住缓存短路，
+    与复核 C-1「只修一侧被打回」是同一类错误。
+    """
+
+    def test_into_outfile_is_write(self):
+        """写 MySQL 服务端文件：含注释分隔、小写、子句尾随、WITH 前缀、多语句。"""
+        for sql in ("SELECT * FROM t INTO OUTFILE '/tmp/a.csv'",
+                    "select id from t into outfile '/tmp/a' fields terminated by ','",
+                    "SELECT * FROM t INTO /* c */ OUTFILE '/tmp/a'",
+                    "WITH x AS (SELECT 1) SELECT * FROM x INTO OUTFILE '/tmp/a'",
+                    "SET @x := 1; SELECT * FROM t INTO OUTFILE '/tmp/a';"):
+            with self.subTest(sql=sql):
+                self.assertTrue(sql_contains_write(sql), sql)
+                self.assertTrue(sql_has_persistent_write(sql), sql)
+
+    def test_into_dumpfile_is_write(self):
+        for sql in ("SELECT * FROM t INTO DUMPFILE '/tmp/a'",
+                    "select * from t into dumpfile '/tmp/a'"):
+            with self.subTest(sql=sql):
+                self.assertTrue(sql_contains_write(sql), sql)
+                self.assertTrue(sql_has_persistent_write(sql), sql)
+
+    def test_into_user_variable_stays_read(self):
+        """反向：`INTO @变量` 是会话级赋值，**必须继续判读**（否则纯读报表永久失去缓存）。"""
+        for sql in ("SELECT * FROM t INTO @a, @b",
+                    "SELECT COUNT(0) INTO @n FROM t"):
+            with self.subTest(sql=sql):
+                self.assertFalse(sql_contains_write(sql), sql)
+                self.assertFalse(sql_has_persistent_write(sql), sql)
+
+    def test_user_variable_script_stays_non_persistent(self):
+        """带 `SET @x` 的多语句脚本：精确判定仍为「非持久写」。
+
+        `sql_contains_write` 在此为 True 属**既有分工**（SET 首关键词不在读白名单，
+        从严判定），与 `INTO OUTFILE` 无关——本用例只钉精确判定，
+        避免把两条通道的分工写反。
+        """
+        sql = "SET @x := 1; SELECT * FROM t INTO @a;"
+        self.assertTrue(sql_contains_write(sql), "既有从严分工：SET 语句算写")
+        self.assertFalse(sql_has_persistent_write(sql))
+
+    def test_string_literal_and_comment_not_misdetected(self):
+        """反向：字面量/注释里的同名词不产出关键词（tokenizer 已排除）。"""
+        for sql in ("SELECT 'INTO OUTFILE' AS s",
+                    'SELECT "INTO DUMPFILE" AS s',
+                    "/* INTO OUTFILE '/p' */ SELECT 1",
+                    "-- INTO OUTFILE '/p'\nSELECT 1",
+                    "SELECT * FROM t WHERE msg = 'into outfile /tmp/a'"):
+            with self.subTest(sql=sql):
+                self.assertFalse(sql_contains_write(sql), sql)
+                self.assertFalse(sql_has_persistent_write(sql), sql)
+
+    def test_identifier_named_like_outfile_is_not_write(self):
+        """反向：单个标识符 `OUTFILE_COL` / 列名 `outfile` ≠ 关键词 `OUTFILE`。"""
+        for sql in ("SELECT * FROM t INTO OUTFILE_COL",
+                    "SELECT outfile FROM t"):
+            with self.subTest(sql=sql):
+                self.assertFalse(sql_contains_write(sql), sql)
+                self.assertFalse(sql_has_persistent_write(sql), sql)
+
+    def test_table_named_outfile_keeps_write_conclusion(self):
+        """表名含 outfile 本就判写，本次改动不得改变该结论。"""
+        for sql in ("INSERT INTO outfile_order (id) VALUES (1)",
+                    "CREATE TABLE outfile_log (id INT)"):
+            with self.subTest(sql=sql):
+                self.assertTrue(sql_contains_write(sql), sql)
+                self.assertTrue(sql_has_persistent_write(sql), sql)
+
+
+
 if __name__ == "__main__":
     unittest.main()

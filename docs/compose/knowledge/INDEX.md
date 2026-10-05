@@ -138,6 +138,10 @@ codegraph sync                                # 每次改完代码必跑
 **不是任务查证入口**——接到新任务先看 `docs/compose/spec/` 的最新生效 spec；
 「该读哪一卷 / 改完必更新哪一卷」看仓库根 `AGENTS.md` §0 入口引导路由表。
 
+**跨会话记忆**：仓库根 `MEMORY.md`（Rules + Discovered），每轮开工前必读；它不是分卷、
+也不在 `docs/compose/knowledge/` 内，登记于此以便检索（2026-10-05 闭环
+`../reports/ui-r3-retrospective.md` §六 的建议）。
+
 ## 8. 分卷来源
 
 | 分卷 | 来源 |

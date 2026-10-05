@@ -78,6 +78,14 @@
     改完任何 `.py`/`.js`/`.mjs` **同一次任务内**跑 `codegraph sync`。完整命令表与降级白名单见
     `knowledge/09-agent-workflow.md`「代码检索纪律」。
 
+16. **写判定第三个易漏形状：`SELECT … INTO OUTFILE` / `INTO DUMPFILE`**（2026-10-05）：
+    两个判定函数的第一道判据是「首关键词落在读白名单 `{SELECT,SHOW,DESCRIBE,DESC,EXPLAIN}` 就当读」，
+    而关键词集合里从来没有 `OUTFILE`/`DUMPFILE` → 写 **MySQL 服务端磁盘** 的语句被当成纯读，
+    `allow_write=0` 被绕过（`/report` 只要求登录、不要求管理员）、缓存也会短路它。
+    修法：判定挂在**相邻关键词对** `(INTO, OUTFILE|DUMPFILE)` 上，插在读白名单分支**之前**
+    （只把 OUTFILE 加进关键词集合**无效** —— 首关键词分支先 `continue` 了）。
+    反向必须继续判读：`SELECT … INTO @变量`（会话级）、`'INTO OUTFILE'` 字面量、`OUTFILE_COL` 标识符。
+
 ## Discovered（环境事实）
 
 - **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（146 文件 / 6870 节点 / 17278 边），`codegraph status`
@@ -113,9 +121,12 @@
   「紧跟 `(`」的关键词，否则纯读 CTE 报表（#17）会被判成写而永久跳过缓存。
 - **静态护栏是并集不是替换**：`(allow_write=0 且含写) 或 含持久写` → 回退普通链路。
   只判持久写会放行 `allow_write=0` 的会话级脚本，形成权限旁路。
-- **本地 debug 栈可直接用，不必改 `app_config.debug.json1` 的文件名**：
-  `DEBUG_CONFIG_FILE=app_config.debug.json1` 即可激活（Redis db0/前缀 `sr_debug`、
+- **本地 debug 栈可直接用**（2026-10-05 核实订正）：调试配置就是工作树里的
+  `app_config.debug.json`（被 gitignore），也是 `app_config.py:41` 的**默认**路径 ——
+  不设任何环境变量即可激活（Redis db0/前缀 `sr_debug`、
   sqlite `config.debug.db`、数据池指向 `127.0.0.1:3307/sqlreport_test`）。
+  **旧文档里的 `DEBUG_CONFIG_FILE=app_config.debug.json1` 已不存在**（本机实测无此文件，
+  照抄会白跑一轮）；只有要换用别的配置文件时才需要设 `DEBUG_CONFIG_FILE`。
 - **静态分析门禁会拦跨脚本 import**：`scripts/perf/*.py` 之间只能用点号包路径
   （`from scripts.perf.x import y`），顶层模块名（`from x import y`）会被判
   「无法导入模块」且**没有 noqa 豁免**（`tests/bug_hunt/static_analyzer.py`）。

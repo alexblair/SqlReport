@@ -308,6 +308,7 @@ python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：
 21. **CDP 验收脚本自身的坑**（都是“测了个假绿/假红”）：陈旧 cookie 拿到登录页；`Page.navigate` 清空 `window.*` 自定义钩子；选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）；`children` 下标被占位元素（如 `#sortList > .sort-empty`）污染；拖拽语义是「**插到目标项之前**」，故 `drag(i, i+1)` 与「拖到自己身上」都是 no-op，要验必须反向拖或跨项拖（实测：排序项 0→1 顺序不变曾被误读为“换页后拖拽失效”）；拿**条件渲染**的函数当存在性判据（`toggleResultIndex` 只在多结果集报表输出，单结果集页 `typeof` 为 `undefined`）；自定义列默认勾选使“取消勾选”语义反转。
 22. **改了 `render.py`/`report.py`/`config.py` 但服务没重启** → 页面内联 JS 从内存直出，验到的是旧行为。配合 HTML `Cache-Control: no-store`（`server.py:_send_html`），否则用户标签页也会跑旧脚本。
 23. **新增门禁不等效于门禁有效**：从未失败过的门禁可能只是恰好路过当前代码。新门禁必须做 RED-GREEN 证明（把历史缺陷打回去→必须失败；还原→必须通过）：`venv/bin/python tests/bug_hunt/gate_redproof.py`（会临时改写 `report.py` 并校验 sha256 还原；不进 discover，勿当常规回归）。
+24. **断言公共 CSS 别对着报表页 `body` 断言**（2026-10-05 实测）：报表页公共样式走**外链** `/static/vendor/self@<hash>/common.css`（`render.py:2484`），**不内联**；只有资产写入失败才回退 `<style>{_COMMON_CSS}</style>`。所以「页面产物里必须出现某条 CSS 规则」的断言在正常环境**必红**（本轮白跑一轮）。正确写法：① 断言公共样式单一来源 `render._COMMON_CSS`（知识库 06 卷已规定禁止页面级补丁，故与页面级等价）；② 另加一条「页面确实携带公共样式」（`"/common.css" in body` 或内联回退命中）。另：收紧旧断言必须用**实测读出的真值**（本轮 `th:first-child + th` 实际是 `156px`，旧断言只要求 `\d+px`、docstring 还写着 100px），并做 RED-PROOF 证明改坏会红。
 
 ## 文档过时线索（AGENTS.md 已提醒）
 

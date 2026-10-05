@@ -2,8 +2,7 @@
 
 > **给执行代理**：实施本计划时逐任务勾选（`- [ ]`）。可用 subagent-driven-development（每任务一实现者 + 一复核者）
 > 或 executing-plans（本会话内自行实施）。**禁止**创建 `docs/superpowers/`（AGENTS §3）。
-
-> 状态: 生效
+> 状态: 已完成（2026-10-05 订正：原写「生效」不在 plan 合法状态值内，见 `2026-09-28-docs-spec-plan-conventions-design.md:61`；checkbox 未逐条回勾，完成判定以文末验收/复核记录为准）
 > 对应 spec: `docs/compose/spec/2026-10-05-cache-source-label-design.md`
 
 **Goal:** 让 `cache_info.source` 真正表示「本次取数来源」，使报表页缓存徽标不再把刚查库的数据说成缓存快照。

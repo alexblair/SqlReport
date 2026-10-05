@@ -506,6 +506,29 @@ _WRITE_STATEMENT_KEYWORDS = frozenset({
 })
 
 
+# `SELECT … INTO OUTFILE '/p'` / `INTO DUMPFILE '/p'` 写的是 **MySQL 服务端磁盘**。
+# 首关键词是 SELECT，会被下面的读白名单直接放行 → allow_write 护栏与缓存读门槛都会漏判。
+# 只认关键词流里**相邻**的 (INTO, OUTFILE|DUMPFILE)：字符串字面量与注释已被
+# `_iter_sql_keywords_with_pos` 排除，故 `SELECT 'INTO OUTFILE'` / `INTO OUTFILE_COL`
+# 不会被误判为写（spec 2026-10-05-outfile-write-detect-design §4.1）。
+_FILE_WRITE_TARGETS = frozenset({"OUTFILE", "DUMPFILE"})
+
+
+def _has_into_file_write(keywords) -> bool:
+    """关键词序列中是否存在相邻的 (INTO, OUTFILE|DUMPFILE)。
+
+    Args:
+        keywords: 关键词可迭代对象——`sql_contains_write` 传字符串列表，
+            `sql_has_persistent_write` 传 (关键词, 结束偏移) 元组的生成器。
+    """
+    previous = None
+    for keyword in keywords:
+        if previous == "INTO" and keyword in _FILE_WRITE_TARGETS:
+            return True
+        previous = keyword
+    return False
+
+
 def _iter_sql_keywords_with_pos(statement: str):
     """迭代语句中的 (关键词大写, 关键词结束偏移)。
 
@@ -588,6 +611,10 @@ def sql_contains_write(sql) -> bool:
         keywords = list(_iter_sql_keywords(statement))
         if not keywords:
             continue  # 纯注释/空语句：不构成写操作
+        if _has_into_file_write(keywords):
+            # `SELECT … INTO OUTFILE`/`DUMPFILE`：首关键词是 SELECT，但写的是
+            # MySQL 服务端磁盘 → 必须与其它写语句同等拦截（spec 2026-10-05 §4.2）。
+            return True
         first = keywords[0]
         if first in _READ_STATEMENT_KEYWORDS:
             continue
@@ -675,6 +702,9 @@ def sql_has_persistent_write(sql) -> bool:
         keywords = list(_iter_sql_keywords_with_pos(statement))
         if not keywords:
             continue  # 纯注释/空语句：不构成写操作
+        if _has_into_file_write(kw for kw, _ in keywords):
+            # 同上：写文件是持久副作用，不得被缓存读短路（spec 2026-10-05 §4.2）。
+            return True
         first, first_end = keywords[0]
         if first in _READ_STATEMENT_KEYWORDS:
             continue
