@@ -222,8 +222,9 @@ class TestExecuteReportRedisLockContention(unittest.TestCase):
 
         self.assertEqual(result.results[0]["rows"], [(3,)])
         mock_exec.assert_called_once()
-        # 真实行为：等待锁超时后直查 MySQL 成功，并写入 Redis 快照 → source=redis
-        self.assertEqual(result.cache_info["source"], "redis")
+        # 真实行为：等待锁超时后直查 MySQL 成功，并写入 Redis 快照 → source=mysql
+        self.assertEqual(result.cache_info["source"], "mysql")
+        self.assertIs(result.cache_info["snapshot_written"], True)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +260,8 @@ class TestExecuteReportRedisFallback(unittest.TestCase):
         mock_exec.assert_called_once()
         mgr.set_snapshot.assert_called_once()       # 重建写入 Redis
         self.assertEqual(result.results[0]["rows"], [(5,)])
-        self.assertEqual(result.cache_info["source"], "redis")
+        self.assertEqual(result.cache_info["source"], "mysql")
+        self.assertIs(result.cache_info["snapshot_written"], True)
 
     @patch("report.redis_cache.get_redis_manager")
     @patch("report.redis_cache.redis_available", return_value=True)
@@ -329,8 +331,9 @@ class TestExecuteReportRedisDegradation(unittest.TestCase):
                                        report=REDIS_REPORT_CFG)
 
         self.assertEqual(result.results[0]["rows"], [(2,)])
-        # 真实行为：MySQL 成功后写入 Redis 快照 → source=redis（fresh 快照）
-        self.assertEqual(result.cache_info["source"], "redis")
+        # 真实行为：MySQL 成功后写入 Redis 快照 → source=mysql（本次取数来自 MySQL）
+        self.assertEqual(result.cache_info["source"], "mysql")
+        self.assertIs(result.cache_info["snapshot_written"], True)
         self.assertTrue(result.cache_info["fresh"])
         mock_exec.assert_called_once()
         mgr.set_snapshot.assert_called_once()

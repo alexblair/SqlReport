@@ -89,7 +89,7 @@ class TestCacheUIDisplay(unittest.TestCase):
         self.assertIn("已启用缓存", body)
 
     def test_cache_badge_missing_ttl_display(self):
-        """FAIL: cache_ttl_hours=24 时未显示 TTL 信息"""
+        """反例：cache_ttl_hours=24 时未显示 TTL 信息"""
         result = self._make_result(cache_info={"source": "redis", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "TTL报表", "sql_query": "SELECT 1", "memo": "",
@@ -302,14 +302,15 @@ class TestRebuildCacheButton(unittest.TestCase):
 
         result = report.execute_report(1, "SELECT 1", pool, report=report_config, refresh=True)
         self.assertIsNotNone(result.cache_info)
-        self.assertEqual(result.cache_info["source"], "redis",
-                         "重建缓存后应显示 Redis 快照来源")
+        self.assertEqual(result.cache_info["source"], "mysql",
+                         "重建缓存后应显示实时查询来源（本次取数来自 MySQL，同时写入快照）")
+        self.assertIs(result.cache_info["snapshot_written"], True)
         self.assertTrue(result.cache_info.get("fresh", False))
 
-        # 验证进程缓存也被标记为 Redis 来源
+        # 验证进程缓存条目不冒名 Redis 来源（本次数据来自 MySQL → source=None）
         cached = report._query_cache.get(1)
         self.assertIsNotNone(cached)
-        self.assertEqual(cached.source, "redis")
+        self.assertIsNone(cached.source)
 
 
 class TestCacheBadgeExpiry(unittest.TestCase):

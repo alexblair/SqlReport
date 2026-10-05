@@ -1146,7 +1146,9 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
             bool(getattr(cached, "truncated", False)), limit_rows):
         all_results = cached.results
         truncated_flag = bool(getattr(cached, "truncated", False))
-        # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示
+        # 如果进程缓存源自 Redis，保留原始来源信息以供 UI 展示。
+        # 只有「回填自 L2 快照」的 L1 条目才带 source="redis"（见下方 cache.set）；
+        # 数据来自 MySQL 的 L1 条目 source=None → 报 process（2026-10-05 取数来源语义）。
         if cached.source == "redis":
             cache_info = {
                 "source": "redis",
@@ -1257,18 +1259,18 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
                             )
                             _mgr.set_snapshot(snapshot_key, _snap, ttl_hours=cache_ttl_hours)
                             _redis_written = True
+                        # L1 条目不标来源：本次数据来自 MySQL，命中即报 process（2026-10-05）
                         cache.set(report_id, all_results, sql_query,
-                                         source="redis" if _redis_written else None,
-                                         source_timestamp=_snap_ts if _redis_written else None,
                                          truncated=_cut)
                         if _redis_written:
                             cache_info = {
-                                "source": "redis",
+                                "source": "mysql",
                                 "timestamp": _snap_ts,
                                 "fresh": True,
+                                "snapshot_written": True,
                             }
                         else:
-                            cache_info = {"source": "mysql"}
+                            cache_info = {"source": "mysql", "snapshot_written": False}
             finally:
                 # 仅当本进程实际持有锁时才释放，覆盖成功/兜底/抛异常/锁等待命中快照全部路径；
                 # wait_for_lock 超时未获锁（lock_held=False）时不误删他人持有的锁。

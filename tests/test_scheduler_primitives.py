@@ -91,8 +91,9 @@ class TestForceRebuild(unittest.TestCase):
             self.assertIn("旧-A", str(normal.results))
 
             rebuilt = self._run({"host": "h"}, force_rebuild=True)
-            # 成功后新数据写入各层缓存：进程缓存来源标记为 redis（快照已更新）
-            self.assertEqual(rebuilt.cache_info["source"], "redis")
+            # 成功后新数据写入各层缓存：本次取数来自 MySQL → source=mysql（快照已更新）
+            self.assertEqual(rebuilt.cache_info["source"], "mysql")
+            self.assertIs(rebuilt.cache_info["snapshot_written"], True)
             self.assertTrue(rebuilt.cache_info.get("fresh"))
             self.assertIn("新-B", str(rebuilt.results))
             # 新快照已原子写入 Redis（先算后换的"换"）

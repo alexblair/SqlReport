@@ -222,8 +222,8 @@ def scenario_2():
     cache = fresh_cache()
     _DB_HITS["n"] = 0
     rr = run_exec(9902, rep, cache)
-    check(rr.cache_info and rr.cache_info.get("source") == "redis",
-          "首查执行数据源并写回Redis", str(rr.cache_info))
+    check(rr.cache_info and rr.cache_info.get("source") == "mysql",
+          "首查执行数据源并写回Redis快照(本次取数=mysql)", str(rr.cache_info))
     check(_DB_HITS["n"] == 1, "首查数据源执行1次", f"hits={_DB_HITS['n']}")
     snap = mgr.get_snapshot(key)
     check(snap is not None and len(snap.results[0]["rows"]) == 3,
@@ -258,8 +258,8 @@ def scenario_3():
     try:
         # 前置：数据源完好时冷查一次 → 建立 Redis 热快照
         rr0 = run_exec(9903, rep, fresh_cache())
-        check(rr0.cache_info and rr0.cache_info.get("source") == "redis",
-              "前置：冷查建立Redis热快照", str(rr0.cache_info))
+        check(rr0.cache_info and rr0.cache_info.get("source") == "mysql",
+              "前置：冷查建立Redis热快照(本次取数=mysql)", str(rr0.cache_info))
         n_rows = len(rr0.results[0]["rows"])
         check(n_rows > 0, "前置：debug库副本可查出报表配置", f"rows={n_rows}")
 
@@ -318,8 +318,8 @@ def scenario_4():
     rr = run_exec(9904, write_rep, fresh_cache())
     check(sqlite_status(1) == "done", "4a UPDATE真实执行落库",
           f"sqlite status={sqlite_status(1)}")
-    check(rr.cache_info and rr.cache_info.get("source") == "redis",
-          "4a 写后结果回写Redis", str(rr.cache_info))
+    check(rr.cache_info and rr.cache_info.get("source") == "mysql",
+          "4a 写后结果回写Redis(本次取数=mysql)", str(rr.cache_info))
     snap = mgr.get_snapshot(key)
     got = snap.results[0]["rows"][0] if snap else None
     check(got is not None and got[2] == "done",
