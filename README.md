@@ -125,6 +125,8 @@ source venv/bin/activate
 python server.py
 ```
 
+> **Version lines (V1 / V2)**: this repository carries two lines — `V2` (the **default branch**, actively updated) and `V1` (**frozen**, no further updates). The command above gets **V2**; for the old release use `git clone -b V1 https://github.com/alexblair/SqlReport.git`. For pinning a specific tag and for switching between V1 and V2 (including data backup and rollback), see the **[V1 ↔ V2 version switch guide](./docs/version-switch-guide.md)** (Chinese).
+
 ### Local test environment (port 8099)
 
 ```bash

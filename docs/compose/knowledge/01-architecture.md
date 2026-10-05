@@ -19,6 +19,17 @@
 安装：`./install.sh` → `source venv/bin/activate`  
 服务：`sudo bash manage_service.sh install`（单元 `web-report`）  
 本地测试环境：`./test_env.sh start|stop|restart|status|log|fg`——默认 `0.0.0.0:8099`（任意地址可访问），靠 `HOST`/`PORT` 环境变量覆盖（`get_server_config` 中优先级最高，**不改配置文件**）；不设 `CONFIG_FILE` → 自动叠加 `app_config.debug.json`，测试环境落 `config.debug.db`/`audit.debug.db`/`run.debug.log`；PID 文件与控制台日志在 `run-logs/`；停止走 SIGINT（命中 `server.py` 优雅关闭分支）→ SIGTERM → SIGKILL 逐级兜底。可用 `TEST_PORT`/`TEST_HOST`/`TEST_BASE_CONFIG=1` 覆盖。
+## 版本线与分支策略（2026-10-05 起）
+
+| 版本线 | 分支 | 固定标签 | 当前提交 | 状态 |
+|--------|------|----------|----------|------|
+| V1 | `V1` | `v1-final` | `9a975b9` | **冻结**：受 GitHub 仓库规则 `V1-freeze`（id 24514074）保护，禁 update / 禁删除 / 禁强推，实测推送报 `GH013: Repository rule violations found` |
+| V2 | `V2`（**默认分支**） | `v2.0.0`（含版本切换指南） | 分支头（持续前进） | 活跃主干：后续提交、修复、发版只进 V2 |
+
+- 旧名 `main` 已改名为 `V1`。**GitHub 的分支改名重定向只覆盖网页/API，不覆盖 `git` 协议的 refspec 匹配**：`git ls-remote origin main` 为空、`git clone -b main …` 失败、老 clone 的 `origin/main` 永不更新。
+- **用户侧取版与切换的单一来源是仓库根 `docs/version-switch-guide.md`**（本卷只记布局与纪律，不复制操作步骤）；双 README 的「快速开始/Quick Start」各有一行入口链接。
+- 两条线共用同一套配置库结构：V1→V2 未改 `config_db.py`（无 `CREATE TABLE`/`ALTER TABLE`），`requirements.txt` 零差异 → `git checkout` 往返切换不需要重装依赖、不需要迁移数据。**V2 之后若改表结构，回退 V1 必须同时恢复当天的 `config.db` 备份。**
+- 维护纪律：开发只在 V2；发版 `git tag -a v2.x.y -m …` 后显式 `git push origin v2.x.y`；**不要向 V1 推送**（会被规则拒绝）；V1 的唯一可信基准是 tag `v1-final`。
 
 ## 应用配置（`app_config.py`）
 
@@ -105,8 +116,6 @@ API 静态：static_cache/api/**.json + config_version + TTL；NGINX 可直出
 
 写测试时注意：连接池是**进程级全局**，测试注入的假连接归还后会泄漏给下一个
 用例。`BaseReportTest.setUp` 与各导出测试的 `setUp` 已统一 `clear_pools()`。
-
-## 运行时勿提交
 
 ## 运行时勿提交
 

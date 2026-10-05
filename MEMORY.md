@@ -86,6 +86,10 @@
     （只把 OUTFILE 加进关键词集合**无效** —— 首关键词分支先 `continue` 了）。
     反向必须继续判读：`SELECT … INTO @变量`（会话级）、`'INTO OUTFILE'` 字面量、`OUTFILE_COL` 标识符。
 
+17. **版本线纪律（2026-10-05）**：`V1` 冻结（GitHub ruleset `V1-freeze`，id 24514074，禁 update/删除/强推）、
+    `V2` 为默认分支并承接全部后续提交；开发/发版只进 V2，发版打附注 tag 后显式推送，**禁止向 V1 推送**。
+    用户侧「取哪一版 / 怎么切换」的单一来源是 `docs/version-switch-guide.md`（改动须同步双 README + `01-architecture.md`）。
+
 ## Discovered（环境事实）
 
 - **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（146 文件 / 6870 节点 / 17278 边），`codegraph status`
@@ -148,4 +152,13 @@
   **收尾必查**：本次新增/引用的文件名（README / spec / knowledge 里出现的路径）是否都在 `git ls-files` 里；`git worktree add --detach <dir> HEAD` 后 `grep -rlF <文件名>` 扫一遍。
 - **判断「过程残留 vs 有效资产」用产出者溯源，不要靠文件名**（2026-10-05）：`docs/compose/spec/shots/` 下先查「哪个脚本 `writeFileSync` 写了它」——产出脚本**已提升进 `scripts/ui-v2/e2e/`** 的才是可复现交付物；只存在于 gitignored `run-logs/` 的过程脚本产出的（`live-*`、`panel-sort-applied`、`panel-export-fixed`）= 过程图，不入库。
   另：**同目录图先 `md5sum` 去重** —— `live-audit-1440.png` 与 `live-overview-1440.png` 字节完全相同（即「审计页截成了概览页」），且画面带「查询中…」遮罩是加载中态；不逐张看图 + 不看产出者，根本发现不了。
+
+- **GitHub 操作慢时用本机代理 `http://127.0.0.1:6012`**（2026-10-05 用户指示）：直连 `git clone` 极慢
+  （`--depth 1` 几分钟拉不完），设 `https_proxy`/`http_proxy`/`all_proxy=http://127.0.0.1:6012` 后 API 1.5s 返回。
+  **clone 类命令一律加 `timeout` 并放后台作业**，禁止前台长阻塞（本会话因此被用户中断两次）。
+- **GitHub 分支改名的重定向只覆盖网页/API，不覆盖 git 的 refspec 匹配**（2026-10-05 实测）：`main` 改名 `V1` 后
+  `git ls-remote origin main` 为空、`git clone -b main` 直接失败、老 clone 的 `origin/main` 永不更新（假「Already up to date」）。
+  冻结旧线的可核查依据是 `GET /repos/{o}/{r}/rules/branches/<branch>`（返回 `update`/`deletion`/`non_fast_forward`）
+  与真实 push 被拒（`GH013: Repository rule violations found`）；**`git push --dry-run` 不触发规则检查，不能当冻结证据**。
+  另：改默认分支（`PATCH /repos/{o}/{r}`）与建 ruleset 都需 admin 权限（本机 PAT 具备）。
 

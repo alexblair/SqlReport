@@ -125,6 +125,8 @@ source venv/bin/activate
 python server.py
 ```
 
+> **版本线（V1 / V2）**：本仓库同时维护两条版本线 —— `V2`（**默认分支**，持续更新）与 `V1`（**已冻结**，不再更新）。上面的命令默认拿到 **V2**；需要旧版请用 `git clone -b V1 https://github.com/alexblair/SqlReport.git`。取固定版本（tag）、以及在 V1 ↔ V2 之间来回切换（含数据备份与回滚）的完整做法，见 **[《V1 ↔ V2 版本切换指南》](./docs/version-switch-guide.md)**。
+
 ### 本地测试环境（8099 端口）
 
 ```bash
