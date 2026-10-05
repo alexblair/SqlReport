@@ -133,3 +133,8 @@
   或重建索引条目 `git hash-object -w <target> && git update-index --cacheinfo 100644,<blob>,<path>`；
   ③ **改完必须验证「干净检出 HEAD 能自绿」**：`git worktree add --detach /tmp/x HEAD` 后跑受影响模块
   —— 工作树全绿 ≠ 提交自绿（工作树可能依赖未提交的他人在制品）。
+- **「已写进文档的资产未入库」= 断链，测试拦不住**（2026-10-05 踩坑）：一次提交把 `README.md` 的 8099 本地测试环境章节（`./test_env.sh start/status/stop` 与结构树条目 `├── test_env.sh`）提了，但 `test_env.sh` 本体未入库——干净检出跑满 3002 例全绿，照样是个断链提交。
+  **收尾必查**：本次新增/引用的文件名（README / spec / knowledge 里出现的路径）是否都在 `git ls-files` 里；`git worktree add --detach <dir> HEAD` 后 `grep -rlF <文件名>` 扫一遍。
+- **判断「过程残留 vs 有效资产」用产出者溯源，不要靠文件名**（2026-10-05）：`docs/compose/spec/shots/` 下先查「哪个脚本 `writeFileSync` 写了它」——产出脚本**已提升进 `scripts/ui-v2/e2e/`** 的才是可复现交付物；只存在于 gitignored `run-logs/` 的过程脚本产出的（`live-*`、`panel-sort-applied`、`panel-export-fixed`）= 过程图，不入库。
+  另：**同目录图先 `md5sum` 去重** —— `live-audit-1440.png` 与 `live-overview-1440.png` 字节完全相同（即「审计页截成了概览页」），且画面带「查询中…」遮罩是加载中态；不逐张看图 + 不看产出者，根本发现不了。
+
