@@ -5,7 +5,7 @@ verify_redis_fallback.py — 真实 Redis 快照 + 数据源不可用时的兜�
 spec §6.1 第 4 条要求：不能只靠单测，要真跑一次「数据源挂了页面仍显示数据」。
 
 做法（**不停止 MySQL、不改用户的 app_config.debug.json**）：
-  1. 用真实 MySQL 跑一次 prefer_cache=1 的报表 → 真实写入 Redis 快照；
+  1. 用真实 MySQL 跑一次 prefer_cache=1 的报表 → 真实写入 Redis 快照（2026-10-05 起本次取数来源报 mysql）；
   2. 把该报表的数据源端口改成一个无人监听的端口（127.0.0.1:3999），
      产生**真实的连接失败**（不是 mock）；
   3. 再跑一次 → 应命中 Redis 过期/新鲜快照，cache_info.source == "redis_fallback"；
@@ -76,8 +76,8 @@ def main() -> int:
         src1 = (r1.cache_info or {}).get("source")
         rows1 = [list(x) for x in r1.results[0]["rows"]]
         print(f"① 正常执行：source = {src1}，{len(rows1)} 行")
-        if src1 != "redis" or len(rows1) != 5:
-            failures.append(f"① 期望 source=redis 且 5 行，实际 {src1}/{len(rows1)}")
+        if src1 != "mysql" or len(rows1) != 5:
+            failures.append(f"① 期望 source=mysql（冷路径查库并写快照）且 5 行，实际 {src1}/{len(rows1)}")
 
         # ② 数据源不可用 + 快照在位 → L2 直接命中，根本不碰 MySQL
         report._query_cache.clear()

@@ -11,7 +11,7 @@ bench.py — 执行层端到端 HTTP 压测
 
 除计时外还做一件更重要的事——**断言 cache_info.source 分布**：
     S1（P1，prefer_cache=0）：预热必须是 mysql，正式请求必须是 process
-    S5（P4，prefer_cache=1）：预热与正式请求都必须是 redis
+    S5（P4，prefer_cache=1）：预热 mysql（本次取数来自 MySQL 并写入快照），正式请求命中 L1 → process
 这比任何单测都更早发现 Redis 链路被破坏。
 
 用法：
@@ -284,11 +284,11 @@ def main() -> int:
     if unexpected:
         failures.append(f"S1 正式请求期望全为 process，实际 {unexpected}")
     s5 = scenarios["S5"]
-    if s5["warm_source"] != "redis":
-        failures.append(f"S5 预热 cache_source 期望 redis，实际 {s5['warm_source']}")
-    bad5 = {k: v for k, v in s5["result"]["cache_source_dist"].items() if k != "redis"}
+    if s5["warm_source"] != "mysql":
+        failures.append(f"S5 预热 cache_source 期望 mysql（冷路径查库并写快照），实际 {s5['warm_source']}")
+    bad5 = {k: v for k, v in s5["result"]["cache_source_dist"].items() if k != "process"}
     if bad5:
-        failures.append(f"S5 正式请求期望全为 redis，实际 {bad5}")
+        failures.append(f"S5 正式请求期望全为 process（300s 内命中 L1），实际 {bad5}")
     for name, sc in scenarios.items():
         if sc["errors"]:
             failures.append(f"{name} 有 {len(sc['errors'])} 次非 200")
