@@ -1418,11 +1418,11 @@ class TestReportSwitcherWidthCSS(unittest.TestCase):
 
     def test_select_fills_card_width(self):
         """select 保持 width:100% 填满卡片"""
-        self.assertIn("  .report-select select {\n    width: 100%", report_mod._CSS)
+        self.assertRegex(render_mod._COMMON_CSS, r'\.report-select\s+select\s*\{[^}]*width:\s*100%')
 
     def test_no_500px_pin_on_report_select(self):
         """500px 钉死不得残留"""
-        self.assertNotIn("max-width: 500px", report_mod._CSS)
+        self.assertNotRegex(render_mod._COMMON_CSS, r'max-width:\s*500px')
 
 
 # ===================================================================
@@ -1739,7 +1739,8 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         result = build_category_section_html(cat_reports, [],
                                               all_cats, self.all_reports,
                                               self.pools, cat_tree)
-        self.assertIn("margin-left:24px;border-left:3px solid #c7d2fe", result)
+        # v2：层级改由 class 承担（导轨容器），不再依赖内联样式
+        self.assertRegex(result, r'class="[^"]*\b(?:kids|cat-children)\b')
         self.assertIn("根分类", result)
         self.assertIn("子分类", result)
         self.assertIn(_icon("folder"), result)
@@ -1810,15 +1811,15 @@ class TestBuildCategorySectionHtml(unittest.TestCase):
         回归：cat-tree-toggle 点击调 classList.toggle('hidden')，若 .hidden 无
         display:none 规则则点击无视觉变化（用户反馈"折叠按钮点击无效"）。
         """
-        self.assertIn('.hidden { display: none !important; }', _COMMON_CSS)
+        self.assertRegex(_COMMON_CSS, r'\.hidden\s*\{\s*display:\s*none\s*!important')
 
     def test_page_style_emits_hidden_rule(self):
         """页面公共资产应包含 .hidden 规则（折叠端到端生效；批次6#28 后经外链引用）"""
         header = render_page_header("t")
         # 外链模式：<link> 引用 _COMMON_CSS；内联回退模式：<style> 直含规则。
-        linked = '<link rel="stylesheet"' in header and (
-            ".hidden { display: none !important; }" in _COMMON_CSS)
-        inline = ".hidden { display: none !important; }" in header
+        linked = '<link rel="stylesheet"' in header and bool(
+            re.search(r'\.hidden\s*\{\s*display:\s*none\s*!important', _COMMON_CSS))
+        inline = bool(re.search(r'\.hidden\s*\{\s*display:\s*none\s*!important', header))
         self.assertTrue(linked or inline)
 
     def test_pool_badge(self):
@@ -2363,36 +2364,37 @@ class TestStickyTableHeaderCss(unittest.TestCase):
     def test_th_is_sticky(self):
         """th 启用 position:sticky 且 top:0（吸附容器顶部）。"""
         css = _COMMON_CSS
-        self.assertIn("position: sticky", css)
-        self.assertIn("top: 0", css)
-        self.assertIn("z-index: 5", css)
+        # v2 起表头选择器写作 `table th`（提高特异性）；两者任一都算「th 选择器块」
+        m = re.search(r'^(?:table\s+)?th\s*\{([^}]*)\}', css, re.M)
+        self.assertIsNotNone(m, "未找到 th 选择器块")
+        block = m.group(1)
+        self.assertRegex(block, r'position:\s*sticky')
+        self.assertRegex(block, r'top:\s*0')
+        self.assertRegex(block, r'z-index:\s*\d+')
 
     def test_th_sticky_inside_th_rule(self):
         """sticky 规则位于 th 选择器块内（非全局裸规则）。"""
         css = _COMMON_CSS
         # 行首定位真 th 选择器：.api-main .path 等含 "th {" 子串，不能用裸 index
-        m = re.search(r"^th \{", css, re.M)
-        self.assertIsNotNone(m, "未找到行首 th 选择器块")
-        th_rule = css[m.start():]
-        th_block_end = th_rule.index("}")
-        th_block = th_rule[:th_block_end]
-        self.assertIn("position: sticky", th_block)
+        m = re.search(r"^(?:table\s+)?th\s*\{([^}]*)\}", css, re.M)
+        self.assertIsNotNone(m, "未找到 th 选择器块")
+        self.assertRegex(m.group(1), r'position:\s*sticky')
 
     def test_table_wrap_scrollable(self):
         """table-wrap 垂直可滚 + max-height 限高（触发容器内滚动）。"""
         css = _COMMON_CSS
-        self.assertIn("overflow-y: auto", css)
-        self.assertIn("max-height: calc(100vh - 130px)", css)
+        blocks = "\n".join(m.group(1) for m in re.finditer(r'\.table-wrap\s*\{([^}]*)\}', css))
+        self.assertRegex(blocks, r'overflow-y:\s*auto')
+        self.assertRegex(blocks, r'max-height:\s*calc\(100vh\s*-\s*130px\)')
 
     def test_table_wrap_rule_combined(self):
         """table-wrap 单规则内同时具备横向/垂直滚动与限高。"""
         css = _COMMON_CSS
-        tw_rule = css[css.index(".table-wrap {"):]
-        tw_block_end = tw_rule.index("}")
-        tw_block = tw_rule[:tw_block_end]
-        self.assertIn("overflow-x: auto", tw_block)
-        self.assertIn("overflow-y: auto", tw_block)
-        self.assertIn("max-height", tw_block)
+        blocks = [m.group(1) for m in re.finditer(r'\.table-wrap\s*\{([^}]*)\}', css)]
+        self.assertTrue(blocks, "未找到 .table-wrap 规则")
+        ok = [b for b in blocks if re.search(r'overflow-x:\s*auto', b)
+              and re.search(r'overflow-y:\s*auto', b) and re.search(r'max-height', b)]
+        self.assertTrue(ok, "需存在一条同时具备横向/垂直滚动与限高的 .table-wrap 规则")
 
 
 # ===================================================================
@@ -2701,11 +2703,11 @@ class TestSidebarCollapseAndUser(unittest.TestCase):
 
     def test_common_css_tri_state_rules(self):
         """公共 CSS 含三态收缩规则、手柄样式、小屏与触屏适配"""
-        self.assertIn('html.sb-rail .sidebar', _COMMON_CSS)
-        self.assertIn('html.sb-wide .sidebar', _COMMON_CSS)
-        self.assertIn('.sb-handle', _COMMON_CSS)
-        self.assertIn('@media (max-width: 1024px)', _COMMON_CSS)
-        self.assertIn('pointer: coarse', _COMMON_CSS)
+        self.assertRegex(_COMMON_CSS, r'html\.sb-rail\s+\.sidebar')
+        self.assertRegex(_COMMON_CSS, r'html\.sb-wide\s+\.sidebar')
+        self.assertRegex(_COMMON_CSS, r'\.sb-handle\s*\{')
+        self.assertRegex(_COMMON_CSS, r'@media\s*\(max-width:\s*1024px\)')
+        self.assertRegex(_COMMON_CSS, r'pointer:\s*coarse')
 
     def test_common_js_handle_init(self):
         """公共 JS 含手柄初始化与记忆读写，并挂入 initPage"""

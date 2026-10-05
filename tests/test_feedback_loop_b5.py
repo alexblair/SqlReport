@@ -58,7 +58,7 @@ class TestFlashAutohideMarkup(unittest.TestCase):
         """× 按钮 CSS 应包含 cursor:pointer（规格 b 条）"""
         css = render._COMMON_CSS
         self.assertIn(".flash-close", css)
-        self.assertIn("cursor: pointer", css)
+        self.assertRegex(css, r"cursor:\s*pointer")
 
 
 # ---------------------------------------------------------------------------

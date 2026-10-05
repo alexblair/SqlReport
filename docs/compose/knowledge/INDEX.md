@@ -86,7 +86,7 @@
 | 排序/列选择 | `sort_rows` / `select_columns` | report / export / api |
 | 筛选帮助文案 | `filter_help.py` | report / audit |
 | 写护栏文案 | `report.WRITE_DENIED_MESSAGE` 等 | report / export / api / config 编辑 |
-| 用户可见术语（缓存/品牌等） | `docs/compose/spec/ui-redesign-visual-spec.md` §5 术语表 | render 缓存徽标/横幅、标题 |
+| 用户可见术语（缓存/品牌等） | `docs/compose/spec/2026-09-30-ui-v2-design.md` §5 术语表 | render 缓存徽标/横幅、标题 |
 | 全量输出护栏 | `allow_all_output` + `max_rows` | report / export / api |
 | 页面骨架/CSS/JS | `render.render_page_header/footer`（侧栏页壳 `_NAV_GROUPS`、**侧栏三态收缩 `.sb-handle` 全高手柄 + `sqlreport_sidebar_collapsed` 记忆 + 请求级用户名上下文 `set_request_user`**）、`_BASE/_COMMON_*`（设计令牌）、hash 含 CSS+JS | 全站 |
 | 表单 flash/302 模式 | 各 `handle_*` 返回 `(code, url, headers)` | config/report |
@@ -119,12 +119,20 @@ server._handle
 ## 7. 索引与检索
 
 ```bash
-codegraph status
-codegraph query <symbol>
-codegraph explore <自然语言或符号>
+codegraph status                              # 索引健康 + pendingChanges
+codegraph explore "<中文意图 + 代码词>"           # 首选：源码 + 调用链 + 波及面（纯中文查不到）
+codegraph node <符号>                         # 单符号源码 + callers/callees
+codegraph node --file <路径> --symbols-only    # 文件结构概览
+codegraph query <symbol> -l 10                # 只查位置
+codegraph callers|callees|impact <symbol>      # 依赖面
+codegraph affected <改过的文件>                # 受影响测试
+codegraph sync                                # 每次改完代码必跑
 ```
+`.codegraph/` 已在 `.gitignore`（当前 146 文件 / 6870 节点 / 17278 边，v1.4.0）。
 
-`.codegraph/` 已在 `.gitignore`。
+> **硬性 #18 / #19**：读/分析代码**强制先走 codegraph**，查不到才降级 grep/read；
+> 改完 `.py`/`.js`/`.mjs` **必须 `codegraph sync`**。完整命令表、降级白名单、实测坑见
+> `09-agent-workflow.md`「代码检索纪律」。
 
 **本 INDEX 的定位**：只管「模块 / 路由 / 页面 / 共享语义」的现状事实。
 **不是任务查证入口**——接到新任务先看 `docs/compose/spec/` 的最新生效 spec；

@@ -1,8 +1,74 @@
 # UI 体系与交互（ui-redesign 重构后 · render 单一来源）
 
 > 与根 `AGENTS.md` 硬性 #11 对齐（完整流程见本卷「UI / 视觉 / 交互任务流程」）。
-> 最后同步：ui-redesign 特性（`docs/compose/spec/ui-redesign.md`，T7.1–T7.11 已实施）
+> 最后同步：**UI v2「石墨·鸢尾」**（`docs/compose/spec/2026-09-30-ui-v2-design.md`，2026-09-30 已实施）
+> 历史：ui-redesign（`ui-redesign.md`）视觉与组件部分已被 UI v2 取代，仅作过程记录
 > + 2026-09-29 从 AGENTS.md 迁入「统一 UI 体系」与 UI 任务流程完整四阶段。
+> + 2026-09-30 复盘同步（硬性 #17 与失败模式库）：14 类缺陷与 10 条流程错误归档在
+> `docs/compose/reports/ui-v2-retrospective.md`；门禁 `tests/test_ui_tokens.py` 30 例 +
+> 门禁自证 `tests/bug_hunt/gate_redproof.py`（4/4 RED-GREEN）。
+
+## UI v2「石墨·鸢尾」体系（2026-09-30 起，当前生效）
+
+**单一来源**：全部视觉只在 `render._BASE_CSS`（令牌+基座+登录页+独立页）+ `render._COMMON_CSS`（页壳/组件/页面级规则）。
+`report._CSS` / `config._CONFIG_EXTRA_CSS` / `config._REPORTS_EXTRA_CSS` / `server` 登录页与错误页内联样式
+**已全部删除**（保留同名空常量以兼容既有引用）；`_MINIBTN_CSS` / `_FLASH_WARN_CSS` / `_B6_CSS` 已并入公共层并清零。
+
+**令牌**（`:root`）：中性冷石墨色板 + 单一鸢尾主色 `--accent #5d61e0`；语义四色各配 `-ink/-soft/-line`；
+**代码面（深色）**：`--code-bg #0f131b` 与 `--code-ink #e2e6ef` 等 9 个令牌，**底色与文字色必须成对声明**
+（历史事故：`<pre class="sql-debug code-block">` 命中「深底」与「深字」两条规则 → 正文 1.02:1 隐形）；
+字阶 11/12/13/14/16/18/22/28；间距 4px 栅格；圆角 4/6/10/14；阴影三层。
+
+**关键约定（新增/变更）**：
+1. **禁止表现性内联样式**：`style="…"` 只允许布局/行为性声明（display/visibility/gap/flex/align/text-align/overflow 等）；
+   颜色、背景、边框、字体、内外边距、尺寸、阴影、透明度一律走 class/令牌。
+2. **列宽体系**：宽表用 `table.table-fixed` + `<colgroup>`（`col.c-check/c-name/c-sql/c-cfg/c-pool/c-memo/c-path/c-api/c-ops`）；
+   无 colgroup 的表保留「第 2 列 ≥156px」兜底，防止名称列被压成一字一行（历史事故：列宽原由内联 `width` 承载，清理后挤压）。
+3. **class 不得撞名**：`.sql-head` 在生产是「SQL 列表头」钩子，曾被挪用为代码工具条 → 表头错乱；
+   代码面工具条统一用 `.code-head`。
+4. **表头统一**：`table th` 12px / 行高 18px / 高 38px / `--ink-2`；`.table-wrap` 保留「表内滚动 + `max-height:calc(100vh - 130px)`」契约。
+5. **报表配置页 = 方案 A**：`.cat-block`（分组卡）+ `.cat-head`（折叠钮/深度色点/名称/计数/hover 操作/全选）+
+   `.cat-children`（**层级导轨**：1px 竖线 + 节点横线 + 逐级缩进，替代原内联 `margin-left+border-left`）+
+   列表形态 `.rpt-row` 行卡片（名称 / 配置 chips / 连接池 / 接口 / 备注 / SQL 摘要 / hover 操作）+
+   卡片形态 `.rpt-card`；两形态同数据各渲一份（`.view-list`/`.view-card` 语义不变），勾选按 value 镜像。
+   **10 列表格已废弃**（1440 视口右栏仅 856px，必然挤压）。
+6a. **class 名必须与生产 JS 完全一致**：抽屉/对话框/遮罩由 JS 切 `.on`（`.side-panel.on` / `.modal.on` / `.backdrop.on`），
+   `.open`/`.show` 仅为确认稿别名，CSS 两套都要认。事故：按确认稿只写 `.open` → 生产点「字段设置/排序设置」毫无反应。
+   门禁：`tests/test_ui_tokens.py::TestJsToggledClassesHaveStyles` 从 JS 源码提取 classList 字面量回查 CSS。
+6a2. **对话框形态**：生产导出对话框是 `.modal` 内 `head/body/foot` 三个并列兄弟（无包装盒）→ `.modal` 必须 `flex-direction:column`，
+   否则三段会被排成一行。新增 `.modal-box` 包装形态时两种都要兼容（门禁 `test_modal_supports_sibling_sections`）。
+6c. **JS 块注释里禁止出现 `*/`**（例如写通配符 `f_*/op_*`）：`*/` 会提前结束注释，整块脚本语法错误，
+   该页所有函数都变 undefined——表现为「按钮点了没反应」且控制台**没有** Log 级错误。
+   门禁：`tests/test_ui_tokens.py::TestInlineJsSyntax` 用 `node --check` 校验 `_COMMON_JS` / `_FOOTER_GLUE`。
+6d. **报表页 URL 统一由 `buildReportUrl(overrides)` 构造**：显式处理 id/page_size/result/sort/dir/cols，
+   其余参数（`nested_filter`、`sql_query`、`f_*`、`op_*`）一律透传。历史缺陷：字段设置/排序各自重建 URL，
+   组合操作时 `cols`、`nested_filter` 被静默清空；且「全选仅调顺序」不发 `cols` → 顺序不生效。
+   门禁：`tests/test_report.py::test_apply_sort_settings_preserves_filters_and_cols` + E2E `e2e-combo.mjs`。
+6f. **JSON 导出恒 UTF-8**：`export.handle_export` 在解析后强制 `charset="utf8"`（含 ZIP 内 `.json`）；
+   导出面板选 JSON 时把字符集单选置为 UTF-8 并禁用（控件禁用后不参与提交）。CSV 仍默认 GBK。
+   约定依据：`api_handler.py` 全部 JSON 响应为 `application/json; charset=utf-8`；RFC 8259。
+   门禁/用例：`tests/test_export.py::test_06_json_forces_utf8_charset`、`test_json_export_headers_gbk`（已改为 utf-8 口径）。
+6g. **HTML 响应必须 `Cache-Control: no-store`**：页脚脚本是内联在 HTML 里的，不设禁缓存时
+   用户标签页可能长期执行旧脚本（表现为「修复上线了但用户那儿还是坏的」）。
+   静态资产仍走 `/static/vendor/self@<hash>` + `immutable`。门禁 `TestHtmlFreshness`。
+6e. **镜像控件不要带 `name`**：导出对话框的隐藏 `<select id="export-format-select">` 曾与 radio 同名 `format`，
+   造成同名参数重复提交（靠服务端「取第一个」侥幸正确）。控件只作状态镜像时去掉 `name`。
+6h. **无刷新换页（navigateTo）只允许一份实现**：统一走公共 `_swapMain` → `_reinitAfterSwap()`。
+   `innerHTML` 赋值**不执行** `<main>` 内联 `<script>`、**不重跑**初始化 → 靠 `addEventListener` 绑定的交互
+   （字段/排序列表拖拽等）换页后全部静默失效（按钮因内联 onclick 仍可用，故表现为「按钮能点、拖拽报废」）。
+   页面级脚本一律用 `onReady(fn)`（定义在头部内联引导脚本）而非裸 `DOMContentLoaded`。
+   门禁：`tests/test_ui_tokens.py::TestNoRefreshSwapReinit`；E2E：`scripts/ui-v2/e2e/swap-reinit.mjs`。
+6i. **`#sortList` 的「暂无排序」占位块必须受管**：加排序项要移除、清空要恢复（`syncSortEmptyState`），
+   序号按 `.sort-item` 数量重排；否则占位块常驻、序号从 2 起、`list.children` 下标错一位（`moveSortItem` 越界判断失真）。
+6b. **同规则内不要重复声明同一属性**：设「默认隐藏」时只保留 `display:none`，
+   若同一条规则后面还留着 `display:flex`，后者胜 → 等于没隐藏。
+   实测事故：登录后整页被「查询中…」遮罩盖住（`.query-loading-overlay`）。
+   门禁：`tests/test_ui_tokens.py::TestOverlayDefaultsHidden` 断言基础规则**最后一条** `display` 为 `none`。
+   另：`.side-panel`/`.modal` 等由 JS 切 class 的组件，基础态必须隐藏、`.open`/`.show` 才显示。
+6. **动态类必须有样式**：JS 运行时切换的 `.hidden` / `.show` / `.fading-out` / `.row-highlight` / `.btn.loading` /
+   `.filter-input-touch` / `query-loading-overlay.show` 必须在公共层定义（遮罩默认 `display:none`，仅 `.show` 显示）。
+7. **门禁**：`tests/test_ui_tokens.py` 钉住令牌齐备、20+ 组前景/背景对比度 ≥4.5:1、页面级补丁为空、
+   渲染产物无表现性内联样式、方案 A 结构存在。**改 CSS 后必须先跑它。**
 
 ## 原则
 
@@ -143,11 +209,48 @@
 13. 侧栏收缩记忆三态语义：`sqlreport_sidebar_collapsed` 无值=默认（桌面展开/小屏图标条），改语义须同步 `_SIDEBAR_BOOTSTRAP_JS`、`sbStoreWrite` 与 `_COMMON_CSS` 三处
 14. **R3 视觉校验教训**：改 `_COMMON_CSS`/`_COMMON_JS` 会变 vendor hash——截图脚本内联公共资产时**禁止硬编码 `self@{hash}`**，须用 `self@[0-9a-f]+` 正则替换，否则 CSS 静默外链、file:// 下整页无样式（曾致几何断言全部失真）；数值断言以 CDP 同会话回读 DOM 几何为准（tables `scrollWidth-clientWidth`、chip `height≤30`、rail `gap>0`/箭头与账号区不相交）
 15. R3 报表页 10 列宽度预算：右栏可用宽 = 视口 − 侧栏240 − 容器padding48 − 左树260 − 间距16；**1280/1366/1440/1920 全部零横向溢出**（操作列不可被挤出视口；2026-09-29 用户 ~1280 视口截图发现溢出后收紧达成，原「1280 允许滚动」口径作废）；改列宽后按此矩阵复测
+16. **验收脚本自身的坑**（2026-09-30 复盘）：陈旧 cookie 拿到登录页、`Page.navigate` 清空 `window.*`、
+    选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）、`children` 下标被占位元素污染、
+    拖到自己身上是 no-op、自定义列反选默认项 → 每一项都会让你「测了个假绿」。清单见 `08-testing-conventions.md`。
+
+## 交互改动验收（硬性 #17）与失败模式库
+
+**来源**：2026-09-30 用户实测「隐藏列→还原→再排序 → 拖拽报废」跨 3 轮反馈才定位。
+根因不在某一行代码，而在验收方式：**只做「整页加载后点一次」，看不见「换页态」「组合操作」「第二次交互」**。
+完整复盘：`docs/compose/reports/ui-v2-retrospective.md`。
+
+**凡改动碰了 JS 交互，提交前逐条过（缺一即未完成）**：
+
+1. **两种载入态都验**：整页加载 + 操作一次后的**原位换页态**（分页/筛选/字段/排序/导出/移动都会触发换页）。
+2. **验到第二、三次操作**：换页后拖拽、连续两次应用、先隐藏再还原再排序。
+3. **组合顺序要验**：字段顺序 × 筛选规则 × 排序 × 导出交叉（脚本 `scripts/ui-v2/e2e/e2e-combo.mjs`、`swap-reinit.mjs`）。
+4. **注册路径唯一**：新增 init 必须进 `initPage()`/`initReportPage()`；页面级脚本用 `onReady(fn)`；换页实现只有 `_swapMain` 一份。
+5. **删样式必问语义归属**：默认隐藏（`display`）、列宽、底色/文字成对——删掉后旧语义由谁承担？
+6. 改了 `render.py`/`report.py`/`config.py` 后**重启服务再验**（页面内联 JS 由内存直出）。
+
+**失败模式库**（每类都是本轮真实事故；能机械检测的已做成门禁，勿靠“记住”）：
+
+| 症状 | 根因 | 拦截 |
+|------|------|------|
+| 代码块文字隐形 | 底/字分属两条规则 | `TestContrastGate`（成对声明 + 对比度实算） |
+| 整页被遮罩盖住 | 同一规则内 `display` 被后面的值覆盖 | `TestNoDuplicateDeclarations` |
+| 面板/对话框点不开 | JS 切 `.on` 而 CSS 只认 `.open/.show` | `TestJsToggledClassesHaveStyles` |
+| 对话框三段排成一行 | 结构假设错（并列兄弟当成单个盒子） | `TestJsToggledClassesHaveStyles::test_modal_supports_sibling_sections` |
+| 按钮能点、拖拽/下拉失效 | 换页只 `innerHTML` 替换，不执行内联脚本、不重跑初始化 | `TestNoRefreshSwapReinit` + `TestPageInitRegistration` |
+| 新加的初始化换页后不跑 | 新 `init*` 没进 `initPage()` | `TestPageInitRegistration` |
+| 「按钮点了没反应」且控制台无 Log 错误 | JS 块注释里出现 `*/` | `TestInlineJsSyntax`（node --check） |
+| 组合操作后参数丢了 | 各功能各自重建 URL | `buildReportUrl()` 单一构造 + 契约用例 |
+| 同名参数重复提交 | 镜像控件带 `name` | `TestFormControlNameUniqueness` |
+| 排序项序号从 2 开始/移动错位 | 占位块未受管，下标整体错位 | `TestNoRefreshSwapReinit::test_sort_placeholder_managed` |
+| 「修了但我这儿还是坏的」 | 动态 HTML 未禁缓存 | `TestHtmlFreshness` |
+
+**门禁自身也要被验证**：`venv/bin/python tests/bug_hunt/gate_redproof.py` 会把上述 4 条新门禁
+对应的历史缺陷打回去（RED 必失败），再还原（GREEN 必通过）；4/4 通过才算门禁有效。
 
 ### 改 UI 前阅读顺序
 
 1. 本卷 + AGENTS 硬性 #11
-2. `docs/compose/spec/ui-redesign-visual-spec.md`（令牌/组件/术语）与 `ui-redesign-ia.md`（页面布局）
+2. `docs/compose/spec/2026-09-30-ui-v2-design.md`（**现行**令牌/组件/页面口径）；`ui-redesign-visual-spec.md` 已标注「已被取代」，仅供追溯
 3. `render.py`：`_BASE/_COMMON_CSS` → `_COMMON_JS` → 侧栏/页壳 → 相关 `build_*`
 4. `tests/htmlcheck.py` + `test_render*` / `test_html*`
 

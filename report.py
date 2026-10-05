@@ -347,97 +347,8 @@ def parse_result_names(raw: str, count: int = None) -> list[str]:
 # sql-hl/pagination/jump-box 等）统一来自 render._COMMON_CSS，
 # 此处仅保留报表页特有类，经 render_page_header(extra_css=...) 追加。
 
-_CSS = """
-  th .sort-link {
-    color: #475569; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
-    transition: color 0.15s; cursor: pointer;
-  }
-  th .sort-link:hover { color: #4f46e5; }
-  th .sort-arrow { font-size: 12px; color: #94a3b8; }
-  th .sort-arrow.active { color: #4f46e5; }
-  /* R2-D：筛选输入已从 th 迁到表头下独立 qf-row，样式选择器随之下沉 */
-  .qf-row .filter-input {
-    display: block; width: 100%; margin-top: 0; padding: 4px 8px;
-    border: 1px solid #e2e8f0; border-radius: 4px; font-size: 12px;
-    font-weight: 400; text-transform: none; letter-spacing: 0;
-    outline: none; transition: border-color 0.2s; background: #fff;
-    box-sizing: border-box;
-  }
-  .qf-row .filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.12); }
-  .qf-row .filter-input::placeholder { color: #cbd5e1; }
-  /* 05 工单：表头列保守 min-width 保证筛选输入框可用；聚焦展开为固定宽度（桌面） */
-  th { min-width: 100px; }
-  .qf-row .filter-input:focus { width: 220px; }
-  .debug-info {
-    background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
-    margin-bottom: 16px; font-size: 13px; color: #64748b;
-    word-break: break-all; line-height: 1.6;
-  }
-  .debug-info code {
-    background: #e9ecef; padding: 2px 6px; border-radius: 4px;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 12px; color: #334155;
-  }
-  .debug-info pre {
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 12px; color: #334155;
-  }
-  .debug-toggle {
-    display:inline-flex; align-items:center; gap:4px; font-size:12px;
-    color:#94a3b8; cursor:pointer; background:none; border:1px solid #e2e8f0;
-    border-radius:6px; padding:4px 10px; margin-bottom:8px; transition:color 0.15s;
-  }
-  .debug-toggle:hover { color:#475569; background:#f1f5f9; }
-  .debug-content { padding: 0 16px 12px; }
-  .debug-content.hidden { display: none; }
-            .controls {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 14px 16px; background: #f8fafc; border-radius: 8px; margin-bottom: 16px;
-    border: 1px solid #e2e8f0;
-  }
-  .controls label { font-size: 14px; color: #475569; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
-  .controls select {
-    padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 6px;
-    font-size: 14px; color: #1e293b; background: #fff; outline: none;
-    cursor: pointer; transition: border-color 0.2s;
-  }
-  .controls select:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
-  .controls .stat { font-size: 14px; color: #64748b; margin-left: auto; }
-  .controls .cache-badge {
-    font-size: 12px; color: #64748b; background: #e9ecef; padding: 2px 10px;
-    border-radius: 99px; white-space: nowrap;
-  }
-  .controls .cache-badge.fresh { background: #dcfce7; color: #166534; }
-  .btn-refresh {
-    display:inline-flex; align-items:center; gap:4px; padding:6px 14px;
-    font-size:13px; font-weight:600; border-radius:6px; cursor:pointer;
-    background:#f0f0f0; color:#475569; border:1px solid #cbd5e1;
-    text-decoration:none; transition:background 0.2s, color 0.2s;
-  }
-  .btn-refresh:hover { background:#e2e8f0; color:#1e293b; }
-  .report-select label { font-size: 15px; color: #334155; font-weight: 500; display: block; margin-bottom: 8px; }
-  .report-select select {
-    width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 8px;
-    font-size: 15px; color: #1e293b; outline: none; cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s; background: #fff;
-    appearance: auto;
-  }
-  .report-select select:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
-  .report-list { list-style: none; padding: 0; margin-top: 4px; }
-  .report-list li { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
-  .report-list li:last-child { border-bottom: none; }
-  .report-list a {
-    color: #4f46e5; text-decoration: none; font-weight: 500; font-size: 15px;
-    transition: color 0.15s; display: flex; align-items: center; gap: 8px;
-  }
-  .report-list a:hover { color: #4338ca; }
-  .report-list a::before { content: "→"; color: #94a3b8; font-weight: 400; }
-  .clear-filter {
-    display: inline-block; margin-left: 8px; font-size: 12px; color: #94a3b8;
-    text-decoration: none; cursor: pointer;
-  }
-  .clear-filter:hover { color: #dc2626; }
-"""
+# 报表页样式已并入 render._COMMON_CSS（第 22 节）：页面级补丁下线（spec 2026-09-30-ui-v2-design §5.2）
+
 
 # _PAGE_HEADER 已删除：页面头部（<head>/导航栏/公共 CSS）统一由
 # render.render_page_header 生成，见 _render_page_header()。
@@ -484,7 +395,7 @@ def render_sql_error_section(friendly: str, raw: str) -> str:
     from html import escape as _h  # 局部引用避免与模块级 _escape 混淆
     return (
         f'<div class="flash flash-error">查询失败：{_h(friendly)}'
-        f'<details style="margin-top:6px"><summary style="cursor:pointer;'
+        f'<details><summary style="cursor:pointer;'
         f'color:#94a3b8;font-size:13px">查看原始错误信息</summary>'
         f'<pre style="white-space:pre-wrap;word-break:break-all;'
         f'font-size:12px;color:#7f1d1d;margin:6px 0 0">{_h(raw)}</pre>'
@@ -535,7 +446,7 @@ def render_sql_error_section(friendly: str, raw: str) -> str:
     """渲染报表执行错误区块：人话主文案 + <details> 折叠原始错误。"""
     return (f'<div class="flash flash-error">查询执行失败：'
             f'{_escape(friendly)}'
-            f'<details style="margin-top:6px"><summary style="cursor:pointer;'
+            f'<details><summary style="cursor:pointer;'
             f'color:#64748b;font-size:12px">查看原始错误信息</summary>'
             f'<pre style="white-space:pre-wrap;font-size:12px;color:#7f1d1d;'
             f'margin:6px 0 0">{_escape(raw)}</pre></details></div>')
@@ -547,7 +458,7 @@ def _render_page_header(title: str = None) -> str:
     批次6#27a：title 可选传入（如报表名），默认保持站点标题。
     """
     return render_page_header(title=title or "SqlReport", active_nav="report",
-                              extra_css=_CSS + markdown_render.codehilite_css() + _MD_CSS)
+                              extra_css=markdown_render.codehilite_css() + _MD_CSS)
 
 
 def _js_string(s: str) -> str:
@@ -568,36 +479,29 @@ def _js_string(s: str) -> str:
 # SQL 高亮/格式化仍按需随页面 defer 加载（C12）。
 _FOOTER_GLUE = r"""
 /* ---- 无刷新导航 ---- */
+ /* 统一委托给公共 JS 的 _swapMain：换页后由 _reinitAfterSwap 重跑 <main> 内联脚本并
+    重新初始化（历史缺陷：这里曾自己复制一份 innerHTML 替换、不做任何重初始化，
+    导致「应用字段设置后再拖拽排序失效」「换页后导出对话框联动失效」）。 */
  function navigateTo(url, replace) {
+   if (typeof _swapMain === 'function') {
+     fetch(url)
+       .then(function(r) { return r.text(); })
+       .then(function(html) { _swapMain(html, url, replace); })
+       .catch(function() { window.location.href = url; });
+     return;
+   }
+   /* 兜底（公共 JS 未加载时） */
    if (replace) history.replaceState(null, '', url);
    else history.pushState(null, '', url);
-   fetch(url)
-     .then(function(r) { return r.text(); })
-     .then(function(html) {
-       var parser = new DOMParser();
-       var doc = parser.parseFromString(html, 'text/html');
-       var newMain = doc.querySelector('main.main');
-       var oldMain = document.querySelector('main.main');
-       if (newMain && oldMain) oldMain.innerHTML = newMain.innerHTML;
-       var newTitle = doc.querySelector('title');
-       if (newTitle) document.title = newTitle.textContent;
-     })
-     .catch(function() { window.location.href = url; });
+   window.location.href = url;
  }
- window.addEventListener('popstate', function() {
-   fetch(window.location.href)
-     .then(function(r) { return r.text(); })
-     .then(function(html) {
-       var parser = new DOMParser();
-       var doc = parser.parseFromString(html, 'text/html');
-       var newMain = doc.querySelector('main.main');
-       var oldMain = document.querySelector('main.main');
-       if (newMain && oldMain) oldMain.innerHTML = newMain.innerHTML;
-       var newTitle = doc.querySelector('title');
-       if (newTitle) document.title = newTitle.textContent;
-     })
-     .catch(function() {});
- });
+ if (typeof _swapMain !== 'function') {
+   window.addEventListener('popstate', function() { window.location.reload(); });
+ }
+ function initReportPage() {
+   initDragHandlers();
+   initSortDragHandlers();
+ }
  function openPanel(id) {
   var el = document.getElementById(id);
   if (!el) return;
@@ -675,6 +579,9 @@ function selectAllFields(checked) {
   });
 }
 function applyFieldSettings() {
+  /* 字段设置：勾选（可见性）+ 顺序（列表顺序）→ cols=逗号分隔（顺序即列序）
+     修复（用户反馈「字段顺序排序不生效」）：原实现只在「勾选数 < 总列数」时才带 cols，
+     于是"全部保留、仅调顺序"不会发送 cols → 服务端按默认列序渲染，顺序白白丢了。 */
   var list = document.getElementById('fieldList');
   var items = Array.from(list.children);
   var cols = [];
@@ -685,36 +592,50 @@ function applyFieldSettings() {
       if (colInput) cols.push(colInput.value);
     }
   });
-  var reportId = new URLSearchParams(window.location.search).get('id');
-  var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
-  var resultIdx = new URLSearchParams(window.location.search).get('result') || '';
-  var sorts = [];
-  var filters = [];
-  var params = new URLSearchParams(window.location.search);
-  params.forEach(function(val, key) {
-    if (key === 'sort') sorts.push(val);
-    if (key === 'dir') sorts.push(val);
-    if (key.startsWith('f_')) filters.push({key: key, val: val});
-    if (key.startsWith('op_')) filters.push({key: key, val: val});
-  });
-  var url = '/report?id=' + reportId;
-  if (pageSize) url += '&page_size=' + pageSize;
-  if (resultIdx) url += '&result=' + encodeURIComponent(resultIdx);
-  for (var i = 0; i < sorts.length; i += 2) {
-    url += '&sort=' + encodeURIComponent(sorts[i]) + '&dir=' + encodeURIComponent(sorts[i+1]);
+  if (cols.length === 0) {
+    showFlashWarn('至少要保留一列');
+    return;
   }
-  filters.forEach(function(f) {
-    url += '&' + f.key + '=' + encodeURIComponent(f.val);
-  });
-   if (cols.length > 0 && cols.length < items.length) {
-     url += '&cols=' + encodeURIComponent(cols.join(','));
-   }
-   navigateTo(url);
+  var params = new URLSearchParams(window.location.search);
+  var url = buildReportUrl({cols: cols.join(',')});
+  navigateTo(url);
  }
+/* 统一构造报表页 URL：显式处理 sort/dir/cols，其余参数（nested_filter、sql_query、
+   result、筛选参数等）一律原样透传，避免组合操作互相清空配置。 */
+function buildReportUrl(overrides) {
+  overrides = overrides || {};
+  var params = new URLSearchParams(window.location.search);
+  var url = '/report?id=' + (params.get('id') || '');
+  if (params.get('page_size')) url += '&page_size=' + encodeURIComponent(params.get('page_size'));
+  if (params.get('result')) url += '&result=' + encodeURIComponent(params.get('result'));
+  var skip = {id: 1, page_size: 1, result: 1, page: 1, sort: 1, dir: 1, cols: 1};
+  var sortVals = [], dirVals = [];
+  params.forEach(function(val, key) {
+    if (skip[key]) return;
+    if (key === 'sort') { sortVals.push(val); return; }
+    if (key === 'dir') { dirVals.push(val); return; }
+    if (overrides[key] !== undefined) return;
+    url += '&' + key + '=' + encodeURIComponent(val);
+  });
+  for (var i = 0; i < sortVals.length; i++) {
+    url += '&sort=' + encodeURIComponent(sortVals[i]) + '&dir=' + encodeURIComponent(dirVals[i] || 'asc');
+  }
+  if (overrides['sort_cols']) {
+    overrides['sort_cols'].forEach(function(s) {
+      url += '&sort=' + encodeURIComponent(s.col) + '&dir=' + encodeURIComponent(s.dir);
+    });
+  }
+  /* cols 是要保留的状态：调用方未显式覆盖时，沿用当前 URL 上的值 */
+  var colsVal = overrides['cols'] !== undefined ? overrides['cols'] : params.get('cols');
+  if (colsVal) url += '&cols=' + encodeURIComponent(colsVal);
+  return url;
+}
 var _dragSrcEl = null;
 function initDragHandlers() {
   var list = document.getElementById('fieldList');
   if (!list) return;
+  if (list.dataset.dragBound === '1') return;   /* 幂等：换页后元素重建，标记随元素 */
+  list.dataset.dragBound = '1';
   list.addEventListener('dragstart', function(e) {
     var item = e.target.closest('.field-item');
     if (!item) return;
@@ -744,14 +665,13 @@ function initDragHandlers() {
     updateMoveButtons();
   });
 }
-document.addEventListener('DOMContentLoaded', function() {
-  initDragHandlers();
-  initSortDragHandlers();
-});
+document.addEventListener('DOMContentLoaded', initReportPage);
 
 function initSortDragHandlers() {
   var list = document.getElementById('sortList');
   if (!list) return;
+  if (list.dataset.dragBound === '1') return;   /* 幂等 */
+  list.dataset.dragBound = '1';
   list.addEventListener('dragstart', function(e) {
     var item = e.target.closest('.sort-item');
     if (!item) return;
@@ -787,30 +707,59 @@ function moveSortItem(btn, dir) {
   var item = btn.closest('.sort-item');
   var list = document.getElementById('sortList');
   if (!list || !item) return;
-  var items = Array.from(list.children);
+  var items = sortItemEls();                 /* 只在排序项之间移动，忽略占位块 */
   var idx = items.indexOf(item);
   var target = idx + dir;
   if (target < 0 || target >= items.length) return;
-  list.insertBefore(item, dir === -1 ? items[target] : items[target].nextSibling);
+  var ref = items[target];
+  if (dir === -1) list.insertBefore(item, ref);
+  else list.insertBefore(item, ref.nextSibling);
   updateSortMoveButtons();
 }
-function updateSortMoveButtons() {
+function sortItemEls() {
+  var list = document.getElementById('sortList');
+  return list ? Array.from(list.querySelectorAll('.sort-item')) : [];
+}
+/* 占位块（.sort-empty「暂无排序」）只在没有排序项时存在。
+   历史缺陷：加排序项后占位块不清除 → 序号从 2 起、▲▼ 边界也错一位。 */
+function syncSortEmptyState() {
   var list = document.getElementById('sortList');
   if (!list) return;
-  var items = Array.from(list.children);
+  var items = sortItemEls();
+  var ph = list.querySelector('.sort-empty');
+  if (items.length === 0) {
+    if (!ph) {
+      ph = document.createElement('div');
+      ph.className = 'sort-empty';
+      ph.style.textAlign = 'center';
+      ph.textContent = '暂无排序';
+      list.appendChild(ph);
+    }
+  } else if (ph) {
+    ph.parentNode.removeChild(ph);
+  }
+}
+function renumberSortItems() {
+  sortItemEls().forEach(function(item, i) {
+    var num = item.querySelector('.sort-num');
+    if (num) num.textContent = i + 1;
+  });
+}
+function updateSortMoveButtons() {
+  var items = sortItemEls();
   items.forEach(function(item, i) {
     var up = item.querySelector('.sort-up');
     var down = item.querySelector('.sort-down');
-    var num = item.querySelector('.sort-num');
     if (up) up.disabled = (i === 0);
     if (down) down.disabled = (i === items.length - 1);
-    if (num) num.textContent = i + 1;
   });
+  syncSortEmptyState();
+  renumberSortItems();
 }
 function removeSortItem(btn) {
   var item = btn.closest('.sort-item');
   if (item) item.parentNode.removeChild(item);
-  updateSortMoveButtons();
+  updateSortMoveButtons();                   /* 会按需恢复「暂无排序」占位 */
 }
 function addSortItem() {
   var col = document.getElementById('newSortCol').value;
@@ -826,7 +775,7 @@ function addSortItem() {
    div.draggable = true;
    var icon = dir === 'asc' ? '↑' : '↓';
    div.innerHTML = '<span class="drag-handle" title="拖拽排序">⠿</span>'
-     + '<span class="sort-num">' + (list.children.length + 1) + '</span>'
+     + '<span class="sort-num">' + (sortItemEls().length + 1) + '</span>'
      + '<span>' + col + ' ' + icon + '</span>'
      + '<input type="hidden" name="sort_col" value="' + col + '">'
      + '<input type="hidden" name="sort_dir" value="' + dir + '">'
@@ -834,36 +783,21 @@ function addSortItem() {
      + '<button type="button" class="sort-down" onclick="moveSortItem(this,1)">▼</button>'
      + '<button type="button" class="sort-remove" onclick="removeSortItem(this)">✕</button>';
    list.appendChild(div);
+   syncSortEmptyState();
+   updateSortMoveButtons();
    updateSortMoveButtons();
    document.getElementById('newSortCol').value = '';
 }
 function applySortSettings() {
-  var list = document.getElementById('sortList');
-  var items = Array.from(list.children);
+  /* 排序设置：排序项 → sort/dir 对；其余参数（含 cols、nested_filter、sql_query）透传 */
+  var items = sortItemEls();                 /* 只取排序项，忽略「暂无排序」占位块 */
   var sorts = [];
   items.forEach(function(item) {
     var colInput = item.querySelector('input[name="sort_col"]');
     if (!colInput) return;
     sorts.push({col: colInput.value, dir: item.querySelector('input[name="sort_dir"]').value});
   });
-  var reportId = new URLSearchParams(window.location.search).get('id');
-  var pageSize = new URLSearchParams(window.location.search).get('page_size') || '';
-  var resultIdx = new URLSearchParams(window.location.search).get('result') || '';
-  var cols = new URLSearchParams(window.location.search).get('cols') || '';
-  var url = '/report?id=' + reportId;
-  if (pageSize) url += '&page_size=' + pageSize;
-  if (resultIdx) url += '&result=' + encodeURIComponent(resultIdx);
-  sorts.forEach(function(s) {
-    url += '&sort=' + encodeURIComponent(s.col) + '&dir=' + encodeURIComponent(s.dir);
-  });
-  var params = new URLSearchParams(window.location.search);
-  params.forEach(function(val, key) {
-    if (key.startsWith('f_') || key.startsWith('op_')) {
-      url += '&' + key + '=' + encodeURIComponent(val);
-    }
-  });
-   if (cols) url += '&cols=' + encodeURIComponent(cols);
-   navigateTo(url);
+  navigateTo(buildReportUrl({sort_cols: sorts}));
  }
 function switchResult(btn) {
   /* R2-D：结果集切换改为 segment 按钮；协议不变（result=N + 会话记忆回跳）。
@@ -898,7 +832,7 @@ function formatDebugSQL() {
     pre.innerHTML = highlight(h(formatted));
   });
 }
-document.addEventListener('DOMContentLoaded', formatDebugSQL);
+onReady(formatDebugSQL);
 """ + _SQL_HIGHLIGHT_JS + _SQL_FORMATTER_JS + r"""
 var filterTouchInit = (function () {
   var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
@@ -1514,8 +1448,8 @@ def render_report_selector(conn) -> str:
         right_html = (
             '<div class="card" style="border:1px dashed #c7d2fe;'
             'background:#f5f7ff;padding:16px 20px">'
-            '<h3 style="margin:0 0 8px">🚀 开始使用</h3>'
-            '<p style="margin:0 0 12px;color:#475569;font-size:14px">'
+            '<h3>🚀 开始使用</h3>'
+            '<p>'
             '三步开始：① 添加连接池 → ② 创建报表 → ③ 发布 API 接口</p>'
             '<a href="/config" class="btn btn-primary btn-sm">前往配置管理</a>'
             '</div>'
@@ -1525,8 +1459,8 @@ def render_report_selector(conn) -> str:
             '<div class="card-grid" id="rc-grid">' + cards + "</div>"
             '<div class="card empty" id="rc-empty" style="display:none;'
             'text-align:center;padding:40px">'
-            '<div style="font-weight:600;margin-bottom:6px">没有匹配的报表</div>'
-            '<div class="muted" style="margin-bottom:14px">换个关键词，或清除筛选查看全部</div>'
+            '<div>没有匹配的报表</div>'
+            '<div class="muted">换个关键词，或清除筛选查看全部</div>'
             '</div>'
         )
 
@@ -1538,7 +1472,7 @@ def render_report_selector(conn) -> str:
     <div class="sub">按分类浏览，或搜索报表名称与备注</div>
   </div>
   <div class="actions">
-    <div class="search-box" style="width:280px">
+    <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input class="input" id="rc-search" placeholder="搜索报表…">
     </div>
@@ -1555,8 +1489,8 @@ def render_report_selector(conn) -> str:
 """
     body += (
         '<div class="split">'
-        '<aside class="card" style="padding:12px">'
-        '<div class="card-head" style="margin-bottom:6px"><h2 style="font-size:14px">分类</h2></div>'
+        '<aside class="card">'
+        '<div class="card-head"><h2>分类</h2></div>'
         f'<div class="tree" id="rc-tree">{tree_html}</div>'
         "</aside>"
         "<div>" + right_html + "</div>"
@@ -1665,7 +1599,7 @@ def render_report_page(conn, report_id: int, page: int = 1,
         if pool_id is None:
             return (_render_page_header() +
                     f'<div class="flash flash-error">该报表 "{_escape(report["name"])}" 关联的连接池已被删除。'
-                    f' 请前往 <a href="/config" style="color:#4f46e5;font-weight:600">配置管理</a> 重新指定连接池。</div>' +
+                    f' 请前往 <a href="/config">配置管理</a> 重新指定连接池。</div>' +
                     _footer())
         pool_config = db.get_pool(conn, pool_id)
         if not pool_config:
@@ -1876,7 +1810,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     # 无库中报表的预览（新建表单预览，report_id=0）不显示编辑入口
     edit_btn = ''
     if report_id > 0:
-        edit_btn = (f'<div style="margin-bottom:10px">'
+        edit_btn = (f'<div>'
                     f'<a href="/config/reports/{report_id}/edit" class="btn btn-outline btn-sm" target="_blank" rel="noopener">编辑</a>'
                     f'</div>')
 
@@ -1892,7 +1826,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
                        if not sql_override else "")
         b6_scripts = (
             "<script>\n"
-            "document.addEventListener('DOMContentLoaded', function() {\n"
+            "onReady(function() {\n"
             f"    applyStoredCols({int(report_id)});\n"
             f"{recent_call}"
             "});\n"
@@ -1914,7 +1848,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     <div class="sub">连接池：{pool_name_esc}</div>
   </div>
   <div class="actions">
-    <span class="summary-line" style="margin:0">{cache_badge}</span>
+    <span class="summary-line">{cache_badge}</span>
     {edit_action}
     <button type="button" class="btn btn-secondary" onclick="openPanel('modal-export')">导出</button>
     <form method="post" action="/report" style="display:inline">
@@ -1951,7 +1885,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         cls = "tab active" if active else "tab"
         return f'<button type="button" class="{cls}" role="tab" data-tab="{key}" onclick="gotoTab(\'{key}\')">{label}{badge}</button>'
 
-    api_badge = (f'<span class="badge badge-info" style="margin-left:6px">'
+    api_badge = (f'<span class="badge badge-info">'
                  f'{len(api_endpoints)}</span>') if api_endpoints else ""
     tabs_nav = ('<div class="tabs" role="tablist">'
                 + _tab("data", "数据", True)

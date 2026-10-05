@@ -1,6 +1,6 @@
 # 多代理协作 · 执行效率与取证纪律
 
-> 对应硬性约束 #13–#16。**仅在派发子代理、或需要严格取证纪律时才需读本卷**；
+> 对应硬性约束 #13–#16、#18–#19。**仅在派发子代理、需要严格取证纪律、或要检索/阅读代码时才需读本卷**；
 > 日常单会话开发只需 AGENTS.md 的硬约束条目与本卷标题下的「一句话版」。
 
 ## 何时读本卷
@@ -9,6 +9,7 @@
 |------|--------|
 | 要 spawn / wait / cancel 子代理 | 「派发纪律」+「预算与监控」+「简报五件套」 |
 | 只是自己写代码、跑测试 | 「执行效率与取证纪律」一节即可 |
+| 读/分析代码、找函数、看谁调用它、改它会影响谁 | 「代码检索纪律（#18）」——**先 codegraph，不要先 grep** |
 | 任务卡住、同一问题反复失败 | 「两败必停」在 `08-testing-conventions.md` |
 
 ## 一句话版
@@ -18,6 +19,7 @@
 - 测试结果**落盘再取数**（同一动作完成两件事）。
 - 改文件走**编辑三拍**：Read 定位 → `old_string` 逐字复制 → Edit。
 - 收尾必报：进度表 + 【任务完成】+ 简报。
+- **查代码先走 codegraph**（`explore` 一个命令 = 源码 + 调用链 + 波及面）；**改完代码跑 `codegraph sync`**。
 
 ---
 
@@ -77,9 +79,16 @@
 
 适用：一切开发/测试/研究动作。目标：**完成任务前提下最小化 token 与往返**；验证强度不降（红绿、L0–L2 分段、全量对账原样保留）。本节是对既有条款的执行模板细化，非替代。
 
-> **落盘路径**：本环境的 `/tmp` 会被周期清空（实测：日志文件在一次命令内消失），
-> 且 `nohup` 后台进程活不过单次 shell 调用。**一律落仓库内已 gitignore 的目录
-> （当前 `run-logs/` 与 `perf-logs/`）**，且起服务 + 压测须在同一条命令内完成。
+> **落盘路径**：本环境的 `/tmp` 是每次命令新建的 tmpfs（实测：日志与 PID 文件在一次命令内消失），
+> 且 `nohup`/`setsid` 后台进程活不过单次 shell 调用。**一律落仓库内已 gitignore 的目录
+> （当前 `run-logs/` 与 `perf-logs/`）**，且起服务 + 验证须在同一条命令内完成。
+>
+> **机制（2026-09-30 实测）**：每次 bash 调用跑在独立的 `bwrap --unshare-pid --die-with-parent`
+> 沙箱里 → ① 调用结束进程组连同 setsid 子进程一起死；② **PID 命名空间不共享**，跨调用查
+> `ps` / `/proc/<pid>` / `ss -p` 的 `pid=` 字段**一律查不到**（同命名空间内才可见）；
+> ③ **网络命名空间共享**，所以上一条调用拉起的服务仍能用 `curl`/`ss -ltn` 访问，只是
+> 进程身份查不到。**推论：启停类脚本的验收必须在单条命令内跑完 start→访问→stop**，
+> 跨调用比对 PID/进程会得到假结论（本项目 `test_env.sh` 的验收即如此完成）。
 
 1. **等待协议（P1）**：>30s 的任务（测试、服务、批量脚本、截图矩阵）一律 `nohup <cmd> > run-logs/<域>-<时间戳>.log 2>&1 &` 后台执行，回报 `PID=… LOG=…`（写路径前先 `sleep 1; ls` 确认文件已建，防 nohup 竞态漏文件）。等待只允许两种：①带退出判据的短轮询 `for i in $(seq 1 N): <判据> && break; sleep 5`——**前台单次阻塞 ≤20s**，循环总长写明上限，到顶→汇报阻塞；②工具自带 `wait`（≤15min×2 次上限）。**禁止整段前台 `sleep` 长阻塞**（实测教训：`sleep 100` 被用户中止并追问，浪费一轮往返）。脚本内部自带的长等待同样适用——把脚本本身 nohup 化，会话只轮询判据。
 2. **测试取证双产出（P2）**：测试类命令统一 `python -m unittest … > run-logs/<段>-<时间戳>.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' <log>`——落盘与取数同一动作：中断可续查、防止「结果只活在对话里→被迫重跑」。预期输出 ≤20 行的短命令（`git status`、单点查询）可直出不落盘，避免为落盘而落盘的仪式浪费。
@@ -92,4 +101,126 @@
 **与既有条款的冲突自检**（防误读/机械执行）：P1 是 #14/#15 轮询的通用化，二者并存；P2 即 #14 落盘模板；P3 是 #12 工具口径细化（2 败换法不变，1 败即换锚点更严）；P4 红绿受 #14 计数约束（代码变更重置）；P5 与简报五件套检索预算分属「探索/记忆」两域独立计数；P7 与「汇报节奏」为同一动作的两处引用，输出一次即可；P1 例外仅限 ≤20 行短命令直出与工具自带 wait 上限。
 
 ---
-最后核对：2026-09-29 从 AGENTS.md 迁入（性能优化任务顺带发现 `/tmp` 被清空、后台进程存活期问题，已在 P1 前加落盘路径说明）
+## 代码检索纪律（硬性 #18 / #19）
+
+适用：**一切「读代码 / 分析代码 / 定位符号 / 查调用链 / 评估改动影响面」的动作**。
+
+codegraph 是本项目已建好的 SQLite 符号知识图谱（当前 **146 文件 / 6870 节点 / 17278 边**，
+`.codegraph/` 已 gitignore）。它预先算好了 AST 与调用关系，**一次 explore 通常顶一轮 grep+read 循环**，
+且能跨动态分发（回调 / 模板拼接）给出一条 grep 跟不动的链路。
+
+### 一句话版
+
+- **查**：`codegraph explore "<中文意图 + 代码词>"` = 源码 + 调用链 + 波及面，通常**是唯一需要的调用**。
+- **查不到才降级** `grep`/`read`，且降级前必须**补代码词加宽重试**（纯中文问句查不到是正常的）。
+- **改**：`codegraph sync`；收尾 `codegraph status` 见 `pendingChanges` 全 0。
+
+### 两条等价通道（同一份索引、同一套输出）
+
+| 用途 | MCP 工具 | CLI（本项目默认，输出与 MCP 同源） |
+|------|------|------|
+| **主入口** | `codegraph_explore` | `codegraph explore "<中文意图 + 代码词>"` |
+| 读文件 / 读符号 | `codegraph_node`（`file` 模式 ≡ Read） | `codegraph node <符号>` / `codegraph node --file <路径>` |
+| 符号名 → 位置 | `codegraph_search` | `codegraph query <关键词> -l 10 [-k class\|function] [-j]` |
+| 谁调用它 | `codegraph_callers` | `codegraph callers <符号> -l 20` |
+| 它调用谁 | `codegraph_callees` | `codegraph callees <符号> -l 20` |
+| 改动影响面 | `codegraph_impact` | `codegraph impact <符号> -d 2` |
+| 受影响测试 | — | `codegraph affected <改过的文件...>` |
+| 项目文件树 | `codegraph_files` | `codegraph files [--filter tests] [--pattern '*.py']` |
+| 索引健康 | `codegraph_status` | `codegraph status [--json]` |
+| 增量同步 | — | `codegraph sync` |
+
+选哪条通道都不违反 #18；**本项目默认用 CLI**（无 MCP 依赖、输出完全一致）。MCP 接入方式见本节末。
+
+### 查询写法
+
+> ⚠️ **实测：本工具的检索靠「代码词」（符号名 / 文件名 / 英文技术词）匹配，**
+> **纯中文问句一律返回 `No relevant code found`（0 个符号）。** 本项目全量用中文交流，
+> 这是最容易误判成「codegraph 查不到 → 可以降级 grep」的坑，**写 query 时必须带代码词**。
+
+- 有效 query（实测命中符号数）：
+
+  | query | 命中 |
+  |-------|------|
+  | `codegraph explore "筛选 parse_filters"` | 41 |
+  | `codegraph explore execute_report QueryCache export_report_to_csv` | 多 |
+  | `codegraph explore "导出 export"` | 9 |
+  | `codegraph explore "筛选 解析"` | ❌ 0 |
+  | `codegraph explore "报表页 换页 初始化"` | ❌ 0 |
+
+- 正确姿势：**中文意图 + 至少一个代码词**，或直接堆符号名。
+  - 不知道符号名时：先用「中文意图 + 你猜的英文词」探一次 → 不中就 `codegraph query <关键词>` 找符号名 → 再 `explore`。
+  - 只想确认某段代码存在：`codegraph files` + `codegraph node --file <路径> --symbols-only`（符号表最省）。
+- 问「X 如何变成 Y / 整条链路」→ **一次把两端符号都写进 query**，它会直接给出中间路径。
+- 输出**按文件分组、逐行带行号**，与 `read` 同形 → **当作已读**，不要再 `read` 同一段。
+- 改某个符号前先看 `explore` 顶部的 **Blast radius** 段（或 `impact`）：它列出会被波及的符号与覆盖它的测试，
+  对应硬性 #4「先研究后修改」与 #9「测试与脚本对齐」。
+- 返回太多时用 `--max-files N` 收窄；**只想要位置不要源码**用 `query`。
+
+### 允许降级的白名单
+
+以下对象 codegraph **不索引**（实测本项目只索引 `.py` 121 个 + `.js`/`.mjs` 25 个），
+直接用 `grep`/`read`/`glob`，不必先试 codegraph：
+
+- **非代码文本**：`.md`、`.json`、`.html`、`.css`、`.sh`、`.txt`、`.log`。
+  （注意：`render.py` 里的 HTML/CSS/JS 是 **Python 源码里的字符串**，**要索引**，用 `explore` 查。）
+- **资源与非源码目录**：`venv/`、`*.db`、截图/报告目录、构建产物。
+- **具体字符串字面量**：某个中文文案 / CSS 类名出现在哪（explore 按符号与文件命中，不按字面量）。
+  先 `explore` 一次相关文件，确无结果再 `grep -n`。
+- **运行期数据**：日志、审计表、DB 内容——用测试/脚本，不属于「分析代码」。
+
+### 禁止项（违反即返工）
+
+1. 禁止用「`grep -rn` 找行号 → 再 `read` 一大段」替代 `explore`。
+2. 禁止用 grep **复核** codegraph 已给出的结论（同一事实查两遍 = 白花往返）。
+3. 禁止把 explore 返回的源码当「摘要」——它是**磁盘逐字原文 + 行号**，可直接当已读、可直接做编辑锚点。
+4. 禁止一查不到就换工具：**先补代码词重试**（加符号名 / 加文件名 / 加英文技术词）——**纯中文问句查不到是正常的，不是降级理由**。
+
+### 同步纪律（硬性 #19）
+
+| 时机 | 动作 |
+|------|------|
+| 改完任何 `.py`/`.js`/`.mjs` | `codegraph sync`（增量，实测 <1s） |
+| 收尾校验 | `codegraph status` → `pendingChanges` 三项全 0 |
+| 大重构 / 搬目录 / 大批新增删文件 | `codegraph index`（全量重建，`-q` 静默） |
+| 索引卡住 / 升级 codegraph 后 | `codegraph unlock` 清陈旧锁 |
+
+**本机没有自动同步**：`.codegraph/daemon.pid` 记录的守护进程（pid 7216 / v1.3.1）早已随容器重启消失，
+**禁止假设「它会自己跟上」**——这正是 #19 存在的原因。
+**只改 `.md` 知识库不需要 sync**（不索引 markdown）；但同一任务里也改了代码，就必须 sync。
+
+### 本项目实测坑
+
+1. **`affected` 输出有噪声**：`codegraph affected export.py` 会把 `docs/compose/spec/_fill_dest.py`
+   之类无关文件算成「受影响测试」。**只当线索**，落地前必须 grep 确认真实引用
+   （白名单例外，不算绕过 #18）。
+2. **mtime 变化不触发 pending**：只 `touch` 文件，`status` 仍显示 up to date——它按**内容哈希**判定，
+   所以 `status` 说干净就是真干净。
+3. **同名符号会多条命中**（如 `humanize_db_error` 在 `report.py` 里有两份定义）：
+   `query` 返回全部、`node` 返回全部定义体，用 `--file` 消歧。
+4. **`node` 不带 `--file` 会当符号名**：`codegraph node report.py` 找不到；读文件必须
+   `codegraph node --file report.py --offset N --limit M`，只想看结构用 `--symbols-only`（最省）。
+5. **`impact` 默认深度 2**；影响面更大时加 `-d 3`，但别默认拉满（输出会淹掉关键行）。
+6. **纯中文 query 查不到**（见「查询写法」）：`explore` 匹配的是符号/文件/英文词。
+   看到 `No relevant code found` **先补代码词重试**，不要直接改用 grep。
+7. **卡在 `indexing` 不动 = 进程被杀**：本环境每次 bash 调用是独立沙箱，后台起的
+   `codegraph index` 随调用结束而死，索引会停在 `state=indexing`（实测停在 80 files）。
+   症状→根因→修法：`codegraph unlock` 清陈旧锁 → **在单条命令内跑完** `codegraph index` → 同命令校验
+   （实测全量 146 文件只要 **3.1s**）。
+
+### 接入 MCP（可选，非必需）
+
+用 CLI 即满足 #18。宿主支持 MCP 时可少一次 bash 往返：
+
+```bash
+codegraph install --print-config claude    # 只打印配置片段，不写文件
+codegraph install -t claude -l local -y    # 写入项目级 MCP 配置
+```
+
+DSH 侧对应 `@deepseek-ai/dsh-mcp-client` 插件条目（`transport: stdio`、`command: codegraph`、
+`args: ['serve', '--mcp']`），工具名带 `mcp__codegraph__` 前缀。
+**未接入 MCP 不构成降级理由——继续用 CLI，禁止因此改用 grep。**
+
+---
+
+最后核对：2026-09-29 从 AGENTS.md 迁入（性能优化任务顺带发现 `/tmp` 被清空、后台进程存活期问题，已在 P1 前加落盘路径说明）；2026-09-30 新增「代码检索纪律（#18/#19）」——codegraph 命令表、降级白名单、同步时机与 5 条实测坑

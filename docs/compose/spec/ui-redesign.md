@@ -1,6 +1,8 @@
 ---
 feature: ui-redesign
-status: delivered
+status: superseded
+superseded_by: 2026-09-30-ui-v2-design.md
+superseded_note: 视觉与组件部分已被 UI v2 取代（过程记录与功能覆盖结论继续有效）
 updated: 2026-09-25
 branch: main
 commits: 9a975b9..f5a99e7

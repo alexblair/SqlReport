@@ -89,7 +89,7 @@ class TestCacheUIDisplay(unittest.TestCase):
         self.assertIn("已启用缓存", body)
 
     def test_cache_badge_missing_ttl_display(self):
-        """FAIL: cache_ttl_hours=24 时未显示 TTL 信息"""
+        """反例：cache_ttl_hours=24 时未显示 TTL 信息"""
         result = self._make_result(cache_info={"source": "redis", "timestamp": time.time()})
         body = _build_report_html(self.conn,
             {"id": 1, "name": "TTL报表", "sql_query": "SELECT 1", "memo": "",

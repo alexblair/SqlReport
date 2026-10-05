@@ -188,265 +188,13 @@ def parse_config_path(path: str) -> dict:
 # HTML 模板片段
 # ---------------------------------------------------------------------------
 
-_CONFIG_EXTRA_CSS = """
-  form.config-form { max-width: 1200px; }
-  @media (min-width: 1100px) {
-    form.config-form {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-auto-flow: dense;
-      column-gap: 32px;
-      row-gap: 16px;
-    }
-    form.config-form label { margin-top: 0; }
-    form.config-form .span-full { grid-column: 1 / -1; }
-  }
-  .config-form label {
-    display: block; margin-top: 16px; font-weight: 600; color: #334155; font-size: 14px;
-  }
-  .config-form label:first-child { margin-top: 0; }
-  .config-form input[type=text],
-  .config-form input[type=password],
-  .config-form input[type=number],
-  .config-form textarea,
-  .config-form select {
-    width: 100%; padding: 10px 14px; margin-top: 6px;
-    border: 2px solid #e2e8f0; border-radius: 8px;
-    font-size: 14px; color: #1e293b; outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    background: #f8fafc;
-  }
-  .config-form input:focus,
-  .config-form textarea:focus,
-  .config-form select:focus {
-    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); background: #fff;
-  }
-  .config-form textarea { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; resize: vertical; min-height: 100px; }
-  .config-form .form-actions { margin-top: 24px; display: flex; align-items: center; gap: 12px; }
-  .config-form .form-actions .cancel { color: #64748b; text-decoration: none; font-size: 14px; font-weight: 500; }
-  .config-form .form-actions .cancel:hover { color: #334155; }
-  .config-form select { cursor: pointer; }
-  /* 定时任务表单：宽屏进一步利用宽度（仅 .sched-form 作用域，不影响其他 config-form） */
-  @media (min-width: 1700px) {
-    form.config-form.sched-form { max-width: 1680px; }
-  }
-  @media (min-width: 2100px) {
-    form.config-form.sched-form { max-width: 1920px; }
-  }
-  .config-form .field-hint {
-    display: block; margin-top: 2px; font-weight: 400;
-    color: #94a3b8; font-size: 12px;
-  }
-  .config-form .check-inline {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-weight: 400; margin: 4px 18px 4px 0; cursor: pointer;
-  }
-  .config-form .muted { color: #94a3b8; }
-  .sched-reports-wrap {
-    max-height: 300px; overflow: auto;
-    border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
-  }
-  table.sched-reports { width: 100%; border-collapse: collapse; font-size: 14px; }
-  table.sched-reports thead th {
-    position: sticky; top: 0; background: #f1f5f9;
-    text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e8f0;
-    color: #334155; font-weight: 600;
-  }
-  table.sched-reports tbody td {
-    padding: 6px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
-  }
-  table.sched-reports tbody tr:last-child td { border-bottom: none; }
-  table.sched-reports .bind-col { width: 56px; text-align: center; }
-  .sql-textarea {
-    width: 100%; padding: 10px 14px; margin-top: 6px;
-    border: 2px solid #e2e8f0; border-radius: 8px;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 13px; line-height: 1.5; resize: vertical; min-height: 120px;
-    color: #1e293b; outline: none; background: #f8fafc; tab-size: 4;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .sql-textarea:focus {
-    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); background: #fff;
-  }
-  .sql-preview {
-    display: none; margin-top: 8px; padding: 10px 14px;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 13px; line-height: 1.5; tab-size: 4; white-space: pre-wrap; word-wrap: break-word;
-    border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;
-  }
-  .sql-preview.show { display: block; }
-  .memo-preview {
-    display: none; margin-top: 8px; padding: 12px 14px;
-    border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff;
-    font-size: 14px; line-height: 1.7;
-  }
-  .memo-preview.show { display: block; }
-  /* .memo-preview 内 markdown 排版（pre/code/列表/表格等）统一由 .md-body
-     （_MD_CSS，追加在 _CONFIG_MD_EXTRA_CSS 末尾）负责，避免双实现漂移 */
-  .sql-toolbar { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .section + .section { margin-top: 8px; }
-  .ops-cell { white-space: nowrap; }
-  .ops-cell form { display: inline; }
-  .badge {
-    display: inline-block; padding: 2px 10px; border-radius: 12px;
-    font-size: 12px; font-weight: 600;
-  }
-  .badge-pool { background: #eef2ff; color: #4f46e5; }
-  /* 连接池表单「测试连接」结果（批次：ajax 不刷新，内联提示） */
-  .config-form .form-actions .test-result {
-    font-size: 13px; font-weight: 500; align-self: center;
-  }
-  .config-form .form-actions .test-result.ok { color: #16a34a; }
-  .config-form .form-actions .test-result.err { color: #dc2626; }
-"""
+_CONFIG_EXTRA_CSS = ""  # 已并入 render._COMMON_CSS 第 22 节（保留变量名兼容既有引用）
+
 
 # 报表配置页专属样式（确认稿 r3：列表/卡片双视图 + 视觉重排）。
 # 作用域一律限定在 #sec-reports 内，避免影响连接池/用户等其他配置页的同名 class。
-_REPORTS_EXTRA_CSS = _CONFIG_EXTRA_CSS + """
-  /* ---- 分组标题：卡片头形态（图标 chip + 计数 + 右侧操作） ---- */
-  #sec-reports .split > div .section-title {
-    background: var(--bg-surface); border: 1px solid var(--line);
-    border-radius: var(--r-md) var(--r-md) 0 0; border-bottom: 0;
-    padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--ink);
-    gap: 8px;
-  }
-  #sec-reports .split > div .section-title .ico {
-    width: 26px; height: 26px; border-radius: var(--r-sm);
-    background: var(--brand-soft); color: var(--brand);
-    display: grid; place-items: center; flex: 0 0 26px;
-  }
-  #sec-reports .split > div .section-title .ico svg { width: 15px; height: 15px; }
-  #sec-reports .split > div .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-  /* 表格/卡片容器与分组标题拼接成整卡 */
-  #sec-reports .section > .table-wrap,
-  #sec-reports .section > .rpt-grid { border-radius: 0 0 var(--r-md) var(--r-md); }
-  #sec-reports .section > .table-wrap { border-top: 0; }
-  /* 嵌套子分类：整组内缩成「完整子卡片」——标题与表格同属一个包裹块，
-     消除旧 border-left:0 hack 造成的半截圆角割裂。
-     margin-left 仍由模板 inline style 控制（测试锁定该串），故容器样式用 !important。 */
-  #sec-reports .split > div .section[style*="border-left"] {
-    border: 1px solid var(--line) !important;
-    border-left: 3px solid #c7d2fe !important;
-    border-radius: var(--r-md) !important;
-    background: var(--bg-surface);
-    overflow: hidden;
-  }
-  #sec-reports .split > div .section[style*="border-left"] > .section-title {
-    border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
-    background: var(--bg-subtle);
-  }
-  #sec-reports .split > div .section[style*="border-left"] > .table-wrap,
-  #sec-reports .split > div .section[style*="border-left"] > .rpt-grid {
-    border: 0; border-radius: 0; max-height: none;
-  }
+_REPORTS_EXTRA_CSS = ""  # 报表配置页样式已并入 render._COMMON_CSS
 
-  /* ---- 左树（确认稿 r3 基准：13px 行、hover 才显操作组、计数 600、单行头部） ---- */
-  #sec-reports .tree { font-size: 13px; }
-  #sec-reports .tree .cat { padding: 5px 8px; font-size: 13px; line-height: 22px; }
-  #sec-reports .tree .cat .nm { flex: 0 1 auto; }
-  #sec-reports .tree .cat .cnt { font-weight: 600; }
-  #sec-reports .tree .cat .ops { display: none; }
-  #sec-reports .tree .cat:hover .ops { display: inline-flex; }
-  #sec-reports .tree .cat .ops .btn { height: 22px; min-width: 22px; padding: 0 4px; font-size: 12px; }
-  /* 折叠钮 = 粗体标题形态（确认稿：报表分类 13px bold 文本，非描边按钮） */
-  #sec-reports .tree-toggle {
-    font-size: 13px; font-weight: 700; color: var(--ink); padding: 0;
-    height: auto; letter-spacing: 0;
-  }
-  #sec-reports .tree-toggle:hover { background: transparent; color: var(--brand); }
-  /* 左栏标题保持普通 flex 行（不套卡片头）；右侧动作右贴 */
-  #sec-reports aside.card .section-title { background: transparent; border: 0; border-radius: 0; padding: 0; margin-bottom: 8px; font-size: 13px; }
-  #sec-reports aside.card .section-title .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-
-  /* ---- 列表视图：列组与截断（确认稿 r3 反馈①②） ---- */
-  /* 列宽收紧：右栏实际可用宽约 876px（1440 - 侧栏240 - 内边距48 - 左树260 - 间距16），
-     10 列必须在此宽度内放下，否则出现横向滚动条、操作列被挤出（截图校验实测缺陷） */
-  #sec-reports th { padding: 8px 5px; }
-  #sec-reports td { padding: 8px 5px; }
-  #sec-reports th.sql-head { width: 112px; }
-  #sec-reports td.sql-cell { max-width: 112px; }
-  #sec-reports td.sql-cell code {
-    display: inline-block; max-width: 100%; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
-    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
-    padding: 2px 6px; border-radius: 4px; color: var(--ink-2); cursor: help;
-  }
-  /* 名称列允许换行（与确认稿一致，靠换行吸收长名而不是撑宽列） */
-  #sec-reports td.name-cell { min-width: 60px; max-width: 200px; }
-  #sec-reports td.memo-cell {
-    max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--ink-3); font-size: 13px;
-  }
-  /* API 列允许换行收缩（原 nowrap 会把整表撑出滚动条） */
-  #sec-reports td.api-cell { text-align: center; font-size: 13px; max-width: 56px; }
-  /* 配置三列（默认分页/缓存/TTL）同底色归组，与其余列视觉分区 */
-  /* 配置三列（默认分页/缓存/TTL）归组：弃用浅蓝底色块（与整表白底冲突、
-     观感「脏」），改为 1px 竖分隔线表达分组，保持全表配色统一 */
-  #sec-reports td.cfg-group { text-align: center; font-variant-numeric: tabular-nums; }
-  #sec-reports td.sql-cell + td,
-  #sec-reports th.sql-head + th { border-left: 1px solid var(--line); }
-  #sec-reports td.cfg-group + td:not(.cfg-group),
-  #sec-reports th.cfg-group + th:not(.cfg-group) { border-left: 1px solid var(--line); }
-
-  /* 连接池 chip：单行截断 + 状态点 + 6px 圆角（替换会包成圆饼的 full 圆角徽标） */
-  #sec-reports .pool-chip {
-    display: inline-flex; align-items: center; gap: 6px; max-width: 96px;
-    padding: 3px 9px; border: 1px solid var(--line); border-radius: var(--r-sm);
-    background: var(--bg-subtle); font-size: 12px; font-weight: 600; color: var(--ink-2);
-    line-height: 18px; white-space: nowrap; overflow: hidden; cursor: default;
-    transition: border-color 0.12s, background 0.12s, color 0.12s;
-  }
-  #sec-reports .pool-chip:hover { border-color: #c7d2fe; background: var(--brand-soft); color: var(--brand); }
-  #sec-reports .pool-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: 0 0 6px; }
-  #sec-reports .pool-chip .txt { overflow: hidden; text-overflow: ellipsis; }
-  #sec-reports .pool-chip.gone { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
-  #sec-reports .pool-chip.gone .dot { background: var(--danger); }
-
-  /* 操作列：图标按钮收拢间距（复用公共 .btn 体系） */
-  #sec-reports .ops-cell { text-align: right; }
-  #sec-reports .ops-cell .btn { padding: 0 6px; }
-  #sec-reports .ops-cell form { display: inline; }
-
-  /* ---- 卡片视图（确认稿 r3：与列表同数据的另一形态） ---- */
-  #sec-reports .rpt-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
-    gap: 12px; padding: 14px; background: var(--bg-surface);
-    border: 1px solid var(--line); border-top: 0;
-  }
-  #sec-reports .rpt-card {
-    position: relative; display: flex; flex-direction: column; gap: 8px;
-    border: 1px solid var(--line); border-radius: var(--r-md);
-    background: var(--bg-surface); padding: 12px 14px 10px;
-    transition: box-shadow 0.12s ease-out, transform 0.12s ease-out, border-color 0.12s;
-  }
-  #sec-reports .rpt-card:hover { border-color: #c7d2fe; box-shadow: var(--sh-2); transform: translateY(-2px); }
-  #sec-reports .rpt-card .rc-pick { position: absolute; top: 10px; right: 10px; margin: 0; }
-  #sec-reports .rpt-card .rc-top { display: flex; align-items: flex-start; gap: 8px; padding-right: 22px; }
-  #sec-reports .rpt-card .rc-name { font-weight: 600; font-size: 14px; line-height: 20px; flex: 1; min-width: 0; }
-  #sec-reports .rpt-card .rc-name a { color: var(--brand); text-decoration: none; }
-  #sec-reports .rpt-card .rc-name a:hover { text-decoration: underline; }
-  #sec-reports .rpt-card .rc-sql {
-    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-    font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--line);
-    border-radius: 4px; padding: 4px 8px; color: var(--ink-2);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
-  }
-  #sec-reports .rpt-card .rc-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  #sec-reports .rpt-card .rc-memo {
-    font-size: 12px; color: var(--ink-3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  #sec-reports .rpt-card .rc-foot {
-    display: flex; align-items: center; gap: 6px; margin-top: auto;
-    border-top: 1px dashed var(--line); padding-top: 8px;
-  }
-  #sec-reports .rpt-card .rc-ops { display: inline-flex; gap: 4px; align-items: center; }
-  #sec-reports .rpt-card .rc-ops .btn { padding: 0 7px; }
-  #sec-reports .rpt-card .rc-ops form { display: inline; }
-  #sec-reports .rpt-card .rc-api { margin-left: auto; font-size: 12px; color: var(--brand); text-decoration: none; white-space: nowrap; }
-  #sec-reports .rpt-card .rc-api:hover { text-decoration: underline; }
-  #sec-reports .rpt-grid .empty-state { grid-column: 1 / -1; }
-"""
 
 # 报表表单页等含 Markdown 渲染能力的页面：基础 config CSS + 代码高亮 CSS
 # + Markdown 排版 CSS（_MD_CSS 必须在 _CONFIG_EXTRA_CSS 之后，保证列表缩进等规则生效）
@@ -547,7 +295,7 @@ window.togglePreview = function(btn) {
   btn.textContent = show ? "隐藏高亮" : "显示高亮";
 };
 
-document.addEventListener("DOMContentLoaded", function() {
+onReady(function() {
   document.querySelectorAll(".sql-textarea").forEach(function(ta) {
     ta.addEventListener("input", function() {
       var label = ta.closest("label");
@@ -590,11 +338,11 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     cache_checked = ' checked' if prefer_cache else ''
     if sql_has_write:
         aw_checked = ' checked' if allow_write else ''
-        allow_write_html = (f'<label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">'
+        allow_write_html = (f'<label class="span-full" style="display:flex;align-items:center;gap:8px">'
                             f'<input type="hidden" name="allow_write" value="0">'
                             f'<input type="checkbox" name="allow_write" value="1"{aw_checked}>'
-                            f'<span style="font-weight:600">允许执行写操作</span>'
-                            f'<span style="color:#94a3b8;font-weight:400;font-size:13px">（SQL 含写语句；未开启时将拒绝执行）</span>'
+                            f'<span>允许执行写操作</span>'
+                            f'<span>（SQL 含写语句；未开启时将拒绝执行）</span>'
                             f'</label>')
         if not allow_write:
             allow_write_html += ('<div class="flash-warn span-full" style="'
@@ -609,31 +357,31 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
     else:
         aao_confirm = ''
     allow_all_output_html = (
-        f'<label style="display:flex;align-items:center;gap:8px;font-weight:400">'
+        f'<label style="display:flex;align-items:center;gap:8px">'
         f'<input type="hidden" name="allow_all_output" value="0">'
         f'<input type="checkbox" name="allow_all_output" value="1"{aao_checked}>'
-        f'<span style="font-weight:600">允许全部输出</span>'
-        f'<span style="color:#94a3b8;font-weight:400;font-size:13px">（关闭时查询结果超过限制行数将被截断，仅显示前 N 行）</span>'
+        f'<span>允许全部输出</span>'
+        f'<span>（关闭时查询结果超过限制行数将被截断，仅显示前 N 行）</span>'
         f'</label>'
         f'<label>全量输出截断上限（行）:'
-        f'<input type="number" name="max_rows" value="{max_rows}" min="1" step="1" style="width:140px">'
-        f'<span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">仅关闭「允许全部输出」时生效</span>'
+        f'<input type="number" name="max_rows" value="{max_rows}" min="1" step="1">'
+        f'<span>仅关闭「允许全部输出」时生效</span>'
         f'</label>')
     # 缓存保活折叠区（scheduler T4）
     ka_checked = ' checked' if keepalive_enabled else ''
     keepalive_html = f"""
-  <details class="span-full" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;background:#f8fafc">
-    <summary style="cursor:pointer;font-weight:600;color:#334155">{_icon("refresh")} 缓存保活</summary>
-    <div style="margin-top:12px">
-      <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+  <details class="span-full">
+    <summary style="cursor:pointer">{_icon("refresh")} 缓存保活</summary>
+    <div>
+      <label style="display:flex;align-items:center;gap:8px">
         <input type="hidden" name="keepalive_enabled" value="0">
         <input type="checkbox" name="keepalive_enabled" value="1"{ka_checked}>
-        <span style="font-weight:600">启用缓存保活</span>
-        <span style="color:#94a3b8;font-weight:400;font-size:13px">（需同时勾选上方「启用 Redis 缓存」且 Redis 可用；到期前自动重建快照，避免首个请求变慢）</span>
+        <span>启用缓存保活</span>
+        <span>（需同时勾选上方「启用 Redis 缓存」且 Redis 可用；到期前自动重建快照，避免首个请求变慢）</span>
       </label>
       <label>提前重建（秒）:
-        <input type="number" name="keepalive_ahead_seconds" value="{keepalive_ahead_seconds}" min="0" step="1" style="width:140px">
-        <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">快照剩余有效期不足该秒数时提前后台重建；0 = 不保活</span>
+        <input type="number" name="keepalive_ahead_seconds" value="{keepalive_ahead_seconds}" min="0" step="1">
+        <span>快照剩余有效期不足该秒数时提前后台重建；0 = 不保活</span>
       </label>
     </div>
   </details>"""
@@ -670,7 +418,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
         </label>
         <label>默认分页大小: <input type="number" name="default_page_size" value="{default_page_size}" min="1" required></label>
         <label class="span-full">备注（非必填）:
-          <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px;font-family:inherit">{memo_val}</textarea>
+          <textarea name="memo" class="sql-textarea" placeholder="输入备注信息... 支持 Markdown（标题/列表/代码块/```mermaid 流程图）" rows="4" style="min-height:80px">{memo_val}</textarea>
           <div class="memo-preview md-body" id="memo-preview"></div>
           <div class="sql-toolbar">
             <button type="button" class="btn btn-outline btn-sm" onclick="toggleMemoPreview(this)">预览备注</button>
@@ -690,21 +438,20 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
           </div>
         </label>
         <label class="span-full">结果名称（每行一个，顺序对应 SELECT 返回；不填则自动编号）:
-          <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px;font-family:inherit">{_escape(result_names_val)}</textarea>
+          <textarea name="result_names" class="sql-textarea" placeholder="例如:&#10;汇总指标&#10;按城市分布&#10;商品TOP10" rows="3" style="min-height:60px">{_escape(result_names_val)}</textarea>
         </label>
       </div>
       <div class="card">
         <div class="card-head"><div class="form-section">③ 缓存与护栏</div></div>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+        <label style="display:flex;align-items:center;gap:8px">
           <input type="hidden" name="prefer_cache" value="0">
           <input type="checkbox" name="prefer_cache" value="1"{cache_checked}>
-          <span style="font-weight:600">启用 Redis 缓存</span>
-          <span style="color:#94a3b8;font-weight:400;font-size:13px">（优先使用缓存数据加速访问）</span>
+          <span>启用 Redis 缓存</span>
+          <span>（优先使用缓存数据加速访问）</span>
         </label>
         <label>缓存 TTL（小时）:
-          <input type="number" name="cache_ttl_hours" value="{cache_ttl_hours}" min="0" step="1"
-                 style="width:120px">
-          <span style="color:#94a3b8;font-weight:400;font-size:13px;margin-left:8px">0 = 永不过期</span>
+          <input type="number" name="cache_ttl_hours" value="{cache_ttl_hours}" min="0" step="1">
+          <span>0 = 永不过期</span>
         </label>
         {allow_write_html}
         {allow_all_output_html}
@@ -967,7 +714,7 @@ def render_reports_page(conn, flash: str = None) -> str:
             + flash_html
             + build_config_filter_box_html()
             + '<div id="sec-reports"><div class="split">'
-            + '<aside class="card" style="padding:12px">' + manage_html + '</aside>'
+            + '<aside class="card">' + manage_html + '</aside>'
             + '<div>' + tables_html + '</div>'
             + '</div></div>'
             + render_page_footer())
@@ -984,9 +731,9 @@ def _render_branding_section() -> str:
     prefix = settings.get("title_prefix") or ""
     color_norm = branding.normalize_color(color)
     picker_value = "#%02X%02X%02X" % color_norm if color_norm else "#4F46E5"
-    return f"""<div class="card" style="margin-top:8px">
-<div class="section-title" style="font-size:16px;margin-bottom:8px"><span>🏷️ 站点标识</span></div>
-<p style="color:#64748b;margin:0 0 10px">favicon 图标与标签页环境前缀，全站生效（保存后刷新页面立即生效）</p>
+    return f"""<div class="card">
+<div class="section-title"><span>🏷️ 站点标识</span></div>
+<p>favicon 图标与标签页环境前缀，全站生效（保存后刷新页面立即生效）</p>
 <form method="post" action="/config/site-branding" class="config-form" id="branding-form">
   <label>图标模式:
     <select name="favicon_mode" id="favmode" onchange="brandingModeChanged()">
@@ -997,8 +744,8 @@ def _render_branding_section() -> str:
   </label>
   <label id="row-color" style="display:{'' if mode == 'color' else 'none'}">颜色 (#RGB / #RRGGBB):
     <input type="color" id="favcolor" value="{picker_value}" title="鼠标点选颜色">
-    <input type="text" name="favicon_color" id="favcolor-text" value="{_escape(color)}" placeholder="#FF0000" style="width:140px">
-    <span id="recent-colors" style="display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px"></span>
+    <input type="text" name="favicon_color" id="favcolor-text" value="{_escape(color)}" placeholder="#FF0000">
+    <span id="recent-colors" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
   </label>
   <label id="row-file" style="display:{'' if mode == 'custom' else 'none'}">上传图片 (PNG / ICO, ≤256KB):
     <input type="file" id="favfile" accept=".png,.ico,image/png,image/x-icon">
@@ -1293,9 +1040,9 @@ def render_overview(conn, flash: str = None,
 
     test_cases_card = ""
     if app_config.is_debug_mode():
-        test_cases_card = """<div class="card" style="border:1px dashed #c7d2fe;background:#f8f7ff">
+        test_cases_card = """<div class="card">
 <div class="card-head"><h2>导入演示数据（DEBUG）</h2></div>
-<p class="muted" style="margin-bottom:12px">将预设测试用例按名称导入当前 DEBUG 配置库，同名覆盖。用于功能验收与脚本测试。</p>
+<p class="muted">将预设测试用例按名称导入当前 DEBUG 配置库，同名覆盖。用于功能验收与脚本测试。</p>
 <form method="post" action="/config/test-cases/import">
 <button type="submit" class="btn btn-primary" onclick="return confirm('确认将预设测试用例导入当前 DEBUG 配置库？同名数据将被覆盖更新。')">导入演示数据</button>
 </form></div>"""
@@ -1311,28 +1058,28 @@ def render_overview(conn, flash: str = None,
     body += (
         '<div class="grid-stat">'
         f'<div class="stat-tile"><div class="num">{n_reports}</div><div class="lbl">个报表</div>'
-        '<a href="/config/reports" style="font-size:12px">前往配置 →</a></div>'
+        '<a href="/config/reports">前往配置 →</a></div>'
         f'<div class="stat-tile"><div class="num">{n_cats}</div><div class="lbl">个分类</div>'
-        '<a href="/config/reports" style="font-size:12px">分类管理 →</a></div>'
+        '<a href="/config/reports">分类管理 →</a></div>'
         f'<div class="stat-tile"><div class="num">{n_api}</div><div class="lbl">个 API 接口</div>'
-        '<a href="/config/api-endpoints" style="font-size:12px">管理接口 →</a></div>'
+        '<a href="/config/api-endpoints">管理接口 →</a></div>'
         f'<div class="stat-tile"><div class="num">{n_sched}</div><div class="lbl">个定时任务</div>'
-        '<a href="/config/scheduler" style="font-size:12px">查看任务 →</a></div>'
+        '<a href="/config/scheduler">查看任务 →</a></div>'
         f'<div class="stat-tile"><div class="num">{n_pools}</div><div class="lbl">个连接池</div>'
-        '<a href="/config/pools" style="font-size:12px">管理连接池 →</a></div>'
+        '<a href="/config/pools">管理连接池 →</a></div>'
         f'<div class="stat-tile"><div class="num">{n_users}</div><div class="lbl">个用户</div>'
-        '<a href="/config/users" style="font-size:12px">管理用户 →</a></div>'
+        '<a href="/config/users">管理用户 →</a></div>'
         '</div>')
     body += (
         '<div class="card"><div class="card-head"><h2>快捷入口</h2></div>'
         '<div class="grid-3">'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/reports">管理报表</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/pools">连接池</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/users">用户</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/reports#sec-categories">管理分类</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/api-endpoints">API 接口</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/config/scheduler">定时任务</a>'
-        '<a class="btn btn-secondary" style="height:44px" href="/audit">审计日志</a>'
+        '<a class="btn btn-secondary" href="/config/reports">管理报表</a>'
+        '<a class="btn btn-secondary" href="/config/pools">连接池</a>'
+        '<a class="btn btn-secondary" href="/config/users">用户</a>'
+        '<a class="btn btn-secondary" href="/config/reports#sec-categories">管理分类</a>'
+        '<a class="btn btn-secondary" href="/config/api-endpoints">API 接口</a>'
+        '<a class="btn btn-secondary" href="/config/scheduler">定时任务</a>'
+        '<a class="btn btn-secondary" href="/audit">审计日志</a>'
         '</div></div>')
     # grid-2：左=系统状态，右=导入演示数据（DEBUG，原型 page-config 口径）
     body += (
@@ -1340,13 +1087,13 @@ def render_overview(conn, flash: str = None,
         '<div class="card-head"><h2>系统状态</h2></div>'
         f'<div style="display:flex;flex-direction:column;gap:10px">'
         f'<div style="display:flex;gap:10px;align-items:center">{sched_badge}'
-        '<span class="muted" style="font-size:13px">定时调度状态（scheduler.enable）</span></div>'
+        '<span class="muted">定时调度状态（scheduler.enable）</span></div>'
         f'<div style="display:flex;gap:10px;align-items:center">{redis_badge}'
-        '<span class="muted" style="font-size:13px">Redis 三层缓存（不可用时自动直连数据库）</span></div>'
+        '<span class="muted">Redis 三层缓存（不可用时自动直连数据库）</span></div>'
         f'<div style="display:flex;gap:10px;align-items:center">'
         f'<span class="badge badge-neutral">{_escape(str(eng).upper())}</span>'
-        '<span class="muted" style="font-size:13px">配置存储引擎</span></div>'
-        f'<div class="muted" style="font-size:13px">已配置 {n_api} 个 API 接口 · 共 {n_reports} 个报表、{n_cats} 个分类</div>'
+        '<span class="muted">配置存储引擎</span></div>'
+        f'<div class="muted">已配置 {n_api} 个 API 接口 · 共 {n_reports} 个报表、{n_cats} 个分类</div>'
         '</div></div>'
         + test_cases_card
         + '</div>')

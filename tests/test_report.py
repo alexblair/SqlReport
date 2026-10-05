@@ -1319,7 +1319,9 @@ class TestSortSettingsPanel(unittest.TestCase):
         self.assertIn("sort-item", body)
         self.assertIn("↑", body)
         self.assertIn("↓", body)
-        self.assertNotIn("暂无排序", body)
+        # 有排序项时不得渲染「暂无排序」占位元素
+        # （正文含该字面量是正常的：syncSortEmptyState 在清空排序后要把它插回来）
+        self.assertNotIn('class="sort-empty"', body)
 
     @patch("report.execute_report")
     def test_sort_settings_drag_handle_present(self, mock_exec):
@@ -1622,17 +1624,26 @@ class TestCombinationScenarios(unittest.TestCase):
 
     @patch("report.execute_report")
     def test_apply_sort_settings_preserves_filters_and_cols(self, mock_exec):
-        """applySortSettings JS 应保留筛选和列设置"""
+        """排序设置必须透传筛选/列设置/嵌套筛选等既有参数。
+
+        用户反馈「排序弹窗有了但配置结果未生效」的根因之一：老实现只重建
+        sort/dir 与 f_*/op_*，其余参数（cols、nested_filter、sql_query）被静默丢弃，
+        组合操作时前面的配置会被清空。现改为统一走 buildReportUrl：
+        - 显式处理 id/page_size/result/sort/dir/cols；
+        - 其余参数一律原样透传（不再靠白名单）。
+        """
         mock_exec.return_value = report.ReportResult(
             columns=["id", "name", "age"], rows=[(1, "A", 25)], total=1, page=1, page_size=10)
         code, body, _ = report.handle_request(
             self.conn, "GET", "/report",
-            "id=1&f_name=a&op_age=gt&cols=id,name",
+            "id=1&f_name=a&op_age=gt&cols=id,name&nested_filter=%7B%7D",
             pool_override=self.mock_pool)
-        # applySortSettings 函数应读取并保留 f_/op_/cols 参数
-        self.assertIn("key.startsWith('f_')", body)
-        self.assertIn("key.startsWith('op_')", body)
-        self.assertIn("cols", body)
+        js = body
+        self.assertIn("function buildReportUrl(", js, "应存在统一的 URL 构造函数")
+        self.assertIn("sort_cols", js, "排序项应作为 overrides 传入")
+        # 透传逻辑：只 skip 显式处理的键，其余原样续接
+        self.assertRegex(js, r"var skip = \{[^}]*id: 1[^}]*cols: 1[^}]*\}")
+        self.assertIn("navigateTo(buildReportUrl({sort_cols: sorts}))", js)
 
     @patch("report.execute_report")
     def test_multi_sort_bar_shows_priority(self, mock_exec):

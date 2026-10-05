@@ -125,6 +125,18 @@ source venv/bin/activate
 python server.py
 ```
 
+### 本地测试环境（8099 端口）
+
+```bash
+./test_env.sh start     # 后台启动，绑定 0.0.0.0:8099（任意地址可访问）
+./test_env.sh status    # 进程 / 监听地址 / 健康检查 / 可访问地址
+./test_env.sh stop      # 停止（SIGINT → SIGTERM → SIGKILL 逐级兜底）
+```
+
+`test_env.sh` 通过 `HOST`/`PORT` 环境变量覆盖监听地址与端口（`app_config.get_server_config()` 中优先级最高），**无需改任何配置文件**；仓库根存在 `app_config.debug.json` 时自动叠加 DEBUG 配置，即测试环境走 `config.debug.db` / `audit.debug.db`，与生产 `config.db` 互不干扰。PID 文件与控制台日志落在已 gitignore 的 `run-logs/`。
+
+默认地址端口可用 `TEST_PORT=9100 TEST_HOST=127.0.0.1 ./test_env.sh start` 覆盖；其余子命令：`restart` / `log`（跟踪日志）/ `fg`（前台排障）。
+
 一键安装脚本 `install.sh` 会自动创建虚拟环境并安装 `requirements.txt` 中的所有依赖。你也可以手动安装：
 
 ```bash
@@ -605,6 +617,7 @@ SqlReport/
 │   └── test_state_machine.py
 ├── config.db              # SQLite 配置数据库（自动创建，不提交）
 ├── install.sh             # 自动化依赖安装脚本（venv + pip install）
+├── test_env.sh            # 本地测试环境启停脚本（默认 0.0.0.0:8099）
 ├── requirements.txt       # pip 依赖清单
 ├── manage_service.sh      # Systemd 服务管理脚本
 ├── git-purge.sh           # Git 仓库重写工具（清理历史/更改作者/代理支持）

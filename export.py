@@ -15,7 +15,8 @@ export.py — CSV / JSON 导出功能
   /export?id=N&format=json  → JSON
 
 导出选项：
-  charset=gbk|utf8          字符集（默认 gbk）
+  charset=gbk|utf8          字符集（默认 gbk；**JSON 固定 utf-8，忽略该参数**——
+                            与 API 侧 JSON 响应统一 UTF-8 的既有约定一致）
   smart_quotes=1,2,4        JSON 智能去引号（逗号分隔位图：1=十进制、2=科学计数法、4=千分位）
   json_no_quotes=1          旧「值无引号」参数，兼容等价 smart_quotes=1,2,4（面板全开）
   zip=1                     输出为 ZIP 压缩包
@@ -434,6 +435,12 @@ def handle_export(conn, query: str,
     charset = "gbk"
     charset_vals = qs.get("charset", [])
     if charset_vals and charset_vals[0].lower() in ("utf8", "utf-8"):
+        charset = "utf8"
+
+    # JSON 固定 UTF-8（RFC 8259；与 api_handler 全部 JSON 响应 application/json; charset=utf-8 一致）。
+    # 导出面板虽仍显示字符集选项，但选 JSON 时会被前端置为 UTF-8 并禁用；此处再兜一层，
+    # 直接构造 URL（如 /export?format=json&charset=gbk）也一定是 UTF-8。
+    if export_format == "json":
         charset = "utf8"
 
     json_no_quotes = False

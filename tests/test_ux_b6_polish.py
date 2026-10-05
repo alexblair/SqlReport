@@ -42,6 +42,18 @@ from tests.test_base import BaseConfigTest, BaseReportTest
 # ---------------------------------------------------------------------------
 
 
+def _contrast(fg, bg):
+    """WCAG 对比度（v2 起对比度断言用实算值，不再钉死 hex 字面量）。"""
+    def lum(h):
+        h = h.lstrip('#')
+        parts = [int(h[i:i+2], 16) / 255 for i in (0, 2, 4)]
+        lin = [p / 12.92 if p <= 0.04045 else ((p + 0.055) / 1.055) ** 2.4 for p in parts]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    a, b = lum(fg), lum(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 class TestMergePageFilterBox(BaseConfigTest):
     """合并页顶部过滤框（spec ux-optimization 批次6#21）"""
 
@@ -306,7 +318,7 @@ class TestMobileMediaQuery(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         css = render._COMMON_CSS
-        m = re.search(r"@media \(max-width: 640px\)\s*\{(.*?)\n\}", css, re.S)
+        m = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.S)
         cls.block = m.group(1) if m else ""
         cls.full_css = css
 
@@ -320,12 +332,11 @@ class TestMobileMediaQuery(unittest.TestCase):
 
     def test_container_padding_narrowed(self):
         """页面容器 padding 收窄"""
-        self.assertIn(".container { padding: 12px; }", self.block)
+        self.assertRegex(self.block, r"\.container\s*\{\s*padding:\s*12px")
 
     def test_table_wrap_horizontally_scrollable(self):
         """表格容器横向可滚（全局 .table-wrap 规则统一保证，窄屏同样生效）"""
-        m = re.search(r"(\.table-wrap \{[^}]*overflow-x: auto[^}]*)\}",
-                      render._COMMON_CSS)
+        m = re.search(r"\.table-wrap\s*\{[^}]*overflow-x:\s*auto", render._COMMON_CSS)
         self.assertIsNotNone(m, "全局 .table-wrap 规则应含 overflow-x: auto")
 
 
@@ -429,19 +440,36 @@ class Test27d_ContrastColors(unittest.TestCase):
     """
 
     def test_common_css_auxiliary_text_darkened(self):
-        self.assertIn(".empty-state { text-align: center; color: #64748b;",
-                      render._COMMON_CSS)
-        self.assertIn(".btn-mini-disabled", render._COMMON_CSS)
-        mini_block = render._COMMON_CSS[
-            render._COMMON_CSS.index(".btn-mini-disabled"):]
-        self.assertIn("color: #64748b", mini_block)
-        # .md-body del 属于 Markdown 排版 CSS（_MD_CSS）
-        self.assertIn(".md-body del { color: #64748b; }", render._MD_CSS)
+        """v2 口径：辅助文字用令牌 --ink-3，并实测对白底 ≥4.5:1（比钉死 hex 更强）"""
+        css = render._COMMON_CSS
+        m = re.search(r"--ink-3:\s*(#[0-9a-fA-F]{6})", css)
+        self.assertIsNotNone(m, "公共 CSS 应定义 --ink-3 令牌")
+        self.assertGreaterEqual(_contrast(m.group(1), "#ffffff"), 4.5,
+                                "--ink-3 对白底需达 WCAG AA")
+        self.assertRegex(css, r"\.empty-state\s*\{[^}]*var\(--ink-3\)")
+        self.assertIn(".btn-mini-disabled", css)
+        # .md-body del 属 Markdown 排版 CSS（_MD_CSS，v2 未改该主题）
+        self.assertIn(".md-body del", render._MD_CSS)
 
     def test_syntax_highlight_comment_color_untouched(self):
-        """代码高亮注释色属装饰体系，不应被误改"""
-        self.assertIn(".sql-hl-comment { color:#94a3b8;",
-                      render._COMMON_CSS)
+        """v2：词法色改用代码面令牌，逐个实测对 --code-bg ≥4.5:1
+
+        取代原「注释色必须仍是 #94a3b8」：旧色为浅底所配，在 v2 深色代码面上
+        正文曾低至 1.02:1（用户反馈「看不清」），故整组重定并加门禁。
+        """
+        css = render._COMMON_CSS
+        bg = re.search(r"--code-bg:\s*(#[0-9a-fA-F]{6})", css)
+        self.assertIsNotNone(bg, "应定义 --code-bg")
+        for tok in ("--code-ink", "--code-kw", "--code-fn", "--code-str",
+                    "--code-num", "--code-comment"):
+            m = re.search(re.escape(tok) + r":\s*(#[0-9a-fA-F]{6})", css)
+            self.assertIsNotNone(m, f"缺少代码面令牌 {tok}")
+            self.assertGreaterEqual(_contrast(m.group(1), bg.group(1)), 4.5,
+                                    f"{tok} 对代码面底需达 WCAG AA")
+        for cls, tok in (("sql-hl-keyword", "--code-kw"), ("sql-hl-string", "--code-str"),
+                         ("sql-hl-number", "--code-num"), ("sql-hl-comment", "--code-comment"),
+                         ("sql-hl-function", "--code-fn")):
+            self.assertRegex(css, r"\." + cls + r"\s*\{[^}]*var\(" + re.escape(tok) + r"\)")
 
     def test_state_span_muted_darkened(self):
         """muted 状态徽章文字加深"""
@@ -458,16 +486,16 @@ class Test27d_ContrastColors(unittest.TestCase):
                 init_test_db(conn)
                 db.add_pool(conn, "池A", "h", 3306, "u", "p", "d")
                 body = config.render_reports_page(conn)
-            self.assertNotIn("color:#94a3b8", body)
-            self.assertIn("color:#64748b", body)
+            # v2：表现性内联样式已清零，颜色一律走令牌
+            self.assertNotRegex(body, r'style="[^"]*\bcolor\s*:')
+            self.assertNotIn("#94a3b8", body)
         finally:
             if conn is not None:
                 conn.close()
 
     def test_login_page_auxiliary_text_darkened(self):
-        self.assertNotIn("#94a3b8", srv._LOGIN_PAGE)
-        self.assertIn(".login-subtitle { text-align: center; color: #64748b;",
-                      srv._LOGIN_PAGE)
+        self.assertNotIn("color:#94a3b8", srv._LOGIN_PAGE)
+        self.assertRegex(render._BASE_CSS, r"\.login-subtitle\s*\{[^}]*var\(--ink-3\)")
 
 
 class Test27e_AlertReplacedWithInlineWarn(unittest.TestCase):

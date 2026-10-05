@@ -77,455 +77,1392 @@ _CHEVRON_RIGHT = _icon("chevron-right")
 
 # 基础片段（reset + body 字体栈 + fadeUp 关键帧），供登录页等独立页面复用
 _BASE_CSS = """
+/* ============================================================================
+   SqlReport UI v2 · 石墨·鸢尾（Graphite & Iris）
+   全站单一视觉来源：令牌 → 基座 → 组件 → 页面 → 兼容层。
+   设计基线：4px 间距栅格 / 一套字阶 / 一套圆角 / 一套阴影 / 单一强调色。
+   禁止在页面级另写样式或散写 hex（除本文件令牌区）。
+   ========================================================================= */
+
+/* ---------------------------------------------------------------- 1. 令牌 */
 :root{
-  --bg-app:#f3f4f8; --bg-surface:#ffffff; --bg-subtle:#f8fafc; --bg-hover:#f1f5f9;
-  --sidebar-bg:#0f172a; --sidebar-ink:#cbd5e1; --sidebar-ink-active:#ffffff;
-  --sidebar-active-bg:rgba(99,102,241,.18);
-  --brand:#4f46e5; --brand-hover:#4338ca; --brand-soft:#eef2ff;
-  --ink:#0f172a; --ink-2:#475569; --ink-3:#64748b;
-  --line:#e5e7eb; --line-strong:#d1d5db;
-  --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
-  --danger:#dc2626; --danger-soft:#fef2f2; --info:#2563eb; --info-soft:#eff6ff;
-  --focus-ring:0 0 0 3px rgba(79,70,229,.35);
-  --r-sm:6px; --r-md:10px; --r-full:999px;
-  --sh-1:0 1px 2px rgba(15,23,42,.06); --sh-2:0 8px 24px rgba(15,23,42,.12);
+  /* 中性（冷石墨） */
+  --n0:#ffffff;
+  --bg-app:#f4f6f9;        /* 页面底 */
+  --bg-surface:#ffffff;    /* 卡片/表格面 */
+  --bg-subtle:#f7f8fa;     /* 表头/内嵌 */
+  --bg-sunken:#f1f3f7;     /* 下沉块（快筛行/代码内嵌） */
+  --bg-hover:#f5f7fa;
+  --bg-active:#eceff4;
+  --line:#dde0e4;          /* 常规分隔线 */
+  --line-soft:#e8eaee;     /* 弱分隔线 */
+  --line-strong:#c1c4cb;   /* 输入框描边 */
+  --ink-1:#11151d;         /* 主文字 17.9:1 */
+  --ink-2:#555b68;         /* 次文字 6.7:1 */
+  --ink-3:#6c717c;         /* 辅助  4.8:1 */
+  --ink-4:#9a9ea7;         /* 占位/禁用 */
+
+  /* 主色（鸢尾） */
+  --accent:#5d61e0;
+  --accent-hover:#4e4ecc;
+  --accent-press:#3e3caa;
+  --accent-ink:#3e3caa;    /* 浅底上的主色文字 8.5:1 */
+  --accent-soft:#f4f6ff;
+  --accent-soft-2:#e7ebff;
+  --accent-line:#d1d9ff;
+
+  /* 语义 */
+  --ok:#048b56;      --ok-ink:#00643a;      --ok-soft:#e6f9ed;      --ok-line:#b8e8cd;
+  --warn:#d78c00;    --warn-ink:#9a5700;    --warn-soft:#fff4e0;    --warn-line:#f5ddb0;
+  --danger:#d02b31;  --danger-ink:#a9131f;  --danger-soft:#ffefed;  --danger-line:#f8cdc9;
+  --info:#0d7dd4;    --info-ink:#005fad;    --info-soft:#eaf6ff;    --info-line:#bfe1f8;
+
+  /* 代码面（深色）：底色与文字色成对声明，禁止分开写（曾因此出现 1.02:1 隐形文字） */
+  --code-bg:#0f131b;      /* 代码面底 */
+  --code-bg-2:#191d26;    /* 代码面次级（工具条） */
+  --code-border:#292e37;
+  --code-ink:#e2e6ef;     /* 正文 14.9:1 */
+  --code-dim:#9fa5b0;     /* 次级 7.5:1 */
+  --code-op:#c8ccd6;      /* 运算符/标点 11.6:1 */
+  --code-kw:#a9a5ff;      /* 关键字 8.4:1 */
+  --code-fn:#7ac8f5;      /* 函数 10.1:1 */
+  --code-str:#88d9a5;     /* 字符串 11.1:1 */
+  --code-num:#eebe7c;     /* 数字 10.9:1 */
+  --code-comment:#9298a5; /* 注释 6.4:1 */
+
+  /* 侧栏 */
+  --sidebar-bg:#10121a;
+  --sidebar-bg-2:#1b1e26;
+  --sidebar-w:248px;
+  --sidebar-rail:60px;
+  --sidebar-ink:#b4b7c2;
+  --sidebar-ink-dim:#83868f;
+  --sidebar-ink-active:#ffffff;
+  --sidebar-hover:rgba(255,255,255,.055);
+  --sidebar-active:rgba(255,255,255,.09);
+  --sidebar-line:rgba(255,255,255,.075);
+
+  /* 字阶（px/行高）——中文优先，正文 14/1.6 */
+  --font-sans:"Inter","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",
+              "PingFang SC","HarmonyOS Sans SC","MiSans","Source Han Sans SC","Noto Sans CJK SC","Microsoft YaHei",
+              system-ui,sans-serif;
+  --font-mono:"JetBrains Mono","SFMono-Regular",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+  --fs-11:11px;  --lh-11:16px;
+  --fs-12:12px;  --lh-12:18px;
+  --fs-13:13px;  --lh-13:20px;
+  --fs-14:14px;  --lh-14:22px;
+  --fs-16:16px;  --lh-16:24px;
+  --fs-18:18px;  --lh-18:26px;
+  --fs-22:22px;  --lh-22:30px;
+  --fs-28:28px;  --lh-28:36px;
+
+  /* 间距（4px 栅格） */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-10:40px;
+
+  /* 圆角 / 阴影 / 动效 */
+  --r-xs:4px; --r-sm:6px; --r-md:10px; --r-lg:14px; --r-full:999px;
+  --sh-1:0 1px 2px rgba(17,21,29,.05);
+  --sh-2:0 2px 4px rgba(17,21,29,.04), 0 8px 20px -6px rgba(17,21,29,.12);
+  --sh-3:0 4px 8px rgba(17,21,29,.05), 0 24px 56px -16px rgba(17,21,29,.26);
+  --t-fast:120ms; --t-med:180ms;
+  --ease:cubic-bezier(.2,.8,.2,1);
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+/* ------------------------------------------------------------ 2. 基座 */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--font-sans);font-size:var(--fs-14);line-height:var(--lh-14);
+  color:var(--ink-1);background:var(--bg-app);min-height:100vh;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  font-feature-settings:"cv11" 1,"ss01" 1;
 }
-@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:none;color:var(--accent-hover)}
+h1,h2,h3,h4{font-weight:600;line-height:1.3;color:var(--ink-1)}
+h1{font-size:var(--fs-22);line-height:var(--lh-22);letter-spacing:-.01em}
+h2{font-size:var(--fs-14);letter-spacing:0}
+h3{font-size:var(--fs-13)}
+code,kbd,samp,pre,.mono{font-family:var(--font-mono);font-variant-ligatures:none}
+/* 兜底：未声明尺寸的内联 SVG 一律按 16px 图标处理。
+   生产里不少图标只写了 viewBox（旧 CSS 靠上下文 class 兜底），缺此规则会渲染成 300×150 巨图。 */
+svg:not([width]){width:16px;height:16px;flex:0 0 auto}
+::selection{background:var(--accent-soft-2);color:var(--accent-press)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:var(--r-xs)}
+::placeholder{color:var(--ink-4);opacity:1}
+*{scrollbar-width:thin;scrollbar-color:#c6cbd4 transparent}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:#ced3db;border:3px solid transparent;background-clip:content-box;border-radius:99px}
+*::-webkit-scrollbar-thumb:hover{background:#aeb5c0;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+.muted{color:var(--ink-3)}
+.sub,.meta{color:var(--ink-3);font-size:var(--fs-12);line-height:var(--lh-12)}
+.grow{flex:1 1 auto}
+
+/* ---------------------------------------------------------- 15. 登录页 */
+body:has(.login-box){
+  display:grid;grid-template-columns:minmax(0,1.02fr) minmax(0,1fr);min-height:100vh;
+  background:var(--bg-surface);align-items:stretch;justify-items:stretch;
+}
+body:has(.login-box)::before{
+  content:"";grid-column:1;align-self:stretch;min-height:100vh;
+  background:
+    radial-gradient(120% 90% at 12% 8%, rgba(122,126,240,.34), transparent 55%),
+    radial-gradient(90% 70% at 90% 96%, rgba(63,63,176,.42), transparent 60%),
+    linear-gradient(160deg,#14161f 0%,#0e1017 60%,#0b0d13 100%);
+}
+.login-box{
+  grid-column:2;display:flex;flex-direction:column;justify-content:center;align-items:stretch;
+  width:100%;max-width:400px;margin:0 auto;padding:var(--sp-10) var(--sp-6);
+}
+.login-box h1{
+  display:flex;align-items:center;gap:10px;font-size:var(--fs-28);line-height:var(--lh-28);
+  font-weight:600;letter-spacing:-.02em;margin-bottom:6px;
+}
+.login-box h1 .logo{
+  width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:0 0 32px;
+  font-size:12px;font-weight:700;color:#fff;
+  background:linear-gradient(150deg,#7b7ff0,#5050d8 55%,#3f3fb0);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 2px 6px rgba(62,60,170,.35);
+}
+.login-subtitle{font-size:var(--fs-14);color:var(--ink-3);margin-bottom:var(--sp-8)}
+.login-box form{display:flex;flex-direction:column;gap:6px}
+.login-box form label{font-size:var(--fs-12);font-weight:500;color:var(--ink-2);margin-top:var(--sp-2)}
+.login-box form input{height:38px;font-size:var(--fs-14)}
+.login-box form button[type=submit]{
+  height:38px;margin-top:var(--sp-4);border:0;border-radius:var(--r-sm);cursor:pointer;
+  background:var(--accent);color:#fff;font-size:var(--fs-14);font-weight:600;letter-spacing:.01em;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 1px 2px rgba(62,60,170,.28);
+  transition:background var(--t-fast) var(--ease);
+}
+.login-box form button[type=submit]:hover{background:var(--accent-hover)}
+.login-footer{margin-top:var(--sp-6);font-size:var(--fs-12);color:var(--ink-4)}
+@media (max-width:860px){
+  body:has(.login-box){grid-template-columns:1fr}
+  body:has(.login-box)::before{display:none}
+  .login-box{grid-column:1;max-width:400px}
+}
+
+/* —— 会话过期 / 表单内联错误 / 横幅 —— */
+.notice{
+  padding:10px 14px;margin-bottom:var(--sp-3);border-radius:var(--r-sm);
+  background:var(--warn-soft);border:1px solid var(--warn-line);color:var(--warn-ink);font-size:var(--fs-13);
+}
+.error{
+  padding:10px 14px;margin-bottom:var(--sp-3);border-radius:var(--r-sm);
+  background:var(--danger-soft);border:1px solid var(--danger-line);color:var(--danger-ink);font-size:var(--fs-13);
+}
+.banner{
+  display:flex;gap:var(--sp-3);align-items:flex-start;padding:12px 14px;margin-bottom:var(--sp-3);
+  border-radius:var(--r-sm);font-size:var(--fs-13);line-height:1.6;
+  background:var(--info-soft);border:1px solid var(--info-line);color:var(--info-ink);
+}
+.banner-info{background:var(--info-soft);border-color:var(--info-line);color:var(--info-ink)}
+.banner strong{font-weight:600}
+.banner a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.flash-close{margin-left:auto;cursor:pointer;opacity:.55;font-size:var(--fs-14);line-height:1;padding:0 2px}
+.flash-close:hover{opacity:1}
+
+/* —— 错误页（原 server.py 内联样式） —— */
+.err-box{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:var(--sp-2);text-align:center;padding:var(--sp-6);
+}
+.err-code{font-size:60px;line-height:1;font-weight:600;letter-spacing:-.03em;color:var(--accent-ink)}
+.err-title{font-size:var(--fs-16);color:var(--ink-2)}
+.err-back{
+  display:inline-flex;align-items:center;height:34px;padding:0 16px;margin-top:var(--sp-3);
+  background:var(--accent);color:#fff;border-radius:var(--r-sm);font-size:var(--fs-13);font-weight:500;
+}
+.err-back:hover{background:var(--accent-hover);color:#fff}
 """
 
 _COMMON_CSS = """
-/* ===== 侧栏页壳（ui-redesign T7.1） ===== */
-.app { display:flex; min-height:100vh; }
-.sidebar {
-  width:240px; flex:0 0 240px; background:var(--sidebar-bg); color:var(--sidebar-ink);
-  position:fixed; inset:0 auto 0 0; display:flex; flex-direction:column; z-index:40;
+/* ------------------------------------------------------------ 3. 页壳 */
+.app{display:flex;min-height:100vh}
+.sidebar{
+  width:var(--sidebar-w);flex:0 0 var(--sidebar-w);background:var(--sidebar-bg);
+  color:var(--sidebar-ink);position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;
+  z-index:40;border-right:1px solid rgba(0,0,0,.4);
 }
-.main { margin-left:240px; flex:1; min-width:0; display:flex; flex-direction:column; }
-.sidebar .brand {
-  display:flex; align-items:center; gap:10px; padding:18px 18px 14px;
-  color:#fff; font-weight:700; font-size:16px; letter-spacing:-.2px; text-decoration:none;
-}
-.sidebar .brand:hover { text-decoration:none; }
-.sidebar .brand .logo {
-  width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:13px;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:800;
-}
-.nav-group { padding:6px 12px 2px; font-size:12px; color:#64748b; font-weight:600; letter-spacing:.04em; }
-.nav-item {
-   display:flex; align-items:center; gap:10px; margin:1px 10px; padding:6px 12px;
-   border-radius:8px; color:var(--sidebar-ink); font-size:14px; text-decoration:none;
-   border:0; background:transparent; width:calc(100% - 20px); text-align:left; position:relative;
-   cursor:pointer; box-sizing:border-box;
-}
-.nav-item:hover { background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
-.nav-item.nav-active { background:var(--sidebar-active-bg); color:var(--sidebar-ink-active); font-weight:600; }
-.nav-item.nav-active::before {
-   content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:#818cf8;
-}
-.nav-item svg { width:16px; height:16px; flex:0 0 16px; opacity:.9; }
-.nav-item a { color:inherit; text-decoration:none; }
-.nav-item a:hover { text-decoration:none; }
-.nav-item a:focus-visible { box-shadow:var(--focus-ring); border-radius:8px; }
-.nav-badge {
-  margin-left:auto; font-size:11px; background:rgba(255,255,255,.1);
-  padding:0 6px; border-radius:var(--r-full);
-}
-/* 确认稿 r3：账号区吸底（视觉规范 §2）。注意：生产每个导航组后各有一个
-   .spacer（确认稿只有 1 个），故 spacer 必须保持固定小间距，吸底改由
-   .account 的 margin-top:auto 实现——曾因 spacer 设 flex:1 导致 4 个 spacer
-   各伸展 283px、组间大段空白（R3 反馈）。 */
-.sidebar .spacer { flex:0 0 1.5em; min-height:24px; }
-.account {
-  border-top:1px solid rgba(255,255,255,.08); padding:12px 16px;
-  display:flex; align-items:center; gap:8px; font-size:13px;
-  margin-top:auto; /* 吸底：与组间 spacer 解耦，避免组间被撑开 */
-}
-.account .avatar {
-  width:28px; height:28px; border-radius:50%; background:#334155; display:grid; place-items:center;
-  color:#e2e8f0; font-size:12px; font-weight:700;
-}
-.account .who { color:#e2e8f0; font-weight:600; }
-.account .out {
-  margin-left:auto; color:#94a3b8; font-size:12px; text-decoration:none;
-}
-.account .out:hover { color:#fff; }
-.account .out-icon { display:none; }
+.main{margin-left:var(--sidebar-w);flex:1;min-width:0;display:flex;flex-direction:column}
+.container{width:100%;max-width:1560px;margin:0 auto;padding:0 28px var(--sp-10)}
 
-/* ===== 侧栏收缩：全高手柄 + 三态（确认稿 v2） ===== */
-/* 手柄：侧栏最右侧整条竖边，任意高度可点；箭头随指针高度移动 */
-.sb-handle {
-  position:absolute; top:0; bottom:0; right:0; width:14px; padding:0; border:0;
-  background:transparent; cursor:pointer; z-index:5; font:inherit;
+/* 侧栏品牌 */
+.sidebar .brand{
+  display:flex;align-items:center;gap:10px;padding:18px 18px 16px;color:#fff;
+  font-weight:600;font-size:var(--fs-14);letter-spacing:-.005em;text-decoration:none;
+  border-bottom:1px solid var(--sidebar-line);margin-bottom:10px;
 }
-.sb-handle:hover { background:rgba(255,255,255,.10); }
-.sb-handle:focus-visible { outline:none; box-shadow:inset 0 0 0 2px #818cf8; }
-.sb-arrow {
-  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  display:grid; place-items:center; pointer-events:none;
-  transition:top .08s linear;
+.sidebar .brand:hover{text-decoration:none;color:#fff}
+.sidebar .brand .logo{
+  width:26px;height:26px;border-radius:7px;display:grid;place-items:center;flex:0 0 26px;
+  font-size:11px;font-weight:700;letter-spacing:.02em;color:#fff;
+  background:linear-gradient(150deg,#7b7ff0,#5050d8 55%,#3f3fb0);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.4);
 }
-.sb-arrow svg { width:11px; height:18px; color:#94a3b8; transition:transform .15s ease;
-  transform:rotate(180deg); }
-.sb-handle:hover .sb-arrow svg { color:#fff; }
-/* 箭头方向 = 下一步动作：展开态 ‹（收起）；sb-rail 态 ›（展开） */
-html.sb-rail .sb-arrow svg { transform:none; }
+.sidebar .brand .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* 三态视觉（桌面）：默认/sb-wide = 240px；sb-rail = 64px 图标条 */
-html.sb-rail .sidebar { width:64px; flex-basis:64px; }
-html.sb-rail .main { margin-left:64px; }
-html.sb-rail .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
-html.sb-rail .sidebar .brand .name, html.sb-rail .sidebar .nav-group,
-html.sb-rail .sidebar .nav-item span, html.sb-rail .sidebar .nav-badge,
-html.sb-rail .sidebar .who, html.sb-rail .sidebar .account .out { display:none; }
-html.sb-rail .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
-/* 确认稿 r3 区一：rail 态账号区改纵向两行（头像上、退出图标下），
-   64px 宽内不溢出、不与手柄箭头挤团（原横排 28+26 超宽重叠） */
-html.sb-rail .account {
-  flex-direction:column; justify-content:center; align-items:center;
-  gap:6px; padding:10px 8px;
+/* 分组与导航 */
+.nav-group{
+  padding:14px 20px 6px;font-size:10px;line-height:14px;color:var(--sidebar-ink-dim);
+  font-weight:600;letter-spacing:.1em;text-transform:uppercase;
 }
-html.sb-rail .account .avatar { width:26px; height:26px; font-size:11px; }
-html.sb-rail .account .out-icon {
-  display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
-  color:#94a3b8; text-decoration:none; flex:0 0 26px;
+.nav-item{
+  display:flex;align-items:center;gap:10px;margin:1px 10px;padding:7px 10px;
+  border-radius:var(--r-sm);color:var(--sidebar-ink);font-size:var(--fs-13);line-height:18px;
+  text-decoration:none;border:0;background:transparent;width:calc(100% - 20px);text-align:left;
+  position:relative;cursor:pointer;transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
 }
-html.sb-rail .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
-html.sb-rail .account .out-icon svg { width:15px; height:15px; }
+.nav-item:hover{background:var(--sidebar-hover);color:#fff;text-decoration:none}
+.nav-item.nav-active{background:var(--sidebar-active);color:var(--sidebar-ink-active);font-weight:600}
+.nav-item.nav-active::before{
+  content:"";position:absolute;left:-10px;top:6px;bottom:6px;width:2px;border-radius:0 2px 2px 0;background:#8b8ff5;
+}
+.nav-item svg{width:16px;height:16px;flex:0 0 16px;opacity:.85;stroke-width:1.6}
+.nav-item:hover svg,.nav-item.nav-active svg{opacity:1}
+.nav-item a{color:inherit;text-decoration:none}
+.nav-badge{
+  margin-left:auto;font-size:10px;line-height:16px;min-width:18px;text-align:center;
+  background:rgba(255,255,255,.08);color:var(--sidebar-ink);padding:0 6px;border-radius:var(--r-full);
+  font-weight:600;font-variant-numeric:tabular-nums;
+}
+.nav-item.nav-active .nav-badge{background:rgba(255,255,255,.16);color:#fff}
+.sidebar .spacer{flex:0 0 1.5em;min-height:24px}
+.account{
+  border-top:1px solid var(--sidebar-line);padding:12px 14px;display:flex;align-items:center;
+  gap:9px;font-size:var(--fs-12);margin-top:auto;
+}
+.account .avatar{
+  width:26px;height:26px;border-radius:var(--r-full);background:var(--sidebar-bg-2);display:grid;
+  place-items:center;color:#dfe1e8;font-size:11px;font-weight:600;flex:0 0 26px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
+}
+.account .who{color:#dfe1e8;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account .out{margin-left:auto;color:var(--sidebar-ink-dim);font-size:var(--fs-12);text-decoration:none;padding:4px 6px;border-radius:var(--r-xs)}
+.account .out:hover{color:#fff;background:var(--sidebar-hover)}
+.account .out-icon{display:none}
 
-/* 自适应（≤1024px）：默认 = 64px 图标条；sb-wide = 240px 覆盖层（主区不挤推） */
-@media (max-width: 1024px) {
-  html:not(.sb-wide) .sidebar { width:64px; flex-basis:64px; }
-  html:not(.sb-wide) .main { margin-left:64px; }
-  html:not(.sb-wide) .sidebar .brand { justify-content:center; padding:18px 8px 14px; }
+/* 折叠手柄（三态协议不变） */
+.sb-handle{
+  position:absolute;top:0;bottom:0;right:0;width:12px;padding:0;border:0;background:transparent;
+  cursor:pointer;z-index:5;font:inherit;transition:background var(--t-fast) linear;
+}
+.sb-handle:hover{background:rgba(255,255,255,.07)}
+.sb-handle:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent)}
+.sb-arrow{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;place-items:center;pointer-events:none;transition:top .08s linear}
+.sb-arrow svg{width:11px;height:18px;color:var(--sidebar-ink-dim);transition:transform var(--t-med) var(--ease);transform:rotate(180deg)}
+.sb-handle:hover .sb-arrow svg{color:#fff}
+html.sb-rail .sb-arrow svg{transform:none}
+
+/* 三态：默认 / sb-wide = 248px；sb-rail = 60px 图标条 */
+html.sb-rail .sidebar{width:var(--sidebar-rail);flex-basis:var(--sidebar-rail)}
+html.sb-rail .main{margin-left:var(--sidebar-rail)}
+html.sb-rail .sidebar .brand{justify-content:center;padding:18px 8px 16px;margin-bottom:10px}
+html.sb-rail .sidebar .brand .name,
+html.sb-rail .sidebar .nav-group,
+html.sb-rail .sidebar .nav-item span,
+html.sb-rail .sidebar .nav-badge,
+html.sb-rail .sidebar .who,
+html.sb-rail .sidebar .account .out{display:none}
+html.sb-rail .sidebar .nav-item{justify-content:center;margin:2px 8px;padding:8px}
+html.sb-rail .sidebar .nav-item.nav-active::before{left:-8px}
+html.sb-rail .account{flex-direction:column;justify-content:center;align-items:center;gap:6px;padding:10px 8px}
+html.sb-rail .account .avatar{width:26px;height:26px;font-size:10px}
+html.sb-rail .account .out-icon{
+  display:grid;place-items:center;width:26px;height:26px;border-radius:var(--r-xs);
+  color:var(--sidebar-ink-dim);text-decoration:none;flex:0 0 26px;
+}
+html.sb-rail .account .out-icon:hover{background:var(--sidebar-hover);color:#fff}
+html.sb-rail .account .out-icon svg{width:15px;height:15px}
+
+@media (max-width:1024px){
+  html:not(.sb-wide) .sidebar{width:var(--sidebar-rail);flex-basis:var(--sidebar-rail)}
+  html:not(.sb-wide) .main{margin-left:var(--sidebar-rail)}
+  html:not(.sb-wide) .sidebar .brand{justify-content:center;padding:18px 8px 16px}
   html:not(.sb-wide) .sidebar .brand .name,
   html:not(.sb-wide) .sidebar .nav-group,
   html:not(.sb-wide) .sidebar .nav-item span,
   html:not(.sb-wide) .sidebar .nav-badge,
   html:not(.sb-wide) .sidebar .who,
-  html:not(.sb-wide) .sidebar .account .out { display:none; }
-  html:not(.sb-wide) .sidebar .nav-item { justify-content:center; margin:2px 8px; padding:8px; }
-  html:not(.sb-wide) .account {
-    flex-direction:column; justify-content:center; align-items:center;
-    gap:6px; padding:10px 8px;
-  }
-  html:not(.sb-wide) .account .avatar { width:26px; height:26px; font-size:11px; }
-  html:not(.sb-wide) .account .out-icon {
-    display:grid; place-items:center; width:26px; height:26px; border-radius:6px;
-    color:#94a3b8; text-decoration:none; flex:0 0 26px;
-  }
-  html:not(.sb-wide) .account .out-icon:hover { background:rgba(255,255,255,.1); color:#fff; }
-  html:not(.sb-wide) .account .out-icon svg { width:15px; height:15px; }
-  html:not(.sb-wide) .sb-arrow svg { transform:none; }
-  html.sb-wide .sidebar { width:240px; flex-basis:240px; box-shadow:var(--sh-2); z-index:60; }
-  html.sb-wide .main { margin-left:64px; }
+  html:not(.sb-wide) .sidebar .account .out{display:none}
+  html:not(.sb-wide) .sidebar .nav-item{justify-content:center;margin:2px 8px;padding:8px}
+  html:not(.sb-wide) .account{flex-direction:column;justify-content:center;align-items:center;gap:6px;padding:10px 8px}
+  html:not(.sb-wide) .account .avatar{width:26px;height:26px;font-size:10px}
+  html:not(.sb-wide) .account .out-icon{display:grid;place-items:center;width:26px;height:26px;border-radius:var(--r-xs);color:var(--sidebar-ink-dim);flex:0 0 26px}
+  html:not(.sb-wide) .account .out-icon svg{width:15px;height:15px}
+  html:not(.sb-wide) .sb-arrow svg{transform:none}
+  html.sb-wide .sidebar{width:var(--sidebar-w);flex-basis:var(--sidebar-w);box-shadow:var(--sh-3);z-index:60}
+  html.sb-wide .main{margin-left:var(--sidebar-rail)}
 }
-/* 触屏：手柄加宽保证触控命中 */
-@media (pointer: coarse) {
-  .sb-handle { width:28px; }
+@media (pointer:coarse){.sb-handle{width:26px}}
+
+/* ------------------------------------------------- 4. 页头（粘性） */
+.page-head{
+  position:sticky;top:0;z-index:30;display:flex;align-items:flex-end;gap:var(--sp-4);
+  flex-wrap:wrap;padding:18px 0 14px;margin:0 0 var(--sp-5);
+  background:color-mix(in srgb,var(--bg-app) 88%,transparent);
+  -webkit-backdrop-filter:saturate(1.6) blur(10px);backdrop-filter:saturate(1.6) blur(10px);
+  border-bottom:1px solid var(--line);
 }
-body {
-  background: var(--bg-app); color: #1e293b; min-height: 100vh;
+.page-head > div:first-child{min-width:0;flex:1 1 auto}
+.page-head h1{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-22);line-height:var(--lh-22);font-weight:600;letter-spacing:-.015em;flex-wrap:wrap}
+.page-head .sub{margin-top:5px;font-size:var(--fs-12);color:var(--ink-3);display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+.page-head .actions{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+.crumb{font-size:var(--fs-12);color:var(--ink-3);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.crumb a{color:var(--ink-3)}
+.crumb a:hover{color:var(--accent-ink)}
+.summary-line{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-12);color:var(--ink-3)}
+
+/* ------------------------------------------------- 5. 卡片 / 区块 */
+.card{
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);
+  margin-bottom:var(--sp-4);overflow:hidden;
 }
-.container { width:100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
-/* 宽屏利用率：视口越宽容器越宽（1440 → 1680 → 1920 → 2400） */
-@media (min-width: 1700px) { .container { max-width: 1680px; } }
-@media (min-width: 2100px) { .container { max-width: 1920px; } }
-@media (min-width: 2600px) { .container { max-width: 2400px; } }
-/* 窄屏：页面容器 padding 收窄；表格横向滚动由全局 .table-wrap 规则统一保证 */
-@media (max-width: 640px) {
-  .container { padding: 12px; }
+.card > .card-head{
+  display:flex;align-items:center;gap:var(--sp-2);padding:12px var(--sp-4);
+  border-bottom:1px solid var(--line-soft);background:var(--bg-surface);
 }
-/* ===== ui-redesign 共享布局与组件（T7.3+） ===== */
-.page-head { display:flex; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
-.page-head h1 { font-size:20px; line-height:28px; font-weight:700; letter-spacing:-.2px; margin:0; }
-.page-head .sub { font-size:13px; color:var(--ink-3); margin-top:2px; }
-.page-head .actions { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.split { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; align-items:start; }
-@media (max-width: 1024px) { .split { grid-template-columns:minmax(0,1fr); } }
-.grid-stat { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
-.stat-tile { background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-1); padding:16px 18px; }
-.stat-tile .num { font-size:20px; font-weight:700; letter-spacing:-.3px; font-variant-numeric:tabular-nums; }
-.stat-tile .lbl { font-size:13px; color:var(--ink-3); margin-top:2px; }
-.search-box { position:relative; }
-.search-box svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-3); }
-.search-box .input { padding-left:32px; }
-.tree { font-size:14px; }
-.tree .cat { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:var(--r-sm); color:var(--ink-2); font-weight:600; cursor:pointer; user-select:none; }
-.tree .cat:hover { background:var(--bg-hover); }
-.tree .cat.active { background:var(--brand-soft); color:var(--brand); }
-.tree .cat .cnt { margin-left:auto; font-size:12px; color:var(--ink-3); font-weight:500; }
-.tree .cat svg { width:14px; height:14px; color:var(--ink-3); flex:0 0 14px; }
-.tree .cat [data-chevron] { transition:transform .12s; }
-.tree .kids { display:none; }
-.tree .kids.on { display:block; }
-/* ui-redesign R2-A：报表配置左树（分类管理）——按已确认原型的 flex 行形态 */
-.tree .kids { padding-left:14px; }
-.tree .cat .nm { min-width:0; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tree .cat .ops { display:flex; align-items:center; gap:2px; flex:0 0 auto; opacity:.55; transition:opacity .12s; }
-.tree .cat:hover .ops { opacity:1; }
-.tree .cat .ops form { display:inline; margin:0; }
-.tree .cat .ops .btn { height:22px; min-width:22px; padding:0 4px; font-size:12px; }
-.tree .cat .ops .btn-outline, .tree .cat .ops .btn-ghost { background:transparent; border-color:transparent; color:var(--ink-3); }
-.tree .cat .ops .btn-outline:hover, .tree .cat .ops .btn-ghost:hover { background:var(--brand-soft); color:var(--brand); }
-.tree .cat .ops .btn-danger { background:transparent; border-color:transparent; color:var(--ink-3); }
-.tree .cat .ops .btn-danger:hover { background:var(--danger-soft); color:var(--danger); }
-/* 区块标题行：flex 化（消除 inline 挤压/重叠；.actions 靠右） */
-.section-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.section-title .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-.card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
-.report-card { background:#fff; border:1px solid var(--line); border-radius:var(--r-md); padding:14px 16px; box-shadow:var(--sh-1); display:flex; flex-direction:column; gap:6px; transition:border-color .12s, box-shadow .12s; cursor:pointer; text-decoration:none; }
-.report-card:hover { border-color:#c7d2fe; box-shadow:var(--sh-pop,0 4px 12px rgba(15,23,42,.10)); text-decoration:none; }
-.report-card .t { font-weight:600; color:var(--ink); font-size:15px; }
-.report-card .meta { font-size:12px; color:var(--ink-3); }
-.report-card .desc { font-size:13px; color:var(--ink-3); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.report-card .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
-.badge { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--r-full); font-size:12px; font-weight:600; line-height:18px; }
-.badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.75; }
-.badge-ok { background:#ecfdf5; color:#047857; }
-.badge-warn { background:#fffbeb; color:#b45309; }
-.badge-danger { background:#fef2f2; color:#b91c1c; }
-.badge-info { background:#eff6ff; color:#1d4ed8; }
-.badge-neutral { background:#f8fafc; color:#64748b; border:1px solid var(--line); }
-.muted { color:var(--ink-3); }
-/* 报表编辑：sticky 保存底栏（T7.7；按钮位于主 form 内，htmlcheck 门禁保持） */
-.formbar { position:sticky; bottom:0; margin:16px 0 0; padding:12px 16px; background:rgba(255,255,255,.95); backdrop-filter:blur(6px); border-top:1px solid var(--line); display:flex; align-items:center; gap:12px; z-index:20; box-shadow:0 -4px 16px rgba(15,23,42,.06); border-radius:0 0 var(--r-md) var(--r-md); }
-.formbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.formbar .cancel { color:var(--ink-3); text-decoration:none; font-size:13px; }
-.formbar .cancel:hover { color:var(--ink); }
-.config-form .form-section { grid-column:1 / -1; }
-.form-section { font-size:13px; font-weight:700; color:var(--ink-3); letter-spacing:.02em; border-bottom:1px solid var(--line); padding-bottom:6px; margin-top:8px; }
-/* API 行卡片（R2-D：api-main 主行 + api-more 展开区，与原型 page-api 统一为一套） */
-.api-row { border:1px solid var(--line); border-radius:var(--r-md); background:#fff; margin-bottom:10px; overflow:hidden; transition:border-color .12s, box-shadow .12s; }
-.api-row:hover { border-color:#c7d2fe; box-shadow:var(--sh-1); }
-.api-main { display:flex; gap:12px; align-items:center; padding:12px 14px; flex-wrap:wrap; cursor:pointer; }
-.api-main .name { font-weight:600; min-width:140px; color:#4f46e5; text-decoration:none; }
-.api-main .name:hover { text-decoration:underline; }
-.api-main .path-chip { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; background:var(--bg-subtle); border:1px solid var(--line); padding:2px 8px; border-radius:var(--r-sm); color:var(--ink-2); overflow-wrap:anywhere; }
-.api-main .ops { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.api-more { display:none; border-top:1px dashed var(--line); padding:12px 14px; background:var(--bg-subtle); font-size:13px; }
-.api-more.on { display:block; }
-.api-meta { display:flex; gap:14px; flex-wrap:wrap; color:#475569; font-size:12.5px; margin-bottom:4px; }
-.api-desc { color:#475569; overflow-wrap:anywhere; }
-.api-desc .lbl { font-weight:500; color:#64748b; margin-right:6px; }
-.api-help { margin:6px 0 0 0; font-size:12.5px; color:#64748b; }
-/* ===== 详情页：页头/Tab/工具行/抽屉/对话框（T7.4） ===== */
-.crumb { font-size:12px; color:var(--ink-3); margin-bottom:4px; }
-.crumb a { color:var(--ink-3); }
-.crumb a:hover { color:var(--brand); }
-.summary-line { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-3); margin-bottom:10px; flex-wrap:wrap; }
-.memo-bar { display:flex; gap:8px; align-items:center; background:var(--bg-subtle); border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:8px 12px; font-size:13px; color:var(--ink-2); margin-bottom:12px; }
-.memo-bar .txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:16px; flex-wrap:wrap; }
-.tab { border:0; background:none; padding:9px 14px; font-size:14px; font-weight:500; color:var(--ink-3); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; font-family:inherit; }
-.tab:hover { color:var(--ink); }
-.tab.active { color:var(--brand); border-bottom-color:var(--brand); font-weight:600; }
-.tabpanel { display:none; }
-.tabpanel.active { display:block; }
-.toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 12px; background:#fff; border:1px solid var(--line); border-radius:var(--r-md); margin-bottom:12px; }
-.toolbar .grow { flex:1; }
-.toolbar .meta { font-size:13px; color:var(--ink-3); }
-.toolbar .sep { width:1px; height:20px; background:var(--line); }
-.segment { display:inline-flex; background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:2px; gap:2px; }
-.segment button { border:0; background:transparent; padding:4px 12px; font-size:13px; color:var(--ink-2); border-radius:4px; cursor:pointer; font-family:inherit; }
-.segment button.active { background:#fff; color:var(--brand); font-weight:600; box-shadow:var(--sh-1); }
-.backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:50; opacity:0; pointer-events:none; transition:opacity .2s; }
-.backdrop.on { opacity:1; pointer-events:auto; }
-.side-panel {
-  position:fixed; top:0; right:0; bottom:0; width:420px; max-width:92vw; background:#fff;
-  z-index:60; box-shadow:var(--sh-2); transform:translateX(105%); transition:transform .2s ease-out;
-  overflow:auto; padding:16px 18px; border-radius:14px 0 0 14px; display:none;
+.card > .card-head h2,.card-head h2{font-size:var(--fs-14);font-weight:600;letter-spacing:-.005em}
+.card .card-head .actions{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
+.card > :not(.card-head){padding:var(--sp-4)}
+.card > .card-head ~ *{padding:var(--sp-4)}
+.card > table,.card > .table-wrap,.card > form > .table-wrap{padding:0}
+.card > .table-wrap{border:0;border-radius:0;margin:0}
+.card > form{padding:var(--sp-4)}
+.card > .formbar{margin:0;border-radius:0;border-left:0;border-right:0;border-bottom:0;box-shadow:none}
+.card-head .form-section,.form-section{font-size:var(--fs-13);font-weight:600;color:var(--ink-1);display:flex;align-items:center;gap:var(--sp-2)}
+.section{margin-bottom:var(--sp-4)}
+.section-title{
+  display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;
+  font-size:var(--fs-14);font-weight:600;color:var(--ink-1);padding:12px var(--sp-4);
+  border-bottom:1px solid var(--line-soft);
 }
-.side-panel.on { display:block; transform:none; }
-.side-panel .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-.side-panel .panel-head h3 { margin:0; font-size:15px; color:var(--ink); }
-.modal {
-  position:fixed; left:50%; top:50%; transform:translate(-50%,-46%) scale(.98); width:560px; max-width:92vw;
-  background:#fff; border-radius:var(--r-md); box-shadow:var(--sh-2); z-index:60; opacity:0; pointer-events:none;
-  transition:opacity .2s, transform .2s; max-height:88vh; overflow:auto;
+.section-title .actions{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
+.section-title .ico svg{display:block;width:15px;height:15px}
+.tree .cat > svg{width:15px;height:15px;flex:0 0 15px;color:var(--ink-4)}
+.tree .cat.active > svg{color:var(--accent)}
+.tree .cat > svg[data-chevron]{transition:transform var(--t-fast) var(--ease)}
+.tree .cat.open > svg[data-chevron]{transform:rotate(90deg)}
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-4);align-items:stretch}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-3)}
+.grid-stat{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-3)}
+.split{display:grid;grid-template-columns:264px minmax(0,1fr);gap:var(--sp-4);align-items:start}
+.span-full{grid-column:1 / -1}
+aside.card{position:sticky;top:78px}
+
+/* 统计磁贴 */
+.stat-tile{
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:var(--sp-4);display:flex;flex-direction:column;gap:2px;min-width:0;
 }
-.modal.on { opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
-.modal .modal-head { padding:16px 18px 0; }
-.modal .modal-head h3 { margin:0; font-size:16px; }
-.modal .modal-body { padding:12px 18px 4px; font-size:14px; color:var(--ink-2); }
-.modal .modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:14px 18px 16px; }
-fieldset.fs { border:1px solid var(--line); border-radius:var(--r-sm); padding:12px 14px; margin-bottom:12px; }
-fieldset.fs legend { font-size:12px; font-weight:700; color:var(--ink-3); padding:0 6px; }
-.check-group { display:flex; flex-wrap:wrap; gap:10px 16px; }
-.check { display:inline-flex; align-items:center; gap:6px; font-size:14px; color:var(--ink-2); cursor:pointer; }
-/* ui-redesign R2-D：双栏布局与卡片头（原型 grid-2 / card-head 的生产唯一定义） */
-.grid-2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; align-items:start; }
-@media (max-width: 1024px) { .grid-2 { grid-template-columns:minmax(0,1fr); } }
-.card-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
-.card-head .form-section, .card-head h2 {
-  margin:0; padding:0; border-bottom:0; font-size:15px; font-weight:700;
-  color:var(--ink); letter-spacing:-.1px;
+.stat-tile .num{font-size:var(--fs-28);line-height:var(--lh-28);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat-tile .lbl{font-size:var(--fs-12);color:var(--ink-3)}
+.stat-tile a{font-size:var(--fs-12);margin-top:auto;padding-top:6px;display:inline-flex;align-items:center;gap:4px}
+
+/* ------------------------------------------------------------ 6. 按钮 */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:30px;padding:0 11px;border-radius:var(--r-sm);border:1px solid transparent;
+  background:transparent;color:var(--ink-1);font:inherit;font-size:var(--fs-13);font-weight:500;
+  line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none;
+  transition:background var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease),
+             color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease);
 }
-.card-head .actions { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-/* ui-redesign R2-D：排除规则可视化行/组（原型 rule-row / rule-group 的生产唯一定义） */
-.rule-group { border:1px dashed var(--line-strong); border-radius:var(--r-sm); padding:10px 12px; margin-bottom:8px; background:var(--bg-subtle); }
-.rule-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
-/* ui-redesign R2-D：三栏统计磁贴/快捷入口网格（原型 grid-3 的生产唯一定义） */
-.grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; align-items:start; }
-@media (max-width: 1024px) { .grid-3 { grid-template-columns:minmax(0,1fr); } }
-/* ui-redesign R2-D：SQL / 规则代码块（原型 code-block 的生产唯一定义） */
-.code-block { background:var(--bg-subtle); border:1px solid var(--line); border-radius:var(--r-sm); padding:10px 12px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px; line-height:20px; color:var(--ink-2); overflow:auto; white-space:pre-wrap; }
-.card {
-  background: #fff; border-radius: var(--r-md);
-  box-shadow: var(--sh-1);
-  padding: 20px; margin-bottom: 16px; animation: fadeUp 0.3s ease-out;
+.btn:hover{text-decoration:none}
+.btn:active{transform:translateY(.5px)}
+.btn svg{width:15px;height:15px;flex:0 0 15px;opacity:.9}
+.btn-primary{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 1px 2px rgba(62,60,170,.24);
 }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.3px; }
-h3 { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 12px; }
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 34px; padding: 0 14px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600;
-  text-decoration: none; cursor: pointer; transition: background 0.12s, border-color 0.12s; border: none;
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
+.btn-primary:active{background:var(--accent-press);border-color:var(--accent-press)}
+.btn-secondary,.btn-outline{
+  background:var(--bg-surface);border-color:var(--line-strong);color:var(--ink-1);
 }
-.btn-primary { background: #4f46e5; color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,0.35); }
-.btn-primary:hover { background: #4338ca; }
-.btn-secondary { background: #fff; border-color: var(--line-strong); color: var(--ink-2); box-shadow: var(--sh-1); }
-.btn-secondary:hover { background: var(--bg-hover); border-color: var(--ink-3); }
-.btn-success { background: #059669; color: #fff; box-shadow: 0 1px 2px rgba(5,150,105,0.3); }
-.btn-success:hover { background: #047857; }
-.btn-danger { background: #dc2626; color: #fff; box-shadow: 0 1px 2px rgba(220,38,38,0.3); }
-.btn-danger:hover { background: #b91c1c; }
-.btn-outline { background: transparent; color: #475569; border: 1px solid var(--line-strong); }
-.btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
-.btn-ghost:hover { background: var(--bg-hover); }
-.btn-link { background: none; border: none; color: var(--brand); height: auto; padding: 0; font-weight: 500; }
-.btn-link:hover { text-decoration: underline; }
-.btn-sm { height: 26px; padding: 0 10px; font-size: 13px; }
-.btn-icon { width: 34px; padding: 0; }
-.btn-icon.btn-sm { width: 26px; }
-.btn-group { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-.btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
-.btn.loading { position: relative; color: transparent; }
-.btn.loading::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
-table {
-  border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px;
+.btn-secondary:hover,.btn-outline:hover{background:var(--bg-hover);border-color:#a9aeb8;color:var(--ink-1)}
+.btn-ghost{background:transparent;color:var(--ink-2)}
+.btn-ghost:hover{background:var(--bg-active);color:var(--ink-1)}
+.btn-danger{background:var(--bg-surface);border-color:var(--danger-line);color:var(--danger-ink);box-shadow:var(--sh-1)}
+.btn-danger:hover{background:var(--danger-soft);border-color:#eda9a3;color:var(--danger-ink)}
+.btn-danger-solid{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn-danger-solid:hover{background:#b81f26;border-color:#b81f26;color:#fff}
+.btn-success{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn-info{background:var(--info);border-color:var(--info);color:#fff}
+.btn-sm{height:26px;padding:0 9px;font-size:var(--fs-12);gap:5px}
+.btn-sm svg{width:13px;height:13px;flex-basis:13px}
+.btn-icon{width:30px;padding:0;justify-content:center}
+.btn-icon.btn-sm{width:26px}
+.btn:disabled,.btn[disabled],.btn-mini-disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.btn:disabled:hover,.btn[disabled]:hover{background:var(--bg-surface)}
+/* 行内迷你按钮（表格操作列）：无边框低噪音，hover 才浮出底色 */
+.btn-mini,.btn-mini-solid,.btn-mini-primary{
+  display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;padding:0 7px;
+  border-radius:var(--r-xs);border:1px solid transparent;background:transparent;
+  color:var(--ink-2);font-size:var(--fs-12);font-weight:500;line-height:1;cursor:pointer;
+  text-decoration:none;transition:all var(--t-fast) var(--ease);
 }
-th {
-  background: var(--bg-subtle); color: var(--ink-2); font-weight: 600; font-size: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap;
-  position: sticky; top: 0; z-index: 5;
+.btn-mini:hover{background:var(--bg-active);color:var(--ink-1)}
+.btn-mini-solid{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-mini-solid:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
+.btn-mini-primary{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-ink)}
+.btn-mini-primary:hover{background:var(--accent-soft-2);color:var(--accent-press)}
+.btn-refresh{background:var(--bg-surface);border:1px solid var(--line-strong);color:var(--ink-2);height:26px;padding:0 9px;border-radius:var(--r-sm);font-size:var(--fs-12);cursor:pointer}
+.btn-refresh:hover{background:var(--bg-hover);color:var(--ink-1)}
+
+/* ------------------------------------------------------------ 7. 表单 */
+input[type=text],input[type=password],input[type=number],input[type=search],input[type=email],input[type=url],
+input[type=date],input[type=datetime-local],input[type=time],input[type=month],input[type=tel],
+input:not([type]),select,textarea{
+  font:inherit;font-size:var(--fs-13);color:var(--ink-1);background:var(--bg-surface);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);height:32px;padding:0 10px;width:100%;
+  transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease),background var(--t-fast) var(--ease);
 }
-td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
-/* ui-redesign R2-D：表头第二行快筛行（原型 qf-row；筛选输入迁出 th，协议不变） */
-tr.qf-row td { background: var(--bg-subtle); padding: 6px 8px; border-bottom: 1px solid var(--line); }
-tr.qf-row td .filter-row { margin-top: 0; }
-tbody tr:hover { background: var(--bg-hover); }
-tbody tr:last-child td { border-bottom: none; }
-.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid var(--line); border-radius: var(--r-md); }
-.flash {
-  padding: 12px 14px; border-radius: var(--r-md); margin-bottom: 14px;
-  font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
-  border: 1px solid transparent;
+input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:#a9aeb8}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft-2);background:var(--bg-surface);
 }
-.flash-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-.flash-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-.flash-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
-/* 批次5#14：flash × 关闭按钮（flex 布局下 margin-left:auto 推至右侧）与淡出过渡 */
-.flash-close { cursor: pointer; margin-left: auto; font-size: 16px; line-height: 1; opacity: 0.6; user-select: none; }
-.flash-close:hover { opacity: 1; }
-.flash.fading-out { opacity: 0; transition: opacity 0.5s ease; }
-/* 批次5#16：锚点目标行高亮——背景淡黄 2 秒渐隐 */
-@keyframes rowHighlightFade { from { background: #fef9c3; } to { background: transparent; } }
-.row-highlight { animation: rowHighlightFade 2s ease forwards; }
-/* 批次5#18：慢查询 loading 全屏遮罩 + CSS 动画圆环 spinner */
-.query-loading-overlay {
-  position: fixed; inset: 0; background: rgba(255,255,255,0.7); z-index: 9999;
-  display: none; align-items: center; justify-content: center;
-  flex-direction: column; gap: 12px; font-size: 15px; color: #475569;
+input:disabled,select:disabled,textarea:disabled{background:var(--bg-subtle);color:var(--ink-4);cursor:not-allowed}
+select{
+  appearance:none;-webkit-appearance:none;padding-right:26px;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%236c717c' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;
 }
-.query-loading-overlay.show { display: flex; }
-.query-loading-overlay .spinner {
-  width: 42px; height: 42px; border: 4px solid #e2e8f0; border-top-color: #4f46e5;
-  border-radius: 50%; animation: querySpin 0.8s linear infinite;
+select[multiple]{height:auto;padding:4px;background-image:none}
+textarea{height:auto;min-height:88px;padding:8px 10px;line-height:var(--lh-13);resize:vertical}
+input[type=checkbox],input[type=radio]{
+  appearance:none;-webkit-appearance:none;width:15px;height:15px;flex:0 0 15px;border:1px solid var(--line-strong);
+  border-radius:var(--r-xs);background:var(--bg-surface);cursor:pointer;position:relative;padding:0;
+  transition:all var(--t-fast) var(--ease);
 }
-@keyframes querySpin { to { transform: rotate(360deg); } }
-/* 批次5#17：批量操作条全局浮动（sticky 底部吸附，显隐由 JS 按选中数切换） */
-.batch-float {
-  position: sticky; bottom: 0; z-index: 50;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
-  box-shadow: 0 -4px 12px rgba(15,23,42,0.08); padding: 10px 14px; margin-top: 16px;
+input[type=checkbox]:hover,input[type=radio]:hover{border-color:var(--accent)}
+input[type=checkbox]:checked,input[type=radio]:checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::after{
+  content:"";position:absolute;left:4px;top:1px;width:5px;height:9px;
+  border:solid #fff;border-width:0 1.8px 1.8px 0;transform:rotate(42deg);
 }
-.empty-state { text-align: center; color: #64748b; padding: 32px 14px; font-size: 14px; }
-.empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
-.sql-hl-keyword { font-weight:700; color:#7c3aed; }
-.sql-hl-string { color:#059669; }
-.sql-hl-number { color:#d97706; }
-.sql-hl-comment { color:#94a3b8; font-style:italic; }
-.sql-hl-function { font-weight:600; color:#2563eb; }
-.pagination { display: flex; align-items: center; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
-.pagination a, .pagination .page-btn, .pagination .page-span {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 28px; height: 28px; padding: 0 8px; border-radius: var(--r-sm);
-  font-size: 13px; text-decoration: none; color: #475569; transition: background 0.12s;
+input[type=radio]{border-radius:var(--r-full)}
+input[type=radio]:checked::after{content:"";position:absolute;inset:4px;border-radius:var(--r-full);background:#fff}
+input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+label{font-size:var(--fs-13);color:var(--ink-2)}
+.config-form > .field-row,form.config-form > *{margin-bottom:0}
+.config-form{display:flex;flex-direction:column;gap:var(--sp-4)}
+.config-form label{display:block;font-size:var(--fs-12);font-weight:500;color:var(--ink-2);margin-bottom:5px}
+.config-form .field-hint,.field-hint{font-size:var(--fs-12);color:var(--ink-3);margin-top:5px;line-height:var(--lh-12)}
+.check-group{display:flex;flex-wrap:wrap;gap:var(--sp-3)}
+.check-inline,.check{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-13);color:var(--ink-1);cursor:pointer}
+.check-inline input,.check input{margin:0}
+.field-item{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--bg-surface);cursor:grab;user-select:none;
+  transition:border-color var(--t-fast) var(--ease),background var(--t-fast) var(--ease);
 }
-.pagination a { background: #fff; border: 1px solid #e2e8f0; }
-.pagination a:hover { background: #f1f5f9; border-color: #cbd5e1; }
-.pagination .active { background: #4f46e5 !important; color: #fff !important; border-color: #4f46e5 !important; font-weight: 600; }
-.pagination .disabled { color: #cbd5e1; background: transparent; border: none; cursor: default; }
-.jump-box { display: inline-flex; align-items: center; gap: 6px; margin-left: 16px; }
-.jump-box input {
-  width: 64px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px;
-  font-size: 14px; text-align: center; outline: none; transition: border-color 0.2s;
+.field-item:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+.drag-handle{color:var(--ink-4);font-size:var(--fs-14);cursor:grab;flex-shrink:0;line-height:1}
+.drag-handle:hover{color:var(--ink-2)}
+.field-up,.field-down{
+  width:22px;height:22px;flex:0 0 22px;display:inline-grid;place-items:center;border-radius:var(--r-xs);
+  border:1px solid var(--line);background:var(--bg-surface);color:var(--ink-3);cursor:pointer;font-size:10px;line-height:1;padding:0;
 }
- .jump-box input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
- .hidden { display: none !important; }
- /* 排序设置面板（T7.7；sort-item/sort-up/sort-down/drag-handle/sort-num 唯一定义） */
- .sort-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; cursor:grab; user-select:none; }
- .sort-item .drag-handle { color:#94a3b8; font-size:14px; cursor:grab; flex-shrink:0; }
- .sort-item .sort-num { font-weight:700; font-size:11px; color:#4f46e5; min-width:20px; }
- .sort-item .sort-up, .sort-item .sort-down { padding:2px 6px; font-size:11px; border:1px solid #e2e8f0; border-radius:4px; cursor:pointer; background:#fff; color:#475569; }
- .sort-item .sort-up:disabled, .sort-item .sort-down:disabled { opacity:0.4; cursor:not-allowed; }
- .sort-item .sort-remove { padding:2px 6px; font-size:11px; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#dc2626; }
- .sort-bar { margin-bottom:10px; font-size:13px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
- .sort-tag { display:inline-flex; align-items:center; gap:3px; background:#eef2ff; color:#4f46e5; border-radius:4px; padding:2px 8px; font-size:12px; border:1px solid #c7d2fe; }
- .sort-prio { font-size:10px; color:#4f46e5; font-weight:700; margin-left:2px; }
- .sort-link { color:var(--ink-2); text-decoration:none; }
- .sort-link:hover { color:var(--brand); }
- .compact-switch { width:auto; height:28px; font-size:13px; font-weight:500; display:inline-block; margin-left:8px; vertical-align:middle; max-width:280px; }
- """
+.field-up:hover,.field-down:hover{background:var(--bg-hover);color:var(--ink-1);border-color:var(--line-strong)}
+/* 保存栏 */
+.formbar{
+  display:flex;align-items:center;gap:var(--sp-3);padding:12px var(--sp-4);background:var(--bg-surface);
+  border:1px solid var(--line);border-radius:var(--r-md);position:sticky;bottom:12px;z-index:20;
+  box-shadow:0 -1px 0 var(--line-soft),var(--sh-2);
+}
+.formbar .cancel{color:var(--ink-3);font-size:var(--fs-13);display:inline-flex;align-items:center;gap:5px}
+.formbar .cancel:hover{color:var(--ink-1)}
+.formbar .right{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
+.form-actions{display:flex;align-items:center;gap:var(--sp-2);padding-top:var(--sp-2)}
+.form-actions .right,.form-actions .grow{margin-left:auto}
+
+/* ------------------------------------------------------------ 8. 表格 */
+.table-wrap{
+  width:100%;overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 130px);  /* 表内滚动 + 粘性表头（批次6 契约） */
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:var(--sp-4);
+}
+.card .table-wrap,.card > .table-wrap{border:0;border-radius:0;margin-bottom:0}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-13)}
+table th{
+  position:sticky;top:0;z-index:10;text-align:left;font-weight:600;font-size:var(--fs-12);
+  line-height:18px;letter-spacing:0;text-transform:none;color:var(--ink-2);
+  background:color-mix(in srgb,var(--bg-subtle) 92%,transparent);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  height:38px;vertical-align:middle;padding:0 12px;
+  border-bottom:1px solid var(--line);white-space:nowrap;
+}
+table td{padding:9px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink-1);vertical-align:middle}
+table tbody tr:last-child td{border-bottom:0}
+table tbody tr{transition:background var(--t-fast) var(--ease)}
+table tbody tr:hover{background:var(--bg-hover)}
+table tbody tr:has(input[type=checkbox]:checked){background:var(--accent-soft)}
+table tr[id^=report-].anchor-hit,table tr.anchor-hit{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+td.num,th.num,.num-cell{text-align:right;font-variant-numeric:tabular-nums}
+td.ops-cell{text-align:right;white-space:nowrap}
+td.ops-cell .btn-mini{margin-left:4px}
+td.ops-cell .btn-mini:first-child{margin-left:0}
+.name-cell strong{font-weight:600}
+.name-cell a{font-weight:500}
+.memo-cell{color:var(--ink-3);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.memo-cell:hover{color:var(--ink-2)}
+.sql-cell,.rc-sql{font-family:var(--font-mono);font-size:var(--fs-12);color:var(--ink-2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfg-group{background:var(--bg-subtle);box-shadow:inset 1px 0 0 var(--line);font-weight:600;color:var(--ink-2);text-align:center}
+td.cfg-group{text-align:center;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.qf-row td{background:var(--bg-subtle);padding:5px 8px;border-bottom:1px solid var(--line-soft)}
+.qf-row .filter-input,.qf-row select,.qf-row input{
+  height:26px;font-size:var(--fs-12);padding:0 7px;border-color:var(--line-soft);background:var(--bg-surface);
+}
+.qf-row input:hover,.qf-row select:hover{border-color:var(--line-strong)}
+.qf-row input:focus,.qf-row select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft-2)}
+.qf-row .filter-input{min-width:72px}
+.sort-links{display:inline-flex;align-items:center;gap:0}
+.sort-link{color:var(--ink-1);font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px}
+.sort-link:hover{color:var(--accent-ink)}
+.sort-arrow{color:var(--accent);font-size:9px;line-height:1;text-decoration:none}
+.sort-num{
+  display:inline-grid;place-items:center;min-width:15px;height:15px;padding:0 3px;margin-left:4px;
+  background:var(--accent);color:#fff;border-radius:var(--r-full);font-size:10px;font-weight:600;
+}
+th[data-sort],th .th-sort{cursor:pointer}
+.table-empty,.empty{
+  padding:var(--sp-10) var(--sp-4);text-align:center;color:var(--ink-3);font-size:var(--fs-13);
+  background:var(--bg-surface);
+}
+.empty .empty-title{font-size:var(--fs-14);font-weight:600;color:var(--ink-1);margin-bottom:4px}
+
+/* 列宽体系：生产原本靠内联 style="width:.."，清理内联样式后列宽失控
+   （名称列曾被压成「一」字一行）。改为 colgroup + table-layout:fixed 显式声明。 */
+.table-fixed{table-layout:fixed}
+.table-fixed > thead > tr > th,.table-fixed > tbody > tr > td{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.table-fixed col.c-check{width:36px}
+.table-fixed col.c-name{width:216px}
+.table-fixed col.c-sql{width:180px}
+.table-fixed col.c-cfg{width:76px}
+.table-fixed col.c-pool{width:112px}
+.table-fixed col.c-memo{width:160px}
+.table-fixed col.c-path{width:176px}
+.table-fixed col.c-api{width:96px}
+.table-fixed col.c-ops{width:116px}
+/* 无 colgroup 兜底：名称列保底宽度，宁可横向滚动也不竖排 */
+th:first-child + th{min-width:156px}
+.name-cell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.name-cell strong{font-weight:600}
+.name-cell a{font-weight:500}
+/* ------------------------------------------------- 9. 工具行/筛选/分页 */
+.toolbar{
+  display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;
+  padding:10px 0;border-bottom:1px solid var(--line-soft);margin-bottom:0;
+}
+.toolbar > form{display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-12);color:var(--ink-2)}
+.toolbar select{width:auto;height:28px;font-size:var(--fs-12);padding:0 24px 0 8px}
+/* 工具行按钮降噪：静止无底无框，hover 才浮出 */
+.toolbar .btn-secondary,.toolbar .btn-outline,.toolbar .btn-ghost{
+  background:transparent;border-color:transparent;color:var(--ink-2);
+}
+.toolbar .btn-secondary:hover,.toolbar .btn-outline:hover{
+  background:var(--bg-active);border-color:var(--line);color:var(--ink-1);
+}
+.toolbar label{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-12);color:var(--ink-3)}
+.filterbar,.audit-filters{
+  display:flex;align-items:flex-end;gap:var(--sp-3);flex-wrap:wrap;
+  padding:12px var(--sp-4);background:var(--bg-surface);border:1px solid var(--line);
+  border-radius:var(--r-md);margin-bottom:var(--sp-4);
+}
+.filterbar form{display:flex;align-items:flex-end;gap:var(--sp-3);flex-wrap:wrap;width:100%}
+.filterbar label{display:flex;flex-direction:column;gap:5px;font-size:var(--fs-12);font-weight:500;color:var(--ink-2)}
+.filterbar input,.filterbar select{height:30px;min-width:130px;width:auto}
+.filterbar input[type=text]{min-width:200px}
+.filter-row{display:flex;gap:4px;align-items:center}
+.filter-input{min-width:80px}
+.filter-btns{display:inline-flex;gap:var(--sp-2);margin-left:auto}
+.filter-help{position:relative;display:inline-block}
+.filter-help-btn,.nf-help-btn{
+  width:24px;height:24px;border-radius:var(--r-full);border:1px solid var(--line-strong);
+  background:var(--bg-surface);color:var(--ink-3);font-size:var(--fs-12);font-weight:600;line-height:1;
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;
+}
+.filter-help-btn:hover,.nf-help-btn:hover{background:var(--bg-hover);color:var(--ink-1);border-color:var(--line-strong)}
+.filter-help-popup{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:60;width:340px;padding:var(--sp-3);
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--sh-3);font-size:var(--fs-12);line-height:var(--lh-12);color:var(--ink-2);
+}
+.filter-help-popup h4{font-size:var(--fs-12);margin-bottom:6px;color:var(--ink-1)}
+.filter-help-popup table{font-size:var(--fs-12)}
+.pagination{
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:center;
+  padding:var(--sp-4) 0;font-size:var(--fs-12);color:var(--ink-3);
+}
+.pagination .page-btn,.pagination .active,.pagination .disabled,.pagination .nav-arrow{
+  display:inline-grid;place-items:center;min-width:28px;height:28px;padding:0 8px;border-radius:var(--r-sm);
+  border:1px solid var(--line);background:var(--bg-surface);color:var(--ink-2);text-decoration:none;font-size:var(--fs-12);
+  transition:all var(--t-fast) var(--ease);
+}
+.pagination .page-btn:hover{background:var(--bg-hover);border-color:var(--line-strong);color:var(--ink-1)}
+.pagination .active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pagination .disabled{color:var(--ink-4);background:var(--bg-subtle);border-color:var(--line-soft);cursor:default}
+.pagination .nav-arrow{font-size:14px;line-height:1}
+.pagination .jump-box{display:inline-flex;align-items:center;gap:5px;margin-left:var(--sp-2);color:var(--ink-3)}
+.pagination .jump-box input{width:52px;height:28px;text-align:center;font-size:var(--fs-12)}
+
+/* ----------------------------------------------------------------- 10. 页签 */
+.tabs{
+  display:flex;align-items:center;gap:2px;position:relative;
+  border-bottom:1px solid var(--line);margin-bottom:var(--sp-4);
+}
+.tab{
+  appearance:none;border:0;background:transparent;font:inherit;font-size:var(--fs-13);font-weight:500;
+  color:var(--ink-3);padding:9px 12px;cursor:pointer;position:relative;border-radius:var(--r-sm) var(--r-sm) 0 0;
+  display:inline-flex;align-items:center;gap:6px;transition:color var(--t-fast) var(--ease);
+}
+.tab:hover{color:var(--ink-1);background:var(--bg-hover)}
+.tab::after{
+  content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;border-radius:2px 2px 0 0;
+  background:var(--accent);transform:scaleX(0);transform-origin:center;transition:transform var(--t-med) var(--ease);
+}
+.tab.active{color:var(--ink-1);font-weight:600}
+.tab.active::after{transform:scaleX(1)}
+.tab .badge{margin-left:0}
+.tabpanel{display:none}
+.tabpanel.active{display:block;animation:panelIn var(--t-med) var(--ease)}
+@keyframes panelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* 分段控件 */
+.segment{
+  display:inline-flex;align-items:center;padding:2px;gap:2px;background:var(--bg-sunken);
+  border:1px solid var(--line);border-radius:var(--r-sm);
+}
+.segment button{
+  appearance:none;border:0;background:transparent;font:inherit;font-size:var(--fs-12);font-weight:500;
+  color:var(--ink-2);padding:4px 10px;border-radius:var(--r-xs);cursor:pointer;line-height:18px;
+  transition:all var(--t-fast) var(--ease);
+}
+.segment button:hover{color:var(--ink-1)}
+.segment button.active{background:var(--bg-surface);color:var(--ink-1);font-weight:600;box-shadow:var(--sh-1)}
+.result-selector{margin-left:auto}
+
+/* --------------------------------------------- 11. 抽屉 / 对话框 / 提示条 */
+.side-panel{
+  display:none;position:fixed;top:0;right:0;bottom:0;width:400px;max-width:92vw;z-index:80;
+  background:var(--bg-surface);box-shadow:var(--sh-3);flex-direction:column;
+  border-left:1px solid var(--line);animation:panelIn var(--t-med) var(--ease);
+}
+.side-panel.on,.side-panel.open{display:flex}   /* 生产 JS 加 .on；.open 为确认稿别名 */
+.side-panel .panel-head{
+  display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-4);border-bottom:1px solid var(--line-soft);
+  flex:0 0 auto;
+}
+.side-panel .panel-head h3{font-size:var(--fs-14);font-weight:600;flex:1}
+.side-panel > :not(.panel-head){padding:var(--sp-4);overflow-y:auto}
+.side-panel > div[id^=fieldList],.side-panel .panel-body{overflow-y:auto}
+.modal{
+  display:none;position:fixed;inset:0;z-index:90;padding:var(--sp-4);
+  background:rgba(17,21,29,.45);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+}
+.modal.on,.modal.open{display:flex}   /* 同上 */
+/* 对话框两种形态都要支持：
+   ① 生产形态：.modal 内是 head/body/foot 三个并列兄弟（无包装），需纵向堆叠成一张卡；
+   ② 确认稿形态：.modal 内是单个 .modal-box 包装。 */
+.modal{flex-direction:column;align-items:center;justify-content:center}
+.modal > .modal-head,.modal > .modal-body,.modal > .modal-foot{
+  width:100%;max-width:520px;background:var(--bg-surface);margin:0;
+  animation:modalIn var(--t-med) var(--ease);
+}
+.modal > .modal-head{border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:1px solid var(--line-soft)}
+.modal > .modal-body{overflow:auto;max-height:62vh}
+.modal > .modal-foot{border-radius:0 0 var(--r-lg) var(--r-lg)}
+.modal > .modal-head:last-child{border-radius:var(--r-lg)}
+.modal > .modal-body:last-child{border-radius:0 0 var(--r-lg) var(--r-lg)}
+.modal .modal-box{
+  background:var(--bg-surface);border-radius:var(--r-lg);box-shadow:var(--sh-3);
+  width:100%;max-width:520px;max-height:88vh;overflow:auto;animation:modalIn var(--t-med) var(--ease);
+}
+@keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.modal-head{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-4);border-bottom:1px solid var(--line-soft)}
+.modal-head h3{font-size:var(--fs-16);font-weight:600}
+.modal-body{padding:var(--sp-4)}
+.modal-foot,.modal .modal-foot{
+  display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-2);
+  padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line-soft);background:var(--bg-subtle);
+}
+/* 提示条 */
+.flash{
+  display:flex;align-items:flex-start;gap:var(--sp-2);padding:10px var(--sp-3);border-radius:var(--r-sm);
+  font-size:var(--fs-13);line-height:var(--lh-13);margin-bottom:var(--sp-3);
+  background:var(--bg-subtle);border:1px solid var(--line);color:var(--ink-1);
+  border-left:3px solid var(--ink-4);
+}
+.flash::before{content:"";flex:0 0 auto;width:14px;height:14px;margin-top:3px;border-radius:var(--r-full);background:currentColor;opacity:.18}
+.flash-info{background:var(--info-soft);border-color:var(--info-line);border-left-color:var(--info);color:var(--info-ink)}
+.flash-success,.flash-ok{background:var(--ok-soft);border-color:var(--ok-line);border-left-color:var(--ok);color:var(--ok-ink)}
+.flash-warn{background:var(--warn-soft);border-color:var(--warn-line);border-left-color:var(--warn);color:var(--warn-ink)}
+.flash-error,.flash-danger{background:var(--danger-soft);border-color:var(--danger-line);border-left-color:var(--danger);color:var(--danger-ink)}
+.flash-warn a,.flash-info a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.memo-bar{
+  display:flex;align-items:center;gap:var(--sp-3);padding:9px var(--sp-3);margin-bottom:var(--sp-3);
+  background:var(--bg-surface);border:1px solid var(--line);border-left:3px solid var(--accent-line);
+  border-radius:var(--r-sm);font-size:var(--fs-13);color:var(--ink-2);
+}
+.memo-bar .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3);font-size:var(--fs-12)}
+.memo-bar strong{font-size:var(--fs-12);color:var(--ink-2);font-weight:600}
+
+/* --------------------------------------------------- 12. 徽标 / 状态点 */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--r-full);
+  font-size:var(--fs-11);font-weight:600;line-height:1;background:var(--bg-subtle);color:var(--ink-2);
+  border:1px solid var(--line);white-space:nowrap;vertical-align:middle;
+}
+.badge-ok{background:var(--ok-soft);color:var(--ok-ink);border-color:var(--ok-line)}
+.badge-warn{background:var(--warn-soft);color:var(--warn-ink);border-color:var(--warn-line)}
+.badge-danger{background:var(--danger-soft);color:var(--danger-ink);border-color:var(--danger-line)}
+.badge-info{background:var(--info-soft);color:var(--info-ink);border-color:var(--info-line)}
+.badge-neutral,.badge-pool{background:var(--bg-subtle);color:var(--ink-2);border-color:var(--line)}
+.badge-accent{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent-line)}
+.cache-badge{
+  display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:var(--r-full);
+  font-size:var(--fs-11);font-weight:500;background:var(--bg-subtle);color:var(--ink-2);border:1px solid var(--line);
+}
+.cache-badge::before{content:"";width:6px;height:6px;border-radius:var(--r-full);background:var(--ink-4)}
+.cache-badge.fresh,.cache-badge.hit{background:var(--ok-soft);color:var(--ok-ink);border-color:var(--ok-line)}
+.cache-badge.fresh::before,.cache-badge.hit::before{background:var(--ok)}
+.cache-badge.stale,.cache-badge.warn{background:var(--warn-soft);color:var(--warn-ink);border-color:var(--warn-line)}
+.cache-badge.stale::before,.cache-badge.warn::before{background:var(--warn)}
+.cache-badge.miss,.cache-badge.off{background:var(--bg-subtle);color:var(--ink-3)}
+.cache-badge.miss::before,.cache-badge.off::before{background:var(--ink-4)}
+.dot{width:6px;height:6px;border-radius:var(--r-full);background:var(--ok);display:inline-block;flex:0 0 6px}
+.dot.off,.dot.danger{background:var(--danger)}
+.dot.warn{background:var(--warn)}
+.pool-chip{
+  display:inline-flex;align-items:center;gap:5px;max-width:140px;height:22px;padding:0 8px;
+  background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-full);
+  font-size:var(--fs-11);color:var(--ink-2);font-weight:500;
+}
+.pool-chip .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.path-chip{
+  display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:var(--r-xs);
+  background:var(--bg-subtle);border:1px solid var(--line);color:var(--ink-2);
+  font-family:var(--font-mono);font-size:var(--fs-11);
+}
+/* 审计类型徽标 */
+.audit-type{
+  display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:var(--r-xs);
+  font-size:var(--fs-11);font-weight:600;white-space:nowrap;background:var(--bg-subtle);color:var(--ink-2);border:1px solid var(--line);
+}
+.audit-type-login{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent-line)}
+.audit-type-write{background:var(--warn-soft);color:var(--warn-ink);border-color:var(--warn-line)}
+.audit-type-error{background:var(--danger-soft);color:var(--danger-ink);border-color:var(--danger-line)}
+.audit-type-page_view,.audit-type-api_access{background:var(--info-soft);color:var(--info-ink);border-color:var(--info-line)}
+
+/* ------------------------------- 13. 树 / API 行 / 报表卡片 / 列表卡 */
+.tree{display:flex;flex-direction:column;gap:1px;font-size:var(--fs-13)}
+.tree .cat{
+  display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--r-sm);cursor:pointer;
+  color:var(--ink-2);transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
+}
+.tree .cat:hover{background:var(--bg-hover);color:var(--ink-1)}
+.tree .cat.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.tree .cat .ico{width:15px;height:15px;flex:0 0 15px;color:var(--ink-4)}
+.tree .cat.active .ico{color:var(--accent)}
+.tree .cat .cnt{margin-left:auto;font-size:var(--fs-11);font-weight:600;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.tree .cat .ops{display:none;align-items:center;gap:2px;margin-left:4px}
+.tree .cat:hover .ops{display:inline-flex}
+.tree .cat.active .cnt{color:var(--accent-ink)}
+.tree .cat.active .ops{display:inline-flex}
+.tree .kids{margin-left:14px;padding-left:10px;border-left:1px solid var(--line-soft)}
+aside.card .section-title{border-bottom:1px solid var(--line-soft)}
+.tree-toggle{
+  display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-13);font-weight:600;
+  color:var(--ink-1);background:transparent;border:0;cursor:pointer;padding:4px 0;
+}
+.tree-toggle:hover{color:var(--accent-ink)}
+
+/* API 行卡片 */
+.api-row{
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);
+  margin-bottom:var(--sp-2);overflow:hidden;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease);
+}
+.api-row:hover{border-color:var(--accent-line);box-shadow:var(--sh-1)}
+.api-main{
+  display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);cursor:pointer;flex-wrap:wrap;
+}
+.api-main .name{font-size:var(--fs-14);font-weight:600;color:var(--ink-1)}
+.api-main .name:hover{color:var(--accent-ink)}
+.api-main .muted{font-size:var(--fs-12);color:var(--ink-3)}
+.api-main .actions,.api-main .ops{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
+.api-more{display:none;padding:var(--sp-3) var(--sp-4) var(--sp-4);border-top:1px solid var(--line-soft);background:var(--bg-subtle)}
+.api-row.open .api-more{display:block}
+.api-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--sp-2) var(--sp-4);margin-bottom:var(--sp-3)}
+.api-meta > *{font-size:var(--fs-12);color:var(--ink-2)}
+.api-desc{font-size:var(--fs-13);color:var(--ink-2);line-height:1.7;margin-bottom:var(--sp-3)}
+.api-url-code,.api-url-code code{
+  display:block;font-family:var(--font-mono);font-size:var(--fs-12);color:var(--ink-2);
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-xs);
+  padding:6px 8px;margin-bottom:6px;overflow-x:auto;white-space:nowrap;
+}
+.api-more-btn{margin-left:auto}
+.api-help{font-size:var(--fs-12);color:var(--ink-3)}
+
+/* 报表卡片 / 双视图 */
+.rpt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--sp-3)}
+.rpt-card,.report-card{
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-4);
+  display:flex;flex-direction:column;gap:6px;transition:border-color var(--t-fast) var(--ease),box-shadow var(--t-fast) var(--ease),transform var(--t-fast) var(--ease);
+}
+.rpt-card:hover,.report-card:hover{border-color:var(--accent-line);box-shadow:var(--sh-2);transform:translateY(-1px)}
+.rpt-card .name,.report-card .name{font-size:var(--fs-14);font-weight:600}
+.rpt-card .muted,.report-card .muted{font-size:var(--fs-12);color:var(--ink-3);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--sp-3)}
+.view-card{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--sp-3)}
+.view-card > .section,.view-card > div{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-4)}
+.view-list{}
+/* 排除规则行 */
+.rule-row,.rule-group{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-13);padding:6px 0}
+.nf-group-head{font-size:var(--fs-12);font-weight:600;color:var(--ink-2);padding:6px 0}
+.schedule-row{display:flex;align-items:center;gap:var(--sp-2);padding:6px 0;font-size:var(--fs-13)}
+.excl-fields{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.sched-reports-wrap{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+.rc-meta{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-12);color:var(--ink-3);flex-wrap:wrap}
+.bind-col{font-weight:600;color:var(--ink-2);font-size:var(--fs-12)}
+.bind-cell{font-size:var(--fs-12);color:var(--ink-2)}
+.config-filter-box{
+  display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-4);
+}
+.config-filter-input{
+  height:34px;font-size:var(--fs-13);background:var(--bg-surface);border:1px solid var(--line-strong);
+  border-radius:var(--r-sm);max-width:420px;
+}
+
+/* ------------------------------------------- 14. 代码面 / SQL 高亮 / Markdown */
+/* 单一实现：底色 + 文字色必须成对出现。历史事故：<pre class="sql-debug code-block">
+   同时命中「深底」与「深字」两条规则 → 正文 1.02:1 完全看不见。 */
+pre,.code-block,.code-view,.sql-debug,.sql-preview,.sql-editor code{
+  background:var(--code-bg);color:var(--code-ink);
+  border:1px solid var(--code-border);border-radius:var(--r-sm);
+  padding:12px 14px;margin:0;
+  font-family:var(--font-mono);font-size:12.5px;line-height:1.75;
+  overflow:auto;tab-size:2;white-space:pre-wrap;word-break:break-word;
+}
+pre b,pre strong{color:var(--code-kw);font-weight:600}
+.sql-debug,.sql-preview{padding:12px 0}
+.sql-debug pre,.sql-preview pre{
+  background:transparent;border:0;border-radius:0;padding:0 14px;color:var(--code-ink);
+}
+/* 代码面工具条（语言标签 / 复制） */
+.code-head{
+  display:flex;align-items:center;gap:var(--sp-2);padding:7px 12px;
+  background:var(--code-bg-2);border-bottom:1px solid var(--code-border);
+  border-radius:var(--r-sm) var(--r-sm) 0 0;
+  font-size:var(--fs-11);font-weight:600;letter-spacing:.04em;
+  color:var(--code-dim);text-transform:uppercase;
+}
+.code-head .actions{margin-left:auto;display:flex;gap:6px;text-transform:none;letter-spacing:0}
+.code-head .btn-ghost{color:var(--code-dim);height:22px;font-size:var(--fs-11)}
+.code-head .btn-ghost:hover{background:rgba(255,255,255,.08);color:#fff}
+.code-head + pre,.code-head + .code-view{border:0;border-radius:0 0 var(--r-sm) var(--r-sm)}
+/* SQL 词法着色（同底色实测对比度 ≥6.4:1） */
+.sql-hl-keyword{color:var(--code-kw);font-weight:600}
+.sql-hl-string{color:var(--code-str)}
+.sql-hl-number{color:var(--code-num)}
+.sql-hl-comment{color:var(--code-comment);font-style:italic}
+.sql-hl-function{color:var(--code-fn);font-weight:500}
+/* 行内代码：浅色，与代码面明确区分 */
+:not(pre) > code,.md-body code,td code,p code,li code{
+  background:#eef0f4;border:1px solid var(--line-soft);border-radius:var(--r-xs);
+  padding:1px 5px;color:var(--ink-1);font-size:12.5px;
+}
+/* SQL 编辑器（可编辑，保持浅色表单语境） */
+.sql-editor{border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden;background:var(--bg-surface)}
+.sql-toolbar{
+  display:flex;align-items:center;gap:var(--sp-2);padding:7px 10px;
+  border-bottom:1px solid var(--line-soft);background:var(--bg-subtle);
+}
+.sql-textarea{
+  width:100%;border:0;border-radius:0;font-family:var(--font-mono);font-size:12.5px;line-height:1.75;
+  padding:var(--sp-3) 14px;min-height:220px;background:var(--bg-surface);color:var(--ink-1);resize:vertical;
+}
+.sql-textarea:focus{box-shadow:none;border:0;outline:2px solid var(--accent);outline-offset:-2px}
+/* Markdown 正文 */
+.md-body{font-size:var(--fs-14);line-height:1.75;color:var(--ink-1);max-width:78ch}
+.md-body h1{font-size:var(--fs-18);margin:0 0 var(--sp-3);padding-bottom:6px;border-bottom:1px solid var(--line-soft)}
+.md-body h2{font-size:var(--fs-16);margin:var(--sp-4) 0 var(--sp-2)}
+.md-body h3{font-size:var(--fs-14);margin:var(--sp-3) 0 var(--sp-2)}
+.md-body p{margin:0 0 var(--sp-3)}
+.md-body ul,.md-body ol{margin:0 0 var(--sp-3) var(--sp-4)}
+.md-body li{margin-bottom:4px}
+.md-body pre code{background:transparent;border:0;padding:0;color:inherit}
+.md-body blockquote{border-left:3px solid var(--accent-line);padding-left:var(--sp-3);color:var(--ink-2);margin:0 0 var(--sp-3)}
+.md-body table{margin-bottom:var(--sp-3)}
+.md-body img{max-width:100%;border-radius:var(--r-sm)}
+/* 快筛单元格：紧实的「操作符 + 值」成组控件（选择非“不筛选”时值输入框出现） */
+.qf-row .filter-row{display:flex;gap:4px;align-items:center;min-width:0}
+.qf-row .filter-op{
+  width:auto;min-width:74px;max-width:96px;flex:0 0 auto;height:26px;
+  font-size:var(--fs-12);padding:0 22px 0 8px;
+}
+.qf-row .filter-input{flex:1 1 auto;min-width:64px;max-width:150px;height:26px;font-size:var(--fs-12)}
+.qf-row .filter-input:focus{max-width:220px}   /* 聚焦时临时放宽，失焦收回，避免把列撑开 */
+.qf-row input[disabled]{background:var(--bg-subtle)}
+
+/* --------------------------------------------------- 16. 页面级细节 */
+/* 概览 */
+.grid-stat + .card,.grid-stat + .grid-2{margin-top:var(--sp-4)}
+/* 报表详情工具行 */
+.tabpanel[data-panel=data] .toolbar{border-bottom:0}
+.tabpanel[data-panel=data] > .toolbar + .filterbar{margin-top:var(--sp-3)}
+/* 表格里的表单（快筛） */
+.qf-row form{display:contents}
+/* 排序列头 */
+th > .sort-links + .filter-row{margin-top:4px}
+/* 审计筛选快捷 */
+.audit-filters input[type=date]{min-width:150px}
+
+/* ------------------------------------------------------------ 17. 工具类 */
+.text-right{text-align:right}
+.nowrap{white-space:nowrap}
+.tnum{font-variant-numeric:tabular-nums}
+.mt-0{margin-top:0}
+.mb-0{margin-bottom:0}
+
+/* ------------------------------------------------- 18. 收尾 / 动效降级 */
+@media (max-width:1280px){
+  .grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:1024px){
+  .split{grid-template-columns:minmax(0,1fr)}
+  .grid-2{grid-template-columns:minmax(0,1fr)}
+  .grid-3{grid-template-columns:minmax(0,1fr)}
+  aside.card{position:static}
+  .container{padding-left:var(--sp-4);padding-right:var(--sp-4)}
+}
+@media (max-width:640px){
+  .container{padding:12px}
+  .grid-stat{grid-template-columns:minmax(0,1fr)}
+  .page-head{align-items:flex-start}
+  .page-head .actions{width:100%}
+  .filterbar input[type=text]{min-width:100%}
+  .filterbar label{width:100%}
+  .filterbar input,.filterbar select{width:100%}
+  .formbar{flex-wrap:wrap}
+  .formbar .right{width:100%;justify-content:flex-end}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+
+/* ------------------------------------- 20. 页面级组件补全（原散在内联样式里） */
+/* 通用工具 */
+.hidden{display:none!important}
+/* 报表中心：搜索框 */
+.search-box{position:relative;display:flex;align-items:center;flex:0 1 320px;min-width:180px}
+.search-box svg{position:absolute;left:10px;width:15px;height:15px;color:var(--ink-4);pointer-events:none}
+.search-box input,.search-box .input{padding-left:32px;height:32px}
+/* 报表卡片（报表中心） */
+.report-card{position:relative}
+.report-card .t{font-size:var(--fs-14);font-weight:600;color:var(--ink-1);line-height:var(--lh-13)}
+.report-card .meta{font-size:var(--fs-12);color:var(--ink-3)}
+.report-card .desc{font-size:var(--fs-12);color:var(--ink-3);line-height:1.6;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.report-card .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:var(--sp-2)}
+/* 报表配置卡片视图 */
+.rpt-card{position:relative;gap:8px}
+.rpt-card .rc-pick{position:absolute;top:12px;right:12px}
+.rpt-card .rc-top{display:flex;align-items:center;gap:var(--sp-2);padding-right:24px}
+.rpt-card .rc-name{font-size:var(--fs-14);font-weight:600;line-height:var(--lh-13)}
+.rpt-card .rc-name a{color:var(--ink-1)}
+.rpt-card .rc-name a:hover{color:var(--accent-ink)}
+.rpt-card .rc-sql{margin:2px 0;color:var(--ink-3)}
+.rpt-card .rc-memo{font-size:var(--fs-12);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpt-card .rc-foot{display:flex;align-items:center;gap:var(--sp-2);margin-top:auto;padding-top:var(--sp-2);border-top:1px solid var(--line-soft)}
+.rpt-card .rc-ops{display:inline-flex;align-items:center;gap:4px;margin-left:auto}
+.rpt-card .rc-ops form{display:inline}
+.rpt-card .rc-api{font-size:var(--fs-12);color:var(--ink-3)}
+.rpt-card .rc-api:hover{color:var(--accent-ink)}
+/* 批量操作浮条 */
+.batch-bar{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;font-size:var(--fs-13);color:var(--ink-2)}
+.batch-float{
+  position:sticky;bottom:14px;z-index:35;margin:var(--sp-3) 0 0;padding:10px 14px;
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--sh-2);
+}
+.batch-float select,.batch-float input{width:auto;height:28px;font-size:var(--fs-12);min-width:150px}
+/* 日期快捷 */
+.date-shortcuts{display:inline-flex;align-items:center;gap:6px}
+/* 页头内联报表切换器 */
+.select.compact-switch{
+  width:auto;height:28px;font-size:var(--fs-13);font-weight:500;color:var(--ink-2);
+  border-color:var(--line);background-color:var(--bg-surface);min-width:130px;
+}
+/* 导出对话框字段集 / 备注预览 */
+fieldset.fs{border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--sp-3) var(--sp-4);margin:0 0 var(--sp-3)}
+fieldset.fs legend{font-size:var(--fs-12);font-weight:600;color:var(--ink-2);padding:0 6px}
+.memo-preview{margin-top:var(--sp-2);padding:var(--sp-3);background:var(--bg-subtle);border:1px solid var(--line-soft);border-radius:var(--r-sm);min-height:56px}
+/* 嵌套筛选构建器 */
+.nf-builder{font-size:var(--fs-13);color:var(--ink-2);display:flex;flex-direction:column;gap:var(--sp-2)}
+.nf-builder > div:first-child{font-size:var(--fs-12);color:var(--ink-3)}
+/* 可折叠调试块 */
+.debug-info{border-top:1px solid var(--line-soft);padding-top:var(--sp-2);margin-top:var(--sp-2)}
+.debug-toggle{
+  appearance:none;border:0;background:transparent;font:inherit;font-size:var(--fs-13);font-weight:600;
+  color:var(--ink-2);cursor:pointer;padding:6px 0;display:inline-flex;align-items:center;gap:6px;
+}
+.debug-toggle:hover{color:var(--accent-ink)}
+.debug-content{padding:var(--sp-2) 0 var(--sp-3)}
+/* 抽屉遮罩 */
+.backdrop{position:fixed;inset:0;z-index:70;background:rgba(17,21,29,.42);display:none}
+.backdrop.on,.backdrop.show{display:block}   /* 生产 JS 加 .on */
+/* 调度表单绑定表 */
+.sched-reports{width:100%;font-size:var(--fs-12)}
+.sched-reports th{font-size:var(--fs-11)}
+/* 审计类型补充 */
+.audit-type-web_access{background:var(--info-soft);color:var(--info-ink);border-color:var(--info-line)}
+.audit-type-operation{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent-line)}
+.audit-type-login_fail,.audit-type-security{background:var(--danger-soft);color:var(--danger-ink);border-color:var(--danger-line)}
+/* 生产遗留笔误 class */
+.btn-smbtn-sm{height:26px;padding:0 9px;font-size:var(--fs-12)}
+/* 概览快捷入口：3 列网格、44px 行高，末行单个时整行铺满（消除末行缺口） */
+.card > .grid-3 > .btn{height:44px;font-size:var(--fs-13);justify-content:center}
+.card > .grid-3 > .btn:last-child:nth-child(3n+1){grid-column:1 / -1}
+/* 统计磁贴：6 磁贴排成 2×3（避免末行 ragged） */
+.grid-stat{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* 可排序表头：默认次级色，hover/当前列才用主文字色 */
+.sort-link{color:var(--ink-2)}
+.sort-link:hover{color:var(--ink-1)}
+/* 分页器内所有按钮统一 28px */
+.pagination .btn{height:28px;padding:0 10px;font-size:var(--fs-12)}
+
+/* --------------------------------------------- 19. 色调变体（同一套结构） */
+/* 石墨蓝：更中性、更“工具” */
+html[data-tint=steel]{
+  --accent:#3f6ad8; --accent-hover:#355cc0; --accent-press:#2b4c9e;
+  --accent-ink:#2b4c9e; --accent-soft:#f2f6ff; --accent-soft-2:#e2eaff; --accent-line:#c9d8f8;
+}
+html[data-tint=steel] .sidebar .brand .logo{background:linear-gradient(150deg,#6ea0f0,#3f6ad8 55%,#2b4c9e)}
+/* 松绿：更冷静、偏“运维” */
+html[data-tint=pine]{
+  --accent:#0f8a6a; --accent-hover:#0c7358; --accent-press:#0a5c46;
+  --accent-ink:#075c45; --accent-soft:#f0fbf6; --accent-soft-2:#dcf5ea; --accent-line:#b6e6d5;
+}
+html[data-tint=pine] .sidebar .brand .logo{background:linear-gradient(150deg,#3fbf9a,#0f8a6a 55%,#0a5c46)}
+
+/* 树节点名 / API 单元格 / 调度表单微调 */
+.tree .cat .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.api-cell a{font-size:var(--fs-12);color:var(--ink-2);display:inline-flex;align-items:center;gap:4px}
+.api-cell a:hover{color:var(--accent-ink)}
+.sched-form{display:flex;flex-direction:column;gap:var(--sp-4)}
+
+/* ============ 21. 报表配置页重设计：分组卡 + 多级层级 + 行卡片 ============ */
+/* 分组卡（一级分类） */
+.cat-block{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:var(--sp-3);overflow:hidden}
+.cat-block > .cat-head{
+  display:flex;align-items:center;gap:var(--sp-2);padding:10px 14px;
+  background:var(--bg-subtle);border-bottom:1px solid var(--line-soft);
+}
+.cat-block > .cat-head .cat-name{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-13);font-weight:600;color:var(--ink-1)}
+.cat-block > .cat-head .cat-name svg{color:var(--ink-4)}
+.cat-block > .cat-head .actions{margin-left:auto;display:flex;align-items:center;gap:2px;opacity:0;transition:opacity var(--t-fast) var(--ease)}
+.cat-block:hover > .cat-head .actions,.cat-block:focus-within > .cat-head .actions{opacity:1}
+.cat-block .cat-head .tree-toggle{font-size:var(--fs-13);font-weight:600;padding:2px 0}
+.cat-block .cat-head .tree-toggle .chev{transition:transform var(--t-fast) var(--ease);display:inline-flex}
+.cat-block.collapsed .cat-head .tree-toggle .chev{transform:rotate(-90deg)}
+.cat-block.collapsed > .cat-body,.cat-block.collapsed > .cat-children{display:none}
+
+/* 层级导轨：父子关系靠「竖线 + 节点横线 + 逐级缩进 + 字号下沉」表达，不靠表格缩进 */
+.cat-children{position:relative;margin-left:22px;padding:10px 0 10px 20px;border-left:1px solid var(--line)}
+.cat-children > .cat-block{position:relative;margin-bottom:var(--sp-2);box-shadow:none}
+.cat-children > .cat-block::before{
+  content:"";position:absolute;left:-20px;top:17px;width:11px;height:1px;background:var(--line);
+}
+.cat-children > .cat-block > .cat-head{background:var(--bg-surface);border-bottom:1px solid var(--line-soft)}
+.cat-children > .cat-block > .cat-head .cat-name{color:var(--ink-2);font-weight:600}
+.cat-children > .cat-block > .cat-head .cat-name svg{color:var(--ink-4)}
+.cat-block .cat-children .cat-children{margin-left:18px;padding-left:18px;border-left-color:var(--line)}
+.cat-block .cat-children .cat-children > .cat-block > .cat-head .cat-name{font-size:var(--fs-12);color:var(--ink-2)}
+/* 层级深度色带：三级及以上用主色系小圆点做锚点，避免无限缩进 */
+.cat-depth-dot{width:6px;height:6px;border-radius:var(--r-full);flex:0 0 6px;background:var(--line-strong)}
+.cat-depth-1 > .cat-head .cat-depth-dot{background:var(--accent)}
+.cat-depth-2 > .cat-head .cat-depth-dot{background:var(--accent-line)}
+.cat-depth-3 > .cat-head .cat-depth-dot{background:var(--line-strong)}
+
+/* 报表行卡片（替代 10 列挤压表格） */
+.rpt-body{display:flex;flex-direction:column}
+.rpt-row{
+  display:flex;align-items:center;gap:12px;padding:11px 14px;
+  border-bottom:1px solid var(--line-soft);transition:background var(--t-fast) var(--ease);
+}
+.rpt-row:last-child{border-bottom:0}
+.rpt-row:hover{background:var(--bg-hover)}
+.rpt-row.picked{background:var(--accent-soft)}
+.rpt-row .pick{display:flex;align-items:center;flex:0 0 auto}
+.rpt-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px}
+.rpt-line1{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.rpt-line1 .nm{font-size:var(--fs-14);font-weight:600;color:var(--ink-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.rpt-line1 .nm:hover{color:var(--accent-ink)}
+.rpt-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:var(--fs-12);color:var(--ink-3);min-width:0}
+.rpt-memo{font-size:var(--fs-12);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.rpt-sql{
+  font-family:var(--font-mono);font-size:var(--fs-12);color:var(--ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
+}
+.rpt-ops{
+  flex:0 0 auto;display:flex;align-items:center;gap:2px;
+  opacity:0;transition:opacity var(--t-fast) var(--ease);
+}
+.rpt-row:hover .rpt-ops,.rpt-row:focus-within .rpt-ops,.rpt-row.picked .rpt-ops{opacity:1}
+/* 配置 chips：把「默认分页 / 缓存 / TTL」三列并成一列，消除挤压 */
+.cfg-chips{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
+.cfg-chip{
+  display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;
+  border-radius:var(--r-xs);background:var(--bg-subtle);border:1px solid var(--line);
+  font-size:var(--fs-11);color:var(--ink-2);white-space:nowrap;
+}
+.cfg-chip b{font-weight:600;color:var(--ink-1);font-variant-numeric:tabular-nums}
+.cfg-chip.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok-ink)}
+.cfg-chip.ok b{color:var(--ok-ink)}
+.cfg-chip.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn-ink)}
+.cfg-chip.warn b{color:var(--warn-ink)}
+.cfg-chip.accent{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-ink)}
+.cfg-chip.accent b{color:var(--accent-ink)}
+.cfg-chip .dot{width:5px;height:5px;flex:0 0 5px}
+/* 分类路径（方案 B：单表 + 路径列） */
+.cat-path{display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-12);color:var(--ink-3);white-space:nowrap}
+.cat-path .sep{color:var(--ink-4)}
+.cat-path .leaf{color:var(--ink-2);font-weight:500}
+.cat-path .rt{color:var(--accent-ink);font-weight:500}
+/* 方案切换条 */
+.scheme-bar{
+  display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  padding:10px 14px;margin-bottom:var(--sp-4);
+  background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--r-md);
+  font-size:var(--fs-12);color:var(--accent-ink);
+}
+.scheme-bar strong{font-weight:600}
+.scheme-bar .segment{background:var(--bg-surface);border-color:var(--accent-line)}
+.scheme-bar .segment button.active{background:var(--accent);color:#fff}
+/* 空分组提示 */
+.cat-empty{padding:14px;font-size:var(--fs-12);color:var(--ink-3);border-top:1px dashed var(--line);display:flex;align-items:center;gap:8px;justify-content:space-between}
+.cat-empty .add{color:var(--accent-ink);font-weight:500}
+@media (max-width:1400px){.split{grid-template-columns:220px minmax(0,1fr)}}
+
+.nowrap-chips{flex-wrap:nowrap;overflow:hidden}
+
+/* —— 报表配置页 v2：卡片视图（与列表视图同数据各渲一份，.view-list/.view-card 语义与生产一致） —— */
+.cat-cards{padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:12px}
+.cat-cards .rpt-card{padding:12px 14px;border-radius:var(--r-sm);gap:6px;min-width:0}
+.cat-cards .rpt-card .rc-top{padding-right:22px}
+.cat-cards .rpt-card .rc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-cards .rpt-card .rc-sql{
+  font-family:var(--font-mono);font-size:12px;color:var(--ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.cat-cards .rpt-card .rc-memo{
+  font-size:var(--fs-12);color:var(--ink-3);min-height:36px;   /* 固定两行高度，卡片底边对齐 */
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.cat-cards .rpt-card .rc-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cat-cards .rpt-card .rc-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:8px;border-top:1px solid var(--line-soft)}
+.cat-cards .rpt-card .rc-ops{margin-left:auto;display:inline-flex;gap:2px;opacity:0;transition:opacity var(--t-fast) var(--ease)}
+.cat-cards .rpt-card:hover .rc-ops,.cat-cards .rpt-card.picked .rc-ops{opacity:1}
+.rpt-card.picked{border-color:var(--accent-line);background:var(--accent-soft)}
+
+/* —— JS 运行时切换的动态类（必须存在，否则交互无视觉反馈） —— */
+@keyframes rowHighlightFade{from{background:var(--accent-soft-2)}to{background:transparent}}
+.row-highlight{animation:rowHighlightFade 2s ease forwards}
+.flash.fading-out{opacity:0;transition:opacity .5s ease}
+.btn-group{display:inline-flex;gap:8px;flex-wrap:wrap}
+.btn-link{background:none;border:none;color:var(--accent-ink);height:auto;padding:0;font-weight:500}
+.btn-link:hover{text-decoration:underline;text-underline-offset:2px}
+.btn[disabled],.btn.disabled{opacity:.5;pointer-events:none}
+.btn.loading{position:relative;color:transparent}
+.btn.loading::after{
+  content:"";position:absolute;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;border-radius:var(--r-full);animation:querySpin .7s linear infinite;
+}
+.pagination .page-span,
+.pagination a:not(.page-btn):not(.nav-arrow){
+  display:inline-grid;place-items:center;min-width:28px;height:28px;padding:0 8px;border-radius:var(--r-sm);
+  border:1px solid var(--line);background:var(--bg-surface);color:var(--ink-2);font-size:var(--fs-12);
+}
+.pagination a:not(.page-btn):not(.nav-arrow):hover{background:var(--bg-hover);border-color:var(--line-strong);color:var(--ink-1)}
+
+/* ============ 22. 生产组件补全（原由页面级 CSS / 小分片提供，迁入单一来源） ============ */
+/* —— 迷你按钮变体（原 _MINIBTN_CSS） —— */
+.btn-mini-outline,.btn-mini-outline-light,.btn-mini-outline-key{
+  background:var(--bg-surface);border:1px solid var(--line-strong);color:var(--ink-2);
+}
+.btn-mini-outline:hover,.btn-mini-outline-light:hover,.btn-mini-outline-key:hover{
+  background:var(--bg-hover);border-color:#a9aeb8;color:var(--ink-1);
+}
+.btn-mini-outline-accent{background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-ink)}
+.btn-mini-outline-accent:hover{background:var(--accent-soft-2);color:var(--accent-press)}
+.btn-mini-success{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn-mini-success:hover{background:#037048;border-color:#037048;color:#fff}
+.btn-mini-s{height:22px;padding:0 6px;font-size:var(--fs-11)}
+.btn-mini-m{height:26px;padding:0 9px;font-size:var(--fs-12)}
+
+/* —— 报表页工具条 .controls（原 report._CSS） —— */
+.controls{
+  display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  padding:12px var(--sp-4);background:var(--bg-subtle);border:1px solid var(--line);
+  border-radius:var(--r-md);margin-bottom:var(--sp-4);
+}
+.controls label{display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-13);font-weight:500;color:var(--ink-2)}
+.controls select{width:auto;height:30px;font-size:var(--fs-13)}
+.controls .stat{margin-left:auto;font-size:var(--fs-12);color:var(--ink-3)}
+
+/* —— 排序条 / 排序项 —— */
+.sort-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0;font-size:var(--fs-12);color:var(--ink-2)}
+.sort-tag{
+  display:inline-flex;align-items:center;gap:3px;padding:2px 8px;
+  background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--r-xs);
+  color:var(--accent-ink);font-size:var(--fs-12);
+}
+.sort-prio{
+  display:inline-grid;place-items:center;min-width:15px;height:15px;padding:0 3px;
+  background:var(--accent);color:#fff;border-radius:var(--r-full);font-size:10px;font-weight:600;
+}
+.sort-item{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--bg-surface);cursor:grab;user-select:none;
+}
+.sort-item:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+.sort-up,.sort-down,.sort-remove{
+  width:22px;height:22px;flex:0 0 22px;display:inline-grid;place-items:center;padding:0;
+  border:1px solid var(--line);border-radius:var(--r-xs);background:var(--bg-surface);
+  color:var(--ink-3);font-size:10px;line-height:1;cursor:pointer;
+}
+.sort-up:hover,.sort-down:hover{background:var(--bg-hover);color:var(--ink-1);border-color:var(--line-strong)}
+.sort-remove{color:var(--ink-3);font-size:11px}
+.sort-remove:hover{background:var(--danger-soft);border-color:var(--danger-line);color:var(--danger-ink)}
+.sort-up:disabled,.sort-down:disabled{opacity:.4;cursor:not-allowed}
+.clear-filter{display:inline-block;margin-left:8px;font-size:var(--fs-12);color:var(--ink-3)}
+.clear-filter:hover{color:var(--danger-ink)}
+
+/* —— 嵌套筛选构建器（nf-*） —— */
+.nf-leaf,.nf-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0}
+.nf-col,.nf-op{width:auto;min-width:104px;height:28px;font-size:var(--fs-12)}
+.nf-op{min-width:88px}
+.nf-val{flex:1 1 160px;max-width:240px;height:28px;font-size:var(--fs-12)}
+.nf-val:disabled{background:var(--bg-subtle)}
+.nf-example{font-size:var(--fs-11);color:var(--ink-4)}
+.nf-rm{
+  width:22px;height:22px;display:inline-grid;place-items:center;padding:0;border:1px solid var(--line);
+  border-radius:var(--r-xs);background:var(--bg-surface);color:var(--ink-3);cursor:pointer;font-size:11px;
+}
+.nf-rm:hover{background:var(--danger-soft);border-color:var(--danger-line);color:var(--danger-ink)}
+.nf-andor{width:auto;min-width:96px;height:28px;font-size:var(--fs-12);font-weight:600}
+.nf-children{margin-left:14px;padding-left:12px;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.nf-empty{padding:var(--sp-4);text-align:center;font-size:var(--fs-12);color:var(--ink-3)}
+
+/* —— 调度排除规则编辑器（excl-*） —— */
+.excl-node{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0}
+.excl-children{margin-left:14px;padding-left:12px;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.excl-type,.excl-op,.excl-dow{width:auto;height:28px;font-size:var(--fs-12)}
+.excl-type{min-width:132px}
+.excl-dow{min-width:88px}
+.excl-from,.excl-to{width:auto;height:28px;font-size:var(--fs-12);padding:0 8px}
+.excl-on{font-size:var(--fs-12);color:var(--ink-3)}
+
+/* —— 报表切换卡 / 报表列表（report._CSS .report-select/.report-list） —— */
+.report-select label{display:block;margin-bottom:6px;font-size:var(--fs-13);font-weight:500;color:var(--ink-2)}
+.report-select select{width:100%;height:34px;font-size:var(--fs-13)}
+.report-list{list-style:none;padding:0;margin-top:4px}
+.report-list li{padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.report-list li:last-child{border-bottom:0}
+.report-list a{display:flex;align-items:center;gap:8px;font-size:var(--fs-13);font-weight:500}
+.report-list a::before{content:"→";color:var(--ink-4);font-weight:400}
+
+/* —— 配置表单（原 config._CONFIG_EXTRA_CSS 的双栏网格） —— */
+form.config-form{max-width:1200px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-auto-flow:dense;column-gap:32px;row-gap:16px;align-items:start}
+form.config-form.sched-form{max-width:1560px}
+form.config-form .span-full{grid-column:1 / -1}
+.config-form label{display:block;margin-top:0;font-weight:600;font-size:var(--fs-13);color:var(--ink-2)}
+.config-form .field-hint{display:block;margin-top:4px;font-weight:400;color:var(--ink-3);font-size:var(--fs-12)}
+.config-form .check-inline{display:inline-flex;align-items:center;gap:6px;font-weight:400;margin:4px 18px 4px 0;cursor:pointer}
+.config-form textarea{font-family:var(--font-mono);font-size:var(--fs-12);min-height:100px;resize:vertical}
+.config-form .form-actions{margin-top:var(--sp-4);display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.config-form .form-actions .cancel{color:var(--ink-3);font-size:var(--fs-13);font-weight:500}
+.config-form .form-actions .cancel:hover{color:var(--ink-1)}
+.config-form .form-actions .test-result{font-size:var(--fs-13);font-weight:500;align-self:center}
+.config-form .form-actions .test-result.ok{color:var(--ok-ink)}
+.config-form .form-actions .test-result.err{color:var(--danger-ink)}
+.sched-reports-wrap{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-surface)}
+table.sched-reports{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-12)}
+table.sched-reports thead th{position:sticky;top:0;background:var(--bg-subtle);text-align:left;padding:8px 12px;
+  border-bottom:1px solid var(--line);color:var(--ink-2);font-weight:600;height:auto}
+table.sched-reports tbody td{padding:7px 12px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+table.sched-reports tbody tr:last-child td{border-bottom:0}
+table.sched-reports .bind-col{width:56px;text-align:center}
+/* SQL 预览 / 备注预览显隐（原 .show 契约） */
+.sql-preview.show,.memo-preview.show{display:block}
+.sql-preview:not(.show),.memo-preview:not(.show){display:none}
+
+/* —— 加载遮罩 / 空态（原 _COMMON_CSS query-loading-overlay） —— */
+.query-loading-overlay{
+  display:none;                       /* 默认隐藏；JS 加 .show 才显示 */
+  position:fixed;inset:0;z-index:200;flex-direction:column;align-items:center;justify-content:center;
+  gap:var(--sp-3);background:rgba(17,21,29,.34);-webkit-backdrop-filter:blur(1.5px);backdrop-filter:blur(1.5px);
+  color:var(--ink-1);font-size:var(--fs-13);font-weight:500;
+}
+.query-loading-overlay.show{display:flex}
+.query-loading-overlay .spinner{
+  width:34px;height:34px;border:3px solid rgba(255,255,255,.55);border-top-color:var(--accent);
+  border-radius:var(--r-full);animation:querySpin .8s linear infinite;
+}
+@keyframes querySpin{to{transform:rotate(360deg)}}
+.empty-state{color:var(--ink-3);font-size:var(--fs-13);padding:var(--sp-6) var(--sp-3);text-align:center}
+.empty-state .icon{font-size:26px;line-height:1;opacity:.45;margin-bottom:8px}
+.empty-state-row td{background:var(--bg-surface)}
+
+/* —— 最近查看（报表中心） —— */
+.recent-reports{margin-bottom:var(--sp-4)}
+.recent-title{font-size:var(--fs-12);font-weight:600;color:var(--ink-3);margin-bottom:8px}
+.recent-cards{display:flex;gap:8px;flex-wrap:wrap}
+.recent-card{
+  display:inline-flex;align-items:center;max-width:240px;height:28px;padding:0 12px;
+  background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--r-full);
+  color:var(--accent-ink);font-size:var(--fs-13);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.recent-card:hover{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-press)}
+
+/* —— 杂项钩子 —— */
+.sql-head{white-space:nowrap}
+.report-checkbox{vertical-align:middle;margin:0}
+.mermaid{
+  background:var(--bg-subtle);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:12px;font-family:var(--font-mono);font-size:var(--fs-12);overflow:auto;color:var(--ink-2);
+}
+.result-mode-section{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+.on{color:var(--ok-ink)}
+.gone{color:var(--ink-3);text-decoration:line-through}
+.act{color:var(--accent-ink);font-weight:500}
+
+/* 规则 JSON 只读框（原内联深色样式 → 类） */
+.code-textarea{
+  width:100%;min-height:80px;margin:0;padding:12px;resize:vertical;
+  background:var(--code-bg);color:var(--code-ink);border:1px solid var(--code-border);
+  border-radius:var(--r-sm);font-family:var(--font-mono);font-size:12.5px;line-height:1.6;
+}
+.code-textarea:focus{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* 触屏：聚焦时把快筛输入框放大到固定宽度（JS 加 .filter-input-touch） */
+.filter-input-touch{
+  width:min(320px,80vw) !important;min-width:min(320px,80vw);
+  box-shadow:0 8px 24px -6px rgba(17,21,29,.28);
+  border-color:var(--accent) !important;background:var(--bg-surface);
+}
+"""
 
 # 迷你按钮公共样式（config 页与 report 页共享；类拆分与内联现状视觉等价）
-_MINIBTN_CSS = """
-.btn-mini {
-  font-size: 12px; border-radius: 4px; cursor: pointer;
-}
-.btn-mini-solid { padding: 4px 10px; border: none; }
-.btn-mini-primary { background: #4f46e5; color: #fff; }
-.btn-mini-success { background: #059669; color: #fff; }
-.btn-mini-disabled {
-  padding: 4px 10px; background: #e2e8f0; color: #94a3b8;
-  /* 找茬 L4：禁用态保持浅色 #94a3b8 与可用态拉开对比度，
-     不参与批次6#27d 的辅助文字加深替换 */
-  border: none; cursor: not-allowed;
-}
-.btn-mini-outline {
-  padding: 3px 10px; background: #fff; border: 1px solid #cbd5e1; white-space: nowrap;
-}
-.btn-mini-outline-light { padding: 4px 10px; background: #fff; border: 1px solid #e2e8f0; }
-.btn-mini-outline-key { padding: 2px 8px; background: #fff; border: 1px solid #cbd5e1; color: #475569; }
-.btn-mini-outline-accent { padding: 2px 8px; background: #fff; border: 1px solid #cbd5e1; color: #4f46e5; }
-.btn-mini-s { padding: 2px 8px; font-size: 12px; }
-.btn-mini-m { padding: 3px 10px; font-size: 12px; }
-"""
+_MINIBTN_CSS = ""  # 迷你按钮变体已并入 _COMMON_CSS 第 22 节（保留变量名兼容既有引用）
 
 # 黄色警示条公共样式（色值统一为较新的 #fefce8 系；!important 覆盖
 # report 页 .controls .cache-badge 等既有类，保证与内联时代视觉一致）
-_FLASH_WARN_CSS = """
-.flash-warn { background: #fefce8 !important; color: #92400e !important; }
-"""
+_FLASH_WARN_CSS = ""  # flash-warn 已并入 _COMMON_CSS（保留变量名兼容既有引用）
 
 # 黄色警示框内联样式（flash-warn 块级组件：表单警示、结果集名称警示共用，防样式漂移）
 _WARN_BOX_STYLE = "margin:8px 0;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;font-size:13px"
@@ -588,30 +1525,7 @@ _MD_CSS = """
 .md-body del { color: #64748b; }
 """
 
-_B6_CSS = """
-/* 合并页检索过滤框（spec ux-optimization 批次6#21） */
-.config-filter-box {
-  margin-bottom: 12px;
-}
-.config-filter-input {
-  width: 100%; padding: 9px 14px; font-size: 14px;
-  border: 2px solid #e2e8f0; border-radius: 8px; outline: none;
-  background: #fff; color: #1e293b; box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.config-filter-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
-/* 总览页「最近查看」快捷卡片（批次6#22） */
-.recent-reports { margin-bottom: 16px; }
-.recent-title { font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600; }
-.recent-cards { display: flex; gap: 8px; flex-wrap: wrap; }
-.recent-card {
-  display: inline-block; max-width: 240px; padding: 6px 14px;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 999px;
-  color: #4f46e5; text-decoration: none; font-size: 14px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.recent-card:hover { border-color: #4f46e5; background: #eef2ff; }
-"""
+_B6_CSS = ""  # 检索过滤框/最近查看卡片已并入 _COMMON_CSS 第 22 节（保留变量名兼容既有引用）
 
 _COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS + _B6_CSS
 
@@ -667,13 +1581,18 @@ function initCatTree() {
   btn.textContent = (isCollapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
 }
 function selectAllInSection(el) {
-  var section = el.closest('.section');
+  /* v2：分组容器由 .section 改为 .section.cat-block（兼容两种写法） */
+  var section = el.closest('.cat-block, .section');
   if (!section) return;
   var c = section.querySelectorAll('.report-checkbox');
   for (var i = 0; i < c.length; i++) {
     c[i].checked = el.checked;
   }
   updateBatchCount();
+}
+function toggleCatBlock(btn) {
+  var b = btn.closest('.cat-block');
+  if (b) b.classList.toggle('collapsed');
 }
 function submitBatchPost(actionUrl, ids, extraFields) {
   var form = document.createElement('form');
@@ -773,12 +1692,10 @@ function initApiUrls() {
     el.textContent = buildApiUrl(path, kind);
   }
 }
-document.addEventListener('DOMContentLoaded', function() {
-  initApiUrls();
-});
-document.addEventListener('DOMContentLoaded', function() {
-  initCatTree();
-});
+/* 页面级初始化只允许一条注册路径：initPage()（见下）。
+   历史写法 initApiUrls/initCatTree 各自再绑一次 DOMContentLoaded → 首次加载二者
+   都会执行两遍（幂等所以没炸），而无刷新换页后这第二条路径不会重放，容易误以为
+   「已注册 = 换页后也会跑」。已删除（复盘门禁：TestPageInitRegistration）。 */
 function showFlashWarn(msg) {
   /* 行内警告提示条（spec ux-optimization 批次6#27e）：替代阻塞式弹窗。
      复用 .flash-warn 样式，5 秒后自动隐藏；容器缺失时降级 console.warn。 */
@@ -1134,8 +2051,38 @@ function initAnchorRowHighlight() {
      if (replace) { history.replaceState(null, '', url); }
      else { history.pushState(null, '', url); }
    }
-   if (typeof initPage === 'function') { initPage(); }
+   _reinitAfterSwap();
  }
+ /* 无刷新换页后的统一重初始化（供所有 navigateTo/_swapMain 调用，幂等）：
+    ① innerHTML 赋值的 <script> 不会执行 → 逐块重建以重新执行（<main> 内的
+       导出对话框联动、嵌套筛选、结果集切换等都靠这个）；
+    ② initPage() 重新绑定公共行为（表单提交遮罩、侧栏、折叠、最近查看…）；
+    ③ initReportPage()（报表页专有）重新绑定字段/排序列表的拖拽。 */
+ /* 「就绪即执行」：内联脚本首次解析时 readyState==='loading' → 绑 DOMContentLoaded；
+   无刷新换页后被重建重放时 readyState==='complete' → 立即执行。
+   历史缺陷：页面级脚本只绑 DOMContentLoaded，换页重放后永远不执行（嵌套筛选/导出联动/结果集切换失效）。 */
+ if (typeof window.onReady !== 'function') {
+   window.onReady = function(fn) {
+     if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', fn); }
+     else { fn(); }
+   };
+ }
+ function _reinitAfterSwap() {
+   var main = document.querySelector('main.main');
+   if (main) {
+     var scripts = main.querySelectorAll('script');
+     for (var i = 0; i < scripts.length; i++) {
+       var old = scripts[i];
+       if (!old.src && !old.textContent.trim()) continue;
+       var fresh = document.createElement('script');
+       if (old.src) { fresh.src = old.src; } else { fresh.textContent = old.textContent; }
+       old.parentNode.replaceChild(fresh, old);
+     }
+   }
+   if (typeof initPage === 'function') { initPage(); }
+   if (typeof initReportPage === 'function') { initReportPage(); }
+ }
+ window._reinitAfterSwap = _reinitAfterSwap;
  function navigateTo(url, replace) {
    fetch(url)
      .then(function(r) { return r.text(); })
@@ -1249,7 +2196,13 @@ _SIDEBAR_BOOTSTRAP_JS = (
     '<script>(function(){try{var v=localStorage.getItem("sqlreport_sidebar_collapsed");'
     'if(v==="1")document.documentElement.classList.add("sb-rail");'
     'else if(v==="0")document.documentElement.classList.add("sb-wide");'
-    '}catch(e){window.__sbStorageErr=(e&&e.name)||"StorageError";}})();</script>'
+    '}catch(e){window.__sbStorageErr=(e&&e.name)||"StorageError";}})();'
+    # onReady 必须在页面内联脚本之前可用：外链 common.js 是 defer，晚于 body 内联脚本执行。
+    # 首次解析（readyState==="loading"）→ 绑 DOMContentLoaded；
+    # 无刷新换页后脚本被重建重放（readyState==="complete"）→ 立即执行。
+    'window.onReady=function(fn){'
+    'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",fn);}'
+    'else{fn();}};</script>'
 )
 
 _PAGE_HEADER_TEMPLATE = string.Template("""<!DOCTYPE html>
@@ -1898,14 +2851,14 @@ def build_debug_section_html(pool_config, actual_sql, active_index,
     if sorts:
         sort_desc = ", ".join(f'{_escape(c)} {"↑" if d == "asc" else "↓"}' for c, d in sorts)
         info_lines.append(f'排序: {sort_desc}')
-    grid_html = (f'<div class="grid-3" style="margin-bottom:12px">{"".join(tiles)}</div>'
+    grid_html = (f'<div class="grid-3">{"".join(tiles)}</div>'
                  if tiles else "")
-    info_html = (f'<div class="muted" style="font-size:13px;line-height:1.8;margin-bottom:10px">'
+    info_html = (f'<div class="muted">'
                  f'{"<br>".join(info_lines)}</div>' if info_lines else "")
     return (f'<div class="card">'
             f'<div class="card-head"><h2>执行信息（Debug）</h2></div>'
             f'{grid_html}{info_html}'
-            f'<h3 style="font-size:14px;margin-bottom:6px">实际执行 SQL</h3>'
+            f'<h3>实际执行 SQL</h3>'
             f'<pre class="sql-debug code-block" style="word-break:break-all">'
             f'{_escape(actual_sql)}</pre>'
             f'</div>')
@@ -2016,7 +2969,7 @@ def build_nested_filter_builder_html(all_columns: list[str], nested_filter=None)
         "function nfInsertDate(){var n=document.getElementById('nf-date-n').value;var u=document.getElementById('nf-date-u').value;"
         "var text=(nfDateKind==='add'?'date_add':'date_sub')+'(now(),'+n+',\\''+u+'\\')';insertExpr(text);"
         "document.getElementById('nf-date-form').style.display='none';}\n"
-        "window.addEventListener('DOMContentLoaded', nfRender);\n"
+        "onReady(nfRender);\n"
     )
 
     help_popup = render_nested_filter_help_popup()
@@ -2024,29 +2977,29 @@ def build_nested_filter_builder_html(all_columns: list[str], nested_filter=None)
     return (
         '<div class="nf-builder" style="margin-bottom:10px;border:1px solid #e2e8f0;'
         'border-radius:8px;padding:12px;background:#f8fafc">'
-        '<div style="font-weight:700;margin-bottom:6px">嵌套筛选条件构建器（AND/OR 组合，支持无限嵌套）</div>'
+        '<div>嵌套筛选条件构建器（AND/OR 组合，支持无限嵌套）</div>'
         '<div id="nf-tree"></div>'
-        '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">'
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'
         '<button type="button" class="btn btn-sm btn-primary" onclick="applyNestedFilter()">应用嵌套筛选</button>'
         '<button type="button" class="btn btn-sm" onclick="clearNestedFilter()">清除嵌套筛选</button>'
         '<button type="button" class="btn btn-sm" onclick="nfLoadFromJson()">从 JSON 载入</button>'
         '</div>'
-        '<div style="margin-top:8px" id="nf-expr-panel">'
-        '<span style="font-size:12px;color:#475569">表达式模板：</span>'
+        '<div id="nf-expr-panel">'
+        '<span>表达式模板：</span>'
         '<button type="button" class="btn btn-sm" onclick="insertExpr(\'now()\')">now()</button>'
         '<button type="button" class="btn btn-sm" onclick="insertExpr(\'today()\')">today()</button>'
         '<button type="button" class="btn btn-sm" onclick="nfToggleDateForm(\'add\')">date_add…</button>'
         '<button type="button" class="btn btn-sm" onclick="nfToggleDateForm(\'sub\')">date_sub…</button>'
         '<span id="nf-date-form" style="display:none">数量'
-        '<input id="nf-date-n" type="number" value="7" style="width:64px">'
+        '<input id="nf-date-n" type="number" value="7">'
         '单位<select id="nf-date-u"><option value="day">天</option>'
         '<option value="month">月</option><option value="year">年</option></select>'
         '<button type="button" class="btn btn-sm btn-primary" onclick="nfInsertDate()">确定</button></span>'
         '</div>'
-        '<div style="margin-top:8px">'
+        '<div>'
         '<textarea id="nf-json" style="width:100%;min-height:72px;font-family:monospace;font-size:12px;'
         'border:1px solid #cbd5e1;border-radius:6px;padding:8px" spellcheck="false"></textarea>'
-        '<div id="nf-msg" style="color:#b91c1c;font-size:12px;min-height:16px"></div>'
+        '<div id="nf-msg" style="min-height:16px"></div>'
         '</div>'
         + help_popup +
         '<style>'
@@ -2120,16 +3073,14 @@ def build_current_rules_section_html(filters, sorts, display_columns: list[str],
         summary_parts.append("无自定义规则（显示全部字段和数据）")
 
     content = (
-        '<div style="margin-bottom:8px;line-height:1.6">'
+        '<div>'
         + '<br>'.join(summary_parts) +
         '</div>'
         '<div style="position:relative">'
-        '<textarea id="current-rules-json" style="width:100%;background:#1e293b;color:#e2e8f0;padding:12px;'
-        'border-radius:6px;font-size:13px;line-height:1.5;font-family:monospace;border:1px solid #334155;'
-        'resize:vertical;margin:0;min-height:80px" spellcheck="false">'
+        '<textarea id="current-rules-json" class="code-textarea" spellcheck="false">'
         f'{_escape(rules_json)}</textarea>'
         '</div>'
-        '<div style="margin-top:6px;font-size:12px;color:#64748b">'
+        '<div>'
         '提示: 以上 JSON 同时包含筛选/排序/字段/嵌套筛选，粘贴到 API 接口配置的「规则 JSON」即可完整复用当前报表规则。'
         '</div>'
     )
@@ -2204,10 +3155,10 @@ def build_result_selector_html(report_id, qs_page_size, result_names,
         f' data-report-id="{report_id}" data-active-index="{active_index}"'
         f' data-swi="{_escape(swi)}" data-page-size="{qs_page_size}"'
         f' data-sql-override="{_escape(sql_override or "")}">'
-        f'<span style="font-size:13px;color:#475569;font-weight:500">结果视图:</span>'
+        f'<span>结果视图:</span>'
         f'<div class="segment" aria-label="结果集">{seg_btns}</div>'
         f'{badges_html}'
-        f'<span style="font-size:12px;color:#64748b">每个结果视图独立维护筛选/排序/分页状态</span>'
+        f'<span>每个结果视图独立维护筛选/排序/分页状态</span>'
         f'</div>'
     )
 
@@ -2273,7 +3224,7 @@ def build_sort_bar_html(report_id, page_size, sorts, filters,
     sort_bar_parts = []
     if sorts:
         sort_bar_parts.append('<div class="sort-bar">')
-        sort_bar_parts.append('<span style="color:#475569;font-weight:500">排序:</span>')
+        sort_bar_parts.append('<span>排序:</span>')
         for idx, (sc, sd) in enumerate(sorts, 1):
             label = f'{_escape(sc)} {"↑" if sd == "asc" else "↓"}'
             prio = chr(0x2460 + idx - 1) if idx <= 20 else f"#{idx}"
@@ -2367,7 +3318,7 @@ def build_table_header_html(columns, display_columns, sorts, filters,
         priority_badge = ""
         if sort_priority > 0:
             prio_char = chr(0x2460 + sort_priority - 1) if sort_priority <= 20 else f"#{sort_priority}"
-            priority_badge = f'<span class="sort-prio" style="font-size:10px;color:#4f46e5;font-weight:700;margin-left:2px">{prio_char}</span>'
+            priority_badge = f'<span class="sort-prio">{prio_char}</span>'
 
         cur_fval = ""
         cur_op = "nofilter"
@@ -2395,15 +3346,15 @@ def build_table_header_html(columns, display_columns, sorts, filters,
         thead_parts.append(f"""<th data-col="{_escape(col)}">
   <div class="sort-links" style="display:inline-flex;align-items:center;gap:0">
     <a href="{asc_href}" class="sort-link" title="升序">{_escape(col)}</a>
-    <a href="{asc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="升序"><span class="{asc_cls}">▲</span></a>
-    <a href="{desc_href}" class="sort-link" style="padding:0 1px;text-decoration:none" title="降序"><span class="{desc_cls}">▼</span></a>
+    <a href="{asc_href}" class="sort-link" title="升序"><span class="{asc_cls}">▲</span></a>
+    <a href="{desc_href}" class="sort-link" title="降序"><span class="{desc_cls}">▼</span></a>
     {priority_badge}
   </div>
 </th>""")
         qf_parts.append(f"""<td data-col="{_escape(col)}">
   <div class="filter-row" style="display:flex;gap:2px;align-items:center">
     <select class="filter-op" form="{filter_form_id}" name="{filter_op_name}"
-      style="padding:2px 2px;font-size:11px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;width:auto;min-width:52px;flex-shrink:0;cursor:pointer"
+      style="flex-shrink:0;cursor:pointer"
       onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
     <input type="text" class="filter-input" form="{filter_form_id}"
       name="{filter_input_name}" placeholder="筛选 {_escape(col)}{FILTER_HINT_SUFFIX}"
@@ -2472,7 +3423,7 @@ def build_controls_bar_html(report_id, page_size, sorts, filters,
     {cols_hidden}
     {nf_hidden}
      <label>每页
-       <select name="page_size" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())" style="height:26px;font-size:13px">
+       <select name="page_size" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())">
          {''.join(f'<option value="{s}"{" selected" if page_size == s else ""}>{s}</option>'
                   for s in [10, 20, 50, 100, 200])}
        </select>
@@ -2527,7 +3478,7 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
 <div class="modal" id="modal-export" role="dialog" aria-modal="true" aria-label="导出">
   <div class="modal-head"><h3>导出</h3></div>
   <div class="modal-body">
-    <p style="font-size:13px;color:#64748b;margin-bottom:10px">导出当前筛选、排序与列设置的完整结果集（不分页）。</p>
+    <p>导出当前筛选、排序与列设置的完整结果集（不分页）。</p>
     <form method="get" action="/export" id="export-modal-form">
       {hiddens}
       <fieldset class="fs">
@@ -2537,7 +3488,7 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
           <label class="check"><input type="radio" name="format" value="json" id="export-format-json"> JSON</label>
           <label class="check"><input type="checkbox" name="zip" value="1"> 打包为 ZIP</label>
         </div>
-        <select name="format" id="export-format-select" style="display:none">
+        <select id="export-format-select" style="display:none" aria-hidden="true">
           <option value="csv">CSV</option><option value="json">JSON</option>
         </select>
       </fieldset>
@@ -2546,6 +3497,9 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
         <div class="check-group">
           <label class="check"><input type="radio" name="charset" value="gbk" checked> GBK（Excel 中文版推荐）</label>
           <label class="check"><input type="radio" name="charset" value="utf8"> UTF-8（通用 / 程序处理）</label>
+        </div>
+        <div class="field-hint" id="export-charset-json-hint" style="display:none">
+          JSON 固定 UTF-8（RFC 8259，与 API 响应一致），此选项对 JSON 不生效。
         </div>
       </fieldset>
       <fieldset class="fs">
@@ -2557,9 +3511,9 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
             <label class="check"><input type="checkbox" class="smart-quote-cb" value="2"> 科学计数法</label>
             <label class="check"><input type="checkbox" class="smart-quote-cb" value="4"> 千分位数字</label>
           </div>
-          <div style="font-size:12px;color:#64748b;line-height:1.6;margin-top:6px">
+          <div>
             原生 int/float 恒裸输出；输出永远合法 JSON（RFC 8259）。
-            <span id="export-smart-csv-hint" style="display:none;color:#dc2626">（仅 JSON 格式支持）</span>
+            <span id="export-smart-csv-hint" style="display:none">（仅 JSON 格式支持）</span>
           </div>
         </div>
       </fieldset>
@@ -2581,6 +3535,7 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
     if (!sel) return;
     sel.value = (document.getElementById('export-format-json')||{{}}).checked ? 'json' : 'csv';
     if (typeof updateExportSmartState === 'function') updateExportSmartState();
+    if (typeof updateExportCharsetState === 'function') updateExportCharsetState();
   }}
   var rj = document.getElementById('export-format-json');
   var rc = document.getElementById('export-format-csv');
@@ -2595,6 +3550,18 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
       if (cb.checked) flags |= parseInt(cb.value, 10) || 0;
     }});
     input.value = flags;
+  }}
+  function updateExportCharsetState() {{
+    var sel = document.getElementById('export-format-select');
+    if (!sel) return;
+    var isJson = sel.value === 'json';
+    var radios = document.querySelectorAll('input[name="charset"]');
+    radios.forEach(function(r) {{
+      r.disabled = isJson;
+      if (isJson) r.checked = (r.value === 'utf8');
+    }});
+    var hint = document.getElementById('export-charset-json-hint');
+    if (hint) hint.style.display = isJson ? 'block' : 'none';
   }}
   function updateExportSmartState() {{
     var sel = document.getElementById('export-format-select');
@@ -2614,7 +3581,11 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
   document.querySelectorAll('#export-smart-panel .smart-quote-cb').forEach(function(cb) {{
     cb.addEventListener('change', updateExportSmartFlags);
   }});
-  document.addEventListener('DOMContentLoaded', updateExportSmartState);
+  window.updateExportCharsetState = updateExportCharsetState;
+  onReady(function() {{
+    updateExportSmartState();
+    updateExportCharsetState();
+  }});
 }})();
 </script>"""
 
@@ -2629,20 +3600,14 @@ def build_field_settings_panel_html(all_columns, display_columns) -> str:
         down_disabled = "disabled" if pos >= len(display_columns) - 1 or pos < 0 else ""
         bg_color = '#f8fafc' if col in display_columns else '#fff'
         field_settings_items.append(
-            f'<label class="field-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
-            f'border:1px solid #e2e8f0;border-radius:6px;background:{bg_color};'
-            f'cursor:grab;user-select:none">'
-            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
+            f'<label class="field-item" draggable="true" style="display:flex;align-items:center;gap:8px">'
+            f'<span class="drag-handle" style="cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
             f'<input type="checkbox" name="col_visible" value="{_escape(col)}" {checked} '
             f'onchange="toggleFieldItem(this)" onclick="event.stopPropagation()">'
-            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(col)}</span>'
+            f'<span style="flex:1">{_escape(col)}</span>'
             f'<input type="hidden" name="col_order" value="{_escape(col)}">'
-            f'<button type="button" class="field-up" {up_disabled} onclick="moveField(this,-1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▲</button>'
-            f'<button type="button" class="field-down" {down_disabled} onclick="moveField(this,1)" '
-            f'style="padding:2px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;'
-            f'cursor:pointer;background:#fff;color:#475569">▼</button>'
+            f'<button type="button" class="field-up" {up_disabled} onclick="moveField(this,-1)">▲</button>'
+            f'<button type="button" class="field-down" {down_disabled} onclick="moveField(this,1)">▼</button>'
             f'</label>'
         )
     field_settings_html = (
@@ -2655,10 +3620,10 @@ def build_field_settings_panel_html(all_columns, display_columns) -> str:
         'grid-template-columns:1fr;gap:6px;max-height:60vh;overflow-y:auto">'
         + "".join(field_settings_items) +
         '</div>'
-        '<div style="display:flex;gap:8px;margin-top:12px">'
+        '<div style="display:flex;gap:8px">'
         '<button type="button" onclick="selectAllFields(true)" class="btn btn-outline btn-sm">全选</button>'
         '<button type="button" onclick="selectAllFields(false)" class="btn btn-outline btn-sm">全不选</button>'
-        '<button type="button" onclick="applyFieldSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
+        '<button type="button" onclick="applyFieldSettings()" class="btn btn-primary btn-sm">应用</button>'
         '</div>'
         '</div>'
     )
@@ -2674,11 +3639,10 @@ def build_sort_settings_panel_html(sorts, all_columns) -> str:
         down_disabled = "disabled" if idx == len(sorts) - 1 else ""
         icon = "↑" if sd == "asc" else "↓"
         sort_settings_items.append(
-            f'<div class="sort-item" draggable="true" style="display:flex;align-items:center;gap:8px;padding:6px 8px;'
-            f'border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:grab;user-select:none">'
-            f'<span class="drag-handle" style="color:#94a3b8;font-size:14px;cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
-            f'<span class="sort-num" style="font-weight:700;font-size:11px;color:#4f46e5;min-width:20px">{idx + 1}</span>'
-            f'<span style="flex:1;font-size:13px;color:#1e293b">{_escape(sc)} {icon}</span>'
+            f'<div class="sort-item" draggable="true" style="display:flex;align-items:center;gap:8px">'
+            f'<span class="drag-handle" style="cursor:grab;flex-shrink:0" title="拖拽排序">⠿</span>'
+            f'<span class="sort-num">{idx + 1}</span>'
+            f'<span style="flex:1">{_escape(sc)} {icon}</span>'
             f'<input type="hidden" name="sort_col" value="{_escape(sc)}">'
             f'<input type="hidden" name="sort_dir" value="{_escape(sd)}">'
             f'<button type="button" class="sort-up" {up_disabled} onclick="moveSortItem(this,-1)" '
@@ -2703,18 +3667,18 @@ def build_sort_settings_panel_html(sorts, all_columns) -> str:
         'max-height:40vh;overflow-y:auto;margin-bottom:8px">'
         + ("".join(sort_settings_items)
            if sort_settings_items else
-           '<div style="color:#64748b;font-size:13px;padding:12px;text-align:center">暂无排序</div>') +
+           '<div class="sort-empty" style="text-align:center">暂无排序</div>') +
         '</div>'
         '<div style="display:flex;gap:8px;align-items:center;padding:8px;'
         'background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px">'
-        '<select id="newSortCol" style="flex:1;padding:4px 8px;font-size:13px">'
+        '<select id="newSortCol" style="flex:1">'
         '<option value="">-- 添加排序字段 --</option>' + col_options + '</select>'
-        '<select id="newSortDir" style="padding:4px 8px;font-size:13px">'
+        '<select id="newSortDir">'
         '<option value="asc">↑ 升序</option><option value="desc">↓ 降序</option></select>'
         '<button type="button" onclick="addSortItem()" class="btn btn-primary btn-sm">添加</button>'
         '</div>'
         '<div style="display:flex;gap:8px;align-items:center">'
-        '<button type="button" onclick="applySortSettings()" class="btn btn-primary btn-sm" style="margin-left:auto">应用</button>'
+        '<button type="button" onclick="applySortSettings()" class="btn btn-primary btn-sm">应用</button>'
         '</div>'
         '</div>'
     )
@@ -2755,7 +3719,7 @@ def build_filter_action_html(report_id, page_size, sorts, cols_param,
         report_id, page_size, sorts, cols_param, result_param,
         nested_filter=nested_filter)
 
-    filter_action_html = (f'<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    filter_action_html = (f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
                          f'<button type="submit" form="ff" class="btn btn-primary btn-sm">筛选</button>'
                          f'<a href="{clear_href}" class="btn btn-outline btn-sm">清除筛选</a>'
                          + render_filter_help() +
@@ -2771,7 +3735,7 @@ def build_filter_action_html(report_id, page_size, sorts, cols_param,
             else:
                 filter_items.append(f'{_escape(c)} {op_label} "{_escape(v)}"')
         filter_summary = "、".join(filter_items)
-        clear_html = (f'<div style="margin-bottom:12px;font-size:13px;color:#64748b">'
+        clear_html = (f'<div>'
                       f'筛选: {filter_summary} '
                       f'<a href="{clear_href}" class="clear-filter">✕ 全部清除</a></div>')
 
@@ -2806,7 +3770,7 @@ def build_report_switcher_html(reports_data, all_cats, cat_tree,
                     html += _render_tree_switcher(node["children"], depth + 1)
                 html += "</optgroup>"
             else:
-                html += f'<option value="" disabled style="color:#64748b;font-style:italic">{indent}({_escape(node["name"])} - 无报表)</option>'
+                html += f'<option value="" disabled>{indent}({_escape(node["name"])} - 无报表)</option>'
                 if node.get("children", []):
                     html += _render_tree_switcher(node["children"], depth + 1)
         return html
@@ -2816,11 +3780,11 @@ def build_report_switcher_html(reports_data, all_cats, cat_tree,
         sel = ' selected' if r["id"] == current_id else ''
         options += f'<option value="{r["id"]}"{sel}>(未分类) {_escape(r["name"])}</option>'
 
-    return f"""<div class="card" style="margin-bottom:16px">
+    return f"""<div class="card">
   <div class="report-select">
     <form method="get" action="/report">
-      <label style="font-size:14px;color:#475569;font-weight:500;margin-bottom:6px;display:block">切换报表:</label>
-       <select name="id" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())" style="width:100%">
+      <label style="display:block">切换报表:</label>
+       <select name="id" onchange="navigateTo(this.closest('form').action+'?'+new URLSearchParams(new FormData(this.closest('form'))).toString())">
          <option value="">-- 选择报表 --</option>
          {options}
        </select>
@@ -2943,7 +3907,7 @@ def build_pool_form_html(pool: dict = None, copy_mode: bool = False, is_edit: bo
     password = ""
     database = _escape(pool["database"] if pool else "")
     pw_required = "" if is_edit else "required"
-    pw_hint = (' <span style="color:#64748b;font-weight:400;font-size:13px">'
+    pw_hint = (' <span>'
                '留空则沿用当前密码</span>') if is_edit else ""
 
     if is_copy:
@@ -3023,7 +3987,7 @@ def build_user_form_html(user: dict = None, is_edit: bool = None) -> str:
     title = "编辑用户" if is_edit else "新增用户"
     username = _escape(user["username"] if is_edit else "")
     pw_required = "" if is_edit else "required"
-    pw_hint = ' <span style="color:#64748b;font-weight:400;font-size:13px">留空则不修改密码</span>' if is_edit else ""
+    pw_hint = ' <span>留空则不修改密码</span>' if is_edit else ""
     return f"""<div class="card">
 <h2>{title}</h2>
 <form method="post" action="{action_url}" class="config-form">
@@ -3091,19 +4055,19 @@ def build_pool_section_html(pools: list, report_counts: dict = None,
         if linked:
             linked_cell = "、".join(
                 f'<a href="/report?id={int(r["id"])}" target="_blank" '
-                f'rel="noopener" style="color:#4f46e5;text-decoration:none">'
+                f'rel="noopener">'
                 f'{_escape(r["name"])}</a>'
                 for r in linked)
         elif ref_count > 0:
             linked_cell = f"{ref_count} 个"
         else:
-            linked_cell = '<span style="color:#cbd5e1">—</span>'
+            linked_cell = '<span>—</span>'
         rows += f"""<tr id="pool-{p['id']}">
   <td><strong>{_escape(p['name'])}</strong></td>
   <td><span class="badge badge-pool">{_escape(p['host'])}:{p['port']}</span></td>
   <td>{_escape(p['user'])}</td>
   <td>{_escape(p['database'])}</td>
-  <td style="font-size:13px">{linked_cell}</td>
+  <td>{linked_cell}</td>
   <td class="ops-cell">
     {move_btns}
     {_link_btn(f"/config/pools/{p['id']}/edit", "编辑")}
@@ -3141,7 +4105,7 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
     for u in users:
         is_current = bool(current_username) and u["username"] == current_username
         if is_current:
-            delete_btn = '<span style="color:#cbd5e1;font-size:13px" title="不能删除当前登录账号">—</span>'
+            delete_btn = '<span title="不能删除当前登录账号">—</span>'
         else:
             delete_btn = build_delete_form_html(
                 f"/config/users/{u['id']}/delete",
@@ -3155,7 +4119,7 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
             role_cell += "；禁止删除当前登录用户"
         rows += f"""<tr id="user-{u['id']}">
   <td>{name_cell}</td>
-  <td class="muted" style="font-size:13px">{role_cell}</td>
+  <td class="muted">{role_cell}</td>
   <td class="ops-cell">
     {_link_btn(f"/config/users/{u['id']}/edit", "编辑")}
     {delete_btn}
@@ -3173,7 +4137,7 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
 {rows or build_empty_row_html(3, "暂无用户")}
 </tbody></table>
 </div>
-<p class="muted" style="font-size:12px;margin-top:8px">
+<p class="muted">
 约定保持：改用户名/密码后强制下线该用户全部会话；flash 不回显明文密码。</p>
 </div>"""
 
@@ -3233,7 +4197,7 @@ def build_category_manage_section_html(all_cats, cat_tree,
     cat_list_html = _render_tree(cat_tree)
 
     if not cat_list_html:
-        cat_list_html = '<div style="color:#64748b;font-size:14px;padding:12px 0">暂无分类</div>'
+        cat_list_html = '<div>暂无分类</div>'
 
     report_add_btn = (_link_btn("/config/reports/add", "新增报表", "btn btn-ghost btn-sm")
                       if show_report_add else "")
@@ -3291,30 +4255,29 @@ def build_category_section_html(cat_reports, unclassified_reports, all_cats,
     # 由 updateBatchCount 按选中数切换显隐；端点 action 保持不变。
     batch_bar = f"""
 <div class="batch-bar batch-float" id="batch-bar" style="display:none;position:sticky;bottom:0;align-items:center;gap:12px;flex-wrap:wrap;z-index:50">
-  <span style="font-size:14px;color:#475569;font-weight:500">
+  <span>
     已选 <span id="batch_count">0</span> 项
   </span>
-  <select id="batch_pool_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+  <select id="batch_pool_id">
     {pool_opts}
   </select>
   <button type="button" class="btn btn-primary btn-sm"
     onclick="batchUpdatePool()">批量修改连接池</button>
-  <select id="batch_cat_id" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+  <select id="batch_cat_id">
     {cat_opts}
   </select>
    <button type="button" class="btn btn-success btn-sm"
     onclick="batchSetCategory()">批量设置分类</button>
-   <select id="batch_cache_switch" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px">
+   <select id="batch_cache_switch">
      <option value="">不改变</option>
      <option value="1">启用缓存</option>
      <option value="0">关闭缓存</option>
    </select>
    <input type="checkbox" id="batch_modify_ttl" onchange="toggleTtlInput()">
-   <label for="batch_modify_ttl" style="font-size:13px">修改TTL</label>
+   <label for="batch_modify_ttl">修改TTL</label>
    <input type="number" id="batch_cache_ttl" value="0" min="0" step="1"
-     style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;width:80px;opacity:0.5"
      disabled>
-   <span style="font-size:12px;color:#64748b">小时（0=永久）</span>
+   <span>小时（0=永久）</span>
    <button type="button" class="btn btn-info btn-sm"
      onclick="batchUpdateCache()">批量更新缓存配置</button>
    <button type="button" class="btn btn-danger btn-sm"
@@ -3453,7 +4416,7 @@ function setReportsView(v, save) {{
                 memo_title_attr = f' title="{_escape(memo_raw)}"'
                 memo_plain = memo_display
             else:
-                memo_display = '<span style="color:#cbd5e1">—</span>'
+                memo_display = '<span>—</span>'
                 memo_title_attr = ""
                 memo_plain = "—"
 
@@ -3464,7 +4427,7 @@ function setReportsView(v, save) {{
                 else build_state_span("否", "muted", bold=False)
             )
             cache_ttl_hours = int(r.get("cache_ttl_hours", 0))
-            cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span style="color:#cbd5e1">—</span>'
+            cache_ttl_display = f'{cache_ttl_hours}h' if cache_ttl_hours else '<span>—</span>'
             # 卡片徽标用纯文本（避免 0 TTL 时嵌入 span）
             if not prefer_cache:
                 card_cache_badge = '<span class="badge badge-neutral">不缓存</span>'
@@ -3495,10 +4458,10 @@ function setReportsView(v, save) {{
                     ep_key = "有 Key" if ep.get("api_key") else "无 Key"
                     tooltip_lines.append(f"  [{ep_status}] {ep_name} ({ep_path}) - {ep_format}, {ep_key}")
                 tooltip = "\\n".join(tooltip_lines)
-                api_cell = f'<a href="/config/reports/{rpt_id}/edit#api-endpoints" style="color:#4f46e5;text-decoration:none;font-size:13px" title="{_escape(tooltip)}">🔌 {summary}</a>'
+                api_cell = f'<a href="/config/reports/{rpt_id}/edit#api-endpoints" title="{_escape(tooltip)}">🔌 {summary}</a>'
                 api_plain = f'🔌 {summary}'
             else:
-                api_cell = '<span style="color:#cbd5e1;font-size:13px">—</span>'
+                api_cell = '<span>—</span>'
                 api_plain = "—"
 
             # 确认稿 r3 反馈①：SQL 摘要窄列单行截断，完整 SQL 悬浮 title 预览
@@ -3512,20 +4475,25 @@ function setReportsView(v, save) {{
             sched_badge = build_schedule_flags_badge_html(
                 (schedules_map or {}).get(rpt_id, {}).get('enabled'), r.get('keepalive_enabled'))
 
-            rows += f"""<tr id="report-{rpt_id}">
-  <td><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></td>
-  <td class="name-cell"><strong><a href="/report?id={rpt_id}" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:none">{_escape(r['name'])}</a>{sched_badge}</strong></td>
-  <td class="sql-cell" title="{sql_full}">
-    <code>{sql_short}</code>
-  </td>
-  <td class="cfg-group">{r['default_page_size']}</td>
-  <td class="cfg-group">{prefer_cache_display}</td>
-  <td class="cfg-group">{cache_ttl_display}</td>
-  <td>{pool_cell}</td>
-  <td class="memo-cell"{memo_title_attr}>{memo_display}</td>
-  <td class="api-cell">{api_cell}</td>
-  <td class="ops-cell">{ops_html}</td>
-</tr>"""
+            # UI v2 方案 A：10 列表格 → 行卡片（名称 / 状态 chip / 配置 chips / 连接池 / 接口 / 备注 / SQL）
+            # 原 10 列在 1440 视口右栏（856px）内必然挤压（名称列曾被压成一字一行）
+            rows += f"""<div class="rpt-row" id="report-{rpt_id}">
+  <label class="pick"><input type="checkbox" class="report-checkbox" value="{rpt_id}" onchange="updateBatchCount()"></label>
+  <div class="rpt-main">
+    <div class="rpt-line1">
+      <a class="nm" href="/report?id={rpt_id}" target="_blank" rel="noopener">{_escape(r['name'])}</a>{sched_badge}
+    </div>
+    <div class="rpt-meta">
+      <span class="cfg-chip">分页 <b>{r['default_page_size']}</b></span>
+      <span class="cfg-chip{' ok' if prefer_cache else ''}">{'缓存 ' + (str(cache_ttl_hours) + 'h' if cache_ttl_hours else '永久') if prefer_cache else '不缓存'}</span>
+      {pool_cell}
+      <span class="cfg-chip">{api_plain}</span>
+    </div>
+    <div class="rpt-memo"{memo_title_attr}>{memo_display}</div>
+    <div class="rpt-sql" title="{sql_full}">{sql_short}</div>
+  </div>
+  <div class="rpt-ops">{ops_html}</div>
+</div>"""
 
             cards += f"""<div class="rpt-card" id="report-card-{rpt_id}">
   <input type="checkbox" class="report-checkbox rc-pick" value="{rpt_id}" onchange="updateBatchCount()" title="勾选以批量操作">
@@ -3561,59 +4529,50 @@ function setReportsView(v, save) {{
             inner = ""
             if reports:
                 rows, cards = _render_report_rows(reports, in_category=True)
-                # 确认稿 r3：列表/卡片双形态同受页头全局开关控制（.view-list/.view-card）
-                inner += f"""<div class="table-wrap view-list">
-<table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
-  <th>名称</th><th class="sql-head">SQL 查询</th>
-  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
-  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
-</tr></thead><tbody>
+                # UI v2 方案 A：列表=行卡片（.view-list）、卡片=网格（.view-card），同受页头开关控制
+                inner += f"""<div class="cat-body view-list">
 {rows}
-</tbody></table>
 </div>
-<div class="rpt-grid view-card hidden">
+<div class="rpt-grid cat-cards view-card hidden">
 {cards}
 </div>"""
             if has_children:
-                inner += _render_report_sections(node["children"], depth + 1)
+                # 层级导轨：子级容器负责缩进 + 竖线 + 节点横线，不再用内联 margin/border
+                inner += f'<div class="cat-children">{_render_report_sections(node["children"], depth + 1)}</div>'
             icon = _icon("folder") if has_children else _icon("chart")
-            count_html = (f' <span style="font-weight:400;font-size:14px;color:#64748b">({len(reports)} 个报表)</span>'
-                          if reports else "")
-            nest_style = ""
-            if depth > 0:
-                nest_style = f'margin-left:{24 * depth}px;border-left:3px solid #c7d2fe;'
-            html += f"""<div class="section" style="{nest_style}">
-<div class="section-title">
-  <span class="ico">{icon}</span><span>{_escape(node['name'])}{count_html}</span>
-</div>
+            html += f"""<section class="section cat-block cat-depth-{min(depth + 1, 3)}">
+  <div class="cat-head">
+    <button type="button" class="tree-toggle" onclick="toggleCatBlock(this)" title="折叠/展开"><span class="chev">▼</span></button>
+    <span class="cat-depth-dot"></span>
+    <span class="cat-name"><span class="ico">{icon}</span>{_escape(node['name'])}</span>
+    <span class="badge badge-neutral">{len(reports)} 个报表</span>
+    <label class="pick-all" title="全选本分类"><input type="checkbox" onchange="selectAllInSection(this)"></label>
+    <span class="actions">{_link_btn(f"/config/categories/{node['id']}/edit", "编辑分类", "btn-mini") if depth == 0 else ""}</span>
+  </div>
 {inner}
-</div>"""
+</section>"""
+        return html
         return html
 
     tab_html = _render_report_sections(cat_tree)
     uncat_rows, uncat_cards = _render_report_rows(unclassified_reports)
     # 批次5#17：未分类区块不再内联批量操作条（页面级单实例移至列表容器之后）
-    uncat_section = f"""<div class="section">
-
-<div class="section-title">
-  <span class="ico">{_icon("list")}</span><span>未分类报表 <span style="font-weight:400;font-size:14px;color:#64748b">({len(unclassified_reports)} 个报表)</span></span>
-  <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn btn-primary btn-sm")}</span>
+    uncat_section = f"""<section class="section cat-block cat-depth-1">
+  <div class="cat-head">
+    <button type="button" class="tree-toggle" onclick="toggleCatBlock(this)" title="折叠/展开"><span class="chev">▼</span></button>
+    <span class="cat-depth-dot"></span>
+    <span class="cat-name"><span class="ico">{_icon("list")}</span>未分类报表</span>
+    <span class="badge badge-neutral">{len(unclassified_reports)} 个报表</span>
+    <label class="pick-all" title="全选本分类"><input type="checkbox" onchange="selectAllInSection(this)"></label>
+    <span class="actions">{_link_btn("/config/reports/add", "新增报表", "btn-mini")}</span>
+  </div>
+<div class="cat-body view-list">
+{uncat_rows or '<div class="cat-empty"><span>暂无未分类报表</span><a class="add" href="/config/reports/add">+ 新增报表</a></div>'}
 </div>
-<div class="table-wrap view-list">
-<table><thead><tr>
-  <th style="width:40px"><input type="checkbox" onchange="selectAllInSection(this)"></th>
-  <th>名称</th><th class="sql-head">SQL 查询</th>
-  <th class="cfg-group">默认分页</th><th class="cfg-group">缓存</th><th class="cfg-group">TTL</th>
-  <th>连接池</th><th>备注</th><th>API 接口</th><th style="text-align:right">操作</th>
-</tr></thead><tbody>
-{uncat_rows or build_empty_row_html(10, "暂无未分类报表")}
-</tbody></table>
-</div>
-<div class="rpt-grid view-card hidden">
+<div class="rpt-grid cat-cards view-card hidden">
 {uncat_cards or '<div class="empty-state">暂无未分类报表</div>'}
 </div>
-</div>"""
+</section>"""
 
     # 批次5#17：浮动操作条渲染一次，置于全部列表区块之后（footer 之前）
     if split_parts:
@@ -3671,9 +4630,9 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         ep_result_mode = ep.get("result_mode", "single")
         ep_result_index = int(ep.get("result_index", 0))
         if ep_result_mode == "all":
-            mode_display = '<span style="color:#4f46e5;font-weight:600">全部</span>'
+            mode_display = '<span>全部</span>'
         else:
-            mode_display = f'<span style="color:#475569">结果 {ep_result_index}</span>'
+            mode_display = f'<span>结果 {ep_result_index}</span>'
         allow_fetch_all = int(ep.get("allow_fetch_all", 1))
         fetch_all_display = (build_state_span("允许")
                              if allow_fetch_all else
@@ -3693,14 +4652,14 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             rname = _escape(ep.get("report_name", ""))
             rpt_id = int(ep.get("report_id", 0) or 0)
             if rpt_id:
-                report_html = (f'<span class="muted" style="font-size:13px">报表：'
+                report_html = (f'<span class="muted">报表：'
                                f'<a href="/report?id={rpt_id}" '
                                f'target="_blank" rel="noopener" '
                                f'title="打开报表查看页" '
-                               f'style="color:#4f46e5;text-decoration:none">'
+                               f'>'
                                f'{rname}</a></span>')
             else:
-                report_html = (f'<span class="muted" style="font-size:13px">'
+                report_html = (f'<span class="muted">'
                                f'报表：{rname}</span>')
         # 展开区：三种调用地址（完整/全量/静态），置灰能力未开启的行
         full_disabled = not allow_fetch_all
@@ -3732,19 +4691,19 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         if key_counts is not None:
             ep_key_count = key_counts.get(ep_id, 0)
             if ep_key_count:
-                key_html = (f'<code style="font-size:12px;color:#64748b">'
+                key_html = (f'<code>'
                             f'{ep_key_count} 个 Key</code>')
             else:
-                key_html = '<code style="font-size:12px;color:#64748b">—</code>'
+                key_html = '<code>—</code>'
         elif api_key_raw:
-            key_html = (f'<code style="font-size:12px;color:#64748b">{api_key_display}</code> '
+            key_html = (f'<code>{api_key_display}</code> '
                         f'<code id="api-key-raw-{ep_id}" style="display:none">'
                         f'{_escape(api_key_raw)}</code>'
                         f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{ep_id}\')" '
                         f'title="复制完整 API Key" '
                         f'class="btn-mini btn-mini-outline-key">复制</button>')
         else:
-            key_html = '<code style="font-size:12px;color:#64748b">—</code>'
+            key_html = '<code>—</code>'
         # 快捷启用/禁用：POST 到独立管理页 toggle 端点，回跳来源页（禁用需确认）
         toggle_label = "禁用" if enabled else "启用"
         if return_to:
@@ -3816,13 +4775,13 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
     # 独立管理页由 page-head 承担标题与新建按钮，区块内不再重复标题
     title_actions = (_link_btn(f"/config/reports/{report_id}/api_endpoints/new", "新增 API 接口", "btn btn-primary btn-sm")
                      if report_id is not None else "")
-    section_title = (f"""<div class="section-title" style="font-size:16px">
+    section_title = (f"""<div class="section-title">
   <span>🔌 API 接口</span>
   <span class="actions">{title_actions}</span>
 </div>""" if report_id is not None else "")
     _sc_state = "开启" if _sc_enabled else "关闭"
     _sc_dir = _sc_cfg.get("dir", "static_cache")
-    _sc_hint = (f'<div style="margin:6px 0 0 0;font-size:12px;color:#64748b">'
+    _sc_hint = (f'<div>'
                 f'静态文件缓存: 全局 {_sc_state} | 存储目录: <code>{_escape(str(_sc_dir))}</code>'
                 f'（通过 app_config.json 的 static_cache 段配置）</div>')
     list_html = rows or '<div class="empty-state">暂无 API 接口配置</div>'
@@ -3831,7 +4790,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         return f"{_sc_hint}\n{list_html}"
     help_html = ('<p class="api-help">信息分级：主行只保留「名称/路径/状态/主操作」；'
                  '全量与静态 URL、说明收进展开区（解决旧 11 列过载行）。</p>')
-    return f"""<div class="section" style="margin-top:24px" id="api-endpoints">
+    return f"""<div class="section" id="api-endpoints">
 {section_title}
 {_sc_hint}
 {list_html}
@@ -3887,7 +4846,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
 
     # 名称列表展示
     name_items = "".join(
-        f'<li style="margin:2px 0;font-size:13px;color:#475569">{"①" if i == 0 else "②" if i == 1 else "③" if i == 2 else f"<span style=\"font-family:monospace\">{i+1}.</span>"} {_escape(n)}</li>'
+        f'<li>{"①" if i == 0 else "②" if i == 1 else "③" if i == 2 else f"<span style=\"font-family:monospace\">{i+1}.</span>"} {_escape(n)}</li>'
         for i, n in enumerate(names)
     )
 
@@ -3908,28 +4867,28 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
                         f'<span>请在报表编辑页的「结果名称」字段中设置，便于识别。暂用默认名称：{" / ".join(names)}</span>'
                         f'</div>')
 
-    return f'''<div class="result-mode-section span-full" style="margin-bottom:16px;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
-  <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">结果集输出模式</div>
-  <div style="margin-bottom:8px;font-size:13px;color:#475569">
+    return f'''<div class="result-mode-section span-full">
+  <div>结果集输出模式</div>
+  <div>
     该报表的 SQL 包含 <strong>{result_count}</strong> 段 SELECT，返回 <strong>{result_count}</strong> 个结果集
   </div>
-  <ul style="list-style:none;padding:0;margin:0 0 10px 0">{name_items}</ul>
+  <ul style="list-style:none">{name_items}</ul>
   {warning_html}
-  <div style="margin:6px 0">
-    <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
+  <div>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
       <input type="radio" name="result_mode" value="all"{all_checked} onchange="toggleResultIndex()">
-      <span style="font-weight:600">输出全部结果集</span>
-      <span style="color:#64748b;font-size:12px;font-weight:400">— 每个结果集独立分页，API 返回 JSON 数组</span>
+      <span>输出全部结果集</span>
+      <span>— 每个结果集独立分页，API 返回 JSON 数组</span>
     </label>
-    <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;margin:4px 0">
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
       <input type="radio" name="result_mode" value="single"{single_checked} onchange="toggleResultIndex()">
-      <span style="font-weight:600">输出单个结果集：</span>
-      <select name="result_index"{select_disabled} style="margin-left:4px">
+      <span>输出单个结果集：</span>
+      <select name="result_index"{select_disabled}>
         {select_opts}
       </select>
     </label>
   </div>
-  <div style="font-size:12px;color:#64748b;margin-top:4px">
+  <div>
     结果集名称在报表编辑页的「结果名称」中配置
   </div>
   <script>
@@ -3944,7 +4903,7 @@ def _build_result_mode_ui(result_count: int, result_names_list: list,
       }}
     }}
   }}
-  document.addEventListener('DOMContentLoaded', toggleResultIndex);
+  onReady(toggleResultIndex);
   </script>
 </div>'''
 
@@ -4134,7 +5093,7 @@ _API_TEMPLATE_JS = r'''
     if (hint) hint.style.display = isCsv ? 'inline' : 'none';
     if (section) section.style.opacity = isCsv ? '0.55' : '1';
   }
-  document.addEventListener('DOMContentLoaded', function() {
+  onReady(function() {
     var radios = document.getElementsByName('result_mode');
     for (var i = 0; i < radios.length; i++) {
       radios[i].addEventListener('change', updateTemplateMode);
@@ -4268,11 +5227,11 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     # 真实数据预览：仅编辑态可用（新增端点无 endpoint_id、无关联已存配置）
     if endpoint_id is not None:
         live_preview_html = (
-            '<div style="margin:10px 0">'
+            '<div>'
             f'<button type="button" id="preview-live-btn" data-url="{_api_endpoint_url(report_id, endpoint_id, "preview")}" '
             'onclick="previewWithRealData()" '
-            'style="padding:6px 14px;cursor:pointer;border:1px solid #6366f1;border-radius:6px;background:#eef2ff;font-size:13px;color:#4338ca">用真实数据预览</button>'
-            '<span style="font-size:12px;color:#64748b;margin-left:8px">以当前表单未保存的模板/规则执行真实查询（最多 3 行数据），结果展示在下方预览区</span>'
+            'style="cursor:pointer">用真实数据预览</button>'
+            '<span>以当前表单未保存的模板/规则执行真实查询（最多 3 行数据），结果展示在下方预览区</span>'
             '</div>'
         )
     else:
@@ -4318,7 +5277,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     placeholder="例如: 客户数据 API"></label>
 
   <label class="span-full">接口说明（可选，仅页面展示，不进入 API 输出）:
-    <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持 Markdown（标题/列表/代码块/```mermaid 流程图）…" rows="4" style="min-height:80px;font-family:inherit">{description}</textarea>
+    <textarea name="description" class="sql-textarea" placeholder="描述该接口的用途、当前状态、使用注意事项，支持 Markdown（标题/列表/代码块/```mermaid 流程图）…" rows="4" style="min-height:80px">{description}</textarea>
     <div class="memo-preview md-body" id="description-preview"></div>
     <div class="sql-toolbar">
       <button type="button" class="btn btn-outline btn-sm" onclick="toggleDescPreview(this)">预览接口说明</button>
@@ -4329,23 +5288,23 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
   <div class="card">
   <div class="card-head"><div class="form-section">② 调用地址</div></div>
   <label class="span-full">URL 路径:
-    <div style="display:flex;align-items:center;gap:0;margin-top:4px">
-      <span style="padding:6px 12px;background:#e2e8f0;border:1px solid #cbd5e1;border-right:none;border-radius:6px 0 0 6px;font-family:monospace;font-size:14px;color:#475569;white-space:nowrap;line-height:1.5">/api/</span>
+    <div style="display:flex;align-items:center;gap:0">
+      <span style="white-space:nowrap">/api/</span>
       <input type="text" name="url_path" value="{url_path_short}" required
         id="url-path-input"
         placeholder="customers"
-        style="border-radius:0 6px 6px 0;flex:1;min-width:200px"
+        style="flex:1"
         oninput="updateFullUrl()">
     </div>
   </label>
-  <div class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-weight:500;color:#64748b">完整 URL:</span>
-    <code id="full-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+  <div class="span-full" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span>完整 URL:</span>
+    <code id="full-url-text" style="flex:1;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('full-url-text')" class="btn-mini btn-mini-outline">复制</button>
   </div>
   <div id="fetch-all-url-row" class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if allow_fetch_all_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-weight:500;color:#64748b">全量 URL:</span>
-    <code id="fetch-all-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+    <span>全量 URL:</span>
+    <code id="fetch-all-url-text" style="flex:1;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('fetch-all-url-text')" class="btn-mini btn-mini-outline">复制</button>
   </div>
   <script>
@@ -4416,7 +5375,7 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     if (hintNoQuotes) hintNoQuotes.style.display = isCsv ? 'inline' : 'none';
     updateStaticUrl();
   }}
-  document.addEventListener('DOMContentLoaded', function() {{
+  onReady(function() {{
     updateFullUrl();
     updateFetchAllUrl();
     updateStaticCacheState();
@@ -4490,46 +5449,46 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <select name="output_format" onchange="updateStaticCacheState();updateTemplateState()">{format_opts}</select>
   </label>
 
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px">
     <input type="hidden" name="static_cache" value="0">
     <input type="checkbox" name="static_cache" value="1"{static_cache_checked} id="static-cache-checkbox"
       onchange="updateStaticUrl()">
-    <span style="font-weight:600">静态文件缓存（.json 变体）</span>
-    <span id="static-cache-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
+    <span>静态文件缓存（.json 变体）</span>
+    <span id="static-cache-csv-hint" style="display:none">仅 JSON 格式支持</span>
   </label>
-  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full">
     开启后，调用方在端点 URL 后追加 <code>.json</code> 即可访问静态化输出（全量数据 + meta 节点），
     命中时零查询零计算；缓存失效自动回退并重建。TTL 与报表缓存配置（cache_ttl_hours）一致。
   </div>
   <div id="static-url-row" class="span-full" style="margin-top:6px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;color:#475569;display:{'flex' if static_cache_checked else 'none'};align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-weight:500;color:#64748b">静态 URL:</span>
-    <code id="static-url-text" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all"></code>
+    <span>静态 URL:</span>
+    <code id="static-url-text" style="flex:1;word-break:break-all"></code>
     <button type="button" onclick="copyToClipboard('static-url-text')" class="btn-mini btn-mini-outline">复制</button>
   </div>
 
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
-    <span style="font-weight:600">智能去引号</span>
-    <span id="json-no-quotes-csv-hint" style="display:none;color:#dc2626;font-size:12px;font-weight:400">仅 JSON 格式支持</span>
+  <label class="span-full" style="display:flex;align-items:center;gap:8px">
+    <span>智能去引号</span>
+    <span id="json-no-quotes-csv-hint" style="display:none">仅 JSON 格式支持</span>
   </label>
-  <div class="span-full" style="margin:6px 0 0 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full">
     <input type="hidden" name="smart_quote_flags" id="smart-quote-flags-input" value="{smart_flags}">
     勾选以下形态时，JSON 输出中对应字符串值<strong>去掉引号</strong>（未勾选形态保持带引号）：
-    <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:400">
+    <label style="display:flex;align-items:center;gap:6px">
       <input type="checkbox" class="smart-quote-cb" value="1"{sq_decimal_checked}
         onchange="updateSmartFlags();renderTemplatePreview()">
       十进制数字（含正负号），如 <code>-1.5</code>；前导零数值化（<code>007</code> → <code>7</code>）
     </label>
-    <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-weight:400">
+    <label style="display:flex;align-items:center;gap:6px">
       <input type="checkbox" class="smart-quote-cb" value="2"{sq_scientific_checked}
         onchange="updateSmartFlags();renderTemplatePreview()">
       科学计数法，如 <code>1e5</code>（符合 JSON 数字语法，原样输出）
     </label>
-    <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-weight:400">
+    <label style="display:flex;align-items:center;gap:6px">
       <input type="checkbox" class="smart-quote-cb" value="4"{sq_thousand_checked}
         onchange="updateSmartFlags();renderTemplatePreview()">
       千分位数字，如 <code>1,000</code>（输出去逗号数值化：<code>1,000</code> → <code>1000</code>）
     </label>
-    <div style="margin-top:6px">
+    <div>
       开启任一形态时，输出<strong>永远合法 JSON</strong>（RFC 8259）：原生 int/float 始终输出为数字，
       无需勾选；Decimal 数值列在勾选「十进制数字」或「科学计数法」时输出为数字，未勾选时带引号；
       含非数字内容的文本（如日期、空串、<code>true</code>/<code>false</code>）永远带引号。
@@ -4539,35 +5498,35 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
 
   {_build_result_mode_ui(result_count, result_names_list, result_mode, result_index)}
 
-  <div class="flash-warn span-full" style="margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #fde68a;font-size:13px">
+  <div class="flash-warn span-full">
     <strong>{_icon("info")} 快捷获取规则：</strong>在报表页面使用筛选/排序/字段选择功能调整数据后，
     切到「<strong>规则</strong>」页签，在「<strong>当前规则</strong>」卡片点击「<strong>复制 JSON</strong>」按钮即可获取 JSON 格式的配置，
     直接粘贴到下方的 JSON 文本框中。
-    <div style="margin-top:4px;font-size:12px;color:#a16207">
-      查看报表 → <a href="/report?id={report_id}" target="_blank" style="color:#4f46e5;font-weight:600">/report?id={report_id}</a>
+    <div>
+      查看报表 → <a href="/report?id={report_id}" target="_blank">/report?id={report_id}</a>
     </div>
   </div>
 
   <label class="span-full">规则 JSON（筛选/排序/字段选择，留空=无二次加工）:
     <textarea name="rule_json" class="sql-textarea"
       placeholder='{{"filters":[{{"col":"status","op":"eq","val":"active"}}],"sorts":[{{"col":"created_at","dir":"desc"}}],"columns":"id,name,email"}}'
-      rows="5" style="min-height:100px;font-family:monospace">{_escape(rule_json)}</textarea></label>
+      rows="5" style="min-height:100px">{_escape(rule_json)}</textarea></label>
 
   <label>最大行数（0=不限制）:
     <input type="number" name="row_limit" value="{row_limit}" min="0" step="1"></label>
 
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px">
     <input type="hidden" name="allow_fetch_all" value="0">
     <input type="checkbox" name="allow_fetch_all" value="1"{allow_fetch_all_checked} onchange="updateFetchAllUrl()">
-    <span style="font-weight:600">允许全量获取（fetch_all 参数）</span>
+    <span>允许全量获取（fetch_all 参数）</span>
   </label>
-  <div class="span-full" style="margin:6px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;color:#475569;line-height:1.7">
+  <div class="span-full">
     <strong>使用示例：</strong>开启后，调用方在请求中携带 <code>fetch_all</code> 参数即可一次获取全部数据（不做翻页）：
-    <div style="font-family:monospace;font-size:12px;margin-top:4px">
+    <div>
       GET&nbsp;&nbsp; /api/&lt;路径&gt;?fetch_all=true<br>
       POST&nbsp; body: {{"fetch_all": true}}
     </div>
-    <div style="color:#64748b;margin-top:4px">值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
+    <div>值仅接受 true / 1 / yes；关闭后即使传递该参数，也按翻页逻辑返回</div>
   </div>
 
   {api_key_block_html}
@@ -4576,82 +5535,82 @@ def build_api_endpoint_form_html(report_id: int, report_name: str,
     <input type="text" name="allowed_origins" value="{allowed_origins}"
       placeholder="例如: https://example.com,http://localhost:3000"></label>
 
-  <label class="span-full" style="display:flex;align-items:center;gap:8px;font-weight:400">
+  <label class="span-full" style="display:flex;align-items:center;gap:8px">
     <input type="hidden" name="enabled" value="0">
     <input type="checkbox" name="enabled" value="1"{enabled_checked}>
-    <span style="font-weight:600">启用</span>
+    <span>启用</span>
   </label>
 
   </div>
   <div class="card">
   <div class="card-head"><div class="form-section">④ JSON 模板</div></div>
-  <div id="template-section" class="span-full" style="margin:0;padding:0;background:none;border:0;border-radius:0">
-    <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px">JSON 输出模板（可选）</div>
-    <label style="font-size:13px;color:#475569;display:block">
+  <div id="template-section" class="span-full">
+    <div>JSON 输出模板（可选）</div>
+    <label style="display:block">
       <textarea name="json_template" id="json-template-input" rows="8"
-        style="width:100%;min-height:150px;font-family:monospace;box-sizing:border-box"
+        style="min-height:150px;box-sizing:border-box"
         placeholder='{{"data": {{{{data}}}}, "total": {{{{total}}}}, "page": {{{{page}}}}, "page_size": {{{{page_size}}}}, "total_pages": {{{{total_pages}}}}}}'
         oninput="renderTemplatePreview()">{template_val}</textarea>
     </label>
-    <div style="margin:6px 0;font-size:12px;color:#64748b;line-height:1.7">
+    <div>
       留空 = 默认输出。自定义模板以默认 JSON 为起点，用 <code>{{{{占位符}}}}</code> 引用数据，
-      值将按实际数据替换（缺键输出 null）。<span id="template-csv-hint" style="display:none;color:#dc2626;font-weight:600">模板仅 JSON 格式支持，CSV 格式下已禁用。</span>
+      值将按实际数据替换（缺键输出 null）。<span id="template-csv-hint" style="display:none">模板仅 JSON 格式支持，CSV 格式下已禁用。</span>
     </div>
 
-    <div style="margin:10px 0;font-size:12px;color:#475569;line-height:2">
-      <span style="font-weight:600;color:#1e293b">可用占位符（随「结果集输出模式」切换）：</span>
+    <div>
+      <span>可用占位符（随「结果集输出模式」切换）：</span>
       <div id="tpl-badges-single">
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{data}}}}</span>数据数组
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{total}}}}</span>总行数
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page}}}}</span>页码
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page_size}}}}</span>每页条数
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{total_pages}}}}</span>总页数
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{full}}}}</span>全量标记（fetch_all 时 true）
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
+        <span style="display:inline-block">{{{{data}}}}</span>数据数组
+        <span style="display:inline-block">{{{{total}}}}</span>总行数
+        <span style="display:inline-block">{{{{page}}}}</span>页码
+        <span style="display:inline-block">{{{{page_size}}}}</span>每页条数
+        <span style="display:inline-block">{{{{total_pages}}}}</span>总页数
+        <span style="display:inline-block">{{{{full}}}}</span>全量标记（fetch_all 时 true）
+        <span style="display:inline-block">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
       </div>
       <div id="tpl-badges-all" style="display:none">
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{results}}}}</span>结果集数组
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{mode}}}}</span>模式（固定 "all"）
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page}}}}</span>页码
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{page_size}}}}</span>每页条数
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{full}}}}</span>全量标记（fetch_all 时 true）
-        <span style="display:inline-block;margin:0 4px 0 0;padding:2px 8px;background:#e0e7ff;color:#3730a3;border-radius:4px;font-family:monospace">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
+        <span style="display:inline-block">{{{{results}}}}</span>结果集数组
+        <span style="display:inline-block">{{{{mode}}}}</span>模式（固定 "all"）
+        <span style="display:inline-block">{{{{page}}}}</span>页码
+        <span style="display:inline-block">{{{{page_size}}}}</span>每页条数
+        <span style="display:inline-block">{{{{full}}}}</span>全量标记（fetch_all 时 true）
+        <span style="display:inline-block">{{{{meta}}}}</span>静态缓存 meta（.json 变体）
       </div>
     </div>
 
-    <details open style="margin:10px 0;font-size:13px;color:#475569">
-      <summary style="cursor:pointer;color:#1e293b;font-weight:600">默认 JSON 起点（把默认结构改一改就是模板）</summary>
-      <div id="tpl-default-single" style="margin-top:8px">
-        <pre style="margin:0;padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;line-height:1.8;color:#334155;overflow:auto">{{
+    <details open>
+      <summary style="cursor:pointer">默认 JSON 起点（把默认结构改一改就是模板）</summary>
+      <div id="tpl-default-single">
+        <pre style="overflow:auto">{{
   "data": {{{{data}}}},              // 数据数组
   "total": {{{{total}}}},            // 总行数
   "page": {{{{page}}}},              // 页码
   "page_size": {{{{page_size}}}},    // 每页条数
   "total_pages": {{{{total_pages}}}} // 总页数
 }}</pre>
-        <div style="margin-top:6px;font-size:12px;color:#64748b">注：原生默认输出在 fetch_all 时含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code>；如需这些字段，在模板中手动加对应键</div>
+        <div>注：原生默认输出在 fetch_all 时含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code>；如需这些字段，在模板中手动加对应键</div>
       </div>
-      <div id="tpl-default-all" style="display:none;margin-top:8px">
-        <pre style="margin:0;padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:12px;line-height:1.8;color:#334155;overflow:auto">{{
+      <div id="tpl-default-all" style="display:none">
+        <pre style="overflow:auto">{{
   "results": {{{{results}}}},   // 结果集数组（每项含 name/data/total/page/page_size/total_pages）
   "mode": {{{{mode}}}},         // 固定 "all"
   "page": {{{{page}}}},         // 页码
   "page_size": {{{{page_size}}}} // 每页条数
 }}</pre>
-        <div style="margin-top:6px;font-size:12px;color:#64748b">注：fetch_all 时原生输出含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code></div>
+        <div>注：fetch_all 时原生输出含 <code>"full": {{{{full}}}}</code>，.json 静态变体含 <code>"meta": {{{{meta}}}}</code></div>
       </div>
     </details>
 
-    <div style="margin:10px 0">
+    <div>
       <button type="button" id="template-reset-btn" onclick="resetTemplateToDefault()"
-        style="padding:6px 14px;cursor:pointer;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:13px">还原为默认 JSON 格式</button>
-      <span style="font-size:12px;color:#64748b;margin-left:8px">还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
+        style="cursor:pointer">还原为默认 JSON 格式</button>
+      <span>还原结果为当前模式的默认模板文本（不含 full/meta，可手动添加）</span>
     </div>
     {live_preview_html}
 
-    <div style="font-size:12px;color:#64748b;margin-top:10px">实时预览（样例数据）：</div>
-    <pre id="template-preview" style="margin:4px 0 0 0;padding:12px;background:#0f172a;color:#e2e8f0;border-radius:6px;font-size:12px;line-height:1.6;overflow:auto;max-height:280px"></pre>
-    <div id="template-preview-error" style="color:#dc2626;font-size:12px;margin-top:6px"></div>
+    <div>实时预览（样例数据）：</div>
+    <pre id="template-preview" style="overflow:auto;max-height:280px"></pre>
+    <div id="template-preview-error"></div>
   </div>
 
   </div>
@@ -4708,14 +5667,14 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
             f'<input type="hidden" name="action" value="delete">'
             f'<input type="hidden" name="key_id" value="{kid}">'
             f'<button type="submit" class="btn-mini btn-mini-m" '
-            f'style="color:#dc2626">删除</button>'
+            f'>删除</button>'
             f'</form>')
         rows += (
             f'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;'
             f'border-bottom:1px dashed #e2e8f0">'
-            f'<span style="min-width:110px;font-size:13px;color:#1e293b;font-weight:600">'
+            f'<span>'
             f'{kname}</span>'
-            f'<code style="font-size:12px;color:#64748b">{kdisp}</code>'
+            f'<code>{kdisp}</code>'
             f'<code id="api-key-raw-{kid}" style="display:none">{_escape(kraw)}</code>'
             f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{kid}\')" '
             f'title="复制完整 API Key" class="btn-mini btn-mini-outline-key">复制</button>'
@@ -4723,20 +5682,20 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
             f'</div>')
     if not rows:
         rows = (
-            '<div style="padding:10px 0;font-size:13px;color:#64748b">'
+            '<div>'
             '暂无 API Key——接口为公开访问（无需鉴权）。生成 Key 后立即生效。</div>')
     return (
         f'<div style="margin:16px 0;padding:14px;background:#f8fafc;border-radius:8px;'
         f'border:1px solid #e2e8f0">'
-        f'<div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px">'
+        f'<div>'
         f'{_icon("key")} API Key 管理</div>'
-        f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
+        f'<div>'
         f'每个调用方可分配独立 Key（名称仅作管理标识）；Key 明文可查看（内控要求），'
         f'通过 Authorization: Bearer &lt;key&gt; 或 ?api_key=xxx 调用。'
         f'禁用/删除后立即失效。</div>'
         f'{rows}'
         f'<form method="post" action="{action_url}" '
-        f'style="display:flex;align-items:center;gap:8px;margin-top:10px">'
+        f'style="display:flex;align-items:center;gap:8px">'
         f'<input type="text" name="name" placeholder="Key 名称（留空=接口名称）" '
         f'style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #cbd5e1;'
         f'border-radius:6px;font-size:13px">'
@@ -4781,11 +5740,11 @@ def render_audit_page(
     keyword_val = filters.get("keyword", "")
 
     table_header = """<thead><tr>
-      <th style="width:160px">时间</th>
-      <th style="width:90px">类型</th>
-      <th style="width:100px">操作者</th>
-      <th style="width:130px">操作</th>
-      <th style="width:100px">实体类型</th>
+      <th>时间</th>
+      <th>类型</th>
+      <th>操作者</th>
+      <th>操作</th>
+      <th>实体类型</th>
       <th>详情</th>
     </tr></thead>"""
 
@@ -4853,12 +5812,12 @@ def render_audit_page(
         detail_html = " | ".join(detail_parts) if detail_parts else "-"
 
         rows_html += f"""<tr>
-      <td style="white-space:nowrap;font-size:13px">{html_mod.escape(ts)}</td>
+      <td style="white-space:nowrap">{html_mod.escape(ts)}</td>
       <td><span class="audit-type audit-type-{rtype}">{type_label}</span></td>
       <td>{user}</td>
-      <td style="font-family:monospace;font-size:13px">{action}</td>
+      <td>{action}</td>
       <td>{entity_type}</td>
-      <td style="font-size:13px;max-width:400px;overflow:hidden;text-overflow:ellipsis">{detail_html}</td>
+      <td style="overflow:hidden;text-overflow:ellipsis">{detail_html}</td>
     </tr>"""
     if not rows_html:
         rows_html = build_empty_row_html(6, "暂无匹配的审计日志")
@@ -4955,7 +5914,7 @@ def render_audit_page(
                 size_info = f"{db_size:.1f} {unit}"
                 break
             db_size /= 1024
-        size_info = f'<span style="margin-left:16px;color:#64748b">数据库大小: {size_info}</span>'
+        size_info = f'<span>数据库大小: {size_info}</span>'
 
     html += f"""
 <div class="page-head">
@@ -5073,14 +6032,14 @@ def _build_api_url_row(code_id: str, label: str, url_path: str,
                     'class="btn-mini btn-mini-disabled">复制</button>')
         fix_link = (f'<a href="{_escape(edit_url)}" target="_blank" rel="noopener" '
                     f'title="在接口配置中开启该能力" '
-                    f'style="font-size:12px;color:#4f46e5;text-decoration:none;white-space:nowrap">去开启 ↗</a>'
+                    f'style="white-space:nowrap">去开启 ↗</a>'
                     if edit_url else "")
     else:
         copy_btn = (f'<button onclick="copyToClipboard(\'{code_id}\')" '
                     f'class="btn-mini btn-mini-solid btn-mini-primary">复制</button>')
         fix_link = ""
     return (f'<div style="margin:2px 0;opacity:{"0.55" if disabled else "1"}">'
-            f'<span style="font-weight:500">{label}</span> '
+            f'<span>{label}</span> '
             f'<code id="{code_id}" class="api-url-code" data-path="{_escape(url_path)}" '
             f'data-kind="{kind}" style="{code_style}" '
             f'title="{_escape(disabled_hint) if disabled else ""}">{_escape(url_value)}</code> '
@@ -5124,7 +6083,7 @@ def build_schedule_flags_badge_html(sched_flag, keepalive_flag) -> str:
     if int(keepalive_flag or 0) == 1:
         parts += f'<span title="已开启缓存保活">{_icon("refresh")}</span>'
     if parts:
-        parts = f' <span style="margin-left:4px;font-size:13px">{parts}</span>'
+        parts = f' <span>{parts}</span>'
     return parts
 
 
@@ -5163,14 +6122,14 @@ def build_report_schedule_summary_html(report_id, scheds: list) -> str:
                 f'<span class="badge {badge}">{state}</span>'
                 f'<span class="muted">{_escape(_format_schedule_plan(s))}</span>'
                 '</div>')
-        body = (rows + '<p style="font-size:12px;color:var(--ink-3);margin:8px 0 0">'
+        body = (rows + '<p>'
                 '命中排除规则（静默窗口）时该次执行跳过；多任务可同时绑定本报表。</p>')
     else:
-        body = ('<p style="font-size:13px;color:var(--ink-3);margin:0">'
+        body = ('<p>'
                 '本报表尚未关联定时任务；新建后可按间隔或每天定时批量刷新本报表缓存。</p>')
     return (f'<div style="margin:0 0 12px;padding:10px 12px;background:var(--bg-subtle);'
             f'border:1px dashed var(--line-strong);border-radius:var(--r-sm)">{body}'
-            f'<div style="margin-top:10px">'
+            f'<div>'
             f'<a class="btn btn-outline btn-sm" href="{new_url}">+ 新建调度</a></div></div>')
 
 
@@ -5184,11 +6143,11 @@ def _format_schedule_last_result(sched: dict) -> str:
     if status == "fail":
         err = (sched.get("last_error") or "").replace('"', "&quot;")
         summary = _escape((sched.get("last_error") or "")[:60])
-        return (f'<span style="color:#dc2626;cursor:help" '
+        return (f'<span style="cursor:help" '
                 f'title="{err}">{_icon("x")} 失败{dur_text}：{summary}</span>')
     if status == "skipped":
         return f'<span title="排除规则命中（静默窗口），本次未执行">{_icon("x")} 静默跳过</span>'
-    return '<span style="color:#cbd5e1">— 未执行</span>'
+    return '<span>— 未执行</span>'
 
 
 def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
@@ -5211,7 +6170,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
         report_names = s.get("report_names") or []
         reports_cell = (", ".join(_escape(r) for r in report_names)
                         if report_names else
-                        '<span style="color:#dc2626;font-size:13px">无关联报表</span>')
+                        '<span>无关联报表</span>')
         badges = ""
         if s.get("exclusions"):
             badges += f' <span title="已配置执行排除（静默窗口）">{_icon("x")}</span>'
@@ -5223,19 +6182,19 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
                        if enabled else
                        build_state_span("停用", "muted"))
         if fail_count >= 5 and enabled:
-            status_cell += ' <span style="color:#dc2626;font-size:13px" title="连续失败达上限，自动派发已熔断；手动成功后恢复">🔥熔断</span>'
+            status_cell += ' <span title="连续失败达上限，自动派发已熔断；手动成功后恢复">🔥熔断</span>'
         next_at = s.get("next_run_at")
         next_cell = (time.strftime("%Y-%m-%d %H:%M", time.localtime(next_at))
                      if next_at else
-                     '<span style="color:#cbd5e1">—</span>')
+                     '<span>—</span>')
         misfire_label = _SCHED_MISFIRE_LABELS.get(
             s.get("misfire_policy"), s.get("misfire_policy") or "")
         toggle_label = "停用" if enabled else "启用"
         toggle_cls = "btn-outline" if enabled else "btn-success"
         rows += f"""<tr>
-  <td><a href="/config/scheduler/{sid}/edit" style="color:#4f46e5;text-decoration:none">{task_name}</a>{badges}</td>
+  <td><a href="/config/scheduler/{sid}/edit">{task_name}</a>{badges}</td>
   <td>{reports_cell}</td>
-  <td>{_escape(_format_schedule_plan(s))}<span style="color:#64748b;font-size:12px;margin-left:6px">错过{_escape(misfire_label)}</span></td>
+  <td>{_escape(_format_schedule_plan(s))}<span>错过{_escape(misfire_label)}</span></td>
   <td>{next_cell}</td>
   <td>{_format_schedule_last_result(s)}</td>
   <td style="white-space:nowrap">{status_cell}</td>
@@ -5264,7 +6223,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
               '<th>上次结果</th>'
               '<th>状态</th><th>操作</th>'
               '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-            '<p class="muted" style="font-size:12px;margin-top:8px">'
+            '<p class="muted">'
             '徽标语义：成功/失败/熔断/静默窗口均为「颜色+文字」双编码；'
             '任务级审计默认关，开启后显示「' + _icon("edit") + '」徽标。'
             '执行历史不在本页重复展示，请到审计日志查询。</p></div>')
@@ -5288,7 +6247,7 @@ _EXCL_EDITOR_JS = """
       var h="",set=data.in||[];
       for(var i=0;i<DOWS.length;i++){var d=DOWS[i];
         var ck=set.indexOf(d)>=0?" checked":"";
-        h+='<label style="font-size:12px;margin-right:6px;font-weight:400">'
+        h+='<label>'
           +'<input type="checkbox" class="excl-dow" value="'+d+'"'+ck+">"
           +DOW_LABELS[d]+"</label>";}
       return '<span>'+h+'</span>';
@@ -5514,10 +6473,10 @@ def build_scheduler_task_form_html(prefill: dict | None,
     edit_hidden = (f'<input type="hidden" name="edit_id" value="{edit_id}">'
                    if edit_id else "")
     excl_editor = f'''
-    <p style="margin:0 0 8px;font-size:12px;color:var(--ink-3)">任一规则命中则本次不执行；解析失败按「不排除」处理（后端 validate_exclusions 兜底）。与报表嵌套筛选结构不同，勿混用。</p>
+    <p>任一规则命中则本次不执行；解析失败按「不排除」处理（后端 validate_exclusions 兜底）。与报表嵌套筛选结构不同，勿混用。</p>
     <div id="excl-rules" class="rule-group"></div>
-    <textarea id="excl-source" rows="5" style="display:none;width:100%;margin-top:6px;padding:6px;font-family:monospace;font-size:12px"></textarea>
-    <div id="excl-msg" style="display:none;color:#dc2626;font-size:12px;margin-top:4px"></div>
+    <textarea id="excl-source" rows="5" style="display:none"></textarea>
+    <div id="excl-msg" style="display:none"></div>
     <input type="hidden" name="exclusions" id="excl-json" value="{_escape(exclusions)}">'''
     interval_disp = "" if stype == "interval" else ' style="display:none"'
     daily_disp = "" if stype == "daily" else ' style="display:none"'
@@ -5533,14 +6492,14 @@ def build_scheduler_task_form_html(prefill: dict | None,
       <div class="schedule-row span-full" id="row-interval"{interval_disp}><label>间隔（分钟）<input type="number" name="interval_minutes" value="{int(interval)}" min="1"></label></div>
       <div class="schedule-row span-full" id="row-daily"{daily_disp}><label>每日时刻<input type="time" name="daily_time" value="{_escape(daily)}"></label></div>
       <label>错过策略<select name="misfire_policy">{policy_opts}</select></label>
-      <div style="margin-top:10px">
+      <div>
         <label class="check-inline"><input type="checkbox" name="schedule_enabled" {enabled_checked}> 启用</label>
         <label class="check-inline"><input type="checkbox" name="audit_enabled" {audit_checked}> 记录执行审计</label>
       </div>
     </div>
     <div class="card">
       <div class="card-head"><h2>关联报表（按序执行）</h2></div>
-      <label style="margin-bottom:6px">关联报表<span class="field-hint">勾选=绑定该报表；「参与执行」未勾选的报表在任务中停用（S10）</span></label>
+      <label>关联报表<span class="field-hint">勾选=绑定该报表；「参与执行」未勾选的报表在任务中停用（S10）</span></label>
       <div class="sched-reports-wrap">
         <table class="sched-reports">
           <thead><tr><th>绑定</th><th>报表</th><th>参与执行</th></tr></thead>

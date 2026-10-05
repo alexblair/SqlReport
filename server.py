@@ -62,53 +62,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SqlReport - 登录</title>
-<style>""" + render._BASE_CSS + """
-  body {
-    display: flex; justify-content: center; align-items: center;
-    min-height: 100vh; margin: 0;
-    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 55%, #312e81 100%);
-  }
-  .login-box {
-    background: #fff; padding: 36px 32px; border-radius: 14px;
-    box-shadow: 0 24px 64px rgba(0,0,0,.35); width: 380px;
-    animation: fadeUp 0.4s ease-out;
-  }
-  .login-box h1 {
-    display: flex; align-items: center; justify-content: center; gap: 10px;
-    color: #0f172a; margin-bottom: 6px;
-    font-size: 17px; font-weight: 700; letter-spacing: -0.2px;
-  }
-  .login-box h1 .logo {
-    width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-size: 13px; font-weight: 800;
-  }
-  .login-subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 24px; }
-  .login-box label { display: block; margin-bottom: 6px; font-weight: 600; color: #475569; font-size: 13px; }
-  .login-box input[type=text], .login-box input[type=password] {
-    width: 100%; padding: 9px 12px; margin-bottom: 16px;
-    border: 1px solid #d1d5db; border-radius: 6px;
-    font-size: 14px; color: #0f172a; transition: border-color .15s, box-shadow .15s;
-    outline: none; background: #fff;
-  }
-  .login-box input[type=text]:focus, .login-box input[type=password]:focus {
-    border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.35); background: #fff;
-  }
-  .login-box button {
-    width: 100%; padding: 11px; background: #4f46e5; color: #fff;
-    border: none; border-radius: 6px; font-size: 15px; font-weight: 600;
-    cursor: pointer; transition: background .15s;
-  }
-  .login-box button:hover { background: #4338ca; }
-  .login-box .error {
-    color: #b91c1c; text-align: center; margin-bottom: 16px; font-size: 13px;
-    padding: 10px; background: #fef2f2; border-radius: 6px; border: 1px solid #fecaca;
-  }
-  .login-box .notice {
-    color: #92400e; text-align: center; margin-bottom: 16px; font-size: 13px;
-    padding: 10px; background: #fffbeb; border-radius: 6px; border: 1px solid #fde68a;
-  }
-  .login-footer { text-align: center; margin-top: 18px; color: #64748b; font-size: 12px; }
-</style>
+<style>""" + render._BASE_CSS + """</style>
 </head>
 <body>
 <div class="login-box">
@@ -178,32 +132,22 @@ def _render_error_page(status: int, title: str) -> str:
     所有页面级错误（404/405/400/500）共用：状态码 + 人话标题 + 返回报表页
     导航入口，避免死胡同。异常详情一律只进日志、不进响应体（防信息泄露）。
     """
-    return f"""<!DOCTYPE html>
+    return ("""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{status} - {title}</title>
-<style>
-body {{ display:flex; justify-content:center; align-items:center; min-height:100vh;
-       margin:0; background:#f3f4f8; font-family:system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif; }}
-.err-box {{ background:#fff; padding:48px 56px; border-radius:10px;
-            box-shadow:0 1px 2px rgba(15,23,42,.06); text-align:center; max-width:420px; }}
-.err-code {{ font-size:56px; font-weight:700; color:#4f46e5; margin:0; }}
-.err-title {{ color:#475569; font-size:18px; margin:12px 0 24px; }}
-.err-back {{ display:inline-block; padding:10px 22px; background:#4f46e5; color:#fff;
-             border-radius:6px; text-decoration:none; font-size:14px; }}
-.err-back:hover {{ background:#4338ca; }}
-</style>
+<title>""" + str(status) + """ - """ + _html_mod.escape(title) + """</title>
+<style>""" + render._BASE_CSS + """</style>
 </head>
 <body>
 <div class="err-box">
-  <p class="err-code">{status}</p>
-  <p class="err-title">{_html_mod.escape(title)}</p>
+  <p class="err-code">""" + str(status) + """</p>
+  <p class="err-title">""" + _html_mod.escape(title) + """</p>
   <a class="err-back" href="/report">返回报表页</a>
 </div>
 </body>
-</html>"""
+</html>""")
 
 
 # 内置图标字节（spec ux-optimization 批次6#27b；site-branding 起迁至
@@ -894,6 +838,10 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type",
                          extra_headers.get("Content-Type", "text/html; charset=utf-8"))
+        # HTML 是动态 + 会话相关的：禁缓存，保证刷新（甚至返回本页）一定拿到最新内联 JS。
+        # 历史教训：修复已上线，但用户标签页仍执行旧的内联脚本 → 表现为「功能坏了」。
+        # 静态资产走 /static/vendor（内容哈希 + immutable），不受此影响。
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         if self._session_token:
             self.send_header("Set-Cookie", auth.make_set_cookie_header(self._session_token))
         for k, v in extra_headers.items():

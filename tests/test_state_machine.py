@@ -141,9 +141,11 @@ def parse_state_from_html(html):
     # ---- 3. 从 filter-input 提取筛选值（补充 hidden input 未覆盖的场景） ----
     if not filters:
         # 匹配 <input type="text" class="filter-input" name="f_COL" value="VAL">
+        # v2：属性顺序与 class 追加不再固定，正则放宽（class 含 filter-input 即可）
         fi_pattern = re.compile(
-            r'<input\s+type="text"\s+class="filter-input"[^>]*name="(f_[^"]+)"'
-            r'[^>]*value="([^"]*)"',
+            r'<input\b(?=[^>]*\bclass="[^"]*\bfilter-input\b)'
+            r'(?=[^>]*\bname="(f_[^"]+)")'
+            r'(?=[^>]*\bvalue="([^"]*)")[^>]*>',
             re.IGNORECASE
         )
         for match in fi_pattern.finditer(html):
@@ -369,6 +371,9 @@ class BaseStateMachineTest(unittest.TestCase):
         # 查找分页 HTML 区域（匹配 <div class="pagination">）
         pag_tag = 'class="pagination"'
         pagination_start = html.find(pag_tag)
+        if pagination_start < 0:
+            _m = re.search(r'class="[^"]*\bpagination\b[^"]*"', html)
+            pagination_start = _m.start() if _m else -1
         if pagination_start < 0:
             return []
         pag_section = html[pagination_start:pagination_start + 3000]

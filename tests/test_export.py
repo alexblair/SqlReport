@@ -85,7 +85,7 @@ class TestExportToCSV(unittest.TestCase):
         self.conn.close()
 
     def _decode(self, content):
-        """解码 handle_export 返回的 bytes（默认 charset=gbk）"""
+        """解码 handle_export 返回的 bytes（CSV 默认 charset=gbk；JSON 恒 utf-8）"""
         if isinstance(content, bytes):
             return content.decode("gbk", errors="replace")
         return content
@@ -349,7 +349,7 @@ class TestJSONExport(unittest.TestCase):
     def _decode_json(self, content):
         """解码 handle_export 返回的 JSON bytes 为 Python 对象"""
         if isinstance(content, bytes):
-            text = content.decode("gbk", errors="replace")
+            text = content.decode("utf-8", errors="replace")
         else:
             text = content
         return json.loads(text)
@@ -421,7 +421,7 @@ class TestJSONExport(unittest.TestCase):
         self.assertIn("6~25", detail)
         # 原始 JSON 字符串中应包含转义后的引号
         if isinstance(content, bytes):
-            text = content.decode("gbk", errors="replace")
+            text = content.decode("utf-8", errors="replace")
         else:
             text = content
         self.assertIn('\\"', text)
@@ -479,8 +479,9 @@ class TestJSONExport(unittest.TestCase):
             self.conn, "id=1&format=json", pool_override=self.mock_pool)
 
         self.assertEqual(code, 200)
+        # JSON 固定 UTF-8（RFC 8259；与 API 侧 JSON 响应一致）——面板未传 charset 时也必须是 utf-8
         self.assertEqual(headers.get("Content-Type"),
-                         "application/json; charset=gbk")
+                         "application/json; charset=utf-8")
         self.assertIn("attachment", headers.get("Content-Disposition", ""))
         self.assertIn("filename*=UTF-8''", headers.get("Content-Disposition", ""))
 
@@ -565,11 +566,12 @@ class TestExportCharset(unittest.TestCase):
             self.conn, "id=1&format=json&charset=gbk",
             pool_override=self.mock_pool)
 
+        # 显式传 charset=gbk 也应被忽略：JSON 恒 UTF-8
         self.assertEqual(code, 200)
         self.assertEqual(headers.get("Content-Type"),
-                         "application/json; charset=gbk")
+                         "application/json; charset=utf-8")
         self.assertIsInstance(content, bytes)
-        text = content.decode("gbk")
+        text = content.decode("utf-8")
         data = json.loads(text)
         self.assertEqual(data["订单报表"][0]["id"], "1")
 
@@ -1351,7 +1353,7 @@ class TestExportParameterCombinations(unittest.TestCase):
 
         self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
-        # 应能正常解码为 GBK
+        # 恒以 UTF-8 解码
         text = content.decode("gbk")
         self.assertIn("Alice", text)
         self.assertIn("Bob", text)
@@ -1365,21 +1367,21 @@ class TestExportParameterCombinations(unittest.TestCase):
     # ------------------------------------------------------------------
 
     @patch("db.create_mysql_connection")
-    def test_06_json_gbk_charset(self, mock_create_conn):
-        """JSON + GBK 编码"""
+    def test_06_json_forces_utf8_charset(self, mock_create_conn):
+        """JSON 固定 UTF-8：即使面板传其它字符集也不受影响（RFC 8259 / 与 API 侧一致）"""
         self._setup_mock(mock_create_conn)
         code, content, headers = export.handle_export(
-            self.conn, "id=1&format=json&charset=gbk",
+            self.conn, "id=1&format=json&charset=utf8",
             pool_override=self.mock_pool)
 
         self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
-        # 应能正常解码为 GBK
-        text = content.decode("gbk")
+        # 恒以 UTF-8 解码
+        text = content.decode("utf-8")
         data = json.loads(text)
         self.assertEqual(len(data["订单报表"]), 4)
         self.assertEqual(data["订单报表"][0]["name"], "Alice")
-        self.assertIn("charset=gbk", headers.get("Content-Type", ""))
+        self.assertIn("charset=utf-8", headers.get("Content-Type", ""))
 
     # ------------------------------------------------------------------
     # 用例 7: CSV + 自定义列 [name]
@@ -1711,18 +1713,18 @@ class TestExportParameterCombinations(unittest.TestCase):
 
     @patch("db.create_mysql_connection")
     def test_20_json_custom_filter_charset(self, mock_create_conn):
-        """JSON + GBK + 筛选 city=NYC + 自定义列 [id, name] 四维组合"""
+        """JSON（恒 UTF-8）+ 筛选 city=NYC + 自定义列 [id, name] 四维组合"""
         self._setup_mock(mock_create_conn)
         code, content, headers = export.handle_export(
-            self.conn, "id=1&format=json&charset=gbk"
+            self.conn, "id=1&format=json&charset=utf8"
                        "&f_city=NYC&op_city=eq"
                        "&use_custom_cols=1&cols=id,name",
             pool_override=self.mock_pool)
 
         self.assertEqual(code, 200)
         self.assertIsInstance(content, bytes)
-        # 解码 GBK → 解析 JSON
-        text = content.decode("gbk")
+        # 恒 UTF-8 解码 → 解析 JSON
+        text = content.decode("utf-8")
         data = json.loads(text)
         rows = data["订单报表"]
         # 2 行 (Alice, Charlie — both in NYC)
@@ -1736,7 +1738,7 @@ class TestExportParameterCombinations(unittest.TestCase):
         names = {r["name"] for r in rows}
         self.assertEqual(names, {"Alice", "Charlie"})
         # 响应头含 gbk
-        self.assertIn("charset=gbk", headers.get("Content-Type", ""))
+        self.assertIn("charset=utf-8", headers.get("Content-Type", ""))
 
     # ------------------------------------------------------------------
     # 用例 21: CSV + name 降序排序

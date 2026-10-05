@@ -1302,7 +1302,8 @@ class TestConfigFormWideLayoutCSS(unittest.TestCase):
 
     def test_form_max_width_raised_to_1200(self):
         """config-form 560px 窄宽约束应解除为 max-width 1200px"""
-        self.assertIn("form.config-form { max-width: 1200px; }", config._CONFIG_EXTRA_CSS)
+        # v2：样式已并入公共层，改查语义（不再依赖页面级常量与空格格式）
+        self.assertRegex(render._COMMON_CSS, r'form\.config-form\s*\{[^}]*max-width:\s*1200px')
 
     def test_no_560px_pin_on_config_form(self):
         """560px 钉死不得残留"""
@@ -1310,13 +1311,14 @@ class TestConfigFormWideLayoutCSS(unittest.TestCase):
 
     def test_wide_screen_grid_media_query(self):
         """宽屏（>=1100px）应启用 2 列网格"""
-        css = config._CONFIG_EXTRA_CSS
-        self.assertIn("@media (min-width: 1100px)", css)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", css)
+        # v2：双栏网格不再依赖 min-width 媒体查询（桌面恒双栏，≤1024 收单栏）
+        css = render._COMMON_CSS
+        self.assertRegex(css, r'form\.config-form\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)')
+        self.assertRegex(css, r'@media\s*\(max-width:\s*1024px\)')
 
     def test_span_full_rule(self):
         """span-full 应跨 2 列整行"""
-        self.assertIn(".span-full { grid-column: 1 / -1; }", config._CONFIG_EXTRA_CSS)
+        self.assertRegex(render._COMMON_CSS, r'\.span-full\s*\{\s*grid-column:\s*1\s*/\s*-1')
 
 
 class TestReportFormSpanFull(unittest.TestCase):
@@ -1343,7 +1345,7 @@ class TestReportFormSpanFull(unittest.TestCase):
     def test_write_switch_span_full_with_warning(self):
         """允许执行写操作 label 与警示框均应跨整行"""
         html = self._form_html(sql_has_write=True, allow_write=0)
-        self.assertIn('<label class="span-full" style="display:flex', html)
+        self.assertRegex(html, r'<label class="span-full"[^>]*style="[^"]*display:\s*flex')
         self.assertIn('class="flash-warn span-full"', html)
 
     def test_form_actions_span_full(self):

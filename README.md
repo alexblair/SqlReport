@@ -125,6 +125,18 @@ source venv/bin/activate
 python server.py
 ```
 
+### Local test environment (port 8099)
+
+```bash
+./test_env.sh start     # start in background, bound to 0.0.0.0:8099 (reachable from any address)
+./test_env.sh status    # process / listening socket / health check / reachable URLs
+./test_env.sh stop      # stop (SIGINT → SIGTERM → SIGKILL, with graceful shutdown first)
+```
+
+`test_env.sh` overrides the listen address and port through the `HOST` / `PORT` environment variables (highest precedence in `app_config.get_server_config()`), so **no configuration file is touched**. When `app_config.debug.json` exists in the repository root it is merged in automatically, so the test environment uses `config.debug.db` / `audit.debug.db` and never touches the production `config.db`. The PID file and console log are written to the gitignored `run-logs/` directory.
+
+Override the defaults with `TEST_PORT=9100 TEST_HOST=127.0.0.1 ./test_env.sh start`; other subcommands: `restart` / `log` (tail the log) / `fg` (foreground, for troubleshooting).
+
 The `install.sh` script creates a virtual environment and installs all dependencies from `requirements.txt` automatically. Manual installation works too:
 
 ```bash
@@ -605,6 +617,7 @@ SqlReport/
 │   └── test_state_machine.py
 ├── config.db              # SQLite config database (auto-created, not committed)
 ├── install.sh             # Automated dependency installer (venv + pip install)
+├── test_env.sh            # Local test environment control script (default 0.0.0.0:8099)
 ├── requirements.txt       # pip dependency list
 ├── manage_service.sh      # Systemd service management script
 ├── git-purge.sh           # Git history rewrite tool (clean history/change author/proxy support)

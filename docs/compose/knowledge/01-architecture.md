@@ -17,7 +17,8 @@
 6. `start_scheduler_from_config()` → daemon `serve_forever` → join 等 Ctrl+C  
 
 安装：`./install.sh` → `source venv/bin/activate`  
-服务：`sudo bash manage_service.sh install`（单元 `web-report`）
+服务：`sudo bash manage_service.sh install`（单元 `web-report`）  
+本地测试环境：`./test_env.sh start|stop|restart|status|log|fg`——默认 `0.0.0.0:8099`（任意地址可访问），靠 `HOST`/`PORT` 环境变量覆盖（`get_server_config` 中优先级最高，**不改配置文件**）；不设 `CONFIG_FILE` → 自动叠加 `app_config.debug.json`，测试环境落 `config.debug.db`/`audit.debug.db`/`run.debug.log`；PID 文件与控制台日志在 `run-logs/`；停止走 SIGINT（命中 `server.py` 优雅关闭分支）→ SIGTERM → SIGKILL 逐级兜底。可用 `TEST_PORT`/`TEST_HOST`/`TEST_BASE_CONFIG=1` 覆盖。
 
 ## 应用配置（`app_config.py`）
 
