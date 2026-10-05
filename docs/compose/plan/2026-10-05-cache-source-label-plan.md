@@ -576,10 +576,36 @@ git commit -m "docs(plan): 回填 8099 三态生产验收证据与收尾状态"
 
 脚本结论行：`全部通过`（exit=0）。
 
-**8099 页面级复核的替代说明**：本会话 bash 运行在 `bwrap --unshare-pid` 沙箱内，宿主进程（PID 文件 `run-logs/test-env-8099.pid` = `682744`）既不可见也不可信号 → **无法从本会话重启 8099**；运行中的 8099 承载的是改动前的代码（MEMORY #14：改 `report.py` 后必须重启再验），直接查它会得到改动前的行为。故 A–D 用「真实 MySQL/Redis + `render.build_cache_badge_html` 真实徽标函数」等价取证。**待用户在宿主机重启 8099 后**复核页面三态；如需本会话自查，可另起 8098 托管实例（会占用第二个端口）。
+**8099 页面级三态实测（用户于 22:08 重启 8099 后完成，spec §7.3 原样执行）**
+
+| 状态 | 报表 | 请求序 | 实测徽标原文 | 解析 source |
+|---|---|---|---|---|
+| A 冷加载 | 3（ttl 24h） | 清 L2 键后首次 | `实时查询 (已启用缓存 · 缓存 24 小时)`；页面**不含**「数据来自缓存快照」横幅 | `mysql` |
+| B L1 命中 | 3 | 2s 后 | `本地缓存 (2s 前刷新 · 已启用缓存 · 缓存 24 小时)` | `process` |
+| C L2 命中 | 7（无调度计划） | L1 过期（330s 前刷新）后 | `缓存快照 (330s 前 · 已启用缓存)`；横幅出现 | `redis` |
+
+证据 HTML：`run-logs/accept-8099-cold.html`、`-l1.html`、`-c-old7.html`、`-c-l2-7.html`；脚本 `run-logs/accept-8099-page.py`（复用 `bench.py` 的登录与徽标解析，不重写解析器）。
+
+状态 C 首次尝试（报表 3，22:14）抓到的是 `本地缓存 (100s 前刷新)` —— 反推 22:12:28 有**外部浏览器请求**重建了该报表的 L1；经查报表 3 **不在任何调度计划**（`schedule_reports` 仅 1/2/5），故非本次缺陷，改用无调度的报表 7 复测得 C。
 
 **代码索引**：`codegraph sync` → `Index is up to date`（`pendingChanges` 全 0）。
 
 **与 spec 的偏差**：仅 spec §6 两处误判（已就地订正，见其 §6.1 订正记录）；其余按 §5.2 原样落地，`render.py` 一行未改。
+
+## 独立复核与修复（2026-10-05）
+
+**复核方式**：fresh-context 子代理独立复核 `31bd612..344a043`（复核包留在 `run-logs/sdd/review-31bd612-344a043/`），按 `requesting-code-review/code-reviewer.md` 的判据。
+
+**业务面结论**：生产者改动与 spec §5.1 逐行一致；L2→L1 继承链、`redis_fallback`/`fresh` 语义未被破坏；6 处既有断言均为「精确换值 + 新增断言」，**无弱化**；`render.py` 零改动；无恒真测试。
+
+**Critical C1（已修复，commit `b99e4fa`）**：`7136c10` 把 ui-v2 的 3 个外来 hunk 裹进提交（`tests/test_report_extra.py` 的 `import render` + 两条改写为 CSS 常量正则的 UI 断言、`tests/test_cache_ui.py` 一处 docstring），而 ui-v2 的 `render.py` 未提交 → **干净检出当时 HEAD 自测必失败**。
+
+- RED（修复前，干净检出 `344a043`）：`tests.test_report_extra.TestFilterInputUX` → `Ran 9 tests, FAILED (failures=2)`。
+- 根因：`git update-index --chmod=-x <file>` 会把**工作树内容重读进索引**，覆盖了先前 `git apply --cached` 的 hunk 级筛选（执行者的 git 误用，不是判断分歧）。
+- 修复：以「`31bd612` 基线 + 仅本任务改动」重建两个索引条目（`git hash-object -w` + `update-index --cacheinfo`），ui-v2 改动退回工作树未提交状态。
+- GREEN：干净检出 `b99e4fa` 上 5 个受影响模块 → `Ran 131 tests — OK`（该检出**不含任何 ui-v2 未提交改动**，证明本次改动不依赖 ui-v2 工作树）；工作树同批 +2 模块 → `Ran 524 tests — OK`；全量官方入口在工作树 → `Ran 3002 tests — OK (skipped=4)`。
+
+**Minor（未修，交用户决定）**：M1 `tests/test_cache_ui.py` 方法名 `test_rebuild_shows_redis_cache_info` 与其 docstring 仍描述旧行为；M2 `report.py:109` 的 `CachedResult.source` docstring 仍写「redis / mysql」，实际只会写 `"redis"` 或 `None`；M3 `TestBadgeHonesty` 三例喂手工 `cache_info`，与生产者解耦（页面级三态实测已覆盖该风险）；M4 spec §6 第二行与 §6.1 有轻微重复。
+**随 C1 退回 ui-v2 的 Important I1**：`test_th_min_width_rule` 的断言由「页面级精确 100px」退化为「`render._COMMON_CSS` 中 `\d+px`」，属 ui-v2 未提交工作，已不在此提交内（建议 ui-v2 收口时收紧）。
 
 **执行记录（ledger）**：`run-logs/sdd/2026-10-05-cache-source-label/progress.md`
