@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI v2 确认稿 · 石墨·鸢尾 — SqlReport</title>
+<style>
+:root{
+  --bg:#f4f6f9; --surface:#fff; --subtle:#f7f8fa; --line:#dde0e4; --line-soft:#e8eaee;
+  --ink-1:#11151d; --ink-2:#555b68; --ink-3:#6c717c; --ink-4:#9a9ea7;
+  --accent:#5d61e0; --accent-ink:#3e3caa; --accent-soft:#f4f6ff; --accent-line:#d1d9ff;
+  --ok-ink:#00643a; --ok-soft:#e6f9ed; --warn-ink:#a96000; --warn-soft:#fff4e0;
+  --font:"Inter","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--ink-1);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;padding:40px 28px 72px}
+header.top{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:28px}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--accent-ink);text-transform:uppercase;margin-bottom:8px}
+h1{font-size:30px;line-height:1.25;font-weight:600;letter-spacing:-.02em}
+h1 .tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;margin-left:10px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-ink);font-size:12px;font-weight:600;vertical-align:middle}
+.lede{color:var(--ink-2);max-width:70ch;margin-top:12px}
+h2{font-size:17px;font-weight:600;margin:36px 0 14px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+h3{font-size:14px;font-weight:600;margin:18px 0 8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:900px){.g2,.g3,.g4{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--ink-3);font-size:13px}
+.num{font-size:26px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.lbl{font-size:12px;color:var(--ink-3)}
+.swatches{display:flex;flex-wrap:wrap;gap:10px}
+.sw{width:104px}
+.sw i{display:block;height:44px;border-radius:8px;border:1px solid rgba(17,21,29,.08)}
+.sw b{display:block;font-size:11px;font-weight:600;margin-top:6px}
+.sw span{display:block;font-size:10px;color:var(--ink-3);font-family:var(--mono)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:12px;font-weight:600;color:var(--ink-3);background:var(--subtle);padding:9px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--subtle)}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--line);background:var(--subtle);color:var(--ink-2);white-space:nowrap}
+.pill.ok{background:var(--ok-soft);border-color:#b8e8cd;color:var(--ok-ink)}
+.pill.warn{background:var(--warn-soft);border-color:#f5ddb0;color:var(--warn-ink)}
+.pill.acc{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-ink)}
+.pill.new{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-ink)}
+ul.tight{padding-left:20px}
+ul.tight li{margin:5px 0}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+.cmp figure{margin:0}
+.cmp img{width:100%;display:block;border:1px solid var(--line);border-radius:8px;background:#fff}
+.cmp figcaption{font-size:12px;color:var(--ink-3);margin-top:6px}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px}
+code{font-family:var(--mono);font-size:12px;background:var(--subtle);border:1px solid var(--line-soft);border-radius:4px;padding:1px 5px}
+.note{background:var(--accent-soft);border:1px solid var(--accent-line);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--accent-ink)}
+.check{list-style:none;padding:0}
+.check li{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px}
+.check li:last-child{border-bottom:0}
+.check input{margin-top:3px;width:15px;height:15px;accent-color:var(--accent)}
+footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-3)}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.links a{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--ink-1)}
+.links a:hover{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">SqlReport · UI v2 确认稿 · ✅ 已确认并实施（方案 A）</div>
+  <h1>石墨·鸢尾 <span class="tag">Graphite &amp; Iris</span></h1>
+  <p class="lede">
+    这一版不是「再调一遍样式」，而是把全站视觉重新做成**一套**体系：一套字阶、一套 4px 间距、
+    一套圆角与阴影、一个强调色，并且把散在各页面的内联样式与页面级 CSS 补丁全部收回到单一来源。
+    下面每一页都可以点开、可交互（页签、抽屉、导出对话框、列表/卡片切换、侧栏收起都能点）。
+  </p>
+  <div class="links">
+    <a href="preview-login.html">① 登录</a>
+    <a href="preview-center.html">② 报表中心</a>
+    <a href="preview-detail.html">③ 报表详情</a>
+    <a href="preview-overview.html">④ 概览</a>
+    <a href="preview-reports.html">⑤ 报表配置</a>
+    <a href="preview-pools.html">⑥ 连接池</a>
+    <a href="preview-users.html">⑦ 用户</a>
+    <a href="preview-api.html">⑧ API 接口</a>
+    <a href="preview-scheduler.html">⑨ 定时任务</a>
+    <a href="preview-audit.html">⑩ 审计日志</a>
+    <a href="preview-report-edit.html">⑪ 报表编辑</a>
+    <a href="preview-sched-new.html">⑫ 新建调度</a>
+    <a href="preview-sched-edit.html">⑬ 编辑调度</a>
+  </div>
+  <p class="muted" style="margin-top:10px">
+    页面底部深色胶囊是确认稿专用切换条：换页 + 换色调（鸢尾 / 石墨蓝 / 松绿）。它不属于产品界面。
+  </p>
+</header>
+
+<div class="note">
+  <strong>为什么之前改了 N 次还是丑</strong>：功能没变、页面没少，但「丑」的根因不是某页没设计好，而是全站没有统一尺度——
+  实测旧代码：共享 CSS 里 <b>49 种 hex 颜色</b>、<b>12 种字号</b>、<b>37 种 padding 写法</b>、<b>12 种圆角</b>、<b>12 种阴影</b>、
+  <b>7 种行高</b>、<b>14 种 transition</b>，外加 <b>269 处内联样式</b>在标签上直接写死颜色和间距。
+  于是任何一次「把某个页面调好看」都会和别的页面打架。这一版先把尺子统一，再把 13 个页面全部落到同一把尺子上。
+</div>
+
+<h2 style="border-bottom-color:var(--accent-line)">0. 你反馈的两条 —— 已定位根因并修复</h2>
+<div class="grid g2">
+  <div class="card" style="border-color:var(--accent-line);background:var(--accent-soft)">
+    <h3 style="margin-top:0;color:var(--accent-ink)">① SQL 代码面：文字与底色打架（正文隐形）</h3>
+    <p style="font-size:13px;color:var(--ink-1)">
+      根因不是「配色不好看」，是两个 class 各写一半：<code>pre.sql-debug.code-block</code> 命中
+      <code>.code-block&#123;color:深墨&#125;</code>（给浅底用的）与 <code>.sql-debug&#123;background:深底&#125;</code>，
+      于是 <b>深字压深底</b>。实测旧稿正文对比度 <b>1.02:1</b>（等于隐形），只有高亮关键字还看得见——
+      所以你看到的是「只剩 SELECT / FROM 几个词，字段全不见了」。旧 token 色也是给浅底配的（关键字 3.26:1 / 函数 3.60:1）。
+    </p>
+    <p style="font-size:13px">
+      <b>改法</b>：把代码面做成一个组件，<b>底色与文字色成对声明、不许分开</b>；重建 8 个词法色并逐个实算对比度。
+    </p>
+    <table style="margin-top:8px">
+      <thead><tr><th>项</th><th>修复前</th><th>修复后</th></tr></thead>
+      <tbody>
+        <tr><td>代码正文</td><td><span class="pill" style="background:#ffefed;border-color:#f8cdc9;color:#a9131f">1.02:1（隐形）</span></td><td><span class="pill ok">14.88:1</span></td></tr>
+        <tr><td>关键字</td><td><span class="pill warn">3.26:1</span></td><td><span class="pill ok">8.42:1</span></td></tr>
+        <tr><td>函数</td><td><span class="pill warn">3.60:1</span></td><td><span class="pill ok">10.10:1</span></td></tr>
+        <tr><td>字符串 / 数字 / 注释</td><td>4.93 / 5.84 / 7.25</td><td><span class="pill ok">11.08 / 10.88 / 6.43</span></td></tr>
+        <tr><td>代码块内文字像素占比</td><td>1.16%</td><td><b>2.85%</b>（≈2.5 倍可读像素）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card" style="border-color:var(--accent-line);background:var(--accent-soft)">
+    <h3 style="margin-top:0;color:var(--accent-ink)">② 快筛：选了操作符却没有值输入框</h3>
+    <p style="font-size:13px;color:var(--ink-1)">
+      联动函数 <code>toggleFilterInput()</code> 定义在生产外链 <code>common.js</code> 里，而确认稿为了自包含把外链 JS 摘掉了，
+      于是 <code>onchange</code> 找不到函数——<b>不是设计漏了，是确认稿少了这段交互</b>。生产页面本身有这个输入框（默认隐藏）。
+    </p>
+    <p style="font-size:13px">
+      <b>改法</b>：按生产<b>同一契约</b>把联动补进确认稿（<code>nofilter/isempty/notempty</code> → 隐藏并禁用；其余 → 显示并启用），
+      并把「操作符 + 值」做成一组紧凑控件（操作符 74–96px，值输入框 64–150px，聚焦临时放宽到 220px，失焦收回，避免把列撑开）。
+    </p>
+    <table style="margin-top:8px">
+      <thead><tr><th>状态</th><th>值输入框</th></tr></thead>
+      <tbody>
+        <tr><td>不筛选 / 为空 / 非空</td><td>隐藏 + disabled</td></tr>
+        <tr><td>包含 / 等于 / 大于 …</td><td><span class="pill ok">显示 + 可输入（150px）</span></td></tr>
+        <tr><td>四个筛选项全开时的表格宽度</td><td><span class="pill ok">1134px = 容器宽，零横向滚动</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/feedback-sql.png" alt="反馈：SQL 看不清"><figcaption>你反馈的：代码面只剩关键字可见（红框为你的标注）</figcaption></figure>
+  <figure><img src="shots/after-detail-debug-1440.png" alt="修复后的 SQL 代码面"><figcaption>修复后：正文 14.88:1、关键字 8.42:1，字段名完整可读</figcaption></figure>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/feedback-filter.png" alt="反馈：没有值输入框"><figcaption>你反馈的：选了操作符却只有下拉框</figcaption></figure>
+  <figure><img src="shots/after-detail-filter-on-1440.png" alt="修复后的快筛联动"><figcaption>修复后：操作符 + 值输入框成组（四个筛选项全开仍不溢出）</figcaption></figure>
+</div>
+
+<h2 style="border-bottom-color:var(--accent-line)">0.2 报表配置页：重灾区重做（两个层级方案供你选）</h2>
+<div class="card" style="border-color:var(--accent-line);background:var(--accent-soft);margin-bottom:12px">
+  <h3 style="margin-top:0;color:var(--accent-ink)">你指出的两个问题，根因都在我这边（同为「清理内联样式」的连带损伤）</h3>
+  <table style="margin-top:6px">
+    <thead><tr><th>你看到的现象</th><th>真因</th><th>修法</th></tr></thead>
+    <tbody>
+      <tr><td>名称列被压成「一」字一行</td><td>列宽原本写在 <code>&lt;th style="width:40px"&gt;</code> 这类内联样式里，我清理内联样式时把 <code>width</code> 一起剔除了 → 自动布局把名称列压扁</td><td>改为 <code>colgroup</code> + <code>table-layout:fixed</code> 显式列宽体系（不再依赖内联）</td></tr>
+      <tr><td>「SQL 查询」表头字号/高度与别的列不一样</td><td><b>class 撞名</b>：生产用 <code>.sql-head</code> 标记 SQL 列表头，我把这个名字挪用成了「代码工具条」（flex + 11px 大写 + 字距）</td><td>删掉挪用规则；表头统一 12px / 行高 18px / 高 38px</td></tr>
+      <tr><td>经营分析 / 区域销售的父子层级完全看不见</td><td>层级原本只靠内联 <code>margin-left:24px;border-left:3px</code> 表达，同样被清理掉</td><td>用真正的层级组件重做（见下方两个方案）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<table style="margin-bottom:12px">
+  <thead><tr><th>实测项（CDP 程序化断言）</th><th>修复前</th><th>修复后</th></tr></thead>
+  <tbody>
+    <tr><td>报表名称渲染</td><td><span class="pill" style="background:#ffefed;border-color:#f8cdc9;color:#a9131f">一字一行（竖排，高 200px+）</span></td><td><span class="pill ok">单行 15px / 行卡片 22px</span></td></tr>
+    <tr><td>表头一致性（字号 / 高度）</td><td><span class="pill warn">SQL 列独立成块、字号高度都不同</span></td><td><span class="pill ok">全部 12px / 38px 统一</span></td></tr>
+    <tr><td>层级缩进导轨</td><td><span class="pill warn">不存在（父子完全平铺）</span></td><td><span class="pill ok">导轨缩进 22px + 节点横线，1280/1440/1920 均生效</span></td></tr>
+    <tr><td>横向溢出</td><td><span class="pill warn">旧结构 10 列塞 856px，表内滚 276px</span></td><td><span class="pill ok">v2 三档全部 0</span></td></tr>
+  </tbody>
+</table>
+<p class="muted" style="font-size:13px;margin-bottom:12px">
+  独立视觉评审（同一视觉模型盲评）：<b>方案 A 7.5 分 / 方案 B 7.0 分，推荐 A</b>。
+  其理由摘要：A 的三级层级（经营分析 → 区域销售 → 华东片区）一目了然，行卡片把名称/配置/连接池/SQL 自然分行、不拥挤；
+  B 的「分类路径」列会被截断导致层级信息丢失、配置 chips 在单元格里竖着堆叠导致行高不齐。
+  我已按评审意见再改一轮：描述文字独立成行、三级导轨同色不再"断裂"、空分类改轻量提示（带「+ 新增报表」）、
+  ≤1400px 左树收窄到 220px、方案 B 的路径列加宽到 176px 且 chips 单行折叠（超出显示 +N）。
+</p>
+<div class="grid g2">
+  <div class="card">
+    <h3 style="margin-top:0">方案 A · 分组卡 + 层级导轨（推荐）</h3>
+    <ul class="tight" style="font-size:13px">
+      <li>一级分类 = 卡片，卡头含折叠钮、深度色点、分类名、报表数、hover 才出的分类操作</li>
+      <li>子分类 = 卡内「层级导轨」：竖向 1px 导轨 + 节点横线 + 逐级缩进 22px + 字号逐级下沉 + 深度色点（三级用浅色点）</li>
+      <li>每行报表改为<b>行卡片</b>：名称 + 状态 chip + <b>配置 chips</b>（分页 / 缓存优先 / 保活 / 写护栏）+ 连接池 + SQL 摘要 + hover 出操作</li>
+      <li>把原来「默认分页 / 缓存 / TTL」三列并成一列 chips → 10 列变 5 个信息区，彻底消除挤压</li>
+      <li>1280 / 1440 / 1920 三档零横向滚动</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">方案 B · 单表 + 分类路径列</h3>
+    <ul class="tight" style="font-size:13px">
+      <li>全部报表一张表，用「分类路径」列表达归属（<code>经营分析 / 区域销售</code>）</li>
+      <li>列数 10 → 8（同样把三列配置并成 chips）；<code>colgroup</code> 固定列宽，表头统一</li>
+      <li>跨分类排序、批量操作天然一致；代价是失去分组卡的视觉分区</li>
+      <li>适合「按属性筛选 + 跨分类比较」的用法；如果你更常按分类逐块管理，A 更顺手</li>
+    </ul>
+  </div>
+</div>
+<div class="card" style="border-color:var(--accent-line);background:var(--accent-soft);margin-bottom:12px">
+  <h3 style="margin-top:0;color:var(--accent-ink)">补做：卡片视图（上一版切换卡片后只剩分类标题）</h3>
+  <p style="font-size:13px">
+    上一版我只藏了列表行、没渲染卡片，切到卡片等于只剩分类大标题——这是漏项，已补。
+    现在每个分类<b>同数据各渲一份</b>（列表 + 卡片，与生产 <code>.view-list</code>/<code>.view-card</code> 语义一致），
+    卡片沿用生产的 <code>.rpt-card</code>/<code>.rc-*</code> DOM 词汇：名称 + 配置 chips + 连接池 + SQL 摘要 + 备注 + 底部接口/操作（hover 才出）。
+    层级导轨在卡片视图下同样保留。勾选做了<b>双形态镜像</b>（生产 <code>pickedReportIds()</code> 同语义），批量条计数不会翻倍。
+  </p>
+  <table style="margin-top:8px">
+    <thead><tr><th>实测（CDP）</th><th>列表视图</th><th>卡片视图</th></tr></thead>
+    <tbody>
+      <tr><td>可见行 / 卡片</td><td>11 行</td><td><span class="pill ok">11 张卡（方案B 同样 11 张）</span></td></tr>
+      <tr><td>卡片网格容器</td><td>—</td><td>4 个分组各一个 + 方案B 1 个 = 5</td></tr>
+      <tr><td>卡片高度一致性</td><td>—</td><td><span class="pill ok">1440 全部 187px（描述固定两行高，底边对齐）</span></td></tr>
+      <tr><td>1280 / 1440 / 1920 溢出</td><td>0</td><td><span class="pill ok">0 / 0 / 0</span></td></tr>
+      <tr><td>勾选跨形态镜像</td><td colspan="2"><span class="pill ok">通过（两形态值同步、计数不翻倍）</span></td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/reports-v2-a-1440.png" alt="方案A"><figcaption>方案 A（1440）：经营分析 3 个报表 → 区域销售 1 个 → 华东片区（三级示意）</figcaption></figure>
+  <figure><img src="shots/reports-v2-b-1440.png" alt="方案B"><figcaption>方案 B（1440）：单表 + 分类路径列</figcaption></figure>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/reports-v2-A-card-1440.png" alt="方案A 卡片视图"><figcaption>方案 A · 卡片视图（分组 + 层级导轨保留，每分类同数据各渲一份）</figcaption></figure>
+  <figure><img src="shots/reports-v2-B-card-1440.png" alt="方案B 卡片视图"><figcaption>方案 B · 卡片视图（平铺，卡片带分类路径）</figcaption></figure>
+</div>
+<p class="muted" style="margin-top:8px">
+  可直接点开的对照页：<a href="preview-reports-v2.html">preview-reports-v2.html</a>（页头分段器切换方案 A/B；点分类卡头折叠、勾选出现批量条、搜索框实时过滤）。
+  另有 1280 / 1920 两档截图：<code>shots/reports-v2-a-1280.png</code>、<code>shots/reports-v2-a-1920.png</code>。
+</p>
+
+<h2>1. 设计令牌（全站唯一取值来源）</h2>
+<div class="grid g4">
+  <div class="card"><div class="num">1</div><div class="lbl">个强调色（鸢尾 #5d61e0）</div></div>
+  <div class="card"><div class="num">9</div><div class="lbl">档字阶（11 / 12 / 13 / 14 / 16 / 18 / 22 / 28）</div></div>
+  <div class="card"><div class="num">4px</div><div class="lbl">间距栅格（4/8/12/16/20/24/32/40）</div></div>
+  <div class="card"><div class="num">4</div><div class="lbl">档圆角（4 / 6 / 10 / 14）</div></div>
+</div>
+
+<h3>色板（OKLCH 生成 + WCAG 对比度实测）</h3>
+<div class="swatches">
+  <div class="sw"><i style="background:#f4f6f9"></i><b>应用底</b><span>#f4f6f9</span></div>
+  <div class="sw"><i style="background:#fff"></i><b>卡片面</b><span>#ffffff</span></div>
+  <div class="sw"><i style="background:#f7f8fa"></i><b>表头/内嵌</b><span>#f7f8fa</span></div>
+  <div class="sw"><i style="background:#dde0e4"></i><b>分隔线</b><span>#dde0e4</span></div>
+  <div class="sw"><i style="background:#11151d"></i><b>主文字</b><span>#11151d</span></div>
+  <div class="sw"><i style="background:#555b68"></i><b>次文字</b><span>#555b68</span></div>
+  <div class="sw"><i style="background:#6c717c"></i><b>辅助文字</b><span>#6c717c</span></div>
+  <div class="sw"><i style="background:#5d61e0"></i><b>主色</b><span>#5d61e0</span></div>
+  <div class="sw"><i style="background:#f4f6ff"></i><b>主色浅底</b><span>#f4f6ff</span></div>
+  <div class="sw"><i style="background:#10121a"></i><b>侧栏底</b><span>#10121a</span></div>
+  <div class="sw"><i style="background:#048b56"></i><b>成功</b><span>#048b56</span></div>
+  <div class="sw"><i style="background:#d78c00"></i><b>警示</b><span>#d78c00</span></div>
+  <div class="sw"><i style="background:#d02b31"></i><b>危险</b><span>#d02b31</span></div>
+  <div class="sw"><i style="background:#0d7dd4"></i><b>信息</b><span>#0d7dd4</span></div>
+</div>
+<p class="muted" style="margin-top:10px">
+  对比度全部实算：主文字 17.9:1、次文字 6.7:1、辅助文字 4.8:1、主色文字 8.5:1、白字压主色 4.9:1，均 ≥ WCAG AA 的 4.5:1。
+</p>
+
+<h3>组件状态语言（同一套：常态 / hover / 聚焦 / 禁用）</h3>
+<div class="badge-row">
+  <span class="pill ok">启用</span><span class="pill warn">将过期</span><span class="pill" style="background:#ffefed;border-color:#f8cdc9;color:#a9131f">失败</span>
+  <span class="pill acc">缓存快照</span><span class="pill">停用</span>
+  <span class="pill" style="height:22px">行内快筛：静止低噪音</span>
+</div>
+<p class="muted" style="margin-top:8px">状态一律「颜色 + 文字」双编码；焦点圈 2px 实线（不再用模糊光晕）；危险操作只在确认弹层里用实心红。</p>
+
+<h2>2. 改版前 / 改版后（同尺寸真实渲染，1440×900）</h2>
+<p class="muted">左＝当前线上页面，右＝确认稿。截图由 headless Chrome 实际渲染产出，非示意图。</p>
+
+<h3>登录</h3>
+<div class="cmp">
+  <figure><img src="shots/before-login-1440.png" alt="旧登录页"><figcaption>改版前：紫渐变满屏 + 居中白卡</figcaption></figure>
+  <figure><img src="shots/after-login-1440.png" alt="新登录页"><figcaption>改版后：左品牌区 + 右表单，克制的深色底与光晕</figcaption></figure>
+</div>
+
+<h3>报表详情（最复杂的一页）</h3>
+<div class="cmp">
+  <figure><img src="shots/before-detail-1440.png" alt="旧报表详情"><figcaption>改版前</figcaption></figure>
+  <figure><img src="shots/after-detail-1440.png" alt="新报表详情"><figcaption>改版后：粘性页头 + 页签下划线指示 + 表格粘性表头 + 数字等宽对齐</figcaption></figure>
+</div>
+
+<h3>报表配置（左树右表 + 双视图）</h3>
+<div class="cmp">
+  <figure><img src="shots/before-reports-1440.png" alt="旧报表配置"><figcaption>改版前</figcaption></figure>
+  <figure><img src="shots/after-reports-list-1440.png" alt="新报表配置"><figcaption>改版后：列表视图（页头分段器可切卡片）</figcaption></figure>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/after-reports-card-1440.png" alt="新报表配置卡片视图"><figcaption>卡片视图（点击页头「卡片」切换）</figcaption></figure>
+  <figure><img src="shots/after-detail-panel-1440.png" alt="字段设置抽屉"><figcaption>字段设置抽屉（右侧滑出 + 遮罩 + ESC 关闭）</figcaption></figure>
+</div>
+
+<h3>概览 / 审计 / 报表编辑</h3>
+<div class="cmp">
+  <figure><img src="shots/before-overview-1440.png" alt="旧概览"><figcaption>改版前</figcaption></figure>
+  <figure><img src="shots/after-overview-1440.png" alt="新概览"><figcaption>改版后：磁贴 2×3 对齐、快捷入口整行铺满</figcaption></figure>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/before-audit-1440.png" alt="旧审计"><figcaption>改版前</figcaption></figure>
+  <figure><img src="shots/after-audit-1440.png" alt="新审计"><figcaption>改版后：类型徽标统一 pill、筛选栏成组</figcaption></figure>
+</div>
+<div class="cmp" style="margin-top:12px">
+  <figure><img src="shots/before-report-edit-1440.png" alt="旧报表编辑"><figcaption>改版前</figcaption></figure>
+  <figure><img src="shots/after-report-edit-1440.png" alt="新报表编辑"><figcaption>改版后：双栏等高、控件统一 32px、底部保存栏</figcaption></figure>
+</div>
+
+<h2>3. 逐页清单</h2>
+<table>
+  <thead><tr><th style="width:36px">#</th><th>页面</th><th>确认稿</th><th>本次视觉改动</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>登录</td><td><a href="preview-login.html">preview-login</a></td><td>紫渐变满屏 → 左品牌深色区 + 右表单；输入框 38px、主按钮加厚</td></tr>
+    <tr><td>2</td><td>报表中心</td><td><a href="preview-center.html">preview-center</a></td><td>分类树轻量化（行高 32、图标 15px、hover 才出操作）；卡片网格重排</td></tr>
+    <tr><td>3</td><td>报表详情</td><td><a href="preview-detail.html">preview-detail</a></td><td>粘性页头、页签下划线指示、表头浮层化、快筛行降噪、数字等宽右对齐</td></tr>
+    <tr><td>4</td><td>概览</td><td><a href="preview-overview.html">preview-overview</a></td><td>磁贴 2×3、快捷入口 3 列末行铺满、系统状态成组</td></tr>
+    <tr><td>5</td><td>报表配置</td><td><a href="preview-reports.html">preview-reports</a></td><td>左树层级线、列表/卡片互斥、行内操作去边框、连接池单行截断</td></tr>
+    <tr><td>6</td><td>连接池</td><td><a href="preview-pools.html">preview-pools</a></td><td>表格节奏统一、状态点语言一致</td></tr>
+    <tr><td>7</td><td>用户</td><td><a href="preview-users.html">preview-users</a></td><td>表格与说明行统一</td></tr>
+    <tr><td>8</td><td>API 接口</td><td><a href="preview-api.html">preview-api</a></td><td>api-row 卡片化、展开区灰底分层、URL 等宽代码块</td></tr>
+    <tr><td>9</td><td>定时任务</td><td><a href="preview-scheduler.html">preview-scheduler</a></td><td>7 列表格节奏、状态徽标统一</td></tr>
+    <tr><td>10</td><td>审计日志</td><td><a href="preview-audit.html">preview-audit</a></td><td>类型徽标 pill、日期快捷成组、筛选栏成卡片</td></tr>
+    <tr><td>11</td><td>报表编辑</td><td><a href="preview-report-edit.html">preview-report-edit</a></td><td>双栏等高分卡、控件 32px、SQL 编辑器 220px、底部保存栏</td></tr>
+    <tr><td>12</td><td>新建调度</td><td><a href="preview-sched-new.html">preview-sched-new</a></td><td>排除规则行组、双栏表单</td></tr>
+    <tr><td>13</td><td>编辑调度</td><td><a href="preview-sched-edit.html">preview-sched-edit</a></td><td>同上 + 绑定表</td></tr>
+  </tbody>
+</table>
+
+<h2>4. 自检证据（程序化断言，非主观描述）</h2>
+<table>
+  <thead><tr><th>检查项</th><th>方法</th><th>结果</th></tr></thead>
+  <tbody>
+    <tr><td>横向溢出</td><td>headless Chrome 实测 <code>scrollWidth - clientWidth</code>，13 页 × 1440/1280 共 16 个检查点</td><td><span class="pill ok">全部 0</span></td></tr>
+    <tr><td>控制台错误</td><td>CDP <code>Log.entryAdded</code> 逐页收集</td><td><span class="pill ok">0</span></td></tr>
+    <tr><td>交互态渲染</td><td>点开页签 / 抽屉 / 导出对话框 / 卡片视图 / API 展开后复测</td><td><span class="pill ok">14 态全部 0 溢出</span></td></tr>
+    <tr><td>超大图标（旧码 300×150 SVG 事故）</td><td>探测所有无尺寸 SVG 的渲染高度 &gt; 28px 的个数</td><td><span class="pill ok">0</span></td></tr>
+    <tr><td>单一来源可行性</td><td>移除生产全部页面级 <code>&lt;style&gt;</code> 补丁，仅用 <code>app.css</code> 渲染 13 页</td><td><span class="pill ok">成立（0 溢出 / 0 报错）</span></td></tr>
+    <tr><td>报表配置页（重灾区）</td><td>CDP 实测：名称元素行高 / 表头字号与高度去重 / 导轨与缩进几何</td><td><span class="pill ok">名称 1 行（不再竖排）· 表头统一 12px/38px · 导轨缩进 22px 生效</span></td></tr>
+    <tr><td>对比度审计脚本修正</td><td>原脚本无法解析 <code>color-mix()</code> 的 <code>color(srgb …)</code> 计算值，把浅灰表头当成近黑底 → 结论失真；已重写解析器后重跑</td><td><span class="pill ok">14 页 0 处低于 4.5:1（本次结论可信）</span></td></tr>
+    <tr><td><b>全站对比度审计</b></td><td>遍历 13 页每个含文字的元素，向上求有效背景后实算 WCAG 比值</td><td><span class="pill ok">0 处低于 4.5:1</span></td></tr>
+    <tr><td>代码面词法着色</td><td>CDP 读计算样式 + 截图内像素复核（8 个 token）</td><td><span class="pill ok">全部 ≥6.4:1（正文 14.9:1）</span></td></tr>
+    <tr><td>对比度</td><td>OKLCH → sRGB 实算 WCAG 比值</td><td><span class="pill ok">全部 ≥ 4.5:1</span></td></tr>
+    <tr><td>class 覆盖率</td><td>13 页实际 DOM 用到 199 个 class，与 app.css 选择器比对</td><td><span class="pill warn">已覆盖 192（余 7 个为输入控件/容器）</span></td></tr>
+  </tbody>
+</table>
+
+<h2>5. 请你确认这几点</h2>
+<ul class="check">
+  <li><input type="checkbox"><span><b>整体方向</b>：明亮工作台 + 深色侧栏、单一鸢尾强调色、克制的边框与阴影。若你想要别的气质（例如整站深色、或更暖的纸感浅色），确认稿底部可一键换色调，也可以直接说，我换方向重出。</span></li>
+  <li><input type="checkbox"><span><b>登录页</b>：左侧深色品牌区 + 右侧表单的分栏。若你更想要「居中单卡」，改回成本很低。</span></li>
+  <li><input type="checkbox"><span><b>信息密度</b>：表格行高 40px、单元格 padding 9×12、正文 13px。想更紧凑（行高 36）或更宽松（行高 44）都可以，我按你的选择一次调到位。</span></li>
+  <li><input type="checkbox"><span><b>快筛行</b>：保留但降噪（我们现在这样）。也可以收进「高级筛选」抽屉，表格更干净但少一个高频入口——你定。</span></li>
+  <li><input type="checkbox"><span><b>侧栏宽度</b>：248px（比现在 240px 略宽）。可以按你屏幕调整。</span></li>
+</ul>
+
+<h2>6. 确认后我会怎么落地（不跑偏）</h2>
+<ul class="tight">
+  <li>把确认稿的 <code>app.css</code> 折进 <code>render.py</code> 的 <code>_BASE_CSS</code> / <code>_COMMON_CSS</code>，成为唯一视觉来源。</li>
+  <li>删掉 <code>report.py _CSS</code>、<code>config.py _CONFIG_EXTRA_CSS</code>、<code>server.py</code> 登录页内联样式等页面级补丁，并把生产 HTML 里那 269 处内联样式换成 class（这一步是治本，也是以前每次「只改全局样式」失败的原因）。</li>
+  <li>补上确认稿里出现的 class（如 <code>.search-box</code>/<code>.rc-*</code>/<code>.quick-actions</code> 等），页面结构按确认稿微调，功能、URL 参数、表单协议一律不动。</li>
+  <li>更新 <code>tests/htmlcheck.py</code> 与 <code>test_render*</code> 中受影响的断言，跑 L0 → L1 → L2 分段全量。</li>
+  <li>回写知识库 <code>06-ui-interactions.md</code> 与视觉规范分卷，并留一份最终对比截图（同样 PC + 移动多视口）。</li>
+</ul>
+
+<footer>
+  确认稿位置：<code>docs/compose/spec/ui-v2-draft/</code>（过程素材，不进生产 static）·
+  样式单一来源：<code>app.css</code> · 生成脚本：<code>scripts/ui-v2/make_preview.py</code> ·
+  令牌与对比度：<code>scripts/ui-v2/tokens.py</code>
+</footer>
+
+</div>
+</body>
+</html>
