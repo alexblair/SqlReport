@@ -169,6 +169,12 @@
 
 `build_category_manage_section_html`（render.py）：`.tree/.cat` flex 行 = SVG 文件夹图标 + 名称 + `.cnt` 报表数角标 + `.ops` ghost 操作（✎编辑 ↑↓移动 ✕删除，`btn-ghost btn-icon`）；子分类包 `.kids` 容器逐级缩进，父行点击 `toggleCatNode(ev,row)` 折叠/展开（区块标题 `toggleCatTree` 整体折叠，localStorage 记忆）。**不再使用 ├─ 文本引导线**（原 `config.py` 的 `.tree-guide/.cat-tree-item` 死 CSS 已于 R2 核对时删除，勿再引入）。
 
+**展开/收起类名契约（2026-10-06 修复，勿再回退）**：UI v2 落公共 CSS 时只抄了确认稿类名，把生产 JS 实际切换的类名弄丢了两处，表现为「按钮文案/箭头会动、面板或子分类不动」（用户实测反馈 `/config/api-endpoints` 展开 收起 失效）：
+
+1. **API 行展开区**：`_COMMON_JS` 的 `apiToggleMore` 切的是 `.api-more` 上的 `.on`，而 `_COMMON_CSS` 当时只认 `.api-row.open .api-more` → 现为 `.api-row.open .api-more,.api-more.on{display:block}`（同 `.side-panel.on,.side-panel.open` 的双别名惯例；`.api-row.open` 保留给确认稿/预览稿 `make_preview.py` 用）。
+2. **分类树子节点**：`.tree .kids{display:none}` + `.tree .kids.on{display:block}` 是**唯一**的折叠实现（`toggleCatNode` 切 `.on`）。两张树共用该选择器：`/config/reports` 左树 markup 带 `on`（默认展开，点父行折叠）；`/report` 报表中心 `#rc-tree` markup **不带** `on`（默认收起，点右侧 `[data-chevron]` 展开）。
+3. **改公共 CSS 的铁律**：元素级对齐——JS 在哪个元素上切哪个类，CSS 就必须有针对**那个元素 + 那个类**的显示规则；类名全局存在不等于该元素可用（`on` 在 `.side-panel` 上有效，在 `.api-more` 上曾是空的）。门禁：`tests/test_ui_tokens.TestRevealClassContracts`（元素级，自证见 `gate_redproof.py` 第 5 条）。
+
 ## 组件库（按需全量见 render.py）
 
 **通用**：`build_flash_html` / `build_empty_row_html` / `build_pagination_html` / `build_collapse_section_html`(**三态 mem_key 已废除**，仅保留参数兼容) / `build_config_filter_box_html` / `build_delete_form_html` / `build_move_buttons_html` / `build_export_modal_html`(T7.4 新增)
@@ -225,8 +231,8 @@
 2. **验到第二、三次操作**：换页后拖拽、连续两次应用、先隐藏再还原再排序。
 3. **组合顺序要验**：字段顺序 × 筛选规则 × 排序 × 导出交叉（脚本 `scripts/ui-v2/e2e/e2e-combo.mjs`、`swap-reinit.mjs`）。
 4. **注册路径唯一**：新增 init 必须进 `initPage()`/`initReportPage()`；页面级脚本用 `onReady(fn)`；换页实现只有 `_swapMain` 一份。
-5. **删样式必问语义归属**：默认隐藏（`display`）、列宽、底色/文字成对——删掉后旧语义由谁承担？
-6. 改了 `render.py`/`report.py`/`config.py` 后**重启服务再验**（页面内联 JS 由内存直出）。
+5. **删样式必问语义归属**：默认隐藏（`display`）、列宽、底色/文字成对——删掉后旧语义由谁承担？改公共 CSS 时**必须同步核对 JS 实际切换的类名**（元素级契约），漏一侧就是「点了没反应」。
+6. 改了 `render.py`/`report.py`/`config.py` 后**重启服务再验**：页面内联 JS 由内存直出；外链公共 CSS/JS 走 `ensure_common_assets` 的**内容哈希目录 + 进程级 URL 缓存**（`_COMMON_ASSET_URLS`），不重启进程就仍指向旧 hash 目录、改了也看不到。
 
 **失败模式库**（每类都是本轮真实事故；能机械检测的已做成门禁，勿靠“记住”）：
 
@@ -234,7 +240,7 @@
 |------|------|------|
 | 代码块文字隐形 | 底/字分属两条规则 | `TestContrastGate`（成对声明 + 对比度实算） |
 | 整页被遮罩盖住 | 同一规则内 `display` 被后面的值覆盖 | `TestNoDuplicateDeclarations` |
-| 面板/对话框点不开 | JS 切 `.on` 而 CSS 只认 `.open/.show` | `TestJsToggledClassesHaveStyles` |
+| 面板/对话框/展开区点不开 | JS 切 `.on` 而 CSS 只认 `.open/.show`（或反过来：只认确认稿类名） | `TestRevealClassContracts`（元素级：JS 切的类必须有对应 display 规则）+ `TestJsToggledClassesHaveStyles` |
 | 对话框三段排成一行 | 结构假设错（并列兄弟当成单个盒子） | `TestJsToggledClassesHaveStyles::test_modal_supports_sibling_sections` |
 | 按钮能点、拖拽/下拉失效 | 换页只 `innerHTML` 替换，不执行内联脚本、不重跑初始化 | `TestNoRefreshSwapReinit` + `TestPageInitRegistration` |
 | 新加的初始化换页后不跑 | 新 `init*` 没进 `initPage()` | `TestPageInitRegistration` |
@@ -243,9 +249,10 @@
 | 同名参数重复提交 | 镜像控件带 `name` | `TestFormControlNameUniqueness` |
 | 排序项序号从 2 开始/移动错位 | 占位块未受管，下标整体错位 | `TestNoRefreshSwapReinit::test_sort_placeholder_managed` |
 | 「修了但我这儿还是坏的」 | 动态 HTML 未禁缓存 | `TestHtmlFreshness` |
+| 展开/收起点了没反应（按钮文案/箭头却在动） | CSS 按确认稿只收 `.api-row.open`，生产 JS 切的是 `.api-more.on`；同一提交还删了 `.tree .kids{display:none}`（分类树折叠同款失效） | `TestRevealClassContracts` + e2e `scripts/ui-v2/e2e/api-row-expand-check.mjs` |
 
-**门禁自身也要被验证**：`venv/bin/python tests/bug_hunt/gate_redproof.py` 会把上述 4 条新门禁
-对应的历史缺陷打回去（RED 必失败），再还原（GREEN 必通过）；4/4 通过才算门禁有效。
+**门禁自身也要被验证**：`venv/bin/python tests/bug_hunt/gate_redproof.py` 会把上述 5 条新门禁
+对应的历史缺陷打回去（RED 必失败），再还原（GREEN 必通过）；5/5 通过才算门禁有效。
 
 ### 改 UI 前阅读顺序
 

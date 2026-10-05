@@ -1,7 +1,7 @@
 """gate_redproof.py — 门禁自身的变体证明（RED-GREEN）。
 
 **为什么需要这个脚本**：一条从未失败过的门禁等于没有门禁——它可能只是"恰好路过"当前
-代码，并不能在缺陷回归时拦下来。本脚本把本轮 4 条 UI 门禁各自对应的**历史缺陷打回去**
+代码，并不能在缺陷回归时拦下来。本脚本把本轮 5 条 UI 门禁各自对应的**历史缺陷打回去**
 （运行时变异 / 临时改写源码），要求门禁**必须失败**（RED），还原后**必须通过**（GREEN）。
 
 覆盖的门禁（`tests/test_ui_tokens.py`）：
@@ -9,6 +9,14 @@
   2. `TestPageInitRegistration::...reachable...`  ← 新增 init 函数没进 initPage（换页后不重放）
   3. `TestPageInitRegistration::...replay_safe`   ← 无条件裸绑 DOMContentLoaded（换页后不执行）
   4. `TestFormControlNameUniqueness`              ← 镜像控件带 name（同名参数重复提交）
+  5. `TestRevealClassContracts::...element_level...` ← CSS 只认确认稿类名、JS 切另一个（展开按钮点了没反应）
+覆盖的门禁（`tests/test_doc_budget.py`，硬性 #20）：
+  6. `test_agents_md_within_budget`  ← AGENTS.md 注入体积膨胀（每步重发）
+  7. `test_routes_resolve`          ← 路由表引用了不存在的分卷
+  8. `test_no_orphan_volumes`       ← 新增分卷未在三处索引登记
+
+第 5 项为纯内存变异（临时把 `render._COMMON_CSS` 改回缺陷版，不碰磁盘），
+故该门禁必须**调用时取值**公共 CSS（`_all_css()`），不能缓存模块级常量。
 
 ⚠️ 第 3 项会**临时改写 `report.py`**（追加一行变异、随即还原）。脚本用 try/finally +
 sha256 校验保证还原；若上次运行被强杀留下 `report.py.redproof.bak`，脚本会拒绝启动，
@@ -139,6 +147,58 @@ def main() -> int:
     _check("镜像控件带 name", mutate_name,
            lambda: setattr(report, "build_export_modal_html", orig_modal),
            "tests.test_ui_tokens.TestFormControlNameUniqueness.test_report_page_controls")
+
+    # --- 5) 展开类名契约错位（历史事故：按钮点了没反应） --------------------
+    orig_reveal_css = render._COMMON_CSS
+
+    def mutate_reveal():
+        render._COMMON_CSS = orig_reveal_css.replace(
+            ".api-row.open .api-more,.api-more.on{display:block}",
+            ".api-row.open .api-more{display:block}", 1)
+        assert render._COMMON_CSS != orig_reveal_css, "变异未命中 api-more 展开规则"
+
+    _check("展开类名契约错位", mutate_reveal,
+           lambda: setattr(render, "_COMMON_CSS", orig_reveal_css),
+           "tests.test_ui_tokens.TestRevealClassContracts"
+           ".test_queried_element_toggled_class_has_element_level_display_rule")
+
+    # --- 6~8) 文档预算门禁（每步注入体积 / 路由完整性，全内存变异） ------
+    from tests import test_doc_budget as docbudget
+    real_load = docbudget._load_docs
+    real_docs = real_load()
+
+    def _cloned() -> dict:
+        return {"files": dict(real_docs["files"]),
+                "volumes": dict(real_docs["volumes"])}
+
+    def mutate_agents_oversize():
+        docs = _cloned()
+        docs["files"]["AGENTS.md"] += "x" * docbudget.LIMIT_AGENTS_MD
+        docbudget._load_docs = lambda: docs
+
+    _check("AGENTS.md 超注入预算", mutate_agents_oversize,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_agents_md_within_budget")
+
+    def mutate_route_dangling():
+        docs = _cloned()
+        docs["files"]["AGENTS.md"] += "\n任务相关分卷见 `99-ghost.md`。\n"
+        docbudget._load_docs = lambda: docs
+
+    _check("分卷路由断链", mutate_route_dangling,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_routes_resolve")
+
+    def mutate_orphan_volume():
+        docs = _cloned()
+        docs["volumes"]["99-ghost.md"] = "# 无人登记的孤儿卷\n"
+        docbudget._load_docs = lambda: docs
+
+    _check("孤儿分卷未登记", mutate_orphan_volume,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_no_orphan_volumes")
+
+    assert docbudget._load_docs is real_load, "文档预算门禁变异未还原"
 
     print(f"{'门禁':26} RED(应失败)  GREEN(应通过)  结论")
     failed = 0

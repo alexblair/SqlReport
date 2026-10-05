@@ -23,8 +23,10 @@ HOST=127.0.0.1 PORT=8099 venv/bin/python server.py &
 | `sort-check2.mjs` | 排序在缓存报表与 20 万行报表上都生效、耗时 | `CDP_PORT=9411 node scripts/ui-v2/e2e/sort-check2.mjs` |
 | `swap-reinit.mjs` | **无刷新换页后**拖拽/排序/导出联动/嵌套筛选是否仍可用（换页重初始化回归） | `CDP_PORT=9411 node scripts/ui-v2/e2e/swap-reinit.mjs` |
 | `repro-sort-broken.mjs` | 用户复现步骤：隐藏列→应用→还原→应用→再排序 | `CDP_PORT=9411 node scripts/ui-v2/e2e/repro-sort-broken.mjs` |
+| `api-row-expand-check.mjs` | `/config/api-endpoints` 展开/收起（整页+换页态+多轮+组合）、两处分类树折叠、详情页接口页签 | `CDP_PORT=9411 node scripts/ui-v2/e2e/api-row-expand-check.mjs`（可加 `BASE=http://127.0.0.1:8098`） |
 
-注意：这些脚本默认连 `http://127.0.0.1:8099`，账号 `admin/admin123`（DEBUG 配置库默认账号）。
+注意：这些脚本默认连 `http://127.0.0.1:8099`，账号 `admin/admin123`（DEBUG 配置库默认账号）；
+`api-row-expand-check.mjs` 支持 `BASE=` 覆盖（可用于另起的验证实例）。
 脚本属于开发期资产，**不参与 unittest discover**（需要浏览器），但与 `tests/test_ui_tokens.py` 的
 静态门禁互补：门禁管「规则/类名/令牌/对比度」，E2E 管「点下去真的有反应、结果真的变了」。
 

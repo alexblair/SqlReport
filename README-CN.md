@@ -587,6 +587,7 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 
 ```
 SqlReport/
+├── AGENTS.md              # AI 开发代理指引（硬性约束 + 入口引导路由表；2026-10-06 起入库）
 ├── server.py              # HTTP 服务器入口、路由分发（ThreadingHTTPServer）
 ├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点/定时任务）
 ├── report.py              # 报表页、分页、排序、筛选
@@ -614,7 +615,7 @@ SqlReport/
 ├── file_permissions.py    # 运行时文件权限管理（static_cache 目录属主/权限）
 ├── tests/                 # 单元测试（80+ 文件；`unittest discover -s tests/ -t .`）
 ├── docs/                  # V1↔V2 切换指南 + spec / plan / 知识库
-├── scripts/               # perf/ 性能工具 + ui-v2/ E2E 脚本
+├── scripts/               # perf/ 性能工具 + ui-v2/ E2E 脚本 + agent/ 会话成本自查（#20）
 ├── config.db              # SQLite 配置数据库（自动创建，不提交）
 ├── install.sh             # 自动化依赖安装脚本（venv + pip install）
 ├── test_env.sh            # 本地测试环境启停脚本（默认 0.0.0.0:8099）
@@ -624,7 +625,7 @@ SqlReport/
 └── MEMORY.md              # 跨会话项目记忆（入库）
 ```
 
-仓库根的 `AGENTS.md`（AI 开发代理指引）与运行时产物（`venv/`、`run-logs/`、`perf-logs/`、`.codegraph/`、`static_cache/`、`*.debug.db`）均在 `.gitignore` 中，不属于仓库内容。
+仓库根的 `AGENTS.md`（AI 开发代理指引）自 2026-10-06 起随仓库入库；运行时产物（`venv/`、`run-logs/`、`perf-logs/`、`.codegraph/`、`static_cache/`、`*.debug.db`）仍在 `.gitignore` 中，不属于仓库内容。
 
 ---
 

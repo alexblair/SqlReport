@@ -2,7 +2,7 @@
 
 # 本项目 spec / plan 存储路径与格式约定（项目初始化）
 
-> 取代关系: 本设计不取代任何既有 spec；与既有过程稿（`ui-redesign*.md`、`cache-write-test-scenarios.md`）并存，历史稿不追溯改造。
+> 取代关系: **部分条款已被 `2026-10-06-token-budget-design.md` 取代**（`AGENTS.md` 的 git 忽略，2026-10-06 用户指示取消）；其余条款仍生效。本设计不取代其他既有 spec；与既有过程稿（`ui-redesign*.md`、`cache-write-test-scenarios.md`）并存，历史稿不追溯改造。
 
 ## 1. 背景与冲突识别
 
@@ -95,11 +95,11 @@
 | 建目录 | `docs/compose/plan/`（本次初始化的 plan 即首个文件） |
 | 写 spec | 本文件 |
 | 写 plan | `docs/compose/plan/2026-09-28-docs-spec-plan-conventions-plan.md` |
-| 提交 | 只提交 `docs/` 存量与新增 spec/plan；`AGENTS.md` 保持忽略不入库 |
+| 提交 | 只提交 `docs/` 存量与新增 spec/plan；~~`AGENTS.md` 保持忽略不入库~~ **2026-10-06 变更：用户指示取消该忽略，`AGENTS.md` 随仓库提交**（见 `2026-10-06-token-budget-design.md` 取代关系） |
 
 **验证（绿了才报完成）**：
 
-1. `git check-ignore AGENTS.md` 仍命中（未误伤）；`git check-ignore docs/compose/spec/<本文件>` 不再命中；
+1. ~~`git check-ignore AGENTS.md` 仍命中（未误伤）~~（2026-10-06 取消该忽略后本判据作废）；`git check-ignore docs/compose/spec/<本文件>` 不再命中；
 2. `git status --short docs/` 显示存量 + 新增待提交清单，无 `__pycache__` / `.pyc`；
 3. `git add -A docs/ && git status` 复核暂存区；提交说明用简体中文，提交前给用户过目；
 4. 约定生效自检：AGENTS.md 新节可 grep 到；spec/plan 文件存在且状态头 / 状态行合规。
@@ -108,4 +108,4 @@
 
 - 不迁移、不改名、不补状态头历史 spec；不动 `knowledge/` 与 `reports/` 的既有结构。
 - 不建 `docs/INDEX.md` 总索引、不建 `docs/superpowers/`、不引入文档生成工具。
-- 不改 AGENTS.md 中与本文无关的任何既有条款；不放开 `AGENTS.md` 本身的 git 忽略。
+- 不改 AGENTS.md 中与本文无关的任何既有条款；~~不放开 `AGENTS.md` 本身的 git 忽略~~（2026-10-06 用户指示已放开，见上表「提交」行）。

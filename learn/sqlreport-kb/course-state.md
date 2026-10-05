@@ -19,13 +19,14 @@
 | 7 | 缓存调度审计 | `07-cache-scheduler-audit.md` | 完成（2026-09-29 补 L1 派生态缓存与导出并入缓存链路的说明） |
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因；2026-09-29 从 AGENTS.md 迁入两败必停全文 + L2 分段命令表 + `-t .` 陷阱 + 性能工具链） |
 | 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7；**2026-09-30 新增「代码检索纪律 #18/#19」——codegraph 优先检索、查不到才降级 grep、改完必 sync**） |
+| 10 | Token 预算 | `10-token-budget.md` | 完成（**2026-10-06 新建**：把 4 个历史会话的真实 `usage` 复盘成可执行纪律——成本 ≈ 步数 × 上下文、98.6% 为历史重发；返回体积阈值/批处理/会话分段交接 = 硬性 #20。配套 `scripts/agent/session_cost.py`（自查工具，含自测）与 `tests/test_doc_budget.py`（文档预算门禁）） |
 
 > 第 6 章已于 2026-09-30 随 UI v2「石墨·鸢尾」实施改写（令牌/组件/页面地图口径见 `06-ui-interactions.md` 与 `docs/compose/spec/2026-09-30-ui-v2-design.md`）。
 
 入口：`docs/compose/knowledge/README.md` + `INDEX.md`
 
 **文档结构约定（2026-09-29 起）**：`AGENTS.md` 只保留「每次任务都要读」的最小集
-（硬性约束条目 + **§0 入口引导路由表** + 环境命令 + 收尾检查单，当前 156 行）。
+（硬性约束条目 + **§0 入口引导路由表** + 环境命令 + 收尾检查单，当前 160 行）。
 凡「只在特定类型任务才需要」的流程全文一律在本库分卷；AGENTS.md §0 路由表登记
 「什么时候读哪一卷 / 改完必更新哪一卷」。新增内容时先判断它属于最小集还是分卷。
 
@@ -95,6 +96,14 @@ kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写
 index=codegraph ok (137 files, 6894 nodes, 17453 edges, v1.4.0)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
+last_sync=2026-10-06 展开/收起类名契约修复（用户实测：/config/api-endpoints 展开 收起 失效）
+           根因：ad109be 只抄确认稿类名（.api-row.open），生产 apiToggleMore 切 .api-more.on；
+           同一提交还删了 .tree .kids{display:none}＋.kids.on → 分类树折叠同款失效；
+           render.py `_COMMON_CSS` 修 3 行（.api-more.on / .tree .kids / .kids.on）；
+           06 卷新增「展开/收起类名契约」段 + 失败模式库 2 条 + 清单第 5/6 条补强；
+           MEMORY.md Rules 13/14 修订、新增 Rule 18 与 Discovered 隔离验证实例事实；
+           新门禁 `TestRevealClassContracts`（元素级）+ e2e `api-row-expand-check.mjs`；
+           gate_redproof 4→5 条；全量 3012 项 OK（74s）、8098 隔离实例浏览器实测 17/17 PASS
 last_sync=2026-10-06 文档/知识库时效审计（V2 基线）
            全库对账修正：codegraph 计数 137/6894/17453、AGENTS.md 156 行、INDEX 模块行数、
            03/05 卷行号锚点、08 卷 L2 分段补漏网测试文件 + perf 脚本表 + 实测 3009 项/94s、

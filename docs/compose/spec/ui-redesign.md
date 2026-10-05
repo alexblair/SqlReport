@@ -15,7 +15,7 @@ commits: 9a975b9..f5a99e7
 > See the final report for up-to-date state:
 > [Final Report](../reports/ui-redesign.md)
 
-> 工作区约定：用户确认在当前 main 检出就地工作（AGENTS.md 与 `docs/compose/` 知识库被 .gitignore 忽略、仅本地存在，不迁移 worktree）；生产代码实施阶段若需分支/隔离再单独决定。
+> 工作区约定：用户确认在当前 main 检出就地工作（AGENTS.md 与 `docs/compose/` 知识库被 .gitignore 忽略、仅本地存在，不迁移 worktree；2026-10-06 注：`AGENTS.md` 已取消 git 忽略并入库，本条仅为当时的工作区约定记录）；生产代码实施阶段若需分支/隔离再单独决定。
 > 过程约束：全程串行、禁止并行任务（用户指令）；所有计划/进度/过程文档落盘于 `docs/compose/`，禁止只停留在会话里。
 
 ## Report

@@ -168,7 +168,7 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 
 ## 禁止提交的运行时/本地物
 
-`app_config*.json`（非 example）、`config.db`、`audit.db`、`venv/`、`static_cache/`、`run-logs/`、`perf-logs/`、`.codegraph/`、`AGENTS.md`、`.mimocode/` 等（见 `.gitignore`）。
+`app_config*.json`（非 example）、`config.db`、`audit.db`、`venv/`、`static_cache/`、`run-logs/`、`perf-logs/`、`.codegraph/`、`.mimocode/` 等（见 `.gitignore`；仓库根 `AGENTS.md` 自 2026-10-06 起已入库）。
 **`docs/` 与 `MEMORY.md` 已入库**，勿误当忽略物（`git check-ignore <path>` 可实测）。
 
 ## 测试策略与推荐验证顺序（硬性 #8）
@@ -267,7 +267,7 @@ python -m unittest discover -s tests/bug_hunt -t . -p 'test_boundary.py' -v
 - 上表用 `discover -p` / 显式模块名分段；**单段失败先修该段再继续**，不要整库重来。
 - 仅当需要与官方全量入口对账、或跨多段改完收口时，最后可跑一次：
   `python -m unittest discover -s tests/ -t . -v`（仍受「代码未变不重复全量」约束）。
-- 参考规模（2026-10-06 实测）：全量 3009 项约 94s（skipped 4 = 无 DEBUG/真库环境）；**跑全量前先看易踩坑 #26**。
+- 参考规模（2026-10-06 实测）：全量 **3018 项约 65s**（skipped 4 = 无 DEBUG/真库环境）；**跑全量前先看易踩坑 #26**。
 - 不在 ①–⑩ 内、也**故意不进 discover** 的：`tests/integration/`（无 DEBUG 配置/MySQL 不通则 skip）、`tests/manual_*.py`（`manual_` 前缀不被收集，需显式运行）。
 
 ### 3. 收尾检查单
@@ -321,6 +321,7 @@ python -m unittest discover -s tests/bug_hunt -t . -p 'test_boundary.py' -v
 24. **新增门禁不等效于门禁有效**：从未失败过的门禁可能只是恰好路过当前代码。新门禁必须做 RED-GREEN 证明（把历史缺陷打回去→必须失败；还原→必须通过）：`venv/bin/python tests/bug_hunt/gate_redproof.py`（会临时改写 `report.py` 并校验 sha256 还原；不进 discover，勿当常规回归）。
 25. **断言公共 CSS 别对着报表页 `body` 断言**（2026-10-05 实测）：报表页公共样式走**外链** `/static/vendor/self@<hash>/common.css`（`render.py:2484`），**不内联**；只有资产写入失败才回退 `<style>{_COMMON_CSS}</style>`。所以「页面产物里必须出现某条 CSS 规则」的断言在正常环境**必红**（本轮白跑一轮）。正确写法：① 断言公共样式单一来源 `render._COMMON_CSS`（知识库 06 卷已规定禁止页面级补丁，故与页面级等价）；② 另加一条「页面确实携带公共样式」（`"/common.css" in body` 或内联回退命中）。另：收紧旧断言必须用**实测读出的真值**（本轮 `th:first-child + th` 实际是 `156px`，旧断言只要求 `\d+px`、docstring 还写着 100px），并做 RED-PROOF 证明改坏会红。
 26. **`run-logs/` 里的历史克隆副本会污染静态分析门禁**（2026-10-06 实测）：`tests/bug_hunt/static_analyzer.py` 只跳过 `IGNORE_DIRS`（`venv`/`.codegraph`/`__pycache__`/`.git`/`.opencode`/`.tmp`），**不跳过 `run-logs/`、`perf-logs/`**。把分支验证用的 `git clone`/`git worktree` 放进 `run-logs/` 后，其 `tests/__init__.py` 的包内相对导入会被判「无法导入模块 test_base」，全量 discover 里 `test_static_analysis.test_no_import_errors` 因此 ERROR 红（本轮实证：全量 3009 项唯一失败即此，产品代码零回归）。对策：跑全量前确认 `run-logs/` 下无 `.py` 克隆产物（或把克隆放到仓库外）；**不要**为此放宽门禁。
+27. **门禁直接读「可能缺失的文件」会在别人新克隆的机器上红**（2026-10-06 实测；当时 `AGENTS.md` 尚未入库）：`AGENTS.md` 曾在 `.gitignore`（本地不入库），门禁 `open()` 它会 `FileNotFoundError` → 整套 discover ERROR。对策：读盘入口用 `_maybe_read()`——文件缺失返回 `None`、从判定集合里去掉（缺文件 = 没有该约束，不算违规），并写成「文件存在才断言」；同时**别让它空转通过**：另加一条结构断言（如「分卷数 ≥9」「`knowledge/README.md` 必须存在」）证明读盘入口本身没退化。另：该仓库里 `.py` 放在 `run-logs/` 会被静态分析扫到（见 #26），一次性分析脚本要么无相对导入，要么别留在仓库内。（2026-10-06 起仓库根 `AGENTS.md` 已入库，但本条对任何可能缺失的文件——被忽略的、生成的、按环境可选装的——仍然适用。）
 
 ## 文档过时线索（AGENTS.md 已提醒）
 
@@ -329,4 +330,4 @@ python -m unittest discover -s tests/bug_hunt -t . -p 'test_boundary.py' -v
 - 文档冲突 → 改文档（中英同步）
 
 ---
-最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#17；**2026-09-30 UI v2 复盘同步**（易踩坑 #21–#24：换页态验收、CDP 脚本自身的坑、改代码后重启服务、门禁需 RED-GREEN 自证；新工具 `tests/bug_hunt/gate_redproof.py`；交互验收清单见 `knowledge/06-ui-interactions.md` 硬性 #17）；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #17–#20）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）
+最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#17、**#20**；**2026-10-06 Token 复盘同步**（易踩坑 #27：门禁读 gitignore 文件的可移植性；新门禁 `tests/test_doc_budget.py`——文档注入预算与知识库路由完整性，已纳入 `gate_redproof.py` 第 6–8 项 RED-GREEN）；**2026-09-30 UI v2 复盘同步**（易踩坑 #21–#24：换页态验收、CDP 脚本自身的坑、改代码后重启服务、门禁需 RED-GREEN 自证；新工具 `tests/bug_hunt/gate_redproof.py`；交互验收清单见 `knowledge/06-ui-interactions.md` 硬性 #17）；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #17–#20）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）

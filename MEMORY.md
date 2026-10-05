@@ -65,13 +65,14 @@
     落地：AGENTS 硬性 #17、`knowledge/06-ui-interactions.md` 验收清单 + 失败模式库、
     门禁 `tests/test_ui_tokens.py::TestPageInitRegistration`、E2E `scripts/ui-v2/e2e/swap-reinit.mjs`。
 
-13. **能机械检测的绝不写进口头约定**（本轮 4 条新门禁）：同一规则内重复声明属性、
+13. **能机械检测的绝不写进口头约定**（累计 5 条新门禁）：同一规则内重复声明属性、
     新 init 未进 `initPage()`/裸绑 `DOMContentLoaded`、同名控件混用类型、JS 块注释 `*/`。
     且**新门禁必须自证有效**：`venv/bin/python tests/bug_hunt/gate_redproof.py`
-    （把历史缺陷打回去必须失败、还原必须通过；4/4 才算数）。从未失败过的门禁等于没有。
+    （把历史缺陷打回去必须失败、还原必须通过；**5/5** 才算数）。从未失败过的门禁等于没有。
 
-14. **改 `render.py`/`report.py`/`config.py` 后必须重启服务再验**，否则验的是内存里的旧 HTML；
-    交付给用户前提醒硬刷新（HTML 已 `no-store`，但用户标签页可能已在跑旧脚本）。
+14. **改 `render.py`/`report.py`/`config.py` 后必须重启服务再验**：内联 JS 由内存直出；外链公共
+    CSS/JS 走 `ensure_common_assets` 的**内容哈希目录 + 进程级 URL 缓存**（`_COMMON_ASSET_URLS`），
+    不重启进程 URL 不变、改了也看不到（换 hash 目录不影响旧页面）。交付前提醒硬刷新。
 15. **查代码先走 codegraph，改完代码先 sync**（2026-09-30 用户硬性要求，AGENTS #18/#19）：
     `codegraph explore "<中文意图 + 代码词>"` 一次拿到源码 + 调用链 + 波及面，通常就是唯一需要的调用；
     **只有查不到才降级** `grep`/`read`，且降级前先把查询**加宽重试**（补符号名/文件名/英文技术词）。
@@ -90,7 +91,37 @@
     `V2` 为默认分支并承接全部后续提交；开发/发版只进 V2，发版打附注 tag 后显式推送，**禁止向 V1 推送**。
     用户侧「取哪一版 / 怎么切换」的单一来源是 `docs/version-switch-guide.md`（改动须同步双 README + `01-architecture.md`）。
 
+18. **展开/收起类交互：CSS 必须认 JS 实际切换的类，且要到「元素级」**（2026-10-06）：
+    用户报「`/config/api-endpoints` 展开 收起 失效」：按钮文案会变、面板恒 `display:none`。
+    根因是 ad109be（UI v2 落公共 CSS）只抄确认稿类名 `.api-row.open`，而生产 `apiToggleMore`
+    切的是 `.api-more` 上的 `.on`；同一提交还删了 `.tree .kids{display:none}`＋`.kids.on`→分类树折叠同款失效。
+    **类名全局存在不等于该元素可用**（`on` 在 `.side-panel` 上有效，在 `.api-more` 上是空的），
+    所以门禁必须元素级：`TestRevealClassContracts` + 浏览器实测 `scripts/ui-v2/e2e/api-row-expand-check.mjs`。
+19. **Token 预算三铁律（2026-10-06 会话复盘，硬性 #20）**：4 个历史会话 Σtotal **69.7M tokens**，
+    其中 **98.6% 是历史重发**（cacheRead），output 仅 0.58% → **成本 ≈ 步数 × 上下文**。
+    ① 单条返回 >8k 字符即超阈：一条全库 `grep`（225 命中 / 43k 字符）让该步加 16.3k tokens、
+    被后面 143 步重发 ＝ **2.33M tokens（该会话 9.7%）**；先 `grep -c` 计数、`head` 截断、`read` 带 `offset/limit`。
+    ② 独立调用**同步发**：会话 1 有 118/147 步只发 1 个调用；每减一步省「该步上下文 + 约 1.6 万固定开销」。
+    ③ 单会话 >60 步或上下文 >120k tokens → 落盘交接（`run-logs/handoff/`）换新会话（长会话是二次成本）。
+    ④ `write`/`edit` 会回显改动后全文（大文件一步 19.9k tokens）→ 放会话后段、一次批量改完。
+    自查：`venv/bin/python scripts/agent/session_cost.py --last 1`；详见 `10-token-budget.md`。
+
 ## Discovered（环境事实）
+
+- **DSH 会话记录可直接读（复盘数据源）**：`~/.dsh/sessions/--<cwd 的 / 换 ->--/session-*/session.v4.jsonl.zstd`
+  （用 `zstd -dc` 解压；本机无 python `zstandard` 模块）。每条 `assistant/message` 带真实
+  `usage`（input / cacheRead / cacheWrite / output / total），`data.stream` 是流式回放产物、**不进模型上下文**。
+  会话标题在 `~/.dsh/storages/session_projcache/sessions/<id>.json` 的 `record.rows.title.val`；
+  `storages/usage_history.json` 只有**按天**聚合，没有按会话用量——按会话要用 `scripts/agent/session_cost.py`。
+- **每步注入的提示词有两个来源**：项目根 `AGENTS.md`（2026-10-06 起入库）与**全局 `/root/.dsh/AGENTS.md`**（仓库外，superpowers 引导 + 全局文档裁决规矩）。两者都每步重发：实测某会话 `agent-instructions` 达 **25,022 字符**（两个文件叠加）。全局文件已于 2026-10-06 从 **6,206 → 4,050 字节**（−35%，只留「不加载技能就会做错」的最小集，完整技能内容改用 `skill using-superpowers` 按需加载）。
+- **外部已起的 8099 实例：本会话看不见也重启不了**（bash 跑在 `bwrap --unshare-pid` 里，`pgrep`/`ss -ltnp`
+  都看不到宿主的 server.py；`./test_env.sh restart` 会因“端口被本命名空间外进程占用”拒绝）。
+  需要验证代码改动时：另起隔离实例（`run-logs/` 内 gitignore 目录）——
+  `DEBUG_CONFIG_FILE=run-logs/probe/verify.debug.json HOST=127.0.0.1 PORT=8098 venv/bin/python -u server.py`
+  （配置里 `scheduler.enable=false` 避免与宿主实例双跑定时任务，`redis.key_prefix`/`audit_db`/`static_cache` 都指向 `run-logs/probe/`）。
+  浏览器验证则用 headless Chrome：`/opt/chrome-offline/chrome-linux64/chrome --headless=new --no-sandbox
+  --remote-debugging-port=9411 --user-data-dir=run-logs/probe/chrome about:blank`（**必须用后台作业**跑，
+  普通 `&` 会随 bwrap 退出被杀）。
 
 - **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（137 文件 / 6894 节点 / 17453 边），`codegraph status`
   可看 `pendingChanges`。**只索引 `.py`(126) + `.js`/`.mjs`(11)**——`.md`/`.json`/`.html`/`.css`/`.sh`

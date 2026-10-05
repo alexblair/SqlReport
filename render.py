@@ -871,7 +871,8 @@ th:first-child + th{min-width:156px}
 .tree .cat:hover .ops{display:inline-flex}
 .tree .cat.active .cnt{color:var(--accent-ink)}
 .tree .cat.active .ops{display:inline-flex}
-.tree .kids{margin-left:14px;padding-left:10px;border-left:1px solid var(--line-soft)}
+.tree .kids{display:none;margin-left:14px;padding-left:10px;border-left:1px solid var(--line-soft)}   /* 折叠态=默认；toggleCatNode 切 .on 展开 */
+.tree .kids.on{display:block}
 aside.card .section-title{border-bottom:1px solid var(--line-soft)}
 .tree-toggle{
   display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-13);font-weight:600;
@@ -893,7 +894,7 @@ aside.card .section-title{border-bottom:1px solid var(--line-soft)}
 .api-main .muted{font-size:var(--fs-12);color:var(--ink-3)}
 .api-main .actions,.api-main .ops{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
 .api-more{display:none;padding:var(--sp-3) var(--sp-4) var(--sp-4);border-top:1px solid var(--line-soft);background:var(--bg-subtle)}
-.api-row.open .api-more{display:block}
+.api-row.open .api-more,.api-more.on{display:block}   /* 生产 JS 加 .on；.open 为确认稿别名 */
 .api-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--sp-2) var(--sp-4);margin-bottom:var(--sp-3)}
 .api-meta > *{font-size:var(--fs-12);color:var(--ink-2)}
 .api-desc{font-size:var(--fs-13);color:var(--ink-2);line-height:1.7;margin-bottom:var(--sp-3)}

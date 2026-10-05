@@ -60,8 +60,7 @@ CONTEXT.md
 # flow 治理资产（本地使用，不提交；知识库主 SPEC/模块分卷/机器索引/访谈记录/flow 状态，主仓保持可安全推送 GitHub）
 .adocs/
 
-# 代理指引（本地使用，不提交）
-AGENTS.md
+# 代理指引：仓库根 AGENTS.md 自 2026-10-06 起不再忽略（随仓库提交）
 
 # MiMoCode 会话/状态（本地使用，不提交）
 .mimocode/

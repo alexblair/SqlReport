@@ -225,7 +225,84 @@ class TestJsToggledClassesHaveStyles(unittest.TestCase):
             with self.subTest(base=base):
                 self.assertRegex(ALL_CSS, re.escape(base) + r'\.on\s*,\s*' + re.escape(base) + r'\.open\s*\{\s*display:\s*flex')
         self.assertRegex(ALL_CSS, r'\.backdrop\.on\s*,\s*\.backdrop\.show\s*\{\s*display:\s*block')
+class TestRevealClassContracts(unittest.TestCase):
+    """展开/收起面板的「显示规则」必须认生产 JS 实际切换的类名（元素级契约）。
 
+    历史事故（ad109be：UI v2 落公共 CSS 时只抄了确认稿类名）：确认稿写
+    `.api-row.open .api-more`，生产 `_COMMON_JS` 却切 `.api-more` 上的 `.on`
+    —— 两边各说各话：按钮文案照切、面板纹丝不动（用户实测反馈
+    「/config/api-endpoints 展开 收起 功能失效」）。同一提交还删掉了
+    `.tree .kids{display:none}` / `.tree .kids.on{display:block}`，分类树折叠同款失效。
+    `.side-panel.on,.side-panel.open` 即此事故的既有修法：**CSS 必须认 JS 的类**。
+    """
+
+    @staticmethod
+    def _all_css() -> str:
+        """当前公共 CSS；**调用时取值**——门禁自证脚本会临时变异 render._COMMON_CSS 验证本门禁能拦住回归。"""
+        return render._BASE_CSS + render._COMMON_CSS
+
+    @staticmethod
+    def _css_rules() -> list:
+        """拆 CSS 为 [(选择器列表, 声明块)]（先剥注释，避免注释里的花括号串场）。"""
+        css = re.sub(r'/\*.*?\*/', '', TestRevealClassContracts._all_css(), flags=re.S)
+        return [([s.strip() for s in sel.split(',') if s.strip()], decl)
+                for sel, decl in re.findall(r'([^{}]+)\{([^{}]*)\}', css)]
+
+    def _display_selectors(self, base: str, cls: str) -> list:
+        """返回同时含 base 类与状态类、且声明了 display 的选择器。"""
+        out = []
+        for sels, decl in self._css_rules():
+            if 'display' not in decl:
+                continue
+            for s in sels:
+                if (re.search(r'\.' + re.escape(base) + r'(?![\w-])', s)
+                        and re.search(r'\.' + re.escape(cls) + r'(?![\w-])', s)):
+                    out.append(s)
+        return out
+
+    def test_queried_element_toggled_class_has_element_level_display_rule(self):
+        """JS「querySelector(某类) → 同一变量 classList 切换类」必须有元素级 display 规则。
+
+        直接从生产 JS 源码提取「元素选择器 + 切换的类」，回查公共 CSS：
+        只要 CSS 按确认稿的类名写、JS 按旧类名切，本条必红（.api-more 即历史实例）。
+        """
+        src = "\n".join(open(mod.__file__, encoding="utf-8").read()
+                        for mod in (render, report, config))
+        assign = dict(re.findall(
+            r"var\s+(\w+)\s*=\s*[^;\n]*?querySelector\(\s*['\"]([^'\"]+)['\"]\s*\)", src))
+        pairs = []
+        for var, sel in assign.items():
+            if not re.fullmatch(r'\.[\w-]+', sel):
+                continue      # 多选择器 / 非单一类选择器无法与 CSS 选择器对齐，跳过
+            base = sel[1:]
+            for cls in re.findall(
+                    re.escape(var) + r"\.classList\.(?:add|remove|toggle)\(\s*['\"](\w[\w-]*)['\"]",
+                    src):
+                pairs.append((base, cls))
+        self.assertIn(('api-more', 'on'), pairs,
+                      f"契约提取失配：未从 JS 提取到 .api-more/.on（实际 {sorted(set(pairs))}）")
+        missing = [f".{base} + .{cls}" for base, cls in pairs
+                   if not self._display_selectors(base, cls)]
+        self.assertEqual([], missing,
+                         f"JS 会切换这些元素上的类，但公共 CSS 无元素级 display 规则：{missing}")
+
+    def test_api_more_hidden_by_default_and_revealed_by_js_class(self):
+        """API 行展开区：默认 display:none，展开规则必须含 `.api-more.on`（JS 实际切法）。"""
+        self.assertTrue(re.search(r'more\.classList\.toggle\("on"\)', render._COMMON_JS),
+                        "apiToggleMore 不再切 .api-more 的 .on —— JS 契约变了，本门禁需同步")
+        base = re.search(r'\.api-more\s*\{([^}]*)\}', self._all_css())
+        self.assertIsNotNone(base, "缺少 .api-more 基础规则")
+        self.assertIn('display:none', base.group(1).replace(' ', ''))
+        self.assertIn('.api-more.on', self._display_selectors('api-more', 'on'))
+
+    def test_tree_kids_hidden_by_default_and_revealed_by_js_class(self):
+        """分类树子节点容器：默认隐藏 + `.tree .kids.on` 展开（两张树都切这个类）。"""
+        self.assertTrue(re.search(r'kids\.classList\.toggle\("on"\)', render._COMMON_JS),
+                        "toggleCatNode 不再切 .kids 的 .on —— JS 契约变了，本门禁需同步")
+        self.assertTrue(re.search(r'\.tree\s+\.kids\s*\{[^}]*display\s*:\s*none', self._all_css()),
+                        ".tree .kids 缺 display:none 基础态（子分类永不隐藏）")
+        self.assertTrue(re.search(r'\.tree\s+\.kids\.on\s*\{[^}]*display\s*:\s*block', self._all_css()),
+                        ".tree .kids.on 缺 display:block 展开规则（分类树折叠失效）")
 
 class TestInlineJsSyntax(unittest.TestCase):
     """内联 JS 必须语法合法（整块脚本一个语法错误 → 该页所有函数都不存在）。

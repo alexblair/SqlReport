@@ -587,6 +587,7 @@ Report list page highlights:
 
 ```
 SqlReport/
+├── AGENTS.md              # AI agent guide (hard constraints + routing table; versioned since 2026-10-06)
 ├── server.py              # HTTP server entry, route dispatch (ThreadingHTTPServer)
 ├── config.py              # Config page CRUD (pools/users/reports/categories/API endpoints/scheduler)
 ├── report.py              # Report page, pagination, sorting, filtering
@@ -614,7 +615,7 @@ SqlReport/
 ├── file_permissions.py    # Runtime file permission management (static_cache owner/perms)
 ├── tests/                 # Unit tests (80+ files; `unittest discover -s tests/ -t .`)
 ├── docs/                  # V1↔V2 switch guide + spec / plan / knowledge base
-├── scripts/               # perf/ benchmark tooling + ui-v2/ E2E scripts
+├── scripts/               # perf/ benchmark tooling + ui-v2/ E2E scripts + agent/ session-cost self-check (#20)
 ├── config.db              # SQLite config database (auto-created, not committed)
 ├── install.sh             # Automated dependency installer (venv + pip install)
 ├── test_env.sh            # Local test environment control script (default 0.0.0.0:8099)
@@ -624,7 +625,7 @@ SqlReport/
 └── MEMORY.md              # Cross-session project memory (tracked)
 ```
 
-The repo-local `AGENTS.md` (AI agent guide) and runtime artifacts (`venv/`, `run-logs/`, `perf-logs/`, `.codegraph/`, `static_cache/`, `*.debug.db`) are gitignored and not part of the repository.
+The repo-local `AGENTS.md` (AI agent guide) is versioned in the repository since 2026-10-06; runtime artifacts (`venv/`, `run-logs/`, `perf-logs/`, `.codegraph/`, `static_cache/`, `*.debug.db`) remain gitignored and are not part of it.
 
 ---
 
