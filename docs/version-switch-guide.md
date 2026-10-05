@@ -107,12 +107,19 @@ cp app_config.json    app_config.json.bak-$(date +%F)    2>/dev/null || true
 
 ```bash
 cd SqlReport
-git fetch origin --tags
-git checkout V2
+git fetch origin --tags                       # 完整克隆：一次更新所有远程跟踪分支
+git checkout V2                               # 本地无 V2 时按 origin/V2 自动建跟踪分支
 ./install.sh                       # 保险起见跑一次；实测 V1→V2 的 requirements.txt 未变
 source venv/bin/activate
 python server.py                   # 或按 §3.4 重启服务
 ```
+
+> **浅克隆（`--depth 1`）注意**：浅克隆默认只跟踪**克隆时的那一条线**，另一条线的远程跟踪引用并不存在；此时 `git checkout V1` 会报 `pathspec 'V1' did not match any file(s) known to git`。先按 refspec 补取再切（实测有效）：
+>
+> ```bash
+> git fetch --depth 1 origin V1:refs/remotes/origin/V1
+> git checkout -B V1 origin/V1
+> ```
 
 校验：
 
@@ -216,6 +223,7 @@ ls docs 2>/dev/null                # 应报「不存在」
 ```bash
 cd SqlReport
 git fetch origin --prune
+# 浅克隆改用：git fetch --depth 1 origin V1:refs/remotes/origin/V1
 git checkout -B V1 origin/V1
 git branch -u origin/V1 V1
 git branch -d main 2>/dev/null || true     # 确认已切到 V1 后再删本地旧名
@@ -266,6 +274,17 @@ python server.py
 **Q9：服务起不来 / 端口被占？**
 本地测试环境用 `./test_env.sh status → stop → start`；`HOST` / `PORT` 环境变量优先级最高，可用 `TEST_PORT=9100 TEST_HOST=127.0.0.1 ./test_env.sh start` 换端口。
 
+**Q10：切分支报 `pathspec 'V1' did not match any file(s) known to git`？**
+你用的是浅克隆（`--depth 1`）：它只跟踪克隆时那一条线，另一条线的远程跟踪引用不存在。按 refspec 补取后再切（实测有效）：
+
+```bash
+git fetch --depth 1 origin V1:refs/remotes/origin/V1
+git checkout -B V1 origin/V1
+git branch -u origin/V1 V1
+```
+
+同理取 V2：`git fetch --depth 1 origin V2:refs/remotes/origin/V2`；完整克隆（不带 `--depth`）不受此影响。
+
 ---
 
 ## 7. 维护者侧：以后怎么发版
@@ -278,18 +297,22 @@ python server.py
 
 ---
 
-## 证据（2026-10-05 实测，**交付前快照**）
+## 证据（2026-10-05 实测；`V1`/tag 为永久值，`V2` 分支头为交付时值）
 
-> 快照中的 `V2` 分支头与 `v2.0.0` 标签对象号，会因「提交本指南」这一步再前进一格（`v2.0.0` 已在**首次交付前**重新指向含本指南的提交——此次重指发生在任何用户取用之前，**此后 tag 不再移动**）；**`V1` 与 `v1-final` 的值永久不变**。实时值自行跑 `git ls-remote --heads --tags origin` 核对。
+> `V1` 与 `v1-final` 的值**永久不变**；`V2` 分支头会继续前进（下面第一段是交付前最后一次实测的原始输出），`v2.0.0` 在首次交付定稿时一次性指向含本指南的定稿提交、**此后不再移动**。任何时刻的实时值：`git ls-remote --heads --tags origin`。
 
 ```text
-$ git ls-remote --heads --tags origin
-9a975b98089352383376cbd46dd3b7fa7b02ce1e	refs/heads/V1
-1e0ea3a26f57e18ada082099be0d6412071f4248	refs/heads/V2
-4283fb67ef3f010d4275dbafec211a75db1829ec	refs/tags/v1-final
-9a975b98089352383376cbd46dd3b7fa7b02ce1e	refs/tags/v1-final^{}
-d31c4d50b33389c9105ff9190e869be5d6c7b83c	refs/tags/v2.0.0
-1e0ea3a26f57e18ada082099be0d6412071f4248	refs/tags/v2.0.0^{}
+$ git ls-remote --heads --tags origin        # 交付前最后一次实测（哈希已截断）
+9a975b98…	refs/heads/V1                 ← 冻结分支，永久不变
+2233dbd…	refs/heads/V2                 ← 交付前的分支头；本指南定稿提交后会再前进一格
+4283fb67…	refs/tags/v1-final            ← 附注 tag 对象
+9a975b98…	refs/tags/v1-final^{}         ← 指向 V1 提交（永久不变）
+6d1b9d5…	refs/tags/v2.0.0              ← 附注 tag 对象
+（定稿提交）	refs/tags/v2.0.0^{}           ← 指向含本指南的定稿提交（此后不再移动）
+
+# 交付瞬间的稳定关系（不写死哈希，永远成立）：
+#   refs/heads/V1 == refs/tags/v1-final^{}      （= 9a975b98…，永久不变）
+#   refs/heads/V2 == refs/tags/v2.0.0^{}        （相等只成立于交付瞬间；此后 V2 前进、v2.0.0 不动）
 ```
 
 ```text
@@ -325,6 +348,20 @@ $ git clone -b V1 --depth 1 …/SqlReport.git v1 && git -C v1 rev-parse HEAD
 $ git clone -b v1-final --depth 1 …      # 成功，检出「游离 HEAD」（tag 语义，见 §2.3）
 $ git clone -b v2.0.0   --depth 1 …      # 成功，检出「游离 HEAD」
 $ git clone -b main …                    # 失败：远程已无 main
+```
+
+```text
+$ git clone --depth 1 …/SqlReport.git            # 默认 clone → V2（交付时实测）
+branch=V2  head=2233dbd…  docs/=有 scripts/=有 test_env.sh=有 docs/version-switch-guide.md=有
+$ git clone -b V1 --depth 1 … && git rev-parse HEAD
+9a975b98…（工作树内 docs/ 与 scripts/ 均不存在，符合 V1 指纹）
+
+# 浅克隆里 V2 → V1 → V2 往返切换（实测）
+git fetch --depth 1 origin V1:refs/remotes/origin/V1 && git checkout -B V1 origin/V1
+  → branch=V1  head=9a975b9  docs存在=no
+git checkout V2
+  → branch=V2  docs存在=yes
+config.db / app_config.json（被 .gitignore 忽略）切换前后 md5 完全一致 ✔
 ```
 
 V1 → V2 增量（`git diff --stat 9a975b9 1e0ea3a`）：
