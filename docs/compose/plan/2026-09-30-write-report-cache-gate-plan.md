@@ -365,4 +365,31 @@ git commit -m "docs(kb): 同步持久写判定与静态护栏变更，记录两�
 - T5 完成：L1 `Ran 402 tests OK`；L2 分段 36 段全绿（合计 2923 用例）；知识库 4 卷 + 记忆 + 掌握状态已同步；
   `codegraph status` → `✓ Index is up to date`。偏差：首跑 `01static` 因新脚本的跨脚本 import 被门禁拦（无 noqa 豁免）
   → 改为点号包路径 `from scripts.perf.seed_session_script_report import ...`，重跑 `Ran 5 tests OK`（未削弱门禁）。
-- 收尾状态：**未提交**（按用户 2026-10-05 决策，改动留在工作区）；最终整支复核进行中。
+- 收尾状态：**已提交**（本地 `main` 提交 `1f971fc`，**未推送**；远端 `origin/main` 未动）。
+- 最终整支复核（2026-10-05）：由**全新上下文的独立 subagent** 执行，结论 `Ready to merge? With fixes`。
+  它独立验证了三条架构边界全部守住：`sql_contains_write` / `_split_sql_statements` 经 AST 级比对 IDENTICAL，
+  对 6,026 条语料做 HEAD vs 工作区行为对比 **0 差异**；权限侧零语义变更；静态护栏为并集；Redis 契约冻结（diff 零命中）。
+  **Critical C-1（已修）**：`TEMPORARY` 原按「关键词集合里出现过」判定 → `DROP TABLE temporary;` /
+  `CREATE TABLE temporary (id INT);` / `CREATE TABLE t (temporary INT);` 三条**真持久写**被判成会话级，
+  真实 DDL 被缓存读短路（复核者实证：3 次翻页只执行 1 次）。已收紧为「`CREATE`/`DROP` 的**次关键词**为
+  `TEMPORARY`」+ 双向用例。RED `run-logs/C1-red-20261005-211344.log`（4 条 subTest 失败）→
+  GREEN `run-logs/C1-green-20261005-211402.log`（79 tests OK）→ 收口 `run-logs/C1-L1-20261005-211638.log`
+  （静态门禁 + L1 组 **411 tests OK**）。同批复核的 I-1/I-2/I-3（回归脚本补安全方向交叉复算、静态护栏两类新用例、
+  `rebuild_static_endpoint_file` 的 403 正向断言）亦已落地。
+- **生产运行时验收（2026-10-05，8099 + 生产 MySQL/Redis，全程只读取证）**：
+
+  | 验收 | 方法 | 结果 |
+  |---|---|---|
+  | A｜`/report?id=38` 读 Redis 不读 MySQL | 21:32:34 **重启清空 L1** → 21:32:42 首次请求（此刻 L1 必为空） | #38 快照 `updated_at` 仍为 **21:27:18**、size 逐字节相同 `10,511,032B` ⟹ 未走 MySQL 成功路径，只能来自 **L2 Redis** ✅ |
+  | B｜修复生效（#35 会话级脚本） | 21:35:00 冷加载 + 21:35:15/25/29 三次翻页 | 快照**首次出现**（`TTL≈24h`、`1,887,246B`、8 结果集），`updated_at` 冻在 **21:35:00** ✅ |
+  | C｜同批解封的 #17 / #19 | 各 1 次冷加载 + 1 次翻页 | #17 `updated_at=21:43:10`、#19 `=21:43:23`，均为**第 1 次**请求时刻且未随翻页变化 ✅ |
+  | 对照｜真写报表 #37 | 未访问（日志无 `id=37`） | 无快照（`EXISTS=False`），符合「真持久写不得被缓存短路」 ✅ |
+
+  判据：旧代码对 #17/#19/#35 恒有 `skip_cache_read=True`（L1 被跳过、每请求真查库、查后重写快照），
+  故 `updated_at` 会等于**最后一次**请求时间；实测等于**第一次** ⟹ 只有冷加载那一次走了 MySQL。
+  同一判定下，若翻页发生在 L1 的 300s 窗口内，命中的是 **L1 进程缓存**；「L2 Redis 真被读」由验收 A 在
+  「重启清空 L1 + 快照永久」条件下严格证明，两者走同一条 `get_snapshot` 代码路径。
+- 用户已确认：`cache_ttl_hours=0` = **永不过期**（#20 / #24 / #26 / #38 为有意配置），非缺陷。
+- 遗留（不进本次修复，建议另立）：① `SELECT … INTO OUTFILE` / `DUMPFILE` 仍被判为「读」（spec §5.4 明文超范围，34 报表命中 0）；
+  ② `cache_info.source` 在「查询成功后回写快照」时标为 `redis`，页面徽标无法区分「本次取数来源」与「快照存在」；
+  ③ `allow_write=0` + 持久写报表的静态端点由「直出历史文件」变为 403（设计意图内）。
