@@ -124,3 +124,12 @@
   此前「MySQL 查询成功即标 `redis`」的账本式标注已修复（`report.py` 生产者 3 处：L1 写入入参
   + 两个 `cache_info` 字典；**渲染器未动**）。**注意**：`scripts/perf/bench.py` 的 S5 正式请求
   期望是 `process`（300s 内命中 L1），不是 `redis`；只有 L1 过期后命中 L2 才是 `redis`。
+- **`git update-index --chmod=±x <file>` 会把该文件的工作树内容重读进索引**（2026-10-05 踩坑，导致一次 Critical）：
+  用它修正环境性的权限位噪音（本仓库工作树有 316 个文件 644→755）时，会把该文件**全部未提交改动**
+  （含他人在制品）一并暂存 → 提交后在**干净检出上自测失败**（当次：`tests/test_report_extra.py` 混入 ui-v2 的
+  `import render` + 两条 CSS 常量正则断言，而 ui-v2 的 `render.py` 未提交）。
+  正确做法：① 先精确暂存（`git apply --cached` 命中 hunk / `git add -p`）；② 权限位用
+  `git update-index --chmod=-x --cacheinfo 100644,$(git rev-parse HEAD:<path>),<path>`，
+  或重建索引条目 `git hash-object -w <target> && git update-index --cacheinfo 100644,<blob>,<path>`；
+  ③ **改完必须验证「干净检出 HEAD 能自绿」**：`git worktree add --detach /tmp/x HEAD` 后跑受影响模块
+  —— 工作树全绿 ≠ 提交自绿（工作树可能依赖未提交的他人在制品）。
