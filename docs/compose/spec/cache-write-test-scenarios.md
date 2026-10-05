@@ -3,7 +3,7 @@
 > [!NOTE]
 > This document may not reflect the current implementation.
 > See the final report for up-to-date state:
-> [Final Report](../reports/ui-redesign.md)
+> 现状事实以 [知识库 INDEX](../knowledge/INDEX.md) 为准（本文件是 2026-09-25 的过程稿）。
 
 > 状态：已实测通过（2026-09-25，四场景全 PASS）
 > 可执行脚本：`tests/manual_cache_scenarios.py`（manual 前缀，不进 unittest discover）

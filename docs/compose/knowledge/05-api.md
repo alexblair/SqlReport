@@ -23,7 +23,7 @@ handle_api_request(conn, path, method, headers, body, query_params, client_ip)
 
 鉴权**始终在**静态分支之前；静态分支内**再拦写护栏**（防旧文件绕过）。
 
-## API Key 鉴权（`_validate_api_key` :675）
+## API Key 鉴权（`_validate_api_key` :684）
 
 ```
 _endpoint_valid_keys:
@@ -36,7 +36,7 @@ hmac.compare_digest 逐个比
 
 Key 格式：`sk-` + `token_urlsafe(32)`。
 
-## CORS（`_build_cors_headers` :737）
+## CORS（`_build_cors_headers` :746）
 
 - `allowed_origins` **空 → 不设任何 CORS 头**（浏览器跨域被拦，≠允许全部）
 - 含 `*` → `Allow-Origin: *` + `_CORS_BASE`

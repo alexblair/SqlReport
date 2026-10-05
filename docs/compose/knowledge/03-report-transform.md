@@ -1,6 +1,6 @@
 # 报表页 · 结果变换 · 导出 · 护栏
 
-## 报表执行核心：`report.execute_report`（report.py:949）
+## 报表执行核心：`report.execute_report`（report.py:972）
 
 输入：`report_id, sql, pool, page, page_size, sorts, filters, refresh, active_index, cache, force_rebuild, read_timeout, nested_filter`
 
@@ -11,7 +11,7 @@
 
 流程要点：
 
-1. **写护栏在读缓存之前**（约 :997）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**（2026-09-25，2026-09-30 收窄）——热快照不得短路写执行，每次真实跑库，缓存回填照常。
+1. **写护栏在读缓存之前**（约 :1025）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**（2026-09-25，2026-09-30 收窄）——热快照不得短路写执行，每次真实跑库，缓存回填照常。
    **判定分两个函数**（2026-09-30，`docs/compose/spec/2026-09-30-write-report-cache-gate-design.md`）：`sql_contains_write`（从严，服务权限与警示）与 `sql_has_persistent_write`（精确，只服务缓存门槛与静态护栏）。会话级语句（`CREATE`/`DROP TEMPORARY TABLE`、`SET @用户变量`）与 CTE 里的 `REPLACE()`/`INSERT()` 字符串函数调用**不再**跳过缓存读。
    **读白名单不豁免写文件**（2026-10-05，`../spec/2026-10-05-outfile-write-detect-design.md` §4.1）：`SELECT … INTO OUTFILE` / `INTO DUMPFILE` 写的是 **MySQL 服务端磁盘**，首关键词虽是 SELECT 也必须判写；判定挂在**相邻关键词对** `(INTO, OUTFILE|DUMPFILE)` 上并插在读白名单分支**之前**。
 2. 优先 Redis 快照（`prefer_cache`）→ 否则查 MySQL → 写回快照（分布式锁）；预览 SQL 与配置不一致**不写 Redis**
@@ -24,16 +24,18 @@ Web 路径 `read_timeout=30`；调度器/API 默认不设（防长查询被截�
 
 ### 关键入口（report.py）
 
+> 行号为 2026-10-06 实测；会随改动漂移，引用前用 `codegraph node <符号>` 核对。
+
 | 函数 | 行 | 作用 |
 |------|----|------|
-| `handle_request` | :1775 | HTTP 总入口：预览 / refresh_cache / GET → `render_report_page` |
-| `parse_filters` | :160 | `f_{col}`+`op_{col}`；旧 `f_col`+`f_q`；`nofilter` 丢弃 |
-| `parse_sorts` | :250 | `sort`/`dir` 可重复；同列保留先出现位置、后出现方向 |
-| `parse_nested_filter` | :217 | URL JSON → `validate_nested_filter`；失败 `ValueError` |
-| `parse_result_index` | :300 | `result=N`；非法回退 0；`-1` 全量哨兵 |
-| `render_report_page` | :1383 | 取配置 → `execute_report(read_timeout=30)` → HTML |
-| `_handle_refresh_cache` | :1699 | POST 重建后 302，保留 page/sort/cols/result |
-| `_filter_warning_flash` | :1756 | 非法数值筛选提示（**仅 Web 页**） |
+| `handle_request` | :2097 | HTTP 总入口：预览 / refresh_cache / GET → `render_report_page` |
+| `parse_filters` | :182 | `f_{col}`+`op_{col}`；旧 `f_col`+`f_q`；`nofilter` 丢弃 |
+| `parse_sorts` | :272 | `sort`/`dir` 可重复；同列保留先出现位置、后出现方向 |
+| `parse_nested_filter` | :239 | URL JSON → `validate_nested_filter`；失败 `ValueError` |
+| `parse_result_index` | :322 | `result=N`；非法回退 0；`-1` 全量哨兵 |
+| `render_report_page` | :1563 | 取配置 → `execute_report(read_timeout=30)` → HTML |
+| `_handle_refresh_cache` | :2021 | POST 重建后 302，保留 page/sort/cols/result |
+| `_filter_warning_flash` | :2078 | 非法数值筛选提示（**仅 Web 页**） |
 
 ### URL 参数
 
@@ -50,7 +52,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 
 ## 筛选语法（全系统统一）
 
-实现：`result_transform.parse_filter_expr`（:57）  
+实现：`result_transform.parse_filter_expr`（:63）  
 文案：`filter_help.py`（报表页 + 审计页 + 条件构建器）
 
 - 操作符：`contains/notcontains`（**不敏感**）、`eq/neq`（**敏感**、fullmatch、通配仍可用）、`gt/lt/gte/lte`（数值或 ISO 日期，不可比**静默跳过**）、`isempty/notempty`
@@ -61,7 +63,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 - 嵌套：`filter_rows_nested` + `validate_nested_filter`；`resolve_expression`：`now()/today()/yesterday()/tomorrow()/date_add/date_sub`（`now()` 实际返回**今天日期**串）
 - `filter_help` 与实现必须对齐（`tests/test_filter_help.py` 钉死）
 
-## 导出（`export.handle_export` :319）
+## 导出（`export.handle_export` :363）
 
 ```
 /export?id=N[&format=json][&charset=utf8|gbk][&zip=1]（**JSON 固定 UTF-8**：RFC 8259，与 `/api/*` 响应统一；选 JSON 时导出面板的字符集会被置为 UTF-8 并禁用）

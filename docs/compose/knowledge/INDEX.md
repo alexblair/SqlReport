@@ -2,19 +2,21 @@
 
 ## 1. 模块职责表
 
+> 行数为 2026-10-06 `wc -l` 实测；会随改动漂移，引用前以实测为准。
+
 | 模块 | 行数约 | 职责 |
 |------|--------|------|
-| `server.py` | 1113 | HTTP 入口、`ROUTES`、鉴权中间件、vendor 静态 |
-| `config.py` | 3002 | `/config*` 页面与表单 CRUD |
+| `server.py` | 1065 | HTTP 入口、`ROUTES`、鉴权中间件、vendor 静态 |
+| `config.py` | 2971 | `/config*` 页面与表单 CRUD |
 | `config_db.py` | 2530 | 配置库 DAL、双引擎 schema/迁移 |
 | `db.py` | 50 | 兼容转发层（仅 re-export） |
-| `report.py` | 2143 | 报表页、分页排序筛选 URL、`execute_report` |
-| `result_transform.py` | 598 | **纯函数**筛选/排序/列选择（页/导出/API/预设共用） |
+| `report.py` | 2225 | 报表页、分页排序筛选 URL、`execute_report` |
+| `result_transform.py` | 622 | **纯函数**筛选/排序/列选择（页/导出/API/预设共用） |
 | `filter_help.py` | 286 | 筛选语法帮助文案单一来源 |
-| `export.py` | 503 | CSV/JSON/ZIP 导出 |
-| `api_handler.py` | 1074 | `/api/*`、Key、CORS、静态 `.json`、预设/模板 |
-| `query_executor.py` | 490 | MySQL 事务多语句、`sql_contains_write` |
-| `render.py` | 5258 | **全站 UI 单一来源**（CSS/JS/`build_*`/`_icon` 图标辅助） |
+| `export.py` | 555 | CSV/JSON/ZIP 导出 |
+| `api_handler.py` | 1083 | `/api/*`、Key、CORS、静态 `.json`、预设/模板 |
+| `query_executor.py` | 795 | MySQL 事务多语句、有界连接池、`sql_contains_write` / `sql_has_persistent_write` |
+| `render.py` | 6571 | **全站 UI 单一来源**（CSS/JS/`build_*`/`_icon` 图标辅助） |
 | `redis_cache.py` | 432 | L2 Redis 快照、分布式锁 |
 | `static_cache.py` | 272 | API `.json` 静态文件缓存 |
 | `scheduler.py` | 734 | 进程内定时任务线程 |
@@ -86,7 +88,7 @@
 | 排序/列选择 | `sort_rows` / `select_columns` | report / export / api |
 | 筛选帮助文案 | `filter_help.py` | report / audit |
 | 写护栏文案 | `report.WRITE_DENIED_MESSAGE` 等 | report / export / api / config 编辑 |
-| 用户可见术语（缓存/品牌等） | `docs/compose/spec/2026-09-30-ui-v2-design.md` §5 术语表 | render 缓存徽标/横幅、标题 |
+| 用户可见术语（缓存/品牌等） | `docs/compose/spec/ui-redesign-visual-spec.md` §5 术语表（UI v2 未重定术语，该节继续有效） | render 缓存徽标/横幅、标题 |
 | 全量输出护栏 | `allow_all_output` + `max_rows` | report / export / api |
 | 页面骨架/CSS/JS | `render.render_page_header/footer`（侧栏页壳 `_NAV_GROUPS`、**侧栏三态收缩 `.sb-handle` 全高手柄 + `sqlreport_sidebar_collapsed` 记忆 + 请求级用户名上下文 `set_request_user`**）、`_BASE/_COMMON_*`（设计令牌）、hash 含 CSS+JS | 全站 |
 | 表单 flash/302 模式 | 各 `handle_*` 返回 `(code, url, headers)` | config/report |
@@ -128,7 +130,7 @@ codegraph callers|callees|impact <symbol>      # 依赖面
 codegraph affected <改过的文件>                # 受影响测试
 codegraph sync                                # 每次改完代码必跑
 ```
-`.codegraph/` 已在 `.gitignore`（当前 146 文件 / 6870 节点 / 17278 边，v1.4.0）。
+`.codegraph/` 已在 `.gitignore`（当前 137 文件 / 6894 节点 / 17453 边，v1.4.0）。
 
 > **硬性 #18 / #19**：读/分析代码**强制先走 codegraph**，查不到才降级 grep/read；
 > 改完 `.py`/`.js`/`.mjs` **必须 `codegraph sync`**。完整命令表、降级白名单、实测坑见
@@ -156,7 +158,7 @@ codegraph sync                                # 每次改完代码必跑
 | 09 | 2026-09-29 新建 `09-agent-workflow.md`：多代理协作纪律（#13–#15）与执行效率取证纪律（P1–P7）从 AGENTS.md 迁入 |
 
 **AGENTS.md 瘦身约定**（2026-09-29）：AGENTS.md 只保留「每次任务都要读」的最小集
-（硬性约束条目 + 入口引导路由表 + 环境命令 + 收尾检查单，约 141 行）。凡
+（硬性约束条目 + 入口引导路由表 + 环境命令 + 收尾检查单，当前约 156 行）。凡
 「只在特定类型任务才需要」的内容一律迁入本库分卷，并在 AGENTS.md §0 路由表登记
 「什么时候读、改完必更新」。新增分卷须同步三处：本 INDEX、`README.md` 索引表、
 AGENTS.md §2 分卷表。

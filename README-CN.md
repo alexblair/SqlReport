@@ -168,7 +168,7 @@ API 静态文件缓存的存储目录 `static_cache/` 在首次写入缓存时�
 
 > ⚠️ **首次登录后请立即修改密码！**
 
-登录后进入 `/config` 门户页，通过入口卡片配置连接池、用户、报表与分类。
+登录后进入 `/config` 总览仪表盘（统计磁贴 + 快捷入口），由此配置连接池、用户、报表与分类。
 
 ---
 
@@ -525,14 +525,14 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 
 ### 配置页 `/config`
 
-配置总览门户，入口卡片直达各管理页面：
+配置总览仪表盘：统计磁贴 + 快捷入口 + `grid-2`（左：系统状态｜右：「导入演示数据（DEBUG）」）+ 站点标识独立成行。各管理区均为独立页面：
 
-- **连接池** — 添加/编辑/删除/复制 MySQL 连接配置，支持上下调序
-- **用户** — 添加/编辑/删除系统用户
+- **连接池** — 独立管理页 `/config/pools`：添加/编辑/删除/复制 MySQL 连接配置，支持上下调序、测试连接
+- **用户** — 独立管理页 `/config/users`：添加/编辑/删除系统用户、清理会话（不能删除当前登录账号）
 - **报表** — 独立管理页 `/config/reports`：配置 SQL 查询、绑定的连接池、默认每页行数、所属分类、备注
-- **分类** — 已并入报表管理页 `/config/reports`（顶部可折叠分类树）：无限层级树形管理，支持调序、新增、删除、重命名；旧地址 `/config/categories` 自动重定向到 `/config/reports`
-- **API 接口** — 独立管理页 `/config/api-endpoints`，全局 API 接口列表及关联报表名称
-- **定时任务** — 独立管理页 `/config/scheduler`：全部报表定时任务一览，展示任务名、关联报表、下次执行时间、上次结果（含耗时）、失败计数、审计标记与熔断标记；支持单任务立即执行 / 启停 / 删除；🔇 徽标 = 已配置排除规则（静默窗口）；全局停用时顶部横幅提示
+- **分类** — 已并入报表管理页 `/config/reports`（左栏可折叠分类树）：无限层级树形管理，支持调序、新增、删除、重命名；旧地址 `/config/categories` 自动重定向到 `/config/reports`
+- **API 接口** — 独立管理页 `/config/api-endpoints`，全局 API 接口列表以 `api-row` 卡片渲染（展开可看输出模式、静态 `.json` 地址与说明全文）
+- **定时任务** — 独立管理页 `/config/scheduler`：7 列单表（任务名 / 关联报表 / 计划 / 下次执行 / 上次结果 / 状态 / 操作）；支持单任务立即执行 / 启停 / 删除；🔇 徽标 = 已配置排除规则（静默窗口）；全局停用时顶部横幅提示
 
 报表编辑表单特色：
 - SQL 编辑器带格式化按钮和语法高亮预览切换
@@ -546,33 +546,36 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 - 【保存】成功后返回列表页
 
 报表列表页特色：
+- 页头「列表 / 卡片」双视图开关（`#rpt-view-seg`，按浏览器记忆；两视图共享勾选）
 - 分类树形展示，缩进表示层级
 - 分类树区块支持整体折叠（折叠状态 localStorage 记忆）
 - 每个报表行内带有上下移动按钮
-- 分类级全选/反选，支持批量删除
+- 分类级全选/反选 + 浮出批量条（批量删除 / 改连接池 / 改缓存 / 改分类）
 - 报表可跨分类移动（下拉选择目标分类）
 - 备注字段截取前 15 字符预览
 
 ### 报表页 `/report`
 
-- 分类树形下拉选择报表
+- 报表中心 `/report`（无 id）：页头搜索 + 最近查看 + 左分类树 + 右报表卡片；详情页顶部改为紧凑报表切换器（原分类树下拉已移除）
+- 报表详情分**五页签**：数据 / 规则 / 接口 / 调试 / 备注，页签切换为客户端原位换页、不整页刷新
+- 侧栏可三态收缩（展开 / 图标条 / 窄屏覆盖层，localStorage 记忆），账户区显示当前登录用户
 - 自动执行 SQL 查询并缓存结果（带缓存时间戳和重建按钮）
 - 分页浏览（可选 10/20/50/100/200 行）
 - 多字段排序 — 点击列头 ▲▼ 箭头，支持组合排序，带排序管理面板（拖拽/添加/删除）
 - 多字段筛选 — 每列独立操作符（包含/不包含/等于/不等于/大于/小于/≥/≤/为空/非空），支持多列同时过滤；筛选值支持**统一匹配表达式**：`*` 通配（任意位置/多次）、英文逗号多值（段间"或"）、`\` 转义（`\*`/`\,`/`\\` 按字面匹配，适用于数据含这些字符的场景），仅"包含/不包含/等于/不等于"参与解析，多列条件之间"且"；报表页、导出、API 预设与审计页关键字共用同一语法（帮助弹窗 `?` 查看示例）；审计页关键字中 `%`/`_` 按字面量匹配
 - 字段设置面板 — 拖拽调整列顺序、勾选显示/隐藏列、全选/全不选
-- 备注显示 — 报表备注可折叠展开（Markdown 渲染），带**三态折叠开关**（自动/展开/折叠）：自动=保持默认逻辑（非空展开、空折叠），展开/折叠强制覆盖状态；选择按报表在 localStorage 记忆
-- 接口说明折叠区 — 每个接口的「接口说明」渲染为独立折叠区（Markdown 渲染，默认展开），带同款三态开关并按端点 id 记忆；列表/表格摘要保持纯文本截断预览（40 字符 + 悬停全文）
+- 备注页签 — 报表备注（Markdown 渲染）独立成页签、普通卡片；原「三态折叠开关」已废除
+- 接口页签 — 以 `api-row` 卡片列出本报表的接口（与管理页同一组件）；展开主行可看接口说明全文（Markdown 渲染）与调用地址；列表摘要保持纯文本截断预览（40 字符 + 悬停全文）
 - 【编辑】按钮：点击新窗口跳转到该报表的配置编辑页面
-- 强制刷新缓存（重新查询数据库）；缓存徽标展示快照时间、TTL，快照超过 TTL 时显示**「已过期（下次请求自动刷新）」**警示（`cache_ttl_hours=0` = 永不过期）
+- 强制刷新缓存（重新查询数据库）；徽标标注本次数据来源——实时查询 / 本地缓存 / 缓存快照，并展示快照时间、TTL；快照超过 TTL 时显示**「已过期（下次请求自动刷新）」**警示（`cache_ttl_hours=0` = 永不过期）
 - 截断提示条 — 结果被全量输出护栏截断至 max_rows 时，页面顶部横幅提示截断上限及在编辑页开启全量输出的方法
 
 ### 导出功能 `/export`
 
 - 完整数据集导出（不分页，保留当前筛选和排序）
 - 支持 **CSV** 和 **JSON** 两种格式
-- UTF-8 BOM 编码（CSV）确保 Excel 正确识别中文
-- 字符集可选 GBK / UTF-8
+- CSV 编码：**默认 GBK**，可选带 BOM 的 UTF-8 以确保 Excel 正确识别中文
+- 字符集对 CSV 可选（GBK / UTF-8）；**JSON 导出恒为 UTF-8**——选择 JSON 时字符集单选被强制为 UTF-8 并禁用
 - JSON 智能去引号面板（十进制数字/科学计数法/千分位数字；URL 参数 `smart_quotes=<逗号列表如 1,4>`；旧参数 `json_no_quotes=1` 兼容等价面板全开；输出永远合法 JSON）
 - ZIP 压缩包打包下载
 - 支持应用自定义字段设置（仅导出选定列并按指定顺序）
@@ -585,46 +588,43 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 ```
 SqlReport/
 ├── server.py              # HTTP 服务器入口、路由分发（ThreadingHTTPServer）
-├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点）
+├── config.py              # 配置页 CRUD 处理（连接池/用户/报表/分类/API 端点/定时任务）
 ├── report.py              # 报表页、分页、排序、筛选
 ├── result_transform.py    # 结果集变换（筛选/排序/列选择，页面/导出/API 共用）
 ├── export.py              # CSV/JSON/ZIP 导出（支持排序）
 ├── auth.py                # 用户认证、Session 管理（滑动过期 + SQLite 持久化）
-├── db.py                  # 配置存储（SQLite/MySQL 双引擎）+ 查询连接管理
+├── db.py                  # 兼容转发层（仅 re-export config_db）
 ├── app_config.py          # 应用配置文件加载器
 ├── app_config.json        # 应用配置文件（含密码，不提交）
 ├── app_config.example.json# 配置文件模板
-├── config_db.py           # 配置数据库引擎选择
-├── query_executor.py      # MySQL 查询执行器（事务支持、?→%s 占位符转换）
-├── render.py              # HTML 模板（string.Template 常量）
+├── config_db.py           # 配置库 DAL、双引擎 schema 与迁移
+├── query_executor.py      # MySQL 执行 + 有界连接池（?→%s 占位符转换）
+├── render.py              # 全站 UI 单一来源（CSS / JS / HTML 构建函数）
+├── filter_help.py         # 筛选语法帮助文案（单一来源）
+├── scheduler.py           # 进程内定时任务线程
+├── redis_cache.py         # Redis 快照缓存层（L2）
+├── static_cache.py        # API 静态 `.json` 缓存
+├── branding.py            # 站点标识 / favicon（实例本地 SQLite）
 ├── audit_db.py            # 审计日志数据库（含自动轮转）
 ├── audit_page.py          # 审计日志页面处理（浏览/清理/CSV 导出）
-├── redis_cache.py         # Redis 快照缓存层
 ├── api_handler.py         # API 接口处理器（API 端点查询 + 静态缓存 + 具名结果结构）
+├── preset_cases.py        # DEBUG 演示数据导入
+├── json_template.py       # 自定义 API JSON 输出模板
+├── markdown_render.py     # Markdown → HTML（报表备注 / 接口说明）
 ├── file_permissions.py    # 运行时文件权限管理（static_cache 目录属主/权限）
-├── tests/                 # 单元测试
-│   ├── __init__.py
-│   ├── test_auth.py
-│   ├── test_base.py
-│   ├── test_config.py
-│   ├── test_db.py
-│   ├── test_export.py
-│   ├── test_health.py
-│   ├── test_mysql_mock.py
-│   ├── test_mysql_transactional.py
-│   ├── test_redis_cache.py
-│   ├── test_report.py
-│   ├── test_server.py
-│   ├── test_file_permissions.py
-│   └── test_state_machine.py
+├── tests/                 # 单元测试（80+ 文件；`unittest discover -s tests/ -t .`）
+├── docs/                  # V1↔V2 切换指南 + spec / plan / 知识库
+├── scripts/               # perf/ 性能工具 + ui-v2/ E2E 脚本
 ├── config.db              # SQLite 配置数据库（自动创建，不提交）
 ├── install.sh             # 自动化依赖安装脚本（venv + pip install）
 ├── test_env.sh            # 本地测试环境启停脚本（默认 0.0.0.0:8099）
 ├── requirements.txt       # pip 依赖清单
 ├── manage_service.sh      # Systemd 服务管理脚本
-├── git-purge.sh           # Git 仓库重写工具（清理历史/更改作者/代理支持）
-└── AGENTS.md              # AI 开发代理指引
+├── git-tool.sh            # 交互式 Git 辅助（清理历史/更改作者/代理支持）
+└── MEMORY.md              # 跨会话项目记忆（入库）
 ```
+
+仓库根的 `AGENTS.md`（AI 开发代理指引）与运行时产物（`venv/`、`run-logs/`、`perf-logs/`、`.codegraph/`、`static_cache/`、`*.debug.db`）均在 `.gitignore` 中，不属于仓库内容。
 
 ---
 
@@ -632,8 +632,10 @@ SqlReport/
 
 ```bash
 source venv/bin/activate
-python -m unittest discover -s tests/ -v
+python -m unittest discover -s tests/ -t . -v
 ```
+
+> `-t .` 不可省：否则 `tests/__init__.py` 不执行，整套测试隔离（Redis / vendor 目录 / 站点标识库）静默失效，测试可能连**生产 Redis**。漏了会被金丝雀 `tests/test_test_isolation.py` 报错提醒。
 
 ---
 
@@ -657,7 +659,7 @@ python -m unittest discover -s tests/ -v
 | 数据查询 | MySQL via `mysql-connector-python` |
 | Markdown 渲染 | `markdown` + `pygments`（报表备注 Markdown、代码高亮） |
 | 认证 | Cookie + PBKDF2-SHA-256 salt hash + 滑动过期 (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
-| 前端 | 纯 HTML + 内联 CSS（无 JS 框架） |
+| 前端 | 服务端渲染 HTML + 公共 CSS/JS 资产（`/static/vendor/`），无前端框架、无构建步骤 |
 | 测试 | `unittest` (Python stdlib) |
 
 ---

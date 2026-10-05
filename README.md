@@ -168,7 +168,7 @@ Open your browser and navigate to `http://localhost:8080`, then log in with the 
 
 > ⚠️ **Please change the password immediately after first login!**
 
-After login, go to the `/config` portal page and use the entry cards to configure connection pools, users, reports, and categories.
+After login, the `/config` page shows a dashboard (stat tiles + quick entries) that links to connection pools, users, reports and categories.
 
 ---
 
@@ -525,14 +525,14 @@ curl -i -H "Authorization: Bearer sk-XXXX" "https://a.com/fishapi/customers.json
 
 ### Config page `/config`
 
-Config overview portal, entry cards leading to each management page:
+Config overview dashboard: stat tiles, quick entries, a `grid-2` block (left: system status | right: "Import demo data (DEBUG)") and a full-width site-branding row. Each management area is its own page:
 
-- **Pools** — add/edit/delete/copy MySQL connection configs, reorder up/down
-- **Users** — add/edit/delete system users
+- **Pools** — standalone page `/config/pools`: add/edit/delete/copy MySQL connection configs, reorder, test connection
+- **Users** — standalone page `/config/users`: add/edit/delete users, clear sessions (you cannot delete the account you are logged in with)
 - **Reports** — standalone page `/config/reports`: configure SQL queries, bound pool, default page size, category, memo
-- **Categories** — merged into `/config/reports` (top collapsible category tree): unlimited-depth tree management, reorder/add/rename/delete; old address `/config/categories` redirects to `/config/reports`
-- **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list with linked report names
-- **Schedules** — standalone page `/config/scheduler`: all report schedules with task name, bound reports, next run time, last result (with duration), failure counter, audit badge and circuit-breaker marker; per-task manual trigger / enable / delete; 🔇 marks tasks with exclusion rules; a banner shows when the scheduler is globally disabled
+- **Categories** — merged into `/config/reports` (left-hand collapsible category tree): unlimited-depth tree management, reorder/add/rename/delete; old address `/config/categories` redirects to `/config/reports`
+- **API endpoints** — standalone page `/config/api-endpoints`, global API endpoint list rendered as `api-row` cards (expandable detail: output mode, static `.json` URLs, full description)
+- **Schedules** — standalone page `/config/scheduler`: 7-column single table (task name, bound reports, schedule, next run, last result, status, actions); per-task manual trigger / enable / delete; 🔇 marks tasks with exclusion rules; a banner shows when the scheduler is globally disabled
 
 Report edit form highlights:
 - SQL editor with format button and syntax-highlighted preview toggle
@@ -546,33 +546,36 @@ Report edit form highlights:
 - [Save] returns to the list page on success
 
 Report list page highlights:
+- List / card dual-view switch in the page header (`#rpt-view-seg`, remembered per browser; both views share the same selection)
 - Tree display with indentation for hierarchy
 - Collapsible category tree section (fold state remembered via localStorage)
 - Up/down move buttons per report row
-- Category-level select all/deselect, batch delete
+- Category-level select all/deselect plus a floating batch bar (batch delete / pool / cache / category)
 - Reports can be moved across categories (target category dropdown)
 - Memo truncated to 15 chars for preview
 
 ### Report page `/report`
 
-- Category tree dropdown to select a report
+- Report center `/report` (no id): page-header search, recently viewed cards, left category tree, right report cards; on the detail page a compact report switcher replaces the old category-tree dropdown
+- Report detail is organized in **five tabs** — Data / Rules / API / Debug / Memo — switched client-side without a full reload
+- Collapsible sidebar (expanded / icon rail / overlay on narrow screens, remembered in localStorage) with the current user in the account area
 - Auto-runs the SQL and caches the result (with cache timestamp and rebuild button)
 - Paginated browsing (10/20/50/100/200 rows per page)
 - Multi-column sorting — click column headers ▲▼ arrows, combo sort with a management panel (drag/add/remove)
 - Multi-field filtering — per-column operators (contains/not-contains/eq/neq/gt/lt/gte/lte/is-empty/not-empty), multiple columns at once; filter values support a **unified match expression**: `*` wildcard (any position/repetition), comma multi-value (OR between segments), `\` escaping (`\*`/`\,`/`\\` match literally, for data containing those characters); only contains/not-contains/eq/neq participate in parsing, multiple column conditions combine with AND; the report page, export, API presets and audit-page keyword share the same syntax (help popup `?` for examples); in the audit page keyword, `%`/`_` match literally
 - Column settings panel — drag to reorder columns, check to show/hide, select all/none
-- Memo display — collapsible report memo (Markdown-rendered) with a **tri-state fold toggle** (Auto/Expand/Collapse): Auto keeps the default behavior (non-empty expanded, empty collapsed), Expand/Collapse force the state; the choice is remembered per report in localStorage
-- API description blocks — each endpoint's interface description renders as its own "Interface Description" fold section (Markdown-rendered, default expanded) with the same tri-state toggle remembered per endpoint id; list/table summaries keep plain-text truncation (40 chars + full text on hover)
+- Memo tab — the report memo (Markdown-rendered) lives in its own tab as a plain card; the old per-report tri-state fold toggle has been removed
+- API tab — lists this report's endpoints as `api-row` cards (same component as the management page); expanding a row shows the full interface description (Markdown-rendered) plus the call URLs; list summaries keep plain-text truncation (40 chars + full text on hover)
 - [Edit] button: opens the report's config edit page in a new window
-- Force-refresh cache (re-query the database); the cache badge shows the snapshot age, TTL, and an **"expired (auto-refresh on next request)"** warning when the snapshot has passed its TTL (`cache_ttl_hours=0` = never expires)
+- Force-refresh cache (re-query the database); the badge shows where the current data came from — live query / local cache / cache snapshot — plus snapshot age, TTL, and an **"expired (auto-refresh on next request)"** warning once the snapshot has passed its TTL (`cache_ttl_hours=0` = never expires)
 - Truncation notice — when the output limit guard cuts results to `max_rows`, a banner shows the cap and how to enable full output in the edit page
 
 ### Export `/export`
 
 - Full dataset export (no pagination, keeps current filters and sorting)
 - **CSV** and **JSON** formats
-- UTF-8 BOM encoding (CSV) for correct Chinese text in Excel
-- Charset selectable: GBK / UTF-8
+- CSV encoding: **GBK (default)** or UTF-8 with BOM for correct Chinese text in Excel
+- Charset selectable for CSV (GBK / UTF-8); **JSON export is always UTF-8** — choosing JSON forces the charset selector to UTF-8 and disables it
 - JSON smart no-quotes panel (decimal / scientific / thousands; URL param `smart_quotes=<comma list, e.g. 1,4>`; legacy `json_no_quotes=1` maps to the full panel — output always stays valid JSON)
 - ZIP archive download
 - Applies custom column settings (export only selected columns, in the chosen order)
@@ -585,46 +588,43 @@ Report list page highlights:
 ```
 SqlReport/
 ├── server.py              # HTTP server entry, route dispatch (ThreadingHTTPServer)
-├── config.py              # Config page CRUD (pools/users/reports/categories/API endpoints)
+├── config.py              # Config page CRUD (pools/users/reports/categories/API endpoints/scheduler)
 ├── report.py              # Report page, pagination, sorting, filtering
 ├── result_transform.py    # Result set transforms (filter/sort/column select, shared by page/export/API)
 ├── export.py              # CSV/JSON/ZIP export (with sorting)
 ├── auth.py                # User auth, Session management (sliding expiry + SQLite persistence)
-├── db.py                  # Config storage (SQLite/MySQL dual engine) + query connection mgmt
+├── db.py                  # Backward-compatible re-export layer for config_db
 ├── app_config.py          # App config file loader
 ├── app_config.json        # App config file (contains credentials, not committed)
 ├── app_config.example.json# Config file template
-├── config_db.py           # Config database engine selection
-├── query_executor.py      # MySQL query executor (transaction support, ?→%s placeholder conversion)
-├── render.py              # HTML templates (string.Template constants)
+├── config_db.py           # Config database DAL, dual-engine schema and migrations
+├── query_executor.py      # MySQL execution + bounded connection pool (?→%s placeholder conversion)
+├── render.py              # Single source of all UI (CSS / JS / HTML builders)
+├── filter_help.py         # Filter syntax help text (single source)
+├── scheduler.py           # In-process scheduled-task thread
+├── redis_cache.py         # L2 Redis snapshot cache layer
+├── static_cache.py        # Static `.json` cache for API endpoints
+├── branding.py            # Site branding / favicon (instance-local SQLite)
 ├── audit_db.py            # Audit log database (with auto rotation)
 ├── audit_page.py          # Audit log page (browse/cleanup/CSV export)
-├── redis_cache.py         # Redis snapshot cache layer
 ├── api_handler.py         # API endpoint handler (endpoint queries + static cache + named result structure)
+├── preset_cases.py        # DEBUG demo-data import
+├── json_template.py       # Custom API JSON output templates
+├── markdown_render.py     # Markdown → HTML (report memo / API description)
 ├── file_permissions.py    # Runtime file permission management (static_cache owner/perms)
-├── tests/                 # Unit tests
-│   ├── __init__.py
-│   ├── test_auth.py
-│   ├── test_base.py
-│   ├── test_config.py
-│   ├── test_db.py
-│   ├── test_export.py
-│   ├── test_health.py
-│   ├── test_mysql_mock.py
-│   ├── test_mysql_transactional.py
-│   ├── test_redis_cache.py
-│   ├── test_report.py
-│   ├── test_server.py
-│   ├── test_file_permissions.py
-│   └── test_state_machine.py
+├── tests/                 # Unit tests (80+ files; `unittest discover -s tests/ -t .`)
+├── docs/                  # V1↔V2 switch guide + spec / plan / knowledge base
+├── scripts/               # perf/ benchmark tooling + ui-v2/ E2E scripts
 ├── config.db              # SQLite config database (auto-created, not committed)
 ├── install.sh             # Automated dependency installer (venv + pip install)
 ├── test_env.sh            # Local test environment control script (default 0.0.0.0:8099)
 ├── requirements.txt       # pip dependency list
 ├── manage_service.sh      # Systemd service management script
-├── git-purge.sh           # Git history rewrite tool (clean history/change author/proxy support)
-└── AGENTS.md              # AI development agent guide
+├── git-tool.sh            # Interactive git helper (history rewrite / author / proxy)
+└── MEMORY.md              # Cross-session project memory (tracked)
 ```
+
+The repo-local `AGENTS.md` (AI agent guide) and runtime artifacts (`venv/`, `run-logs/`, `perf-logs/`, `.codegraph/`, `static_cache/`, `*.debug.db`) are gitignored and not part of the repository.
 
 ---
 
@@ -632,8 +632,10 @@ SqlReport/
 
 ```bash
 source venv/bin/activate
-python -m unittest discover -s tests/ -v
+python -m unittest discover -s tests/ -t . -v
 ```
+
+> The `-t .` flag is mandatory: without it `tests/__init__.py` is not loaded, the whole test isolation (Redis / vendor dir / branding DB) silently fails, and the suite may talk to **production Redis**. The canary `tests/test_test_isolation.py` fails loudly when it is missing.
 
 ---
 
@@ -657,7 +659,7 @@ python -m unittest discover -s tests/ -v
 | Data queries | MySQL via `mysql-connector-python` |
 | Markdown rendering | `markdown` + `pygments` (report memo Markdown, code highlighting) |
 | Auth | Cookie + PBKDF2-SHA-256 salted hash + sliding expiry (Python stdlib `hashlib`, `secrets`, `hmac`, `time`) |
-| Frontend | Pure HTML + inline CSS (no JS framework) |
+| Frontend | Server-rendered HTML + shared CSS/JS assets (`/static/vendor/`), no frontend framework or build step |
 | Tests | `unittest` (Python stdlib) |
 
 ---

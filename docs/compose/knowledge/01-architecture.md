@@ -7,7 +7,7 @@
 - 依赖：`mysql-connector-python`、`redis`、`markdown`、`pygments`、`pytest`（测试）
 - 配置存储：SQLite / MySQL（`config_db` 列表 + `enable`）
 
-## 启动链路（`server.main` ~:979）
+## 启动链路（`server.main` ~:934）
 
 1. `setup_logging` → `render.ensure_common_assets()` 预热公共资产  
 2. `file_permissions.load_permissions` + `refresh_tree(static_cache.permissions_root())`  
@@ -60,7 +60,7 @@
 
 ## 模块地图（真正影响写法的部分）
 
-单包扁平布局，**无 monorepo**；入口只有 `server.py`。行数为 2026-09-29 实测。
+单包扁平布局，**无 monorepo**；入口只有 `server.py`。模块行数见 `INDEX.md` §1（2026-10-06 实测）。
 
 | 职责 | 模块 | 要点 |
 |------|------|------|

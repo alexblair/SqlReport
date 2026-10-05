@@ -56,7 +56,7 @@
     判断标准一句话：**新内容默认进分卷；只有「不读就会做错，且每次任务都会遇到」
     才进 AGENTS.md**。新增分卷须同步三处：`knowledge/INDEX.md` §8、
     `knowledge/README.md` 索引表、`AGENTS.md` §2 分卷表。
-    （本次实测：AGENTS.md 395 → 141 行，内容零丢失、24 项关键条目逐条复核留存。）
+    （本次实测：AGENTS.md 395 → 141 行，内容零丢失、24 项关键条目逐条复核留存；后续随硬约束 #17–#19 增补已增至 156 行，以 `wc -l AGENTS.md` 为准。）
 
 12. **交互类改动必须验「两种载入态 + 多轮 + 组合」**（2026-09-30 用户实测教训）：
     「整页加载后点一次」看不见三类失效：**换页态**（无刷新导航后 `innerHTML` 不执行内联
@@ -92,13 +92,13 @@
 
 ## Discovered（环境事实）
 
-- **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（146 文件 / 6870 节点 / 17278 边），`codegraph status`
-  可看 `pendingChanges`。**只索引 `.py`(121) + `.js`/`.mjs`(25)**——`.md`/`.json`/`.html`/`.css`/`.sh`
+- **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（137 文件 / 6894 节点 / 17453 边），`codegraph status`
+  可看 `pendingChanges`。**只索引 `.py`(126) + `.js`/`.mjs`(11)**——`.md`/`.json`/`.html`/`.css`/`.sh`
   一律不索引，查这些直接用 grep/read。**`explore` 按代码词（符号名/文件名/英文词）匹配，纯中文问句
   一律 0 命中**——看到 `No relevant code found` 要补代码词重试，不是降级 grep 的理由。
   **后台守护进程已死**（`.codegraph/daemon.pid` 记 pid 7216 / v1.3.1，进程早已不存在），
   **没有自动同步**——改完代码必须手动 `codegraph sync`（增量 <1s）。
-  按内容哈希判定，只 `touch` 文件不会变脏；`codegraph index` 全量 146 文件仅 **3.1s**，
+  按内容哈希判定，只 `touch` 文件不会变脏；`codegraph index` 全量重建 137 文件为**秒级**，
   但**必须在单条命令内跑完**（后台起会被沙箱杀掉，索引卡在 `state=indexing`，需 `codegraph unlock`）。
 - **截图**：一次性 `chrome --screenshot` 在本容器**必挂**（最小 data:URL 用例也超时）。
   可行路径 = CDP：同命令内 `nohup chrome --headless=new --remote-debugging-port=9333
@@ -115,8 +115,7 @@
   验收线：**1280/1366/1440/1920 全部零横向溢出**（`tablesOver=[0,0,0,0]`，
   操作列右缘 < 视口宽）。列宽最终值：SQL 112 / 名称 min 60 / 备注 70 / API 56 /
   chip 96 / 单元格 padding 5px。
-- **嵌套层级容器样式须 `!important`**：模板 inline `style="margin-left:24px;
-  border-left:3px solid #c7d2fe" 被 `tests/test_render.py:1742` 锁定，CSS 无法覆盖。
+- **嵌套层级样式（2026-09-30 UI v2 起已改口径）**：内联 `style="margin-left:24px;border-left:3px solid #c7d2fe"` 已清理，层级改由 `.cat-children` class 承担；`tests/test_render.py` 现断言 class / `.kids`，**不再需要 `!important`**（旧条目「被 `:1742` 锁定、CSS 无法覆盖」已失效）。
 - **写判定有两个函数，别再混用**（2026-10-05）：`sql_contains_write`（严格，服务权限/警示/403）
   与 `sql_has_persistent_write`（精确，只服务缓存读门槛与静态护栏）。踩过两次：
   ① 报表 35 的 9 条 `SET @…` 全带前导块注释（`/*** c ***/ SET @x := …`），在**裸文本**上
@@ -134,6 +133,10 @@
 - **静态分析门禁会拦跨脚本 import**：`scripts/perf/*.py` 之间只能用点号包路径
   （`from scripts.perf.x import y`），顶层模块名（`from x import y`）会被判
   「无法导入模块」且**没有 noqa 豁免**（`tests/bug_hunt/static_analyzer.py`）。
+- **`run-logs/` 里的克隆副本会污染静态分析门禁**（2026-10-06 实测）：`static_analyzer.IGNORE_DIRS` 不含 `run-logs/`、`perf-logs/`，
+  放在里面的 `git clone`/`git worktree` 副本会被扫到，其 `tests/__init__.py` 的包内相对导入被判「无法导入模块 test_base」→
+  全量 discover 里 `test_static_analysis.test_no_import_errors` 报 ERROR（本轮 3009 项唯一失败即此，产品代码零回归）。
+  跑全量前先确认 `run-logs/` 下无 `.py` 克隆产物（或把克隆放到仓库外），**不要**为此放宽门禁。
 - **`cache_info.source` 自 2026-10-05 起 = 本次取数来源**（`mysql` / `process` / `redis` /
   `redis_fallback`；`snapshot_written` 仅 `mysql` 分支有，标记本次是否同时写了 L2 快照）。
   此前「MySQL 查询成功即标 `redis`」的账本式标注已修复（`report.py` 生产者 3 处：L1 写入入参

@@ -7,9 +7,9 @@
 <拿到什么答案就能继续推进，一句话。>
 
 ## 2. 项目背景（自包含）
-- 技术约束：纯 Python 3 标准库 + `http.server`；**无前端框架、无构建链**（禁 React/Vue/Node/npm）；页面 = 服务端拼 HTML 字符串 + 内联 CSS/JS；全部 UI 文案简体中文；不得新增第三方依赖。
-- 页面结构：左侧固定深色侧栏（展开 240px / 收起 64px 图标条）+ 主内容区；本次涉及页 = 报表配置页：左分类树面板（260px，内含标题行、折叠按钮、分类行=图标+名称+计数+悬浮操作组）+ 右侧按分类分组的报表表格。
-- 设计基准：单一令牌体系（色板 #4f46e5 主色、#f3f4f8 页面底、#fff 卡片、圆角 6/10px、13/14px 字号）；组件 class 命名固定（.card/.btn/.tree/.cat/.cnt/.ops/.section-title）。
+- 技术约束：纯 Python 3 标准库 + `http.server`；**无前端框架、无构建链**（禁 React/Vue/Node/npm）；页面 = 服务端拼 HTML 字符串 + 公共 CSS/JS 资产（`/static/vendor/self@<hash>/`，写入失败才回退内联）；全部 UI 文案简体中文；不得新增第三方依赖。
+- 页面结构：左侧深色侧栏三态（展开 240px / 图标条 64px / ≤1024px 覆盖层）+ 主内容区；本次涉及页 = 报表配置页：左分类树面板（260px，内含标题行、折叠按钮、分类行=图标+名称+计数+悬浮操作组）+ 右侧分组卡（`.cat-block`/`.cat-head`/`.cat-children` 层级导轨）与列表/卡片双视图（`.rpt-row`/`.rpt-card`）。
+- 设计基准（UI v2「石墨·鸢尾」）：单一令牌体系（主色 `--accent #5d61e0`，深色代码面 `--code-bg #0f131b` / `--code-ink #e2e6ef`，圆角 4/6/10/14，字阶 11/12/13/14/16/18/22/28；令牌定义在 `render._BASE_CSS :root`）；组件 class 命名固定（.card/.btn/.tree/.cat/.cnt/.ops/.section-title）。
 - 涉事 DOM/CSS：（粘贴关键 HTML 片段 + 相关 CSS 规则原文，≤40 行）
 
 ## 3. 问题现象（带数值）

@@ -34,7 +34,7 @@
 ## 第一层：单元测试验证（回归检查）
 
 ### 工具
-- `python -m unittest discover -s tests/ -v` — 全部测试通过
+- `python -m unittest discover -s tests/ -t . -v` — 全部测试通过（**`-t .` 不可省**：漏了 `tests/__init__.py` 不执行、测试隔离失效，会连生产 Redis）
 - **FLAKY 检测** — 每个测试连续运行 3 次，确认非 Flaky
 
 ### 标准
@@ -114,7 +114,7 @@
 
 ```
 Round N:
-  1. python -m unittest discover -s tests/ -v  # 自动包含:
+  1. python -m unittest discover -s tests/ -t . -v  # 自动包含:
      - 单元测试（test_*.py）
      - 静态分析  → 自动触发（ERROR→fail）
      - 边界条件  → 自动触发

@@ -9,7 +9,7 @@
 
 | # | 章节 | 产物 | 状态 |
 |---|------|------|------|
-| 0 | 索引初始化 | `codegraph init` → `.codegraph/`（2026-09-30 全量重建实测 146 files / 6870 nodes / 17278 edges） | 完成 |
+| 0 | 索引初始化 | `codegraph init` → `.codegraph/`（2026-10-06 实测 137 files / 6894 nodes / 17453 edges） | 完成 |
 | 1 | 架构与配置 | `01-architecture.md` | 完成 |
 | 2 | 路由与鉴权 | `02-routing-auth.md` | 完成（explore-1 增补） |
 | 3 | 报表与变换 | `03-report-transform.md` | 完成（explore-3 增补） |
@@ -20,10 +20,12 @@
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因；2026-09-29 从 AGENTS.md 迁入两败必停全文 + L2 分段命令表 + `-t .` 陷阱 + 性能工具链） |
 | 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7；**2026-09-30 新增「代码检索纪律 #18/#19」——codegraph 优先检索、查不到才降级 grep、改完必 sync**） |
 
+> 第 6 章已于 2026-09-30 随 UI v2「石墨·鸢尾」实施改写（令牌/组件/页面地图口径见 `06-ui-interactions.md` 与 `docs/compose/spec/2026-09-30-ui-v2-design.md`）。
+
 入口：`docs/compose/knowledge/README.md` + `INDEX.md`
 
 **文档结构约定（2026-09-29 起）**：`AGENTS.md` 只保留「每次任务都要读」的最小集
-（硬性约束条目 + **§0 入口引导路由表** + 环境命令 + 收尾检查单，约 141 行）。
+（硬性约束条目 + **§0 入口引导路由表** + 环境命令 + 收尾检查单，当前 156 行）。
 凡「只在特定类型任务才需要」的流程全文一律在本库分卷；AGENTS.md §0 路由表登记
 「什么时候读哪一卷 / 改完必更新哪一卷」。新增内容时先判断它属于最小集还是分卷。
 
@@ -43,6 +45,7 @@
 | CORS 空≠允许 | mastered | explore-1 | 高 | 改跨域 |
 | render 单一来源 + 嵌套 form | mastered | explore-4 + htmlcheck | 高 | 新 UI |
 | ui-redesign 重构（侧栏/令牌/页签/抽屉/导出对话框/术语表） | mastered | docs/compose/spec/ui-redesign.md + 全量 2844 项对账 | 高 | 改任何页面布局/组件前读 06 卷与 visual-spec |
+| UI v2「石墨·鸢尾」实施（2026-09-30） | mastered | spec 2026-09-30-ui-v2-design.md + 06 卷 + 全量 3009 项对账（2026-10-06） | 高 | 改任何页面布局/组件/CSS 前读 06 卷与 ui-v2-design |
 | vendor hash = CSS+JS 拼接哈希 | mastered | explore-4 + R2 核对 | 中高 | 改 CSS 或 JS 都会变 |
 | L1/L2/L3 + 保活先算后换 | practiced | explore-2 | 中 | 改缓存 |
 | scheduler exclusions ≠ nested_filter | mastered | explore-3 | 高 | 改调度 |
@@ -60,8 +63,8 @@
 | Decimal 不在 isinstance 快速路径 → DECIMAL 列退化 | mastered | 03 卷 + verify_transform_equivalence 实测 -27% | 高 | 改 result_transform |
 | `filter_rows` 单趟化反而更慢（闭包调用开销） | mastered | spec §10.3 实测 +41%~72% | 高 | 想优化 filter 时先看 |
 | discover 必须加 `-t .`，否则 tests/__init__.py 不执行 | mastered | 08 卷 + spec §10.7 探针实测 + 金丝雀 test_test_isolation | 高 | 跑全量测试时 |
-| 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #16 + tests/_bootstrap.py | 高 | 写涉及缓存的测试时 |
-| 断言「隔离是否生效」的测试不能自己 import tests（自我掩盖） | mastered | 08 卷易踩坑 #17（第一版金丝雀即栽在这） | 高 | 写环境守卫类测试时 |
+| 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #17 + tests/_bootstrap.py | 高 | 写涉及缓存的测试时 |
+| 断言「隔离是否生效」的测试不能自己 import tests（自我掩盖） | mastered | 08 卷易踩坑 #18（第一版金丝雀即栽在这） | 高 | 写环境守卫类测试时 |
 | 端到端压测噪声约 ±6%，transform 收益须用隔离 A/B | practiced | spec §10.3 | 中 | 做性能对比时 |
 | 写判定分工：`sql_contains_write`（从严、权限侧）vs `sql_has_persistent_write`（精确、缓存门槛与静态护栏） | practiced | spec 2026-09-30 §5 | 中 | 动 allow_write / skip_cache_read / 静态护栏时 |
 | 静态护栏是**并集**（权限判定 + 持久写判定），不是替换 | practiced | spec 2026-09-30 §3.3 | 高 | 改静态分支条件时 |
@@ -89,9 +92,14 @@
 slug=sqlreport-kb
 chapters=0..9 done
 kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写死绝对路径
-index=codegraph ok (146 files, 6870 nodes, 17278 edges, v1.4.0)
+index=codegraph ok (137 files, 6894 nodes, 17453 edges, v1.4.0)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
+last_sync=2026-10-06 文档/知识库时效审计（V2 基线）
+           全库对账修正：codegraph 计数 137/6894/17453、AGENTS.md 156 行、INDEX 模块行数、
+           03/05 卷行号锚点、08 卷 L2 分段补漏网测试文件 + perf 脚本表 + 实测 3009 项/94s、
+           06 卷术语表与嵌套层级内联样式口径、双 README 结构树与 -t .、版本指南 describe 指纹；
+           新增易踩坑 #26（run-logs 克隆污染静态分析门禁）
 last_sync=2026-10-05 收尾轮（OUTFILE/DUMPFILE 写判定缺口修复 + 全项目遗留收口）
            spec/plan `2026-10-05-outfile-write-detect-*`；03 卷补「读白名单不豁免写文件」；
            reports/2026-10-05-closeout-decisions.md 记录「裁定不做」6 项

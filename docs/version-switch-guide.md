@@ -31,7 +31,7 @@
 | 判定命令 | V1 | V2 |
 |----------|----|----|
 | `git rev-parse --abbrev-ref HEAD` | `V1` | `V2` |
-| `git describe --tags` | `v1-final` | `v2.0.0` |
+| `git describe --tags` | `v1-final`（tag 即分支头） | 形如 `v2.0.0-<n>-g<sha>`——**分支头已前进，不会等于 tag**（2026-10-06 实测 `v2.0.0-1-g498eb66`）；要 tag 本身用 `git describe --tags --abbrev=0` → `v2.0.0` |
 | `git rev-parse HEAD` | `9a975b9…`（冻结不变） | 不固定（用 tag / 分支判定） |
 | `ls docs scripts test_env.sh` | 三项都不存在 | 三项都存在 |
 
@@ -125,7 +125,7 @@ python server.py                   # 或按 §3.4 重启服务
 
 ```bash
 git rev-parse --abbrev-ref HEAD    # 期望输出 V2
-git describe --tags                # 期望输出 v2.0.0
+git describe --tags --abbrev=0     # 期望输出 v2.0.0（`git describe --tags` 会带 -<n>-g<sha> 后缀，因分支头已前进）
 ls docs scripts test_env.sh        # 三项都应存在
 ```
 

@@ -70,6 +70,9 @@ unrelated 的测试失败发现。所以隔离是否生效本身是一条会自�
 | `init_debug_env.py` | 初始化空的 `config.debug.db`，建数据源、4 张性能报表、基准账号、API 端点 |
 | `bench.py` | 12 场景端到端 HTTP 压测，输出 JSON；**并断言 `cache_info.source` 分布**（S1 冷 `mysql`→正式 `process`；S5 冷 `mysql`→正式 `process`）|
 | `verify_transform_equivalence.py` | 以 `git <基线commit>` 的实现为参考，真实数据上逐行比对 transform 语义 |
+| `seed_session_script_report.py` | 造「会话级脚本」与「真持久写」两个本地夹具（表名 `perf_sess_` 前缀，可重复执行） |
+| `bench_session_script.py` | 会话级脚本报表的缓存门槛 A/B + 三端一致性（启动即校验数据源为本地，拒绝指向生产） |
+| `verify_redis_fallback.py` | 真跑「数据源不可用 → 过期快照兜底」：真实 Redis 快照 + 断源，验证 `redis_fallback` |
 
 约定：
 - **产物落 `perf-logs/`（已 gitignore），不要用 `/tmp`** —— 本环境 `/tmp` 会被
@@ -161,7 +164,7 @@ from tests import BaseConfigTest, BaseReportTest, make_config_db, init_test_db
 
 - **优先给共享行为加测**：筛选语法、写护栏、导出截断、API 鉴权、HTML 结构——改一处会波及三端的东西，最值得钉死。具体文件清单见下方「跨模块一致性测试优先覆盖」。
 - **characterization 测试的期望值必须来自未改动实现的实测**，不能靠推导（2026-09-29 实测中推导错误两次）。改这类"不许变"的行为时：先写测试→先确认绿→再改代码→确认仍绿。
-- 测试必须能**独立于执行顺序**通过，否则是隐藏的进程级全局污染（见易踩坑 #18）。
+- 测试必须能**独立于执行顺序**通过，否则是隐藏的进程级全局污染（见易踩坑 #19）。
 
 ## 禁止提交的运行时/本地物
 
@@ -199,7 +202,8 @@ python -m unittest tests.test_filter_help tests.test_result_transform \
   tests.test_nested_filter tests.test_exclusion_engine \
   tests.test_max_rows tests.test_output_limit \
   tests.test_write_guard tests.test_sql_write_detect \
-  tests.test_sql_persistent_write tests.test_derived_cache -v
+  tests.test_sql_persistent_write tests.test_derived_cache \
+  tests.test_result_transform_perf -v
 
 # ③ 配置 / 数据层 / 迁移
 python -m unittest discover -s tests/ -t . -p 'test_config*.py' -v
@@ -225,7 +229,8 @@ python -m unittest discover -s tests/ -t . -p 'test_markdown*.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_*branding*.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_ux*.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_feedback*.py' -v
-python -m unittest discover -s tests/ -t . -p 'test_smart_quotes*.py' -v
+python -m unittest discover -s tests/ -t . -p 'test_smart_quote*.py' -v
+python -m unittest discover -s tests/ -t . -p 'test_ui_tokens.py' -v
 
 # ⑦ 认证 / 审计 / 健康检查
 python -m unittest discover -s tests/ -t . -p 'test_auth*.py' -v
@@ -240,6 +245,7 @@ python -m unittest discover -s tests/ -t . -p 'test_static_cache*.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_query_cache.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_cache_ui.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_scheduler*.py' -v
+python -m unittest discover -s tests/ -t . -p 'test_cache_source_label.py' -v
 
 # ⑨ 服务入口与杂项收尾
 python -m unittest discover -s tests/ -t . -p 'test_server.py' -v
@@ -249,15 +255,20 @@ python -m unittest discover -s tests/ -t . -p 'test_bug_*.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_file_permissions.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_sql_formatter.py' -v
 python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：仅当需要与 discover 对账时
+
+# ⑩ 基座 / 隔离金丝雀 / bug_hunt 边界（易漏：不被 ①–⑨ 任何通配覆盖）
+python -m unittest tests.test_base tests.test_test_isolation -v
+python -m unittest discover -s tests/bug_hunt -t . -p 'test_boundary.py' -v
 ```
 
 说明：
 
-- 顺序固定为 ①→⑨；后段依赖前段语义时不要倒序「先跑大的」。
+- 顺序固定为 ①→⑩；后段依赖前段语义时不要倒序「先跑大的」。
 - 上表用 `discover -p` / 显式模块名分段；**单段失败先修该段再继续**，不要整库重来。
 - 仅当需要与官方全量入口对账、或跨多段改完收口时，最后可跑一次：
   `python -m unittest discover -s tests/ -t . -v`（仍受「代码未变不重复全量」约束）。
-- 参考规模（2026-09-29 实测）：全量 2934 项约 62s；分段累计 2900+ 项。
+- 参考规模（2026-10-06 实测）：全量 3009 项约 94s（skipped 4 = 无 DEBUG/真库环境）；**跑全量前先看易踩坑 #26**。
+- 不在 ①–⑩ 内、也**故意不进 discover** 的：`tests/integration/`（无 DEBUG 配置/MySQL 不通则 skip）、`tests/manual_*.py`（`manual_` 前缀不被收集，需显式运行）。
 
 ### 3. 收尾检查单
 
@@ -294,27 +305,28 @@ python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：
 9. **测试依赖真实 vendor 路径或 debug 配置**
 10. **生产路径** `/alexblair/windir/www/SqlReport/` 被误读误改（禁止）
 11. **子代理写 `/tmp` 后再读被 `external_directory=ask` 拦**——子代理截图落 /tmp 后应在当轮直接报告数值/文件名，读图与复核由主会话执行
-11. **未先最小范围就全量** / 代码未变反复全量 / 单次 discover 整体超时
-12. **旧测试逻辑未随需求改写**，假失败干扰修正
-13. **测试/代码/文档硬编码本仓库主目录绝对路径**
-14. **同一问题失败 ≥2 次仍盲目重试**，不先找根因（硬性 #12）
-15. **本机 `app_config.json` 配了 `config_db.engine=mysql` 时，未 patch 引擎的 SQLite 用例会在 `init_db` 走 MySQL 分支**报 `sqlite3.OperationalError: near "="`——`init_db` 内部经 `db._get_engine()` 读配置；单测须按 `test_base` 惯例 `patch("db._get_engine", return_value="sqlite3")`（已修：`test_config_db_migrations/TestInitDbFullMigration`、`test_preset_cases/make_db`）；新增直调 `init_db` 的测试同样要隔离
-16. **discover 忘加 `-t .`** → `tests/__init__.py` 不执行，整套测试隔离失效（含连生产 Redis）。有金丝雀 `test_test_isolation` 会失败并给出修复命令。见上文
-17. **金丝雀被自己掩盖** → 断言「隔离是否生效」的测试**不能 import `tests`**（import 了就等于自己装上隔离，断言恒为真）。用「本模块的导入风格」（`__name__` 是否以 `tests.` 开头）这类**导入期确定**的判据
-18. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
-19. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
-20. **UI 验收只做「整页加载后点一次」**（2026-09-30 复盘头号教训）：无刷新换页（`_swapMain`）后 `innerHTML` 不执行内联 `<script>`、不重跑初始化——靠 `addEventListener` 绑定的交互全部静默失效，而内联 `onclick` 仍可用（表现为“按钮能点、拖拽报废”）。
+12. **未先最小范围就全量** / 代码未变反复全量 / 单次 discover 整体超时
+13. **旧测试逻辑未随需求改写**，假失败干扰修正
+14. **测试/代码/文档硬编码本仓库主目录绝对路径**
+15. **同一问题失败 ≥2 次仍盲目重试**，不先找根因（硬性 #12）
+16. **本机 `app_config.json` 配了 `config_db.engine=mysql` 时，未 patch 引擎的 SQLite 用例会在 `init_db` 走 MySQL 分支**报 `sqlite3.OperationalError: near "="`——`init_db` 内部经 `db._get_engine()` 读配置；单测须按 `test_base` 惯例 `patch("db._get_engine", return_value="sqlite3")`（已修：`test_config_db_migrations/TestInitDbFullMigration`、`test_preset_cases/make_db`）；新增直调 `init_db` 的测试同样要隔离
+17. **discover 忘加 `-t .`** → `tests/__init__.py` 不执行，整套测试隔离失效（含连生产 Redis）。有金丝雀 `test_test_isolation` 会失败并给出修复命令。见上文
+18. **金丝雀被自己掩盖** → 断言「隔离是否生效」的测试**不能 import `tests`**（import 了就等于自己装上隔离，断言恒为真）。用「本模块的导入风格」（`__name__` 是否以 `tests.` 开头）这类**导入期确定**的判据
+19. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
+20. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
+21. **UI 验收只做「整页加载后点一次」**（2026-09-30 复盘头号教训）：无刷新换页（`_swapMain`）后 `innerHTML` 不执行内联 `<script>`、不重跑初始化——靠 `addEventListener` 绑定的交互全部静默失效，而内联 `onclick` 仍可用（表现为“按钮能点、拖拽报废”）。
     → 交互类改动必须验**两种载入态**（整页 + 换页后）+ **第二次/第三次操作** + **组合顺序**；静态门禁 `TestPageInitRegistration`（新 init 必须进 `initPage()`，页面脚本用 `onReady`），E2E `scripts/ui-v2/e2e/swap-reinit.mjs`。
-21. **CDP 验收脚本自身的坑**（都是“测了个假绿/假红”）：陈旧 cookie 拿到登录页；`Page.navigate` 清空 `window.*` 自定义钩子；选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）；`children` 下标被占位元素（如 `#sortList > .sort-empty`）污染；拖拽语义是「**插到目标项之前**」，故 `drag(i, i+1)` 与「拖到自己身上」都是 no-op，要验必须反向拖或跨项拖（实测：排序项 0→1 顺序不变曾被误读为“换页后拖拽失效”）；拿**条件渲染**的函数当存在性判据（`toggleResultIndex` 只在多结果集报表输出，单结果集页 `typeof` 为 `undefined`）；自定义列默认勾选使“取消勾选”语义反转。
-22. **改了 `render.py`/`report.py`/`config.py` 但服务没重启** → 页面内联 JS 从内存直出，验到的是旧行为。配合 HTML `Cache-Control: no-store`（`server.py:_send_html`），否则用户标签页也会跑旧脚本。
-23. **新增门禁不等效于门禁有效**：从未失败过的门禁可能只是恰好路过当前代码。新门禁必须做 RED-GREEN 证明（把历史缺陷打回去→必须失败；还原→必须通过）：`venv/bin/python tests/bug_hunt/gate_redproof.py`（会临时改写 `report.py` 并校验 sha256 还原；不进 discover，勿当常规回归）。
-24. **断言公共 CSS 别对着报表页 `body` 断言**（2026-10-05 实测）：报表页公共样式走**外链** `/static/vendor/self@<hash>/common.css`（`render.py:2484`），**不内联**；只有资产写入失败才回退 `<style>{_COMMON_CSS}</style>`。所以「页面产物里必须出现某条 CSS 规则」的断言在正常环境**必红**（本轮白跑一轮）。正确写法：① 断言公共样式单一来源 `render._COMMON_CSS`（知识库 06 卷已规定禁止页面级补丁，故与页面级等价）；② 另加一条「页面确实携带公共样式」（`"/common.css" in body` 或内联回退命中）。另：收紧旧断言必须用**实测读出的真值**（本轮 `th:first-child + th` 实际是 `156px`，旧断言只要求 `\d+px`、docstring 还写着 100px），并做 RED-PROOF 证明改坏会红。
+22. **CDP 验收脚本自身的坑**（都是“测了个假绿/假红”）：陈旧 cookie 拿到登录页；`Page.navigate` 清空 `window.*` 自定义钩子；选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）；`children` 下标被占位元素（如 `#sortList > .sort-empty`）污染；拖拽语义是「**插到目标项之前**」，故 `drag(i, i+1)` 与「拖到自己身上」都是 no-op，要验必须反向拖或跨项拖（实测：排序项 0→1 顺序不变曾被误读为“换页后拖拽失效”）；拿**条件渲染**的函数当存在性判据（`toggleResultIndex` 只在多结果集报表输出，单结果集页 `typeof` 为 `undefined`）；自定义列默认勾选使“取消勾选”语义反转。
+23. **改了 `render.py`/`report.py`/`config.py` 但服务没重启** → 页面内联 JS 从内存直出，验到的是旧行为。配合 HTML `Cache-Control: no-store`（`server.py:_send_html`），否则用户标签页也会跑旧脚本。
+24. **新增门禁不等效于门禁有效**：从未失败过的门禁可能只是恰好路过当前代码。新门禁必须做 RED-GREEN 证明（把历史缺陷打回去→必须失败；还原→必须通过）：`venv/bin/python tests/bug_hunt/gate_redproof.py`（会临时改写 `report.py` 并校验 sha256 还原；不进 discover，勿当常规回归）。
+25. **断言公共 CSS 别对着报表页 `body` 断言**（2026-10-05 实测）：报表页公共样式走**外链** `/static/vendor/self@<hash>/common.css`（`render.py:2484`），**不内联**；只有资产写入失败才回退 `<style>{_COMMON_CSS}</style>`。所以「页面产物里必须出现某条 CSS 规则」的断言在正常环境**必红**（本轮白跑一轮）。正确写法：① 断言公共样式单一来源 `render._COMMON_CSS`（知识库 06 卷已规定禁止页面级补丁，故与页面级等价）；② 另加一条「页面确实携带公共样式」（`"/common.css" in body` 或内联回退命中）。另：收紧旧断言必须用**实测读出的真值**（本轮 `th:first-child + th` 实际是 `156px`，旧断言只要求 `\d+px`、docstring 还写着 100px），并做 RED-PROOF 证明改坏会红。
+26. **`run-logs/` 里的历史克隆副本会污染静态分析门禁**（2026-10-06 实测）：`tests/bug_hunt/static_analyzer.py` 只跳过 `IGNORE_DIRS`（`venv`/`.codegraph`/`__pycache__`/`.git`/`.opencode`/`.tmp`），**不跳过 `run-logs/`、`perf-logs/`**。把分支验证用的 `git clone`/`git worktree` 放进 `run-logs/` 后，其 `tests/__init__.py` 的包内相对导入会被判「无法导入模块 test_base」，全量 discover 里 `test_static_analysis.test_no_import_errors` 因此 ERROR 红（本轮实证：全量 3009 项唯一失败即此，产品代码零回归）。对策：跑全量前确认 `run-logs/` 下无 `.py` 克隆产物（或把克隆放到仓库外）；**不要**为此放宽门禁。
 
 ## 文档过时线索（AGENTS.md 已提醒）
 
-- README「项目结构」可能仍写 `AGENTS.md` 存在、列出 `git-purge.sh` —— 以当前目录为准
-- README 测试树不完整 —— 以 `tests/` + discover 为准
+- README「项目结构」的 `AGENTS.md` / `git-purge.sh` 与测试清单已于 2026-10-06 修正（见双 README 结构树）；仍以当前目录为准
+- README 测试树已收敛为目录说明（不再逐文件列出）—— 以 `tests/` + discover 为准
 - 文档冲突 → 改文档（中英同步）
 
 ---
-最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#17；**2026-09-30 UI v2 复盘同步**（易踩坑 #20–#23：换页态验收、CDP 脚本自身的坑、改代码后重启服务、门禁需 RED-GREEN 自证；新工具 `tests/bug_hunt/gate_redproof.py`；交互验收清单见 `knowledge/06-ui-interactions.md` 硬性 #17）；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #16–#19）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）
+最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#17；**2026-09-30 UI v2 复盘同步**（易踩坑 #21–#24：换页态验收、CDP 脚本自身的坑、改代码后重启服务、门禁需 RED-GREEN 自证；新工具 `tests/bug_hunt/gate_redproof.py`；交互验收清单见 `knowledge/06-ui-interactions.md` 硬性 #17）；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #17–#20）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）
