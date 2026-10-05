@@ -26,7 +26,7 @@ import db
 import app_config
 import auth
 from report import execute_report, parse_result_names, WRITE_DENIED_MESSAGE
-from query_executor import sql_contains_write
+from query_executor import sql_contains_write, sql_has_persistent_write
 import static_cache
 from json_template import is_template_enabled, render_template
 from result_transform import (select_columns, column_indices, calc_total_pages,
@@ -207,8 +207,14 @@ def _handle_static_request(conn, endpoint: dict, base_path: str,
 
     # PH-05 写护栏：allow_write=0 且 SQL 含写 → 回退普通链路（execute_report 统一 403），
     # 防止历史静态缓存文件绕过护栏直出（普通 API 与 .json 变体行为必须一致）
-    if not int(report.get("allow_write", 1) or 0) \
-            and sql_contains_write(report.get("sql_query") or ""):
+    # 追加（2026-10-05）：**真持久写报表一律禁止静态化**——静态文件命中时不执行任何语句，
+    # 会让整个 TTL 窗口内的写被短路（2026-09-25「场景 4b」在 L3 上的漏网）。
+    # 注意是**并集不是替换**：会话级脚本（只建临时表 / `SET @用户变量`）格式化无害、允许静态化，
+    # 但 allow_write=0 的报表仍必须回退并 403（权限旁路红线）。
+    _static_sql = report.get("sql_query") or ""
+    if (not int(report.get("allow_write", 1) or 0)
+            and sql_contains_write(_static_sql)) \
+            or sql_has_persistent_write(_static_sql):
         return _run_normal_api_request(conn, endpoint, method, body, query_params, headers)
 
     ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)
@@ -280,9 +286,12 @@ def rebuild_static_endpoint_file(conn, endpoint: dict,
     report = db.get_report(conn, endpoint["report_id"])
     if report is None or report.get("pool_id") is None:
         return False, 404, '{"error": "report not found"}', dict(default_headers)
-    # PH-05 写护栏：allow_write=0 且 SQL 含写 → 拒绝静态化
-    if not int(report.get("allow_write", 1) or 0) \
-            and sql_contains_write(report.get("sql_query") or ""):
+    # PH-05 写护栏 + 持久写禁令（并集）：allow_write=0 含写 → 拒绝静态化；
+    # 真持久写 → 同样拒绝静态化（命中静态文件不会执行写，会让写被短路）。
+    _static_sql = report.get("sql_query") or ""
+    if (not int(report.get("allow_write", 1) or 0)
+            and sql_contains_write(_static_sql)) \
+            or sql_has_persistent_write(_static_sql):
         return False, 403, '{"error": "write blocked"}', dict(default_headers)
 
     ttl_hours = int(report.get("cache_ttl_hours", 0) or 0)

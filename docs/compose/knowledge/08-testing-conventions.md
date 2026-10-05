@@ -198,7 +198,8 @@ python -m unittest tests.bug_hunt.test_static_analysis -v
 python -m unittest tests.test_filter_help tests.test_result_transform \
   tests.test_nested_filter tests.test_exclusion_engine \
   tests.test_max_rows tests.test_output_limit \
-  tests.test_write_guard tests.test_sql_write_detect -v
+  tests.test_write_guard tests.test_sql_write_detect \
+  tests.test_sql_persistent_write tests.test_derived_cache -v
 
 # ③ 配置 / 数据层 / 迁移
 python -m unittest discover -s tests/ -t . -p 'test_config*.py' -v
@@ -270,7 +271,8 @@ python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：
 ## 跨模块一致性测试优先覆盖
 
 - 筛选语法：`test_filter_help`、`test_result_transform`、`test_nested_filter`、`test_exclusion_engine`
-- 写护栏：`test_write_guard`、`test_sql_write_detect`
+- 写护栏：`test_write_guard`、`test_sql_write_detect`、`test_sql_persistent_write`（判定分工矩阵）、`test_derived_cache`
+- 写判定/缓存门槛回归（手工，不进 discover）：`tests/manual_write_gate_regression.py`（只读跑配置库全部报表比对新旧判定）、`scripts/perf/bench_session_script.py`（本地夹具 A/B + 三端一致性）
 - 导出/截断：`test_export`、`test_max_rows`、`test_output_limit`
 - API：`test_api_*`
 - HTML：`test_html_structure` + `htmlcheck`
@@ -301,6 +303,11 @@ python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：
 17. **金丝雀被自己掩盖** → 断言「隔离是否生效」的测试**不能 import `tests`**（import 了就等于自己装上隔离，断言恒为真）。用「本模块的导入风格」（`__name__` 是否以 `tests.` 开头）这类**导入期确定**的判据
 18. **测试依赖进程级全局状态而未清理**：`report._query_cache`（L1）、`query_executor` 连接池。导出改走 `execute_report`（C-4）与连接池（C-2）后，写相关测试必须在 `setUp` 清 `report._query_cache.clear()` + `query_executor.clear_pools()`，否则会读到别的用例的 mock 数据——**症状是「换个执行顺序就过不过」**
 19. **characterization 测试的期望值靠推导** → 必须用**未改动的实现实测**得出。2026-09-29 实测中就抓到过推导错误（数字字符串排序我以为返回 float，实际返回原字符串，变的只是行序）
+20. **UI 验收只做「整页加载后点一次」**（2026-09-30 复盘头号教训）：无刷新换页（`_swapMain`）后 `innerHTML` 不执行内联 `<script>`、不重跑初始化——靠 `addEventListener` 绑定的交互全部静默失效，而内联 `onclick` 仍可用（表现为“按钮能点、拖拽报废”）。
+    → 交互类改动必须验**两种载入态**（整页 + 换页后）+ **第二次/第三次操作** + **组合顺序**；静态门禁 `TestPageInitRegistration`（新 init 必须进 `initPage()`，页面脚本用 `onReady`），E2E `scripts/ui-v2/e2e/swap-reinit.mjs`。
+21. **CDP 验收脚本自身的坑**（都是“测了个假绿/假红”）：陈旧 cookie 拿到登录页；`Page.navigate` 清空 `window.*` 自定义钩子；选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）；`children` 下标被占位元素（如 `#sortList > .sort-empty`）污染；拖拽语义是「**插到目标项之前**」，故 `drag(i, i+1)` 与「拖到自己身上」都是 no-op，要验必须反向拖或跨项拖（实测：排序项 0→1 顺序不变曾被误读为“换页后拖拽失效”）；拿**条件渲染**的函数当存在性判据（`toggleResultIndex` 只在多结果集报表输出，单结果集页 `typeof` 为 `undefined`）；自定义列默认勾选使“取消勾选”语义反转。
+22. **改了 `render.py`/`report.py`/`config.py` 但服务没重启** → 页面内联 JS 从内存直出，验到的是旧行为。配合 HTML `Cache-Control: no-store`（`server.py:_send_html`），否则用户标签页也会跑旧脚本。
+23. **新增门禁不等效于门禁有效**：从未失败过的门禁可能只是恰好路过当前代码。新门禁必须做 RED-GREEN 证明（把历史缺陷打回去→必须失败；还原→必须通过）：`venv/bin/python tests/bug_hunt/gate_redproof.py`（会临时改写 `report.py` 并校验 sha256 还原；不进 discover，勿当常规回归）。
 
 ## 文档过时线索（AGENTS.md 已提醒）
 
@@ -309,4 +316,4 @@ python -m unittest discover -s tests/ -t . -p 'test_*.py' -v   # 可选兜底：
 - 文档冲突 → 改文档（中英同步）
 
 ---
-最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#14；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #16–#19）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）
+最后核对：`tests/` 目录 + `AGENTS.md` 硬性约束 #8–#17；**2026-09-30 UI v2 复盘同步**（易踩坑 #20–#23：换页态验收、CDP 脚本自身的坑、改代码后重启服务、门禁需 RED-GREEN 自证；新工具 `tests/bug_hunt/gate_redproof.py`；交互验收清单见 `knowledge/06-ui-interactions.md` 硬性 #17）；2026-09-29 执行层性能优化同步（`-t .` 隔离与金丝雀、进程级全局清理、`scripts/perf/` 工具链、characterization 测试纪律、易踩坑 #16–#19）；2026-09-29 AGENTS.md 瘦身重构（本卷接收「测试策略与推荐验证顺序」全文 + 「两败必停」全文；多子代理细则移交 `09-agent-workflow.md`）

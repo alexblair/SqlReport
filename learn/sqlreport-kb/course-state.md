@@ -9,7 +9,7 @@
 
 | # | 章节 | 产物 | 状态 |
 |---|------|------|------|
-| 0 | 索引初始化 | `codegraph init` → `.codegraph/`（100 files / 6037 nodes / 15144 edges） | 完成 |
+| 0 | 索引初始化 | `codegraph init` → `.codegraph/`（2026-09-30 全量重建实测 146 files / 6870 nodes / 17278 edges） | 完成 |
 | 1 | 架构与配置 | `01-architecture.md` | 完成 |
 | 2 | 路由与鉴权 | `02-routing-auth.md` | 完成（explore-1 增补） |
 | 3 | 报表与变换 | `03-report-transform.md` | 完成（explore-3 增补） |
@@ -18,7 +18,7 @@
 | 6 | UI 交互 | `06-ui-interactions.md` | 完成（ui-redesign T9 重写 + R2-D：API 列表 api-row 卡片/详情五页签对齐 page-detail——qf-row 快筛、结果集 segment、分页恒显、规则双卡、调试磁贴、备注卡片；**emoji→SVG 图标系统（_icon 函数）、CSS 按钮类补齐、侧栏 button→a 语义修复**；**2026-09-29 侧栏三态收缩（全高手柄+localStorage 记忆+小屏自适应）与当前登录用户名注入**；**R3 侧栏账号区吸底/两行修复 + 报表配置页列表/卡片双视图与列宽预算、截图数值断言校验法（易踩坑 #14–15）**） |
 | 7 | 缓存调度审计 | `07-cache-scheduler-audit.md` | 完成（2026-09-29 补 L1 派生态缓存与导出并入缓存链路的说明） |
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因；2026-09-29 从 AGENTS.md 迁入两败必停全文 + L2 分段命令表 + `-t .` 陷阱 + 性能工具链） |
-| 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7，自 AGENTS.md 迁入） |
+| 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7；**2026-09-30 新增「代码检索纪律 #18/#19」——codegraph 优先检索、查不到才降级 grep、改完必 sync**） |
 
 入口：`docs/compose/knowledge/README.md` + `INDEX.md`
 
@@ -31,7 +31,8 @@
 
 | 概念 | 状态 | 证据 | 置信度 | 复习点 |
 |------|------|------|--------|--------|
-| codegraph 索引 | mastered | status up to date | 高 | 大改后 sync |
+| codegraph 索引 | mastered | status up to date | 高 | 每次改完代码 sync（#19） |
+| codegraph 优先检索（#18）+ 改完必 sync（#19） | mastered | 09 卷命令表 + sync 端到端实测（改文件→pending 1→sync→新符号可查） | 高 | 出现「先 grep 后 explore」时 |
 | ROUTES 首次匹配 + needs_db=False 边界 | mastered | server:244-263 + explore-1 | 高 | 新 URL |
 | Session 滑动 + 限流 + next 白名单 | mastered | auth + explore-1 | 高 | 改登录 |
 | result_transform 单一语义 | mastered | docstring + 三端调用 | 高 | 改筛选 |
@@ -61,10 +62,13 @@
 | 测试进程会连生产 Redis（无隔离时） | mastered | 08 卷易踩坑 #16 + tests/_bootstrap.py | 高 | 写涉及缓存的测试时 |
 | 断言「隔离是否生效」的测试不能自己 import tests（自我掩盖） | mastered | 08 卷易踩坑 #17（第一版金丝雀即栽在这） | 高 | 写环境守卫类测试时 |
 | 端到端压测噪声约 ±6%，transform 收益须用隔离 A/B | practiced | spec §10.3 | 中 | 做性能对比时 |
+| 写判定分工：`sql_contains_write`（从严、权限侧）vs `sql_has_persistent_write`（精确、缓存门槛与静态护栏） | practiced | spec 2026-09-30 §5 | 中 | 动 allow_write / skip_cache_read / 静态护栏时 |
+| 静态护栏是**并集**（权限判定 + 持久写判定），不是替换 | practiced | spec 2026-09-30 §3.3 | 高 | 改静态分支条件时 |
 
 ## 复习队列
 
-- （空）
+- 若将来要把「临时表名追踪」纳入判定（会话级 DML 目标为**本脚本内建**的临时表），
+  需先补单测再改 spec §5.3 的 YAGNI 结论（当前 34 个真实报表无一需要）。
 
 ## 错误日志
 
@@ -73,7 +77,7 @@
 
 ## 下一步（可选）
 
-1. 大改前 `codegraph sync`（ui-redesign 后应执行）
+1. 改完代码后 `codegraph sync`（硬性 #19，本机无守护进程自动同步）
 2. 改共享语义时按 INDEX「共享语义」表全链路搜调用点
 3. 探索报告全文已并入各分卷；若需原始长文可回看会话 actor 结果
 
@@ -83,7 +87,7 @@
 slug=sqlreport-kb
 chapters=0..9 done
 kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写死绝对路径
-index=codegraph ok (100 files, 6037 nodes)
+index=codegraph ok (146 files, 6870 nodes, 17278 edges, v1.4.0)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
 last_sync=2026-09-29 执行层性能优化（spec 2026-09-29-execution-layer-performance-design.md）
@@ -92,4 +96,15 @@ last_sync=2026-09-29 执行层性能优化（spec 2026-09-29-execution-layer-per
 last_sync=2026-09-29 AGENTS.md 瘦身重构（395 → 141 行）
            新建 09-agent-workflow.md；01/02/03/04/06/08 迁入对应 AGENTS.md 内容；
            AGENTS.md §0 新增「任务类型 → 先读/改完必更新」入口引导路由表
+last_sync=2026-09-30 UI v2 复盘轮（14 类缺陷 + 10 条流程错误 → 机制）
+           06 新增「交互改动验收（硬性 #17）+ 失败模式库」与易踩坑 16；
+           08 新增易踩坑 20–23（换页态验收 / CDP 脚本自身的坑 / 改代码后重启服务 / 门禁须 RED-GREEN）；
+           AGENTS.md 硬性 #17 + 收尾检查单第 6 条；MEMORY.md Rules 12–14；
+           新增门禁 3 类 4 例（test_ui_tokens 26→30）与 tests/bug_hunt/gate_redproof.py；
+           复盘报告 docs/compose/reports/ui-v2-retrospective.md
+last_sync=2026-09-30 codegraph 优先检索纪律（用户硬性要求）
+           AGENTS.md 新增硬性 #18（检索/阅读代码强制先走 codegraph，查不到才降级 grep/read）
+           与 #19（改完 .py/.js/.mjs 必 codegraph sync）；§0 路由表新增检索行、§4 命令块、收尾清单第 7 条
+           09 卷新增「代码检索纪律（#18/#19）」：两条等价通道（MCP/CLI）命令表、查询写法、
+           降级白名单、禁止项、同步时机表、本项目 5 条实测坑；同步 INDEX.md §7、knowledge/README.md
 ```

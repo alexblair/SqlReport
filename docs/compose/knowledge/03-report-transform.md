@@ -8,7 +8,8 @@
 
 流程要点：
 
-1. **写护栏在读缓存之前**（约 :997）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含写 SQL 仍令 `skip_cache_read`**（2026-09-25）——热快照不得短路写执行，每次真实跑库，缓存回填照常
+1. **写护栏在读缓存之前**（约 :997）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**（2026-09-25，2026-09-30 收窄）——热快照不得短路写执行，每次真实跑库，缓存回填照常。
+   **判定分两个函数**（2026-09-30，`docs/compose/spec/2026-09-30-write-report-cache-gate-design.md`）：`sql_contains_write`（从严，服务权限与警示）与 `sql_has_persistent_write`（精确，只服务缓存门槛与静态护栏）。会话级语句（`CREATE`/`DROP TEMPORARY TABLE`、`SET @用户变量`）与 CTE 里的 `REPLACE()`/`INSERT()` 字符串函数调用**不再**跳过缓存读。
 2. 优先 Redis 快照（`prefer_cache`）→ 否则查 MySQL → 写回快照（分布式锁）；预览 SQL 与配置不一致**不写 Redis**
 3. L1 `QueryCache` 进程缓存全量行，键约 `(report_id, sql_query)`
 4. 全量输出护栏：`allow_all_output=0` 且 `max_rows>0` → 截断并 `truncated`；`_cache_matches_limit_policy` 拒绝「已截断但当前要全量」的旧缓存
@@ -59,7 +60,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 ## 导出（`export.handle_export` :319）
 
 ```
-/export?id=N[&format=json][&charset=utf8|gbk][&zip=1]
+/export?id=N[&format=json][&charset=utf8|gbk][&zip=1]（**JSON 固定 UTF-8**：RFC 8259，与 `/api/*` 响应统一；选 JSON 时导出面板的字符集会被置为 UTF-8 并禁用）
         [&smart_quotes=1,2,4][&json_no_quotes=1]
         [&f_*/op_*/sort/nested_filter/cols/result=...]
 ```
@@ -67,7 +68,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 | 项 | 行为 |
 |----|------|
 | 默认格式 | CSV |
-| 默认字符集 | **gbk**（非 utf8）；GBK 剥 BOM |
+| 默认字符集 | **gbk**（非 utf8）；GBK 剥 BOM（仅 CSV；**JSON 恒 UTF-8**，面板传其它字符集也会被忽略——`export.handle_export` 在解析后强制 `charset="utf8"`，ZIP 内 `.json` 同样是 UTF-8）|
 | 变换顺序 | 查询 → 选结果集 → **先 max_rows 截断** → 筛选 → 排序 → 列 |
 | **数据来源** | 走 `report.execute_report`（**复用 L1 进程缓存 / L2 Redis 快照**，2026-09-29 C-4 起）。改前自带连接直查 MySQL、完全绕过三层缓存，实测 10 万行导出 1519.7ms → 复用缓存后 359.2ms。`report_id=None` 时保留旧的直连分支 |
 | 写护栏 | 403 `WRITE_DENIED_MESSAGE`（在调用 execute_report **之前**判定，不依赖其 `PermissionError`） |
@@ -131,8 +132,9 @@ report.allow_write 与 sql_contains_write(sql)
   刷新 Redis 快照」这一既有语义。
 - **分页切片不缓存**，每次现算（`O(page_size)`）。翻页只有 page 变 →
   命中率高，这正是设计针对的访问模式。
-- **仅在 `not skip_cache_read` 时启用**：写报表每轮数据都变、force_rebuild
-  是「先算后换」，两者复用派生态都会返回旧行序。
+- **仅在 `not skip_cache_read` 时启用**：真持久写报表每轮数据都变、force_rebuild
+  是「先算后换」，两者复用派生态都会返回旧行序。（`skip_cache_read` 自 2026-09-30 起
+  由 `sql_has_persistent_write` 决定：会话级脚本与 CTE+函数名报表**恢复**复用派生态。）
 - LRU 上限 `_DERIVED_CACHE_MAX = 8` 组合/报表。`derived` 绝不进序列化路径。
 - 10 万行实测（重复同筛选/排序）：排序 76.1→16.1ms，筛选 95.3→15.5ms。
   **首次**访问仍是 O(N)，与基线同量级。

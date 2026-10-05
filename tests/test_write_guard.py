@@ -610,7 +610,13 @@ class TestStaticCacheWriteGuard(unittest.TestCase):
     def test_static_cache_hit_cannot_bypass_guard(self):
         """allow_write=1 构建缓存文件后关闭开关 → .json 变体 403（不得直出缓存）"""
         import static_cache
-        rid = db.add_report(self.conn, "写报表", "DELETE FROM t", 20, 1,
+        # 用「会话级脚本」而非 DELETE 构造前置状态：自 2026-10-05 起真持久写报表
+        # 一律禁止静态化（见写护栏并集判定），已无法用 DELETE 报表生成静态文件；
+        # 而 sql_contains_write 对会话级脚本仍为 True，allow_write=0 的拦截语义照旧被验到。
+        _session_sql = ("DROP TEMPORARY TABLE IF EXISTS t;\n"
+                        "CREATE TEMPORARY TABLE t SELECT 1;\n"
+                        "SELECT * FROM t;")
+        rid = db.add_report(self.conn, "写报表", _session_sql, 20, 1,
                             allow_write=1)
         db.add_api_endpoint(self.conn, rid, "写端点", "/api/write-static")
         with patch("db.create_mysql_connection") as mock_conn, \
@@ -642,6 +648,123 @@ class TestStaticCacheWriteGuard(unittest.TestCase):
             mock_query.return_value = [{"columns": ["c"], "rows": [("v",)]}]
             status, body, _ = self._request("/api/read-static.json")
         self.assertEqual(status, 200)
+
+    def test_session_only_script_still_served_from_static_file(self):
+        """会话级脚本（只建临时表）+ allow_write=1：静态 .json 仍正常命中。
+
+        与下一条用例互为正反面：真持久写必须禁静态化，会话级脚本必须保留快速度。
+        本用例改前改后都应通过（防过度拦截）。
+        """
+        import static_cache  # noqa: F401
+        sql = ("DROP TEMPORARY TABLE IF EXISTS tmp_a;\n"
+               "CREATE TEMPORARY TABLE tmp_a SELECT 1;\n"
+               "SELECT * FROM tmp_a;")
+        rid = db.add_report(self.conn, "会话级脚本报表", sql, 20, 1,
+                            allow_write=1)
+        db.add_api_endpoint(self.conn, rid, "会话级端点", "/api/session-static")
+        with patch("db.create_mysql_connection") as mock_conn, \
+                patch("db.execute_mysql_query") as mock_query:
+            mock_conn.return_value = MagicMock()
+            mock_query.return_value = [{"columns": ["c"], "rows": [("v",)]}]
+            status1, _, headers1 = self._request("/api/session-static.json")
+            status2, _, headers2 = self._request("/api/session-static.json")
+        self.assertEqual(status1, 200)
+        self.assertEqual(status2, 200)
+        self.assertEqual(headers1.get("X-Static-Cache"), "miss")
+        self.assertEqual(headers2.get("X-Static-Cache"), "hit")
+        self.assertEqual(mock_query.call_count, 1,
+                         "会话级脚本：第二次应由静态文件服务，不重跑脚本")
+
+    def test_persistent_write_report_not_static_cached(self):
+        """真持久写 + allow_write=1：不得静态化，每次请求都要真实执行写。
+
+        改前 `allow_write=1` 的写报表会被静态文件短路整个 TTL——2026-09-25
+        「场景 4b」在 L3 上的漏网。
+        """
+        sql = ("TRUNCATE TABLE t;\n"
+               "INSERT INTO t (c) SELECT 'v';\n"
+               "SELECT * FROM t;")
+        rid = db.add_report(self.conn, "真重建报表", sql, 20, 1, allow_write=1)
+        db.add_api_endpoint(self.conn, rid, "重建端点", "/api/rebuild-static")
+        with patch("db.create_mysql_connection") as mock_conn, \
+                patch("db.execute_mysql_query") as mock_query:
+            mock_conn.return_value = MagicMock()
+            mock_query.return_value = [{"columns": ["c"], "rows": [("v",)]}]
+            status1, _, headers1 = self._request("/api/rebuild-static.json")
+            status2, _, headers2 = self._request("/api/rebuild-static.json")
+        self.assertEqual(status1, 200)
+        self.assertEqual(status2, 200)
+        self.assertIsNone(headers1.get("X-Static-Cache"),
+                          "真持久写报表不得走静态缓存")
+        self.assertIsNone(headers2.get("X-Static-Cache"),
+                          "真持久写报表不得走静态缓存")
+        self.assertEqual(mock_query.call_count, 2,
+                         "真持久写报表每次请求都必须真实跑库")
+
+    def test_allow_write_zero_session_script_still_403(self):
+        """权限红线：allow_write=0 + 只建临时表的脚本，静态端点仍须 403。
+
+        若把静态护栏「替换」成只判持久写，这里会因新判定为 False 而直接静态化，
+        绕过 allow_write 拦截——本用例钉死该红线（spec §3.3 权限旁路警告）。
+        """
+        sql = ("DROP TEMPORARY TABLE IF EXISTS tmp_a;\n"
+               "CREATE TEMPORARY TABLE tmp_a SELECT 1;\n"
+               "SELECT * FROM tmp_a;")
+        rid = db.add_report(self.conn, "未授权会话级报表", sql, 20, 1,
+                            allow_write=0)
+        db.add_api_endpoint(self.conn, rid, "未授权端点", "/api/denied-session")
+        with patch("db.create_mysql_connection") as mock_conn, \
+                patch("db.execute_mysql_query") as mock_query:
+            mock_conn.return_value = MagicMock()
+            mock_query.return_value = [{"columns": ["c"], "rows": [("v",)]}]
+            status, body, _ = self._request("/api/denied-session.json")
+        self.assertEqual(status, 403)
+        self.assertIn(WRITE_DENIED_MESSAGE, body)
+        self.assertEqual(mock_query.call_count, 0,
+                         "拦截必须发生在跑库之前")
+
+    def test_temporary_identifier_write_not_static_cached(self):
+        """`temporary` 作**表名**的真持久写同样不得静态化（复核 C-1/I-2）。
+
+        修 C-1 前这种报表会被误判为会话级 → 静态文件命中即不执行 DDL。
+        """
+        sql = ("DROP TABLE temporary;\n"
+               "CREATE TABLE temporary (id INT);\n"
+               "SELECT * FROM temporary;")
+        rid = db.add_report(self.conn, "temporary 表名报表", sql, 20, 1,
+                            allow_write=1)
+        db.add_api_endpoint(self.conn, rid, "temporary 端点", "/api/tmp-name-static")
+        with patch("db.create_mysql_connection") as mock_conn, \
+                patch("db.execute_mysql_query") as mock_query:
+            mock_conn.return_value = MagicMock()
+            mock_query.return_value = [{"columns": ["c"], "rows": [("v",)]}]
+            s1, _, h1 = self._request("/api/tmp-name-static.json")
+            s2, _, h2 = self._request("/api/tmp-name-static.json")
+        self.assertEqual(s1, 200)
+        self.assertEqual(s2, 200)
+        self.assertIsNone(h1.get("X-Static-Cache"),
+                          "temporary 作表名的真 DDL 不得静态化")
+        self.assertIsNone(h2.get("X-Static-Cache"))
+        self.assertEqual(mock_query.call_count, 2,
+                         "真 DDL 每次请求都必须真实执行")
+
+    def test_rebuild_static_endpoint_file_403_for_persistent_write(self):
+        """持久写报表的静态文件重建必须**显式 403**（而非 500/静默）且不落盘（复核 I-3）。
+
+        调度保活会直接调 `rebuild_static_endpoint_file`；该分支的返回值需要有
+        正向断言守着，否则将来守卫被误删也无人发觉。
+        """
+        sql = ("TRUNCATE TABLE t;\n"
+               "INSERT INTO t (c) SELECT 'v';\n"
+               "SELECT * FROM t;")
+        rid = db.add_report(self.conn, "真重建报表-直调", sql, 20, 1,
+                            allow_write=1)
+        endpoint = {"report_id": rid, "url_path": "/api/rebuild-direct"}
+        written, status, body, _ = api_handler.rebuild_static_endpoint_file(
+            self.conn, endpoint, record_invalidation=False)
+        self.assertFalse(written, "持久写报表不得落盘静态文件")
+        self.assertEqual(status, 403)
+        self.assertIn("write blocked", body)
 
 
 # ===================================================================

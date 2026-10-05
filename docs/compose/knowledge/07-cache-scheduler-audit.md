@@ -61,7 +61,13 @@ keyword 共用 `parse_filter_expr`。
 ```
 /report 或 /api 或 /export
   → execute_report
-      force_rebuild 或 SQL含写? 跳过读（写报表禁缓存短路，2026-09-25）
+      force_rebuild 或 含持久写? 跳过读（写报表禁缓存短路，2026-09-25）
+        ├ 门槛用 sql_has_persistent_write（精确）：会话级语句（CREATE/DROP
+        │  **次关键词为 TEMPORARY** 的临时表、SET @用户变量）与 CTE 内
+        │  REPLACE()/INSERT() 函数调用
+        │  不算持久写 → 可放行缓存读（2026-09-30）
+        └ 权限侧另用 sql_contains_write（从严）：allow_write 拦截/警示、导出与
+           API 403、静态护栏**并集**（2026-10-05 追加禁静态化）
       → L1 QueryCache + 截断策略
       → L2 prefer_cache && redis_available → get_snapshot(config_version)
       → miss → 锁 → MySQL（连接期或查询期失败 → 过期快照兜底

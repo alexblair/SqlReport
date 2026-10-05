@@ -212,6 +212,43 @@ class TestDerivedCacheLifecycle(unittest.TestCase):
         self.assertEqual(self.calls["sort"], 2,
                          "写报表禁缓存短路，每次都应真实执行")
 
+    def test_session_only_script_report_uses_derived(self):
+        """✅ 会话级脚本（只建临时表 + SET @变量）无持久副作用 → 必须恢复缓存读。
+
+        与上一条用例互为正反面：`DELETE FROM t` 继续禁缓存短路，
+        而只建临时表的脚本必须走回 L1 / 派生态。
+        """
+        sql = ("DROP TEMPORARY TABLE IF EXISTS tmp_a;\n"
+               "CREATE TEMPORARY TABLE tmp_a SELECT id, v FROM t;\n"
+               "/** c */ SET @n := (SELECT COUNT(0) FROM tmp_a);\n"
+               "SELECT * FROM tmp_a;")
+        cfg = dict(REPORT_CFG, allow_write=1, prefer_cache=1,
+                   cache_ttl_hours=6)
+        source = {"n": 0}
+
+        def counting_source(*a, **kw):
+            source["n"] += 1
+            return ROWS
+
+        results = []
+        for page in (1, 2):
+            with patch("report.db.execute_mysql_query",
+                       side_effect=counting_source), \
+                 patch("report.db.create_mysql_connection",
+                       return_value=MagicMock()), \
+                 patch("report.filter_rows", self.cfilter), \
+                 patch("report.sort_rows", self.csort):
+                results.append(execute_report(
+                    1, sql, POOL, report=cfg, cache=self.cache,
+                    page=page, page_size=10, sorts=[("v", "asc")]))
+
+        self.assertEqual(source["n"], 1,
+                         "会话级脚本报表第二次翻页不得再查数据源")
+        self.assertIn(results[1].cache_info["source"], ("process", "redis"))
+        self.assertEqual(self.calls["sort"], 1,
+                         "派生态应被复用，不得重跑排序")
+        self.assertEqual(results[1].results[0]["rows"][0], (11, "v011"),
+                         "第二页切片应为第 11..20 行（与缓存数据同源同序）")
 
 class TestSnapshotFormatUnchanged(unittest.TestCase):
     """Global Constraint #2 的兜底：派生态绝不能泄漏进 Redis 快照。"""

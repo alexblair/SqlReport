@@ -73,6 +73,10 @@
    修复：`skip_cache_read = force_rebuild or sql_contains_write(sql_query)`——
    含写语句的执行每次真实跑库，缓存回填路径保持生效；纯 SELECT 报表行为不变。
    转单测建议名：`test_warm_snapshot_cannot_short_circuit_write`。
+   **2026-09-30 补注**：上述公式已**收窄**为 `skip_cache_read = force_rebuild or
+   sql_has_persistent_write(sql_query)`——会话级语句（临时表、`SET @用户变量`）
+   不再跳过缓存读。本场景（真 `UPDATE`）的结论与断言**不变**。
+   详见 `2026-09-30-write-report-cache-gate-design.md`。
 2. **3c 缺口（2026-09-25 已修复）**：`report.py execute_report` 内层 try 原仅包
    `execute_mysql_query`，`create_mysql_connection` 在其外；实测
    `mysql.connector.connect` 连接被拒时**立即抛** InterfaceError → 最常见

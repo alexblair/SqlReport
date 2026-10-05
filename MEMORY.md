@@ -58,8 +58,36 @@
     `knowledge/README.md` 索引表、`AGENTS.md` §2 分卷表。
     （本次实测：AGENTS.md 395 → 141 行，内容零丢失、24 项关键条目逐条复核留存。）
 
+12. **交互类改动必须验「两种载入态 + 多轮 + 组合」**（2026-09-30 用户实测教训）：
+    「整页加载后点一次」看不见三类失效：**换页态**（无刷新导航后 `innerHTML` 不执行内联
+    `<script>`、不重跑 init → `addEventListener` 交互静默失效，而内联 `onclick` 仍可点）、
+    **第二/三次操作**（先隐藏再还原再排序）、**组合操作**（字段顺序×筛选×排序×导出）。
+    落地：AGENTS 硬性 #17、`knowledge/06-ui-interactions.md` 验收清单 + 失败模式库、
+    门禁 `tests/test_ui_tokens.py::TestPageInitRegistration`、E2E `scripts/ui-v2/e2e/swap-reinit.mjs`。
+
+13. **能机械检测的绝不写进口头约定**（本轮 4 条新门禁）：同一规则内重复声明属性、
+    新 init 未进 `initPage()`/裸绑 `DOMContentLoaded`、同名控件混用类型、JS 块注释 `*/`。
+    且**新门禁必须自证有效**：`venv/bin/python tests/bug_hunt/gate_redproof.py`
+    （把历史缺陷打回去必须失败、还原必须通过；4/4 才算数）。从未失败过的门禁等于没有。
+
+14. **改 `render.py`/`report.py`/`config.py` 后必须重启服务再验**，否则验的是内存里的旧 HTML；
+    交付给用户前提醒硬刷新（HTML 已 `no-store`，但用户标签页可能已在跑旧脚本）。
+15. **查代码先走 codegraph，改完代码先 sync**（2026-09-30 用户硬性要求，AGENTS #18/#19）：
+    `codegraph explore "<中文意图 + 代码词>"` 一次拿到源码 + 调用链 + 波及面，通常就是唯一需要的调用；
+    **只有查不到才降级** `grep`/`read`，且降级前先把查询**加宽重试**（补符号名/文件名/英文技术词）。
+    改完任何 `.py`/`.js`/`.mjs` **同一次任务内**跑 `codegraph sync`。完整命令表与降级白名单见
+    `knowledge/09-agent-workflow.md`「代码检索纪律」。
+
 ## Discovered（环境事实）
 
+- **codegraph（本机 v1.4.0）**：符号级知识图谱已建好（146 文件 / 6870 节点 / 17278 边），`codegraph status`
+  可看 `pendingChanges`。**只索引 `.py`(121) + `.js`/`.mjs`(25)**——`.md`/`.json`/`.html`/`.css`/`.sh`
+  一律不索引，查这些直接用 grep/read。**`explore` 按代码词（符号名/文件名/英文词）匹配，纯中文问句
+  一律 0 命中**——看到 `No relevant code found` 要补代码词重试，不是降级 grep 的理由。
+  **后台守护进程已死**（`.codegraph/daemon.pid` 记 pid 7216 / v1.3.1，进程早已不存在），
+  **没有自动同步**——改完代码必须手动 `codegraph sync`（增量 <1s）。
+  按内容哈希判定，只 `touch` 文件不会变脏；`codegraph index` 全量 146 文件仅 **3.1s**，
+  但**必须在单条命令内跑完**（后台起会被沙箱杀掉，索引卡在 `state=indexing`，需 `codegraph unlock`）。
 - **截图**：一次性 `chrome --screenshot` 在本容器**必挂**（最小 data:URL 用例也超时）。
   可行路径 = CDP：同命令内 `nohup chrome --headless=new --remote-debugging-port=9333
   --user-data-dir=... &` → 轮询 `curl /json/version` → node 脚本（Node24 内置全局
@@ -76,4 +104,21 @@
   操作列右缘 < 视口宽）。列宽最终值：SQL 112 / 名称 min 60 / 备注 70 / API 56 /
   chip 96 / 单元格 padding 5px。
 - **嵌套层级容器样式须 `!important`**：模板 inline `style="margin-left:24px;
-  border-left:3px solid #c7d2fe"` 被 `tests/test_render.py:1742` 锁定，CSS 无法覆盖。
+  border-left:3px solid #c7d2fe" 被 `tests/test_render.py:1742` 锁定，CSS 无法覆盖。
+- **写判定有两个函数，别再混用**（2026-10-05）：`sql_contains_write`（严格，服务权限/警示/403）
+  与 `sql_has_persistent_write`（精确，只服务缓存读门槛与静态护栏）。踩过两次：
+  ① 报表 35 的 9 条 `SET @…` 全带前导块注释（`/*** c ***/ SET @x := …`），在**裸文本**上
+  做 `^\s*SET\s+@` 正则会全部落空 → 必须用「首关键词结束偏移 + 跳过空白/注释」定位；
+  ② `WITH` 语句里的 `REPLACE(`/`INSERT(` 是 MySQL 字符串函数，扫描写动词时必须排除
+  「紧跟 `(`」的关键词，否则纯读 CTE 报表（#17）会被判成写而永久跳过缓存。
+- **静态护栏是并集不是替换**：`(allow_write=0 且含写) 或 含持久写` → 回退普通链路。
+  只判持久写会放行 `allow_write=0` 的会话级脚本，形成权限旁路。
+- **本地 debug 栈可直接用，不必改 `app_config.debug.json1` 的文件名**：
+  `DEBUG_CONFIG_FILE=app_config.debug.json1` 即可激活（Redis db0/前缀 `sr_debug`、
+  sqlite `config.debug.db`、数据池指向 `127.0.0.1:3307/sqlreport_test`）。
+- **静态分析门禁会拦跨脚本 import**：`scripts/perf/*.py` 之间只能用点号包路径
+  （`from scripts.perf.x import y`），顶层模块名（`from x import y`）会被判
+  「无法导入模块」且**没有 noqa 豁免**（`tests/bug_hunt/static_analyzer.py`）。
+- **`cache_info.source` 不能用来判断「数据是否来自缓存」**：MySQL 查询成功后回写快照时
+  就把 source 标为 `redis`，因此「每请求都真跑库」的旧行为下徽标也显示 redis/新鲜
+  （2026-10-05 实测两臂均报 redis）。

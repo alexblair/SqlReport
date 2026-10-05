@@ -506,11 +506,14 @@ _WRITE_STATEMENT_KEYWORDS = frozenset({
 })
 
 
-def _iter_sql_keywords(statement: str):
-    """迭代语句中的 SQL 关键词（跳过注释、字符串字面量、括号、空白）。
+def _iter_sql_keywords_with_pos(statement: str):
+    """迭代语句中的 (关键词大写, 关键词结束偏移)。
 
-    字符串字面量（'...' / "..." / `...`）内的内容不产出关键词，
-    注释内含写关键词不影响判定。
+    跳过注释、字符串字面量、括号、空白。字符串字面量（'...' / "..." / `...`）
+    内的内容不产出关键词，注释内含写关键词不影响判定。
+
+    结束偏移供「关键词后面的下一个有效字符是什么」类判定使用
+    （如 `REPLACE(` 是函数调用而非语句动词、`SET @x` 是用户变量）。
     """
     i = 0
     n = len(statement)
@@ -555,10 +558,16 @@ def _iter_sql_keywords(statement: str):
             j = i
             while j < n and (statement[j].isalnum() or statement[j] == '_'):
                 j += 1
-            yield statement[i:j].upper()
+            yield statement[i:j].upper(), j
             i = j
             continue
         i += 1
+
+
+def _iter_sql_keywords(statement: str):
+    """迭代语句中的 SQL 关键词（`_iter_sql_keywords_with_pos` 的薄包装）。"""
+    for keyword, _ in _iter_sql_keywords_with_pos(statement):
+        yield keyword
 
 
 def sql_contains_write(sql) -> bool:
@@ -586,6 +595,116 @@ def sql_contains_write(sql) -> bool:
             if any(kw in _WRITE_STATEMENT_KEYWORDS for kw in keywords[1:]):
                 return True
             continue
+        return True
+    return False
+
+
+# WITH 语句中需要扫描的写动词：**不含 SET**（SET 在 WITH 内只可能出现在表达式中，
+# 不是语句动词）。命中还要求动词后面**不紧跟 (**——紧跟 ( 的是 MySQL 字符串函数
+# REPLACE() / INSERT()，不是语句动词（报表 17 曾因此被误判为写）。
+_WITH_WRITE_VERBS = frozenset({
+    "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER",
+    "TRUNCATE", "CALL", "GRANT", "REVOKE",
+})
+
+# SET 语句中出现这些关键词即不是「会话级用户变量」赋值，一律从严按持久写。
+_SET_NON_USER_SCOPE_KEYWORDS = frozenset(
+    {"GLOBAL", "PERSIST", "SESSION", "NAMES"})
+
+
+def _skip_ws_and_comments(statement: str, i: int) -> int:
+    """从 i 起跳过空白与注释，返回下一个有效字符的下标（到末尾返回 len）。"""
+    n = len(statement)
+    while i < n:
+        c = statement[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c == '-' and i + 1 < n and statement[i + 1] == '-':
+            j = statement.find('\n', i)
+            if j == -1:
+                return n
+            i = j + 1
+            continue
+        if c == '#':
+            j = statement.find('\n', i)
+            if j == -1:
+                return n
+            i = j + 1
+            continue
+        if c == '/' and i + 1 < n and statement[i + 1] == '*':
+            j = statement.find('*/', i + 2)
+            if j == -1:
+                return n
+            i = j + 2
+            continue
+        return i
+    return n
+
+
+def sql_has_persistent_write(sql) -> bool:
+    """检测 SQL 是否包含**产生持久副作用**的写语句（缓存读门槛专用）。
+
+    与 `sql_contains_write` 的分工（见
+    docs/compose/spec/2026-09-30-write-report-cache-gate-design.md）：
+    - `sql_contains_write`：**从严**，服务权限与警示（allow_write 拦截、导出 403、
+      API 403、表单警示）——真实写语句必有写关键词。
+    - 本函数：**精确**，只服务「跳过缓存读会不会让一个待执行的写被短路」。
+      会话级语句（临时表、`SET @用户变量`）不产生持久副作用，可放行缓存读取。
+
+    唯一铁律：**只有能静态证明无持久副作用时才排除该语句**；一切未知、无法解析、
+    动态构造的语句一律按持久写处理。从严方向永远是安全的——至多维持现状
+    （继续跳过缓存），绝不会误放行真正的写。
+
+    判定规则（spec §5）：
+    1. 首关键词在读白名单 → 读；
+    2. `CREATE` / `DROP` 的**次关键词**为 `TEMPORARY`（修饰词位置）→ 会话级；
+       `temporary` 作表名/列名时（`DROP TABLE temporary`）必须判持久写
+    3. `SET` 后为**单个 `@`** 用户变量（且不含 GLOBAL/PERSIST/SESSION/NAMES）→ 会话级；
+    4. `WITH`：扫描写动词，仅当命中「后面不紧跟 `(`」者 → 持久写；
+    5. 其余 → 持久写。
+
+    实现注意：第 3 条基于**首关键词的结束偏移**向后跳过空白与注释再取字符，而不是在
+    裸文本上做正则——报表 35 的 9 条 `SET @…` 全部带前导块注释
+    （`/*** 入驻数计算 ***/ SET @x := …`），裸文本正则会全部落空、把它们判成持久写，
+    使整个缓存修复静默失效。
+    """
+    if not sql or not sql.strip():
+        return False
+    for statement in _split_sql_statements(sql):
+        keywords = list(_iter_sql_keywords_with_pos(statement))
+        if not keywords:
+            continue  # 纯注释/空语句：不构成写操作
+        first, first_end = keywords[0]
+        if first in _READ_STATEMENT_KEYWORDS:
+            continue
+        # TEMPORARY 必须是 CREATE/DROP 的**次关键词**（修饰词位置）：
+        # `DROP TABLE temporary` / `CREATE TABLE t (temporary INT)` 里的 temporary
+        # 只是表名/列名，若用「关键词集合里出现 TEMPORARY」判定，真实 DDL 会被
+        # 判成会话级、进而被缓存读短路（复核 C-1）。见 spec §5.1。
+        if first in ("CREATE", "DROP") \
+                and len(keywords) > 1 and keywords[1][0] == "TEMPORARY":
+            continue
+        if first == "SET":
+            k = _skip_ws_and_comments(statement, first_end)
+            is_user_variable = (k + 1 < len(statement)
+                                and statement[k] == "@"
+                                and statement[k + 1] != "@"
+                                and not statement[k + 1].isspace())
+            if is_user_variable and not any(
+                    kw in _SET_NON_USER_SCOPE_KEYWORDS for kw, _ in keywords):
+                continue
+        if first == "WITH":
+            hit = False
+            for kw, end in keywords[1:]:
+                if kw not in _WITH_WRITE_VERBS:
+                    continue
+                k = _skip_ws_and_comments(statement, end)
+                if k >= len(statement) or statement[k] != "(":
+                    hit = True
+                    break
+            if not hit:
+                continue
         return True
     return False
 

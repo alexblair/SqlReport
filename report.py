@@ -38,7 +38,7 @@ from result_transform import (filter_rows, sort_rows, select_columns,
                               calc_total_pages, invalid_numeric_filters,
                               NUMERIC_FILTER_OPS, filter_rows_nested,
                               validate_nested_filter)
-from query_executor import sql_contains_write
+from query_executor import sql_contains_write, sql_has_persistent_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
 WRITE_DENIED_MESSAGE = "该报表包含写操作语句且未开启『允许执行写操作』，请到编辑页开启"
@@ -1080,10 +1080,13 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
     # 直接进入 MySQL 查询分支；写路径（进程缓存/快照回填）保持生效。
     # 写报表护栏：含写语句的 SQL 禁止被任何缓存层短路——热快照会让页面
     # 显示写后结果而数据库实际未执行（场景4b），故每次真实执行写 SQL。
-    # 整条 SQL 只解析一次：写语句检测要做一次完整的多语句拆分 + 关键词扫描，
-    # 长 SQL / 多语句时代价不低，下面的写护栏复用同一个结果。
+    # 写通报护栏的判定分两个函数（见 query_executor.sql_has_persistent_write）：
+    # `sql_contains_write` 从严，服务权限拦截与页面警示（下方 PH-05）；
+    # `sql_has_persistent_write` 精确，服务缓存读门槛——会话级语句（临时表、
+    # `SET @用户变量`）无持久副作用，可放行缓存读取；真持久写仍每次真实跑库。
+    # 两者各自完成一次完整拆分 + 扫描；双重解析成本**未单独实测**（不在 T4 观测量内）。
     _has_write = sql_contains_write(sql_query)
-    skip_cache_read = bool(force_rebuild) or _has_write
+    skip_cache_read = bool(force_rebuild) or sql_has_persistent_write(sql_query)
 
     # PH-05 写操作护栏：实际 SQL 含写语句且报表未开启 allow_write → 拒绝执行。
     # 拦截置于缓存读取之前，防止已缓存结果绕过拦截；裸调用（report=None，测试等）

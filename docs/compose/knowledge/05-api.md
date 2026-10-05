@@ -74,7 +74,9 @@ Key 格式：`sk-` + `token_urlsafe(32)`。
 GET xxx.json
   → resolve_file_path 防穿越
   → 报表有 pool
-  → allow_write=0 且写 SQL → 回退普通链路 / 拒绝静态化
+  → allow_write=0 且写 SQL → 回退普通链路 / 拒绝静态化（权限，沿用 sql_contains_write）
+  → 或 报表 SQL 含**持久写** → 同样拒绝静态化（2026-10-05 并集追加：
+    静态命中不执行任何语句，会让写被整个 TTL 短路；会话级脚本报表仍允许静态化）
   → try_read(config_version, ttl)
        hit → 200 + X-Static-Cache: hit
        miss → rebuild_static_endpoint_file → 原子落盘 → miss 头
