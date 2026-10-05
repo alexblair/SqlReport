@@ -6,6 +6,9 @@
 
 输出：`ReportResult`（多结果集 `results=[{columns,rows,total}]` + `active_index/page/page_size/cache_info/truncated`）
 
+`cache_info.source` 表示**本次取数来源**（`mysql` / `process` / `redis` / `redis_fallback`），
+不是「是否写了缓存」的账本；`snapshot_written`（仅 `mysql` 分支存在）标记本次是否同时写了 L2 快照。
+
 流程要点：
 
 1. **写护栏在读缓存之前**（约 :997）：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按 1 历史契约；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**（2026-09-25，2026-09-30 收窄）——热快照不得短路写执行，每次真实跑库，缓存回填照常。

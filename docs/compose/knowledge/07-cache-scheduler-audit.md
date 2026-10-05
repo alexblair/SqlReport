@@ -72,11 +72,16 @@ keyword 共用 `parse_filter_expr`。
       → L2 prefer_cache && redis_available → get_snapshot(config_version)
       → miss → 锁 → MySQL（连接期或查询期失败 → 过期快照兜底
         redis_fallback，fresh=False；兜底也失败才抛）
-        → set_snapshot + L1
+        → set_snapshot + L1（L1 条目不标来源：数据来自 MySQL → source=None，命中报 process）
       → L1 条目上的派生态 memo（C-3，2026-09-29）：按
         (filters, sorts, nested_filter) 缓存「已筛选已排序的全量行列表」，
         分页切片不缓存。与 L1 同生共死，不是新的一层
-  → cache_info: process | redis | mysql | redis_fallback
+  → `cache_info.source` = **本次取数来源**（2026-10-05 起）：
+      `mysql` 本次真查库（`snapshot_written` 标是否同时写了 L2 快照）|
+      `process` 命中 L1（条目数据来自 MySQL）|
+      `redis` 命中 L2 快照，或 L1 条目继承自 L2 |
+      `redis_fallback` 查库失败 → 过期快照兜底（`fresh=False`）
+      （徽标文案由 render.build_cache_badge_html 映射：实时查询 / 本地缓存 / 缓存快照）
 
 scheduler tick → force_rebuild 预热 L2 + 静态 .json
 ```

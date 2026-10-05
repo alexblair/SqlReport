@@ -53,6 +53,7 @@
 | UI 先可交互 HTML 确认、严格按确认稿、全局视觉一致 | mastered | AGENTS 硬性 #11 + 06 分卷 | 高 | 设计稿/UI 优化 |
 | 同一问题失败 2 次停手、根因优先再改 | mastered | AGENTS 硬性 #12 + 08 分卷 | 高 | 调试/测试卡住时 |
 | L1/L2/L3 + 保活先算后换 | mastered | 07 卷 + spec 2026-09-29 性能设计 §10.1 基线实测 | 高 | 改缓存 |
+| `cache_info.source` = 本次取数来源（mysql/process/redis/redis_fallback），`snapshot_written` 仅 mysql 分支 | mastered | spec 2026-10-05 §5.1 + tests/test_cache_source_label.py | 中 | 改取数来源标注/缓存徽标时 |
 | 派生态缓存（C-3）挂 CachedResult、零失效逻辑 | mastered | spec §5 C-3 + §10.8 + tests/test_derived_cache.py | 高 | 改 transform 或加缓存层 |
 | 导出并入三层缓存（C-4） | mastered | spec §5 C-4 + tests/test_export_cache_path.py | 高 | 改导出 |
 | MySQL 连接池：`close()` 语义为归还、read_timeout 进池键 | mastered | 01 卷 + tests/test_mysql_pool.py | 高 | 改 query_executor |

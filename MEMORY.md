@@ -119,6 +119,8 @@
 - **静态分析门禁会拦跨脚本 import**：`scripts/perf/*.py` 之间只能用点号包路径
   （`from scripts.perf.x import y`），顶层模块名（`from x import y`）会被判
   「无法导入模块」且**没有 noqa 豁免**（`tests/bug_hunt/static_analyzer.py`）。
-- **`cache_info.source` 不能用来判断「数据是否来自缓存」**：MySQL 查询成功后回写快照时
-  就把 source 标为 `redis`，因此「每请求都真跑库」的旧行为下徽标也显示 redis/新鲜
-  （2026-10-05 实测两臂均报 redis）。
+- **`cache_info.source` 自 2026-10-05 起 = 本次取数来源**（`mysql` / `process` / `redis` /
+  `redis_fallback`；`snapshot_written` 仅 `mysql` 分支有，标记本次是否同时写了 L2 快照）。
+  此前「MySQL 查询成功即标 `redis`」的账本式标注已修复（`report.py` 生产者 3 处：L1 写入入参
+  + 两个 `cache_info` 字典；**渲染器未动**）。**注意**：`scripts/perf/bench.py` 的 S5 正式请求
+  期望是 `process`（300s 内命中 L1），不是 `redis`；只有 L1 过期后命中 L2 才是 `redis`。

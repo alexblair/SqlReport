@@ -218,7 +218,7 @@ DEBUG 配置 `app_config.debug.json` 保持原样（端口 1000、Redis 6379 已
 ### 6.1 Redis 契约守卫
 
 1. **现有测试必须全绿**：`tests/test_redis_cache*.py`、`tests/test_query_cache.py`、`tests/test_cache_ui.py`、`tests/test_report*.py`、`tests/test_export*.py`、`tests/test_api*.py` —— 这些是 Redis 缓存契约的既有守卫
-2. **压测每轮断言 `cache_info.source` 分布**符合预期：冷请求 → `mysql`，二次请求 → `redis`，数据源故障 → `redis_fallback`
+2. **压测每轮断言 `cache_info.source` 分布**符合预期：冷请求 → `mysql`，二次请求 → `redis`，数据源故障 → `redis_fallback` ——（2026-10-05 精确化为三态：冷请求 `mysql`；300s 内二次请求命中 L1 → `process`；L1 过期后命中 L2 → `redis`。见 `2026-10-05-cache-source-label-design.md`）
 3. **快照格式回归断言**：优化前后，同一 SQL 写入的快照 JSON 必须**逐字节相同**
 4. **不止靠单测** —— 真实跑一次「MySQL 不可用 → 页面仍显示过期快照」的真实验证
 
@@ -293,6 +293,9 @@ P50/P95 · 数据量 `perf_text` 10 万行 / `perf_wide` 5 万行 / `perf_multi_
 | S12 | 多结果集（3 个结果集） | 538.8ms | **12.9ms** | 19.1ms | process |
 
 原始数据：`perf-logs/baseline-1790691445.json`（`perf-logs/` 已 gitignore）。
+
+> 注（2026-10-05）：上表 S5 行的「全部 redis」是修复前的**旧实现账本式标注**（MySQL 查询成功即标
+> `redis`）。本次修复后 S5 期望为预热 `mysql` → 正式 20 次 `process`（命中 L1）。历史数值本身不改。
 
 ### 10.2 基线暴露的关键事实（修正了本 spec 的两处判断）
 
@@ -371,6 +374,8 @@ S5/S8 显著抬升，再按 §2.1 重新评估。
 
 其余 11 个场景无回退；`cache_info.source` 断言（S1 预热 mysql→正式 process、
 S5 全 redis）全部通过。
+（2026-10-05 注：S5 的「全 redis」是旧账本式标注的产物；修复后 S5 期望改为预热 `mysql` →
+正式 `process`，见 `2026-10-05-cache-source-label-design.md`。）
 
 359.2ms 的构成与 §10.2 的预测一致：transform 13.2 + 行投影 64.2 +
 `rows_to_csv` 207.0 ≈ 285ms，加上 HTTP 与配置库开销。**主导项 `rows_to_csv`

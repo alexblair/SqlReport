@@ -68,7 +68,7 @@ unrelated 的测试失败发现。所以隔离是否生效本身是一条会自�
 | `check_conn.py` | MySQL/Redis 连通性预检，失败时打印「缺哪个配置键」并非零退出 |
 | `seed_perf_data.py` | 造性能数据（`perf_text` 10 万行含 DECIMAL/混排/NULL 等） |
 | `init_debug_env.py` | 初始化空的 `config.debug.db`，建数据源、4 张性能报表、基准账号、API 端点 |
-| `bench.py` | 12 场景端到端 HTTP 压测，输出 JSON；**并断言 `cache_info.source` 分布** |
+| `bench.py` | 12 场景端到端 HTTP 压测，输出 JSON；**并断言 `cache_info.source` 分布**（S1 冷 `mysql`→正式 `process`；S5 冷 `mysql`→正式 `process`）|
 | `verify_transform_equivalence.py` | 以 `git <基线commit>` 的实现为参考，真实数据上逐行比对 transform 语义 |
 
 约定：
