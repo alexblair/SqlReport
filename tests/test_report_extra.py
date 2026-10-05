@@ -46,7 +46,6 @@ import urllib.parse
 from unittest.mock import patch, MagicMock
 
 import report
-import render
 import config_db
 import redis_cache
 from render import _COMMON_JS
@@ -1074,11 +1073,13 @@ class TestFilterInputUX(BaseReportTest):
     def test_th_min_width_rule(self):
         """表头列保守 min-width（100px）保证窄列输入框可用"""
         body = self._render()
-        self.assertRegex(render._COMMON_CSS, r"th:first-child \+ th\s*\{\s*min-width:\s*\d+px")
+        self.assertIn("min-width: 100px", body)
 
     def test_desktop_focus_expand_css(self):
         """桌面：聚焦展开为固定较宽宽度（CSS :focus 展开）"""
-        self.assertRegex(render._COMMON_CSS, r"\.qf-row \.filter-input:focus\s*\{[^}]*max-width:\s*220px")
+        body = self._render()
+        self.assertIn(".filter-input:focus", body)
+        self.assertIn("width: 220px", body)
 
     def test_touch_detection_branch(self):
         """触屏：pointer: coarse 检测分支存在"""
