@@ -77,6 +77,8 @@ git clone -b v2.0.0 --depth 1 https://github.com/alexblair/SqlReport.git SqlRepo
 
 `--depth 1` 只拉该版本的单层历史，最快；需要完整历史/切换分支时去掉它。
 
+> **`-b <tag>` 检出的是「游离 HEAD」（detached HEAD），这是正常的**——tag 不是分支。实测：`git clone -b v1-final …` 后 `git rev-parse --abbrev-ref HEAD` 输出 `HEAD`、`rev-parse HEAD` 输出 `9a975b9…`。
+> 想在 tag 基础上改代码：先 `git switch -c my-branch`（否则新提交会“无处可存”）；tag 检出**不会**、也不应该自动跟进后续提交——这正是「精确固定版本」的含义。
 ### 2.4 不装 git 也能拿（压缩包）
 
 ```bash
@@ -278,7 +280,7 @@ python server.py
 
 ## 证据（2026-10-05 实测，**交付前快照**）
 
-> 快照中的 `V2` 分支头与 `v2.0.0` 标签对象号，会因「提交本指南」这一步再前进一格（`v2.0.0` 已重新指向含本指南的提交）；**`V1` 与 `v1-final` 的值永久不变**。实时值自行跑 `git ls-remote --heads --tags origin` 核对。
+> 快照中的 `V2` 分支头与 `v2.0.0` 标签对象号，会因「提交本指南」这一步再前进一格（`v2.0.0` 已在**首次交付前**重新指向含本指南的提交——此次重指发生在任何用户取用之前，**此后 tag 不再移动**）；**`V1` 与 `v1-final` 的值永久不变**。实时值自行跑 `git ls-remote --heads --tags origin` 核对。
 
 ```text
 $ git ls-remote --heads --tags origin
@@ -314,6 +316,15 @@ HTTP 200  refs/tags/v1-final
 HTTP 200  refs/heads/V2
 HTTP 200  refs/heads/V1
 HTTP 404  refs/heads/main     ← 旧 main 的压缩包地址同样失效（按 §5 迁移）
+```
+
+```text
+$ git clone -b V1 --depth 1 …/SqlReport.git v1 && git -C v1 rev-parse HEAD
+9a975b98089352383376cbd46dd3b7fa7b02ce1e      # 与 V1 一致；工作树内 docs/ 不存在（符合 V1 指纹）
+
+$ git clone -b v1-final --depth 1 …      # 成功，检出「游离 HEAD」（tag 语义，见 §2.3）
+$ git clone -b v2.0.0   --depth 1 …      # 成功，检出「游离 HEAD」
+$ git clone -b main …                    # 失败：远程已无 main
 ```
 
 V1 → V2 增量（`git diff --stat 9a975b9 1e0ea3a`）：
