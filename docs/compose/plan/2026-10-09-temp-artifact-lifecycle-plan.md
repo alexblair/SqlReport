@@ -74,12 +74,12 @@ Expected: `[OK] selftest 通过（N 项断言）`，退出 0
 
 Run:
 ```bash
-mkdir -p perf-logs/_t && date > perf-logs/_t/fresh.log && touch -d '2 hours ago' perf-logs/_t/old.log
+D=perf-logs/_t; mkdir -p $D && date > $D/fresh.log && touch -d '2 hours ago' $D/old.log
 venv/bin/python scripts/agent/cleanup_tmp.py            # dry-run：预期 0 删除（验证零副作用）
-ls perf-logs/_t                                                                       # 预期：old.log / fresh.log 都还在
+ls $D                                                                                 # 预期：old.log / fresh.log 都还在
 venv/bin/python scripts/agent/cleanup_tmp.py --apply    # 预期：old.log 被删、fresh.log 进 kept
 venv/bin/python scripts/agent/cleanup_tmp.py --apply    # 预期：cleaned 0 files / 0.0 MB; kept 1 active（fresh.log 仍在活跃窗口内）
-touch -d '2 hours ago' perf-logs/_t/fresh.log
+touch -d '2 hours ago' $D/fresh.log
 venv/bin/python scripts/agent/cleanup_tmp.py --apply    # 预期：cleaned 1 files; kept 0 active
 ```
 Expected: dry-run 后两个文件仍在；第一条 `--apply` 输出含 `kept 1 active` 且只删 `old.log`；第二条 `cleaned 0 files`；最后一条删掉 `fresh.log`；全部退出 0
@@ -159,8 +159,7 @@ R3 的交接落盘路径由 `run-logs/handoff/<YYYY-MM-DD>-<主题>.md` 改为 `
 新增一条边界：AOCI Entry 的 F/R/A/S 与证据不得把 `run-logs/`、`perf-logs/` 下的产物作为长期依据（临时目录随时清空）；把「另一份副本」那行里的 `run-logs/aoci/extract/aoci` 改掉（该副本已不存在）。
 
 - [ ] **Step 5: 同步 `MEMORY.md` / `learn/sqlreport-kb/course-state.md` / `.gitignore`**
-
-`course-state.md:110` 的 `run-logs/repro_sql_scrollbar.py` 改为不含临时路径的表述（该脚本按「产出者溯源」判为过程脚本、不提升）；`.gitignore` 注释补「可由 `scripts/agent/cleanup_tmp.py` 随时清空」。
+`course-state.md:110` 里的过程脚本引用（`run-logs/repro_*.py`）改为不含临时路径的表述（该脚本按「产出者溯源」判为过程脚本、不提升）；`.gitignore` 注释补「可由 `scripts/agent/cleanup_tmp.py` 随时清空」；并把 `.superpowers/`（SDD 工作区，非交付物）加入 `.gitignore`。
 
 - [ ] **Step 6: 门禁复跑（确认只降不升）**
 
@@ -184,6 +183,7 @@ git commit -m "docs(rules): 硬性 #14 改为收尾统一清理，依据类内�
 - Modify: `docs/compose/plan/2026-09-29-execution-layer-performance-plan.md`、`docs/compose/plan/2026-09-30-write-report-cache-gate-plan.md`、`docs/compose/plan/2026-10-05-cache-source-label-plan.md`
 - Modify: `docs/compose/reports/2026-10-06-token-efficiency-retrospective.md`
 - Modify: `docs/compose/spec/2026-10-09-temp-artifact-lifecycle-design.md`（§2.2 表格掩码）
+- Modify: `docs/compose/plan/2026-10-09-temp-artifact-lifecycle-plan.md`（本计划自身也在扫描集内：示例改用 `$D` 变量与掩码）
 
 **Interfaces:**
 - Consumes: Task 2 的 `_violations()` 与放行规则
@@ -191,7 +191,7 @@ git commit -m "docs(rules): 硬性 #14 改为收尾统一清理，依据类内�
 
 - [ ] **Step 1: 改历史证据引用（spec/plan/reports）**
 
-原则：**保留结论与数值，删掉指向已消失文件的路径**；确需展示文件名时改占位符（`<时间戳>`、`<段名>`、`*`），并注明「原始日志为临时产物，已清理」。覆盖：`2026-09-29-execution-layer-performance-plan.md:507,544`（`perf-logs/t4b-1.log`→`perf-logs/t4b-<序号>-<时间戳>.log`）、`2026-09-30-write-report-cache-gate-plan.md:375,376`（`C1-red/green/L1-<时间戳>.log`）、`2026-10-05-cache-source-label-plan.md:483,489,496,502,562,567,586,610`、`2026-10-06-token-efficiency-retrospective.md:32`（`run-logs/xx.jsonl`→`run-logs/<名>.jsonl`）、`2026-09-29-execution-layer-performance-design.md:295`（改为结论 + 复现命令）。
+原则：**保留结论与数值，删掉指向已消失文件的路径**；确需展示文件名时改占位符（`<时间戳>`、`<段名>`、`*`），并注明「原始日志为临时产物，已清理」。覆盖：`2026-09-29-execution-layer-performance-plan.md:507,544`、`2026-09-30-write-report-cache-gate-plan.md:375,376`、`2026-10-05-cache-source-label-plan.md:483,489,496,502,562,567,586,610`、`2026-10-06-token-efficiency-retrospective.md:32`、`2026-09-29-execution-layer-performance-design.md:295`（改为结论 + 复现命令）。改法统一：把 `perf-logs/`、`run-logs/` 后接的具体文件名换成占位符形态（如 `perf-logs/<段>-<序号>-<时间戳>.log`、`run-logs/accept-<序号>-<轮次>.html`）。
 
 - [ ] **Step 2: 补「取代两头改」**
 
@@ -201,9 +201,9 @@ git commit -m "docs(rules): 硬性 #14 改为收尾统一清理，依据类内�
 
 第 327 行的样例脚本引用改写为不含临时路径的知识性描述；日志取证口径同步 Task 3 的 #14 新表述。
 
-- [ ] **Step 4: 本设计 spec §2.2 掩码**
+- [ ] **Step 4: spec 全文与计划自身掩码**
 
-把表格里的具体产物名改为掩码形态（如 `perf-logs/baseline-<id>.json`、`run-logs/final-discover-<时间戳>.log`、`run-logs/sdd/<任务>/progress.md`、`run-logs/repro_*.py`），保持「断层样本」语义不变；**精确名字保留在本 spec 首个提交 `5455c0e` 的历史里**，不在正文钉住会消失的文件。
+把 spec **全文**（§2.2 表格与 §7 第 5 项等）的具体产物名改为掩码形态（如 `perf-logs/baseline-<id>.json`、`run-logs/final-discover-<时间戳>.log`、`run-logs/sdd/<任务>/progress.md`、`run-logs/repro_*.py`），保持「断层样本」语义不变；**精确名字保留在本 spec 首个提交 `5455c0e` 的历史里**，不在正文钉住会消失的文件。本**计划文件自身**同样在扫描集内：确认 Task 1 Step 6 已用 `$D` 变量、Task 5 的注入串已用拼接、Task 3 的过程脚本引用已掩码，全文不再出现具体临时文件名。
 
 - [ ] **Step 5: 门禁转绿**
 
@@ -230,7 +230,7 @@ git commit -m "test(docs)+docs: 临时产物引用门禁（RED 25→GREEN 0）�
 
 - [ ] **Step 1: 追加门禁自证条目**
 
-在 `gate_redproof.py` 的汇总打印（`print(f"{'门禁':26} ...")` 之前）追加：`import tests.test_temp_log_policy as temp_policy`（与其他 `# noqa: E402` 导入同区），`mutate` = 把 `temp_policy._load_docs` 换成返回 `{"FAKE.md": "见 run-logs/ghost-20260101.log"}` 的假函数，`restore` = 还原原函数；`_check("文档引用临时产物", mutate, restore, "tests.test_temp_log_policy.TestTempLogPolicy.test_no_concrete_temp_artifact_refs")`。
+在 `gate_redproof.py` 的汇总打印（`print(f"{'门禁':26} ...")` 之前）追加：`import tests.test_temp_log_policy as temp_policy`（与其他 `# noqa: E402` 导入同区），`mutate` = 把 `temp_policy._load_docs` 换成返回 `{"FAKE.md": "见 run-logs/ghost-" + "20260101" + ".log"}` 的假函数（**必须用字符串拼接**：本计划自身也在门禁扫描集内，不能明文写具体文件名），`restore` = 还原原函数；`_check("文档引用临时产物", mutate, restore, "tests.test_temp_log_policy.TestTempLogPolicy.test_no_concrete_temp_artifact_refs")`。
 
 - [ ] **Step 2: 跑自证**
 
