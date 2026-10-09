@@ -148,10 +148,16 @@ venv/bin/python -m unittest tests.test_xxx -t .
 
 ### B6 写作时必须预先核实的点（避免重复 B5 的返工）
 
-- **B6-7 `page_size` 封顶 1000**：上限**只在 URL 解析处**（`report.py` 的 `handle_request`）夹紧，
-  **绝不得**放进 `execute_report` 或 `render_report_page` —— 内部调用方靠大 `page_size` 取全量：
-  `export.py`（`2**31-1`）、`api_handler.py`（`fetch_all` 时 `1e9`）、`scheduler.py`（保活/定时任务）。
+- **B6-7 `page_size` 封顶 1000**：上限**只能在 UI 的输入解析处**夹紧，
+  **绝不得**放进 `execute_report`（`report.py:1031`）或 `render_report_page`（`:1612`）——内部调用方靠大 `page_size` 取全量：
+  `export.py:97`（`2**31-1`）、`api_handler.py:452`（`fetch_all` 时 `1e9`）、`scheduler.py`（保活/定时任务）。
   必须带一条断言：`execute_report` 源码里**不含** `MAX_UI_PAGE_SIZE`。
+  > ⚠️ **Lead 实测发现：有 2 个 UI 入口，两个都要夹紧，否则可绕过**：
+  > ① `report.py:2217`（`handle_request` 的 GET query 解析）
+  > ② `report.py:2073`（`_handle_refresh_cache` 的 POST form 解析，经 `:2198` 调用）
+  > 两处写法都是 `page_size = max(1, parsed_page_size)`。只夹一处＝封顶无效。
+  > 另：`MAX_UI_PAGE_SIZE` **不得**用于 API 翻页（`api_handler._apply_get_overrides` 是独立路径，
+  > 且受端点 `row_limit` 约束）。
 - **B6-4 socket 超时**：标为中高风险，须 L2 实测大导出是否被截断。
 - **B6-5 `render.py` 首次引入 `logging`**：`logging.getLogger` 安全，但**不要**模块级 `basicConfig`。
 - **B6-3 `?`→`%s`**：同文件 `query_executor.py` 已有引号感知实现可复用。
