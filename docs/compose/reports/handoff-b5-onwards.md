@@ -14,11 +14,11 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ · B6 部分（3/8）** |
-| **待做批次** | **B6 剩余 5 个（B6-3/8/1/2/4）→ B7 → B8 → B9** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅** |
+| **待做批次** | **B7 → B8 → B9** |
 
-> **B6 已完成 3/8**（`Ran 3109`，提交 `b0ebd8d`）：B6-5（render 资产失败留痕）、B6-6（static_cache 加锁）、B6-7（UI page_size 封顶 1000，两个入口）。
-> **B6 剩余 5 个**：B6-3（`?`→`%s` 引号感知）、B6-8（CSV 公式中和开关）、B6-1（Redis 自愈，最严重）、B6-2（重建锁）、B6-4（socket 超时，须 L2）。
+> **B6 已完成 8/8**（`Ran 3146`）。B6-5/6/7 → `b0ebd8d`；B6-3/8/1 → `a3886ed`；B6-2 → `1680dc3`；B6-4 → `0937b96`。
+> B6-4 由 Lead 发现并修正了子代理方案的一处真缺陷（读超时解除点必须在 `parse_request`，见 §6 踩坑表）。
 
 > **B5 已完成**（`Ran 3101`）。摘要见 §3.1；B5-4（派生态拆级）按 plan 标为可选/风险中，已跳过。
 
@@ -112,7 +112,7 @@ venv/bin/python -m unittest tests.test_xxx -t .
 | 批次 | 主题 | 写域 | 依赖 | 关键内容 |
 |---|---|---|---|---|
 | ~~B5~~ | ~~P1 性能~~ | — | — | ✅ **已完成**（Ran 3101）；写域实为 `config_db.py` `result_transform.py` `config.py`；B5-4 已跳过 |
-| **B6（进行中 3/8）** | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3 ✅ B4 ✅ B5 ✅ | ① Redis 冷启动自愈 ② 重建锁 owner/TTL ③ `?`→`%s` 引号感知 ④ socket 超时（**风险中高，须 L2 实测**）⑤ 资产降级加日志（render 首次引入 logging）⑥ `static_cache` 加锁 ⑦ **`page_size` 封顶 1000，仅 UI 层**（严禁加在 `execute_report`！）⑧ CSV 公式中和（默认关+导出页勾选） |
+| ~~B6~~ | ~~P1 健壮性 + page_size 封顶 + CSV 开关~~ | — | — | ✅ **已完成 8/8**（Ran 3146） |
 | **B7** | P1 语义收口 | `config.py` `render.py` `export.py` `report.py` `result_transform.py` | B5 B6 | ① `_escape` 两份语义不同 ② 分类树缩进（**D4 已定：全角 U+3000**，改 `config.py:1181`）③ `transform_rows` 收口 ④ `report.py` 45 行被遮蔽重复定义 |
 | **B8** | P2 死代码清理 | 多文件 | B7 | 12 项（`db.py` 漏转出、隐藏参数抄 3 遍、`MAX_FAIL_COUNT` 死常量、`is_debug_mode` 每次重读、`_ICONS` 畸形 SVG 等） |
 | **B9** | P3 结构拆分 | 新增 `ui_assets.py` 等 | B8 | `render.py` 7 个大常量外移（1887 行→`ui_assets.py`）；`config.py` 按 8 实体拆分（**必须保留 re-export**，19 个测试文件引用 `config.`） |
@@ -142,18 +142,16 @@ venv/bin/python -m unittest tests.test_xxx -t .
 
 ## 7. 下一步（立即可做）
 
-**B6 无阻塞**（依赖 B3/B4/B5 均已完成）。建议：
+**B7 无阻塞**（依赖 B5/B6 均已完成）。B7 = P1 语义收口，共 4 项：
 
-1. ✅ **`docs/compose/reports/b6-work-brief.md` 已写好**（601 行，8 个任务，行号经只读侦察双重复核 + Lead 抽查 14 处锚点全中）——**直接拿来用，不要重写**
-2. 逐任务派子代理（B6 共 8 个任务）；**建议顺序**见 brief §9：
-   B6-5 → B6-6 → B6-7 → B6-3 → B6-8 → B6-1 → B6-2 → B6-4
-3. 全量期望 `Ran ≥3110`（B5 后 3101 + B6 新增）
+1. `_escape` 两份语义不同（`render._escape` vs `config` 里的那份）
+2. 分类树缩进 → **全角 U+3000**（D4 已定，证据：半角在 `<option>` 里会折叠）；改 `config.py` 的缩进生成处（原 plan 标 `:1181`，**行号已漂移，写 brief 前用 grep 重定位**）
+3. `transform_rows` / `column_indices` 收口
+4. 删除 `report.py` 里被遮蔽的 45 行重复定义（原 plan 标 `:358-402`，**同样需重定位**）
 
-> brief 里已写明每任务的：精确行号与现状代码、**不可破坏的语义**、Step 1 测试代码、回归命令与模块。
-> 特别提醒（已在 brief 内标注）：
-> - **B6-7 有两个 UI 入口**（`report.py:2217` GET + `:2073` POST），只夹一处＝封顶无效
-> - **B6-1 的 `enable=False` 必须仍返回 `None`**（未启用 ≠ 连不上）
-> - **B6-4 必须先 L2 实测**大导出是否被截断，再定超时值
+**写 B7 工作包前必须先重新定位行号**（B5/B6 已使多个行号漂移）。
+
+> 已完成批次的工作包可直接参考：`b5-work-brief.md`、`b6-work-brief.md`（含实测基线、必测断言、回归命令）。
 
 ### B6 写作时必须预先核实的点（避免重复 B5 的返工）
 
@@ -180,3 +178,5 @@ venv/bin/python -m unittest tests.test_xxx -t .
   `get_all_reports(conn)`（真全量）。改任何 N+1 前先确认用的是哪个。
 - **全量套件有低概率 flaky**：B5 期间 6 次全量中有 1 次失败（重跑即绿），与改动无关；
   遇到失败先重跑 + 用 `git stash` 对照，再定位。
+- **子代理的「L2 实测通过」可能只是没踩到边界**（B6-4）：子代理在 500KB/s、8MiB、30s 超时下测通过；但 Lead 把超时缩到 2s + 客户端暂停 3s，立刻暴露「读超时解除点放错位置」的真缺陷（响应只发出 2588672/4194304）。**教训：对「把 A 阶段与 B 阶段解耦」这类改动，验收要用小参数直接压迫边界，而不是只用生产参数跑一遍。**
+- **测试可能编码被修掉的缺陷**（B2 的 `ping`、B6-2 的锁）：修完发现旧断言变红时，先判断「它测的是缺陷本身还是真实需求」——前者按原意改写机制断言，后者才是回归。

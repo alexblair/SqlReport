@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-09T20:18:47Z",
+  "updated_at": "2026-10-09T21:16:51Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "7b9558b33a0cd0a7486bfeac43385d44995e9d772c83cff52a19150364b32ea3",
-      "size": 61330,
-      "normalized_sha256": "7b9558b33a0cd0a7486bfeac43385d44995e9d772c83cff52a19150364b32ea3"
+      "sha256": "12ee5d5c76f0d90d47b55db1603aeca31b83e03a1453b644fe8d6e9e383081a7",
+      "size": 61485,
+      "normalized_sha256": "12ee5d5c76f0d90d47b55db1603aeca31b83e03a1453b644fe8d6e9e383081a7"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -155,9 +155,9 @@
     },
     "docs/compose/knowledge/01-architecture.md": {
       "role": "index",
-      "sha256": "d5bbb19bcbdab1a8dc933c6f383542e13423372085e6eb4094c24ac76a66a9f7",
-      "size": 8055,
-      "normalized_sha256": "d5bbb19bcbdab1a8dc933c6f383542e13423372085e6eb4094c24ac76a66a9f7"
+      "sha256": "7e3d7ea321d0a4c800df7319d899ee5243218780bc4da5a093dfc9f1fc0221a1",
+      "size": 8544,
+      "normalized_sha256": "7e3d7ea321d0a4c800df7319d899ee5243218780bc4da5a093dfc9f1fc0221a1"
     },
     "docs/compose/knowledge/02-routing-auth.md": {
       "role": "index",
@@ -191,9 +191,9 @@
     },
     "docs/compose/knowledge/07-cache-scheduler-audit.md": {
       "role": "index",
-      "sha256": "667e0077f3fdf2e3631991914c2ce9092fa39f50d752c0be03799c9511d4c3d5",
-      "size": 6536,
-      "normalized_sha256": "667e0077f3fdf2e3631991914c2ce9092fa39f50d752c0be03799c9511d4c3d5"
+      "sha256": "ee90d140cc71022f51a0cce5a9042cb0c7b6131b4b03d0146e60bd44832a3575",
+      "size": 6872,
+      "normalized_sha256": "ee90d140cc71022f51a0cce5a9042cb0c7b6131b4b03d0146e60bd44832a3575"
     },
     "docs/compose/knowledge/08-testing-conventions.md": {
       "role": "index",
@@ -1464,9 +1464,9 @@
     },
     "redis_cache.py": {
       "role": "index",
-      "sha256": "698bdc38aa85425bf34a61236a71b905d9ea2df8bfc70cbb3bf5102ce65f9e4d",
-      "size": 17768,
-      "normalized_sha256": "698bdc38aa85425bf34a61236a71b905d9ea2df8bfc70cbb3bf5102ce65f9e4d"
+      "sha256": "866e16f3c3f32fbd1b247e5619b8f2c28407987f375fa256a8f9d16b6cf13b59",
+      "size": 19589,
+      "normalized_sha256": "866e16f3c3f32fbd1b247e5619b8f2c28407987f375fa256a8f9d16b6cf13b59"
     },
     "render.py": {
       "role": "index",
@@ -1650,9 +1650,9 @@
     },
     "server.py": {
       "role": "index",
-      "sha256": "b3eb52adeb32b79ce8598b225e3e32dc3e7a8f9aa89a94df5e1e24b52634365f",
-      "size": 44395,
-      "normalized_sha256": "b3eb52adeb32b79ce8598b225e3e32dc3e7a8f9aa89a94df5e1e24b52634365f"
+      "sha256": "bffbf9302c38db89bd8f20b91fe727b1c454f6559a3c870f1226c25addf07142",
+      "size": 47754,
+      "normalized_sha256": "bffbf9302c38db89bd8f20b91fe727b1c454f6559a3c870f1226c25addf07142"
     },
     "static_cache.py": {
       "role": "index",
@@ -1872,9 +1872,9 @@
     },
     "tests/test_b6_robustness.py": {
       "role": "observe",
-      "sha256": "3b2605b3ea2e9f6a9242e776f14622ca715a390a984cd7b95c693b782b56a653",
-      "size": 13921,
-      "normalized_sha256": "3b2605b3ea2e9f6a9242e776f14622ca715a390a984cd7b95c693b782b56a653"
+      "sha256": "910f7cb9d92c3dc64c85587c62fca95f23cd552f29093933a9e78e52b9b0b5e2",
+      "size": 25747,
+      "normalized_sha256": "910f7cb9d92c3dc64c85587c62fca95f23cd552f29093933a9e78e52b9b0b5e2"
     },
     "tests/test_base.py": {
       "role": "observe",
@@ -2076,15 +2076,15 @@
     },
     "tests/test_redis_cache.py": {
       "role": "observe",
-      "sha256": "128b27465b27722350fffd4a7e01eee545a0dcc6570aeb0beb369684e05a96d3",
-      "size": 20359,
-      "normalized_sha256": "128b27465b27722350fffd4a7e01eee545a0dcc6570aeb0beb369684e05a96d3"
+      "sha256": "675ad37fe3977d531b42a73321742a0b8121fb51e85a144d757b87585d00eba5",
+      "size": 20581,
+      "normalized_sha256": "675ad37fe3977d531b42a73321742a0b8121fb51e85a144d757b87585d00eba5"
     },
     "tests/test_redis_cache_extra.py": {
       "role": "observe",
-      "sha256": "37dfb2371a492c55abc2b98ac77b48d125f21bb56119eb612046b3bbbdbe0dd7",
-      "size": 8806,
-      "normalized_sha256": "37dfb2371a492c55abc2b98ac77b48d125f21bb56119eb612046b3bbbdbe0dd7"
+      "sha256": "22fbee39fbcb10341730c944fb5795b511d6065884a45b4e5592e110d47b01de",
+      "size": 9101,
+      "normalized_sha256": "22fbee39fbcb10341730c944fb5795b511d6065884a45b4e5592e110d47b01de"
     },
     "tests/test_render.py": {
       "role": "observe",
