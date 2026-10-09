@@ -14,8 +14,10 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅** |
-| **待做批次** | **B5 → B6 → B7 → B8 → B9** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅** |
+| **待做批次** | **B6 → B7 → B8 → B9** |
+
+> **B5 已完成**（`Ran 3101`）。摘要见 §3.1；B5-4（派生态拆级）按 plan 标为可选/风险中，已跳过。
 
 ### 提交历史（每个批次 = 1 个 fix 提交 + 1 个 aoci 提交）
 ```
@@ -61,6 +63,13 @@ f881bd2 perf(B2): 配置库连接池化 + 请求内复用，并修复 _is_alive 
 - **B4-2**：`_run_schedule` 的取连接在 `try:` **之外** → 抛异常时 `finally` 不执行 → `sid` 永留 `_running` → **任务永久静默停摆**。修：移入 try + `conn=None` 判空
 - 测试：`tests/test_b4_scheduler_safety.py`（6 例）
 
+### B5 性能（Ran 3101）
+- **B5-1 筛选合并 alternation**（`result_transform._compile_alternation`）：原「每单元格逐个 `any(rx.search(...))`」改为单条 `(?:s1)|(?:s2)`。实测 100k 行：单值 85.2→36.9ms、三值 148.8→38.2ms（**3.9×**），结果逐元素一致。**禁止**改用 `lower() in`（Unicode 折叠语义差异）
+- **B5-2 侧栏调度徽标改 `COUNT(*)`**（`config_db.count_schedules`）：原 N+1。实测 `_nav_badges` 总 SQL **8→5** 条。用 `config_db.count_schedules` 而非 `db.*`（`db.py` 是显式白名单再导出）
+- **B5-3 `get_reports_by_category` 去 N+1**：一次 `get_all_reports` + Python 分组。实测 3 分类时 SQL 由 2+C 降为**常量 2**。⚠️ 必须用 `get_all_reports`——`get_reports(conn)` 的 `category_id` 默认 `None` 只查未分类报表
+- **B5-4 派生态拆两级：跳过**（plan 标为可选/风险中）
+- 测试：`tests/test_b5_perf.py`（18 例，含 9 个等价性护栏先行 + 200 轮随机差分）
+
 ---
 
 ## 4. 续做流程（必须照此执行，用户已明确要求）
@@ -99,8 +108,8 @@ venv/bin/python -m unittest tests.test_xxx -t .
 
 | 批次 | 主题 | 写域 | 依赖 | 关键内容 |
 |---|---|---|---|---|
-| **B5** | P1 性能 | `config_db.py` `report.py` `result_transform.py` `render.py` `config.py` | B2 ✅ | ① 筛选内循环合并 alternation（实测快 2.8~3.5×，**禁止**用 `lower() in`）② 配置页 12 次查询 → 7 ③ 侧栏徽标 N+1 ④ `get_reports_by_category` N+1 ⑤ 派生态缓存拆两级（可选项） |
-| **B6** | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3 ✅ B4 ✅ B5 | ① Redis 冷启动自愈 ② 重建锁 owner/TTL ③ `?`→`%s` 引号感知 ④ socket 超时（**风险中高，须 L2 实测**）⑤ 资产降级加日志（render 首次引入 logging）⑥ `static_cache` 加锁 ⑦ **`page_size` 封顶 1000，仅 UI 层**（严禁加在 `execute_report`！）⑧ CSV 公式中和（默认关+导出页勾选） |
+| ~~B5~~ | ~~P1 性能~~ | — | — | ✅ **已完成**（Ran 3101）；写域实为 `config_db.py` `result_transform.py` `config.py`；B5-4 已跳过 |
+| **B6（下一个）** | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3 ✅ B4 ✅ B5 ✅ | ① Redis 冷启动自愈 ② 重建锁 owner/TTL ③ `?`→`%s` 引号感知 ④ socket 超时（**风险中高，须 L2 实测**）⑤ 资产降级加日志（render 首次引入 logging）⑥ `static_cache` 加锁 ⑦ **`page_size` 封顶 1000，仅 UI 层**（严禁加在 `execute_report`！）⑧ CSV 公式中和（默认关+导出页勾选） |
 | **B7** | P1 语义收口 | `config.py` `render.py` `export.py` `report.py` `result_transform.py` | B5 B6 | ① `_escape` 两份语义不同 ② 分类树缩进（**D4 已定：全角 U+3000**，改 `config.py:1181`）③ `transform_rows` 收口 ④ `report.py` 45 行被遮蔽重复定义 |
 | **B8** | P2 死代码清理 | 多文件 | B7 | 12 项（`db.py` 漏转出、隐藏参数抄 3 遍、`MAX_FAIL_COUNT` 死常量、`is_debug_mode` 每次重读、`_ICONS` 畸形 SVG 等） |
 | **B9** | P3 结构拆分 | 新增 `ui_assets.py` 等 | B8 | `render.py` 7 个大常量外移（1887 行→`ui_assets.py`）；`config.py` 按 8 实体拆分（**必须保留 re-export**，19 个测试文件引用 `config.`） |
@@ -130,11 +139,29 @@ venv/bin/python -m unittest tests.test_xxx -t .
 
 ## 7. 下一步（立即可做）
 
-B5 无阻塞（依赖 B2 已完成）。建议：
+**B6 无阻塞**（依赖 B3/B4/B5 均已完成）。建议：
 
-1. 读 plan 的 B5 章节 + spec §5 B5
-2. 写 `docs/compose/reports/b5-work-brief.md`（含：精确行号、实测基线数字、必测断言、**禁止 lower() 的警告**）
-3. 按 B5-1 → B5-2 → B5-3 → B5-4 → B5-5 逐任务派子代理
-4. 全量期望 `Ran ≥3090`（B4 后 3083 + B5 新增）
+1. 读 plan 的 B6 章节 + spec §5 B6 + §7.4.1（`page_size` 边界）
+2. 写 `docs/compose/reports/b6-work-brief.md`（含：精确行号、必测断言、**`page_size` 封顶的放置位置警告**）
+3. 逐任务派子代理（B6 共 8 个任务，见 plan）
+4. 全量期望 `Ran ≥3110`（B5 后 3101 + B6 新增）
 
-> **B5-1 的实测基线**（供写 brief）：100k 行 × 12 列，单条件 contains 筛选 73.2ms；改用单条 alternation 后 35.8ms（3 值场景 99.0→35.8ms）。**禁止**改成 `lower() in`（25.3→8.4ms 但 Unicode 大小写折叠语义有边界差异）。
+### B6 写作时必须预先核实的点（避免重复 B5 的返工）
+
+- **B6-7 `page_size` 封顶 1000**：上限**只在 URL 解析处**（`report.py` 的 `handle_request`）夹紧，
+  **绝不得**放进 `execute_report` 或 `render_report_page` —— 内部调用方靠大 `page_size` 取全量：
+  `export.py`（`2**31-1`）、`api_handler.py`（`fetch_all` 时 `1e9`）、`scheduler.py`（保活/定时任务）。
+  必须带一条断言：`execute_report` 源码里**不含** `MAX_UI_PAGE_SIZE`。
+- **B6-4 socket 超时**：标为中高风险，须 L2 实测大导出是否被截断。
+- **B6-5 `render.py` 首次引入 `logging`**：`logging.getLogger` 安全，但**不要**模块级 `basicConfig`。
+- **B6-3 `?`→`%s`**：同文件 `query_executor.py` 已有引号感知实现可复用。
+
+### 写 brief 的通用教训（B4/B5 各踩一次）
+
+- **凭命名推测签名会错**：写测试调用前先用 `inspect.signature` 实测（B4 把 `_run_schedule` 写成 5 参，实际 3 参）。
+- **测试夹具配方先实跑**：B5 才发现 `make_config_db()` 不建表、`config_db.init_db()` 在裸 sqlite3 上报错、
+  `upsert_schedule` 必须绑报表。
+- **同名前缀的 DB 函数语义可能不同**：`get_reports(conn)`（默认 `None` → 只查未分类）vs
+  `get_all_reports(conn)`（真全量）。改任何 N+1 前先确认用的是哪个。
+- **全量套件有低概率 flaky**：B5 期间 6 次全量中有 1 次失败（重跑即绿），与改动无关；
+  遇到失败先重跑 + 用 `git stash` 对照，再定位。
