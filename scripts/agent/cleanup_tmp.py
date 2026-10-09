@@ -35,6 +35,7 @@ from pathlib import Path
 # ---- 白名单：唯二允许清理的仓库内目录（不得扩充，见设计 spec §3.2）----------------
 TEMP_DIRS: tuple[str, ...] = ("run-logs", "perf-logs")
 MAX_LIST = 20          # 明细清单最多列出的条数（只影响刷屏，不影响统计与删除）
+_SELF_DELETED: set[str] = set()   # 本工具真正删掉的绝对路径（dry-run 归因：我们干的 vs 第三方）
 
 
 def repo_root() -> Path:
@@ -42,10 +43,34 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _managed_roots() -> list[Path]:
+    """受管目录的真实根：`repo_root()/run-logs` 与 `repo_root()/perf-logs`。
+
+    每次从 `repo_root()` 现算（自测可临时替换 `repo_root` 指向隔离根）。
+    白名单锚定仓库根，而不是「路径里有个叫 run-logs 的分量」这种 basename 猜测。
+    """
+    return [Path(os.path.realpath(repo_root() / name)) for name in TEMP_DIRS]
+
+
+def _strictly_inside(real: str, root: Path) -> bool:
+    """`real`（真实路径）是否**严格**位于受管根 `root` 之内；受管根本身不算。"""
+    if real == str(root):
+        return False
+    try:
+        Path(real).relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def _managed(path: str) -> bool:
-    """白名单校验：只允许删除 TEMP_DIRS 目录**内部**的条目，目录本身永不在列。"""
-    real = Path(os.path.realpath(path))
-    return real.name not in TEMP_DIRS and any(part in TEMP_DIRS for part in real.parts)
+    """白名单校验：只允许删除受管目录**内部**的条目，受管根自身永不在列。
+
+    锚定 `repo_root()`：`realpath(path)` 必须严格位于某个受管根之内才算数；
+    仓库之外（或恰好同名）的 `run-logs`/`perf-logs` 分量一律拒绝。
+    """
+    real = os.path.realpath(path)
+    return any(_strictly_inside(real, root) for root in _managed_roots())
 
 
 def collect(dir_path: Path) -> list[tuple[str, float]]:
@@ -98,7 +123,7 @@ def split_active(records: list[tuple[str, float]], now: float, window: float,
 
 
 def delete_entries(paths: list[str]) -> tuple[int, int]:
-    """删除文件，返回 `(删除文件数, 释放字节)`；父目录自底向上删空（不删白名单目录本身）。"""
+    """删除文件，返回 `(删除文件数, 释放字节)`；父目录自底向上删空到受管根为止（不删根本身）。"""
     files = 0
     freed = 0
     parents: set[str] = set()
@@ -112,12 +137,14 @@ def delete_entries(paths: list[str]) -> tuple[int, int]:
             continue  # 并发下文件可能已被别处删除；以实际删除数为准
         files += 1
         freed += size
+        _SELF_DELETED.add(os.path.abspath(path))
         parents.add(os.path.dirname(os.path.abspath(path)))
 
-    # 目录自底向上删空：只删受管目录内部的空目录，绝不动 run-logs/ 与 perf-logs/ 本身
+    # 目录自底向上删空：只在受管根**内部**爬升，到达 run-logs/ 与 perf-logs/ 本身即停
+    roots = _managed_roots()
     for start in sorted(parents, key=lambda d: d.count(os.sep), reverse=True):
         cur = start
-        while os.path.basename(cur) not in TEMP_DIRS and _managed(cur + os.sep):
+        while any(_strictly_inside(os.path.realpath(cur), root) for root in roots):
             try:
                 os.rmdir(cur)  # 仅空目录可删；非空即失败并停止上行
             except OSError:
@@ -132,7 +159,8 @@ def _selftest() -> int:
     六条断言（①–⑥，逐条展开为若干叶子检查）：
     ① 窗口内保留、窗口外可删；② `force=True` 全部可删；③ 空输入返回两个空列表；
     ④ `collect` 对不存在目录返回 `[]`；⑤ `collect` 丢弃符号链接与越界 realpath；
-    ⑥ `delete_entries` 删文件并清空二级目录（保留目标目录本身）。
+    ⑥ `delete_entries` 删文件、把嵌套同名架子一路清到受管根（保留受管根本身），
+    且白名单锚定 `repo_root()`：受管根之外的 `run-logs`/`perf-logs` 同名分量一律拒绝。
     """
     now = 1_000_000.0
     checks: list[tuple[str, object, object]] = []
@@ -168,8 +196,8 @@ def _selftest() -> int:
         got = collect(base)
         checks.append(("⑤ 只收真实文件", got, [(str(real), real.stat().st_mtime)]))
 
-    # ⑥ 删文件并清空二级目录，但保留目标目录本身
-    with tempfile.TemporaryDirectory() as td:
+    # ⑥ 锚定仓库根的白名单删除：清空嵌套目录、保留受管根本身（自测内改用隔离根）
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as td2:
         base = Path(td) / "perf-logs"
         deep = base / "l1" / "l2"
         deep.mkdir(parents=True)
@@ -177,11 +205,33 @@ def _selftest() -> int:
         f2 = base / "b.log"
         f1.write_text("aaaa", encoding="utf-8")
         f2.write_text("bb", encoding="utf-8")
-        n, freed = delete_entries([str(f1), str(f2)])
-        checks.append(("⑥ 删除文件数", n, 2))
-        checks.append(("⑥ 释放字节数", freed, 6))
+        # 受管根内部嵌套同名架子（真实遗留形态 perf-logs/_t-iso-*/perf-logs/_t）：
+        # 爬升必须一路删到受管根，而不是见到同名 basename 就停
+        nested = base / "_t-iso" / "perf-logs" / "_t"
+        nested.mkdir(parents=True)
+        f3 = nested / "c.log"
+        f3.write_text("ccc", encoding="utf-8")
+        # 同名分量但在受管根之外的诱饵：必须拒绝（白名单锚定 repo_root 的正面取证）
+        decoy = Path(td2) / "run-logs" / "d.log"
+        decoy.parent.mkdir(parents=True)
+        decoy.write_text("dddd", encoding="utf-8")
+
+        original_repo_root = repo_root
+        globals()["repo_root"] = lambda: Path(td)  # 隔离根：不碰真实 run-logs/perf-logs
+        try:
+            n, freed = delete_entries([str(f1), str(f2), str(f3), str(decoy)])
+            checks.append(("⑥ 受管根内路径受管", _managed(str(base / "x.log")), True))
+            checks.append(("⑥ 受管根自身不受管", _managed(str(base)), False))
+            checks.append(("⑥ 同名诱饵不受管", _managed(str(decoy)), False))
+        finally:
+            globals()["repo_root"] = original_repo_root
+
+        checks.append(("⑥ 删除文件数", n, 3))
+        checks.append(("⑥ 释放字节数", freed, 9))
+        checks.append(("⑥ 嵌套同名架子一路清到受管根", not (base / "_t-iso").exists(), True))
         checks.append(("⑥ 二级目录已清空", not deep.exists() and not (base / "l1").exists(), True))
         checks.append(("⑥ 目标目录本身保留", base.is_dir(), True))
+        checks.append(("⑥ 同名诱饵未被删", decoy.exists(), True))
 
     bad = [(name, got, want) for name, got, want in checks if got != want]
     if bad:
@@ -204,10 +254,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--quiet", action="store_true", help="只输出末行结论")
     args = ap.parse_args(argv)
 
-    if args.selftest:
-        return _selftest()
-
     try:
+        if args.selftest:
+            return _selftest()  # 同样在 try 内：tempfile 等 OSError 收敛为一行错误 + 退出 1
         # 白名单硬检查：目标目录只能是 TEMP_DIRS 本身（spec §3.2「代码内断言白名单」）
         if TEMP_DIRS != ("run-logs", "perf-logs"):
             print("[ERROR] 清理白名单被篡改，拒绝执行", file=sys.stderr)
@@ -233,12 +282,21 @@ def main(argv: list[str] | None = None) -> int:
                     freed += os.lstat(path).st_size
                 except OSError:
                     continue
-            # 决策 #1 显式检查（零副作用）：dry-run 后候选文件必须原样还在
+            # 决策 #1 显式检查（零副作用）：dry-run 分支从不调用 delete_entries，
+            # 候选消失只可能是第三方写入者干的（本工具从不在 dry-run 分支删文件）；
+            # 只有「本工具自己删过」（_SELF_DELETED）才是硬失败（防未来回归）。
             missing = [p for p in deletable if not os.path.lexists(p)]
             if missing:
-                print(f"[ERROR] dry-run 零副作用校验失败：{len(missing)} 个候选文件不在了",
-                      file=sys.stderr)
-                return 1
+                ours = [p for p in missing if os.path.abspath(p) in _SELF_DELETED]
+                if ours:
+                    print(f"[ERROR] dry-run 零副作用校验失败：本工具删除了 {len(ours)} 个候选文件",
+                          file=sys.stderr)
+                    return 1
+                shown = ", ".join(os.path.relpath(p, base) for p in missing[:MAX_LIST])
+                more = f" …等 {len(missing)} 个" if len(missing) > MAX_LIST else ""
+                print(f"[WARN] dry-run 期间第三方移除了候选文件：{shown}{more}"
+                      f"（已从统计扣除，不影响结论）", file=sys.stderr)
+                n -= len(missing)
 
         if not args.quiet:
             note = "，--force 已忽略活跃窗口" if args.force else ""
