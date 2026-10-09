@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-09T23:11:50Z",
+  "updated_at": "2026-10-09T23:41:20Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "80e66ffea3e85a529552d508260829ae8f70e6ef94ba15e9193e7184a76f68ba",
-      "size": 63029,
-      "normalized_sha256": "80e66ffea3e85a529552d508260829ae8f70e6ef94ba15e9193e7184a76f68ba"
+      "sha256": "db690534bb556013dd842aba1311fd728dc0163cdd64a2e06c754215c6dabb74",
+      "size": 64374,
+      "normalized_sha256": "db690534bb556013dd842aba1311fd728dc0163cdd64a2e06c754215c6dabb74"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -351,11 +351,17 @@
       "size": 11392,
       "normalized_sha256": "d934542f5323d50bd5b11501cd9b234d4ce56089f8cfe8285fa5d10784257745"
     },
+    "docs/compose/reports/b9-work-brief.md": {
+      "role": "index",
+      "sha256": "97ce38f2add0cd35e891da8fb947ffbdfde577eed2aa624fad6369a277ce3cb3",
+      "size": 11290,
+      "normalized_sha256": "97ce38f2add0cd35e891da8fb947ffbdfde577eed2aa624fad6369a277ce3cb3"
+    },
     "docs/compose/reports/handoff-b5-onwards.md": {
       "role": "index",
-      "sha256": "a2123fcf86fe091a29065946521cce4af230e725287b8c9326338cb8cba11ca2",
-      "size": 14941,
-      "normalized_sha256": "a2123fcf86fe091a29065946521cce4af230e725287b8c9326338cb8cba11ca2"
+      "sha256": "5aeb885ae2a07dac898d0dcb5206f7f10252fd9d0fe3b7aa2e66430cacbd79dc",
+      "size": 15310,
+      "normalized_sha256": "5aeb885ae2a07dac898d0dcb5206f7f10252fd9d0fe3b7aa2e66430cacbd79dc"
     },
     "docs/compose/reports/ui-r3-retrospective.md": {
       "role": "index",
@@ -1482,9 +1488,9 @@
     },
     "render.py": {
       "role": "index",
-      "sha256": "a0a7eb0f567193bc373fe5fb66a24d152ddb451ab9b7dc402b1a9a6a40c55213",
-      "size": 335679,
-      "normalized_sha256": "a0a7eb0f567193bc373fe5fb66a24d152ddb451ab9b7dc402b1a9a6a40c55213"
+      "sha256": "58687c5e3e2d471ba7695157f0a199a7a1db2762b7b263c9d92d9a09c1b8a203",
+      "size": 230402,
+      "normalized_sha256": "58687c5e3e2d471ba7695157f0a199a7a1db2762b7b263c9d92d9a09c1b8a203"
     },
     "report.py": {
       "role": "index",
@@ -1900,6 +1906,12 @@
       "size": 11037,
       "normalized_sha256": "2b173e265ec9dd0ea9a17cceafd342b409370987cdb8a19664216cc0312c40a4"
     },
+    "tests/test_b9_moves.py": {
+      "role": "observe",
+      "sha256": "5fd57113efb4699d08384033494ce60199180029cb9d1f789839fc60d3aff636",
+      "size": 2122,
+      "normalized_sha256": "5fd57113efb4699d08384033494ce60199180029cb9d1f789839fc60d3aff636"
+    },
     "tests/test_base.py": {
       "role": "observe",
       "sha256": "1db4f8dba783ba4744b077270f257672b4148b6472f1044c3d47e078ddc5f1e2",
@@ -2295,6 +2307,12 @@
       "sha256": "1bedc56b1734fa269bf90ac89f4f759e67578bb052c0b358eee77ad52601d19c",
       "size": 38842,
       "normalized_sha256": "1bedc56b1734fa269bf90ac89f4f759e67578bb052c0b358eee77ad52601d19c"
+    },
+    "ui_assets.py": {
+      "role": "index",
+      "sha256": "99321e7a853d84255c806dfd7f326dd0c2e18a640a70825536d9d0ceec4eb796",
+      "size": 106382,
+      "normalized_sha256": "99321e7a853d84255c806dfd7f326dd0c2e18a640a70825536d9d0ceec4eb796"
     }
   },
   "managed_scope": {
