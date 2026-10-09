@@ -136,9 +136,17 @@ def _load_and_transform(sql_query: str, pool_config: dict,
     display_indices = column_indices(output_columns, all_columns)
     return output_columns, display_indices, rows, truncated
 
+_DANGEROUS_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def sanitize_csv_formula(value) -> str:
+    """为以公式引导符开头的单元格加前缀 '，使 Excel/WPS 不当公式执行。"""
+    s = value if isinstance(value, str) else str(value)
+    return ("'" + s) if s[:1] in _DANGEROUS_LEADS else s
 
 def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
-                encoding="utf-8", lineterminator="\n"):
+                encoding="utf-8", lineterminator="\n",
+                sanitize_formula: bool = False):
     """
     将表头与行数据序列化为 CSV 文本（导出 / API / 审计页三处共用的统一实现）。
 
@@ -151,6 +159,9 @@ def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
         encoding: "utf-8" 返回 str；"utf-8-sig" 返回 utf-8-sig 编码的 bytes
                   （自带 BOM 字节，等价于调用方自行 .encode("utf-8-sig")）。
         lineterminator: 行结束符（默认 "\\n"；需要 CRLF 时传 "\\r\\n"）。
+        sanitize_formula: 为 True 时对以危险公式引导符（= + - @ \t \r）开头的
+                          单元格加前缀 '，避免 Excel/WPS 当公式执行（默认 False，
+                          输出与不传该参数时逐字节一致）。
 
     返回 str（encoding="utf-8"）或 bytes（encoding="utf-8-sig" 时）。
     """
@@ -159,9 +170,15 @@ def rows_to_csv(header, rows, *, bom=True, quoting=csv.QUOTE_ALL,
         output.write("\ufeff")
     writer = csv.writer(output, delimiter=",", quotechar='"',
                         quoting=quoting, lineterminator=lineterminator)
-    writer.writerow(header)
+    if sanitize_formula:
+        writer.writerow([sanitize_csv_formula(c) for c in header])
+    else:
+        writer.writerow(header)
     for row in rows:
-        writer.writerow(row)
+        if sanitize_formula:
+            writer.writerow([sanitize_csv_formula(c) for c in row])
+        else:
+            writer.writerow(row)
     content = output.getvalue()
     if encoding == "utf-8-sig":
         return content.encode("utf-8-sig")
@@ -178,7 +195,8 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
                          nested_filter=None,
                          *, report_id: int = None,
                          report_config: dict = None,
-                         conn=None) -> str:
+                         conn=None,
+                         sanitize_formula: bool = False) -> str:
     """
     执行查询并将结果导出为 CSV 字符串。
 
@@ -189,6 +207,7 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     sorts: list[(col, dir), ...] 排序参数（与报表页面一致）。
     max_rows: 全量输出截断上限（None=不截断；>0 时原始行超过即截断，PH-07）。
     _truncated_out: 内部回传通道（list）；发生过截断时写入 [True]（供响应头标记）。
+    sanitize_formula: 为 True 时逐单元格中和公式引导符（默认 False，字节不变）。
 
     返回完整的 CSV 文本（含 BOM + 表头行 + 数据行），
     以 UTF-8 字符串形式返回。
@@ -206,7 +225,8 @@ def export_report_to_csv(sql_query: str, pool_config: dict,
     # 序列化为 CSV（QUOTE_ALL 全字段加双引号 + BOM + "\n" 行尾，与既有输出一致）
     rows_out = [[row[i] for i in display_indices] for row in filtered]
     content = rows_to_csv(output_columns, rows_out, bom=True,
-                          quoting=csv.QUOTE_ALL, lineterminator="\n")
+                          quoting=csv.QUOTE_ALL, lineterminator="\n",
+                          sanitize_formula=sanitize_formula)
     if truncated:
         content += (f"# 注意：查询结果超过 {max_rows} 行上限，"
                     f"已截断为前 {max_rows} 行数据\n")
@@ -457,6 +477,9 @@ def handle_export(conn, query: str,
     is_zip = False
     if qs.get("zip", [None])[0] == "1":
         is_zip = True
+    sanitize_formula = False
+    if qs.get("sanitize_formula", [None])[0] == "1":
+        sanitize_formula = True
 
     # 多结果集索引
     result_index = parse_result_index(qs)
@@ -514,7 +537,8 @@ def handle_export(conn, query: str,
                 custom_columns, result_index, sorts=sorts,
                 max_rows=export_limit, _truncated_out=truncated_sink,
                 nested_filter=nested_filter,
-                report_id=report_id, report_config=report_config, conn=conn)
+                report_id=report_id, report_config=report_config, conn=conn,
+                sanitize_formula=sanitize_formula)
     except Exception as e:
         return 500, f"导出失败: {e}", {}
 

@@ -396,20 +396,74 @@ class RedisConnectionManager:
 # 全局单例
 # ---------------------------------------------------------------------------
 
+# 单例与其创建/恢复过程的模块级锁（防并发首访重复创建、防并发恢复风暴）
+_redis_manager_lock = threading.Lock()
 _redis_manager: Optional[RedisConnectionManager] = None
+# 上次尝试建连的时间戳（单调时钟），用于失败恢复的退避
+_redis_last_connect_attempt: float = 0.0
+
+
+def _ensure_redis_manager_locked() -> None:
+    """在持有 _redis_manager_lock 的前提下建连/恢复（调用方负责加锁）。"""
+    global _redis_manager, _redis_last_connect_attempt
+    config = get_redis_config()
+    if not config.get("enable", False):
+        # 语义：Redis 未启用 ≠ 连接失败。保持 None，也不做恢复尝试。
+        return
+    if _redis_manager is None:
+        _redis_last_connect_attempt = time.monotonic()
+        _redis_manager = RedisConnectionManager(config)
+        _redis_manager.connect()
+        if _redis_manager.available:
+            _redis_manager.start_health_check()
+        return
+    # 已存在但不可用：带退避地尝试恢复（Redis 可能在启动后恢复）
+    if _redis_manager.available:
+        return
+    now = time.monotonic()
+    if now - _redis_last_connect_attempt < _HEALTH_CHECK_INTERVAL:
+        return  # 退避窗口内，直接复用当前（不可用）实例，防连接风暴
+    _redis_last_connect_attempt = now
+    _redis_manager.connect()
+    if _redis_manager.available:
+        _redis_manager.start_health_check()
 
 
 def get_redis_manager() -> Optional[RedisConnectionManager]:
-    """获取全局 Redis 连接管理器。"""
+    """获取全局 Redis 连接管理器（并发安全；不可用时按退避自动恢复）。"""
+    mgr = _redis_manager
+    if mgr is None:
+        # 从未初始化：需建连，走锁（可能阻塞在 connect 的超时上）
+        return _init_redis_manager_locked()
+    if mgr.available:
+        return mgr
+    # 已存在但不可用：先做无锁退避快路径，避免每个调用都去抢锁/重连
+    # （connect 可能阻塞最多 socket_timeout 秒，不能让它卡住并发调用方）
+    if time.monotonic() - _redis_last_connect_attempt < _HEALTH_CHECK_INTERVAL:
+        return mgr
+    with _redis_manager_lock:
+        # 双检锁：等锁期间可能已被其他线程恢复
+        mgr = _redis_manager
+        if mgr is None:
+            _ensure_redis_manager_locked()
+            return _redis_manager
+        if mgr.available:
+            return mgr
+        # 二次退避检查：并发进入时只有一个线程真正重连
+        if time.monotonic() - _redis_last_connect_attempt < _HEALTH_CHECK_INTERVAL:
+            return mgr
+        _ensure_redis_manager_locked()
+        return _redis_manager
+
+
+def _init_redis_manager_locked() -> Optional[RedisConnectionManager]:
+    """并发首访的唯一建连入口（双检锁，保证只创建一个 manager）。"""
     global _redis_manager
-    if _redis_manager is None:
-        config = get_redis_config()
-        if config.get("enable", False):
-            _redis_manager = RedisConnectionManager(config)
-            _redis_manager.connect()
-            if _redis_manager.available:
-                _redis_manager.start_health_check()
-    return _redis_manager
+    with _redis_manager_lock:
+        if _redis_manager is not None:
+            return _redis_manager
+        _ensure_redis_manager_locked()
+        return _redis_manager
 
 
 def redis_available() -> bool:
@@ -420,13 +474,15 @@ def redis_available() -> bool:
 
 def reset_redis_manager(config: Optional[dict] = None):
     """重置全局 Redis 连接管理器（测试用）。"""
-    global _redis_manager
+    global _redis_manager, _redis_last_connect_attempt
     if _redis_manager:
         _redis_manager.close()
     if config:
+        _redis_last_connect_attempt = time.monotonic()
         _redis_manager = RedisConnectionManager(config)
         _redis_manager.connect()
         if _redis_manager.available:
             _redis_manager.start_health_check()
     else:
         _redis_manager = None
+        _redis_last_connect_attempt = 0.0

@@ -13,11 +13,12 @@
 | `ReportSnapshot` + `_SNAPSHOT_VERSION=2` | JSON 快照；Decimal 标记；v1 淘汰 |
 | `compute_config_version(sql, pool_id)` | 进键；改 SQL/pool 自然 miss |
 | `build_snapshot_key` / `build_lock_key` | `{prefix}:snapshot:{rid}:{ver}` / lock |
-| `RedisConnectionManager` | 连接 + 15s 健康检查 + SETNX 锁 |
+| `RedisConnectionManager` | 连接 + 15s 健康检查 + SETNX 锁；单例创建有锁（双检锁），不可用时按 `_HEALTH_CHECK_INTERVAL` 退避自动重连 |
 | 保活 | 剩余 TTL < ahead → `force_rebuild` **先算后换** |
 
 配置：`redis.enable` 默认关；`key_prefix` `sr`；`default_ttl_hours`。  
 `redis_available()` False → 上层**静默降级**，不当异常。
+`enable=False` 时 `get_redis_manager()` **必须返回 `None`**（未启用 ≠ 连不上）；运行期不可用会按退避自愈，不需重启（B6-1）。
 
 ## L3 静态 API 缓存（`static_cache`）
 

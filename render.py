@@ -3545,6 +3545,11 @@ def build_export_modal_html(report_id, sorts, filters, cols_param,
         <legend>列范围</legend>
         <label class="check"><input type="checkbox" name="use_custom_cols" value="1" {"checked" if cols_param else ""}> 应用自定义字段</label>
       </fieldset>
+      <fieldset class="fs">
+        <legend>CSV 公式中和</legend>
+        <label class="check"><input type="checkbox" name="sanitize_formula" value="1"> 中和公式引导符（= + - @ 开头的单元格加 ' 前缀，仅 CSV）</label>
+        <div class="field-hint">默认关闭。开启后 Excel/WPS 打开导出的 CSV 时不再把这些单元格当公式执行。</div>
+      </fieldset>
     </form>
   </div>
   <div class="modal-foot">

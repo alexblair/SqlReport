@@ -77,6 +77,7 @@ L1 process QueryCache（进程内，TTL ~300s）
 - **`_is_alive` 必须写「ping 不抛即活」，不得写 `bool(raw.ping(...))`**：mysql-connector 的 `ping()` 成功返回 **None**（失败才抛异常），`bool(None)==False` 会使**真实 MySQL 下所有连接都被判死** → 池恒空、退化成每次直连（实测每请求仍付 71–120ms）。假连接返回 True 会掩盖此 bug，测试断言请用 `ping.side_effect=异常` 表达「死」。
 - **配置库池**（`_config_pool`，2026-10-10 B2-2 新增）：与用户查询池**分开**（配置来源不同）；`_connect_mysql_config()` 取池中 raw 后返回 `_ConfigConnection`（`_MySQLConnection` 子类，`close()`=归还+幂等），**不得**改成返回 `_PooledConnection`（会丢掉 `executescript` 等 `config_db` 依赖的接口）。归还前先 `rollback()`，防下一个借出者继承未提交事务。
 - **请求内复用**（2026-10-10 B2-1）：`_handle` 把连接提到 `_authenticate()` 之前存入 `self._req_conn`，`auth.refresh_session(token, conn=...)` 复用；**认证失败分支必须归还连接**否则泄漏。实测认证请求 159.7ms → **3.6ms**。
+- **`?`→`%s` 必须引号/注释感知**（`_question_to_percent_s`，B6-3）：`_MySQLCursor.execute` 与 `_MySQLConnection.execute` 两处都不得再用裸 `str.replace`——那会把 `WHERE memo LIKE '%?%'` 改坏成 `'%%s%'`，同一条 SQL 在 SQLite 正常、MySQL 报错（双引擎分叉且难定位）。扫描规则可参照同文件 `_split_sql_statements`，但**不可**用它的返回值（它按 `;` 切分且重组空白）。
 
 ## 运行时勿提交
 

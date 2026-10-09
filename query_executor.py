@@ -55,6 +55,84 @@ class _MySQLRow:
     def __repr__(self):
         return repr(self._data)
 
+# ---------------------------------------------------------------------------
+# SQL 占位符转换（MySQL 兼容层）
+# ---------------------------------------------------------------------------
+
+def _question_to_percent_s(sql: str) -> str:
+    """
+    把 SQL 中「字符串字面量/注释之外」的 `?` 占位符替换为 `%s`。
+
+    逐字符遍历，其余字符**逐个原样追加**（空白、换行、大小写一律不动），
+    因此可以直接把返回值当 SQL 用。
+
+    扫描规则与 `_split_sql_statements` 一致：跳过 `'...'` / `"..."` / `` `...` ``、
+    行注释 `-- ...` / `# ...`、块注释 `/* ... */`，并处理 `''` 与反斜杠转义。
+    **但绝不能直接拿 `_split_sql_statements` 的返回值当 SQL**：那个函数按 `;` 切分
+    并 `.strip()`，会把空白重组或丢弃，只适合「拆分语句」而不适合「改写字符串」。
+    """
+    if not sql:
+        return sql
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        c = sql[i]
+        # 字符串字面量 / 反引号标识符：整段原样复制
+        if c in ("'", '"', '`'):
+            delim = c
+            out.append(c)
+            i += 1
+            while i < n:
+                c2 = sql[i]
+                out.append(c2)
+                i += 1
+                # 反斜杠转义：下一个字符无条件属于本字面量
+                if c2 == "\\" and i < n:
+                    out.append(sql[i])
+                    i += 1
+                    continue
+                if c2 == delim:
+                    # '' / "" / `` = 转义引号，字面量继续
+                    if i < n and sql[i] == delim:
+                        out.append(delim)
+                        i += 1
+                        continue
+                    break
+            continue
+        # 行注释 -- ...
+        if c == '-' and i + 1 < n and sql[i + 1] == '-':
+            while i < n and sql[i] != '\n':
+                out.append(sql[i])
+                i += 1
+            continue
+        # 行注释 # ...
+        if c == '#':
+            while i < n and sql[i] != '\n':
+                out.append(sql[i])
+                i += 1
+            continue
+        # 块注释 /* ... */（未闭合时其余全部视为注释）
+        if c == '/' and i + 1 < n and sql[i + 1] == '*':
+            out.append(c)
+            i += 1
+            while i < n:
+                out.append(sql[i])
+                if sql[i] == '*' and i + 1 < n and sql[i + 1] == '/':
+                    out.append('/')
+                    i += 2
+                    break
+                i += 1
+            continue
+        # 区间之外的占位符
+        if c == '?':
+            out.append('%s')
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
 
 # ---------------------------------------------------------------------------
 # MySQL 游标包装
@@ -80,8 +158,9 @@ class _MySQLCursor:
     def execute(self, sql: str, params=None):
         import mysql.connector
 
-        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s
-        mysql_sql = sql.replace("?", "%s") if params is not None else sql
+        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s（跳过字符串字面量与注释）
+        mysql_sql = (_question_to_percent_s(sql)
+                     if params is not None else sql)
         try:
             self._cursor.execute(mysql_sql, params or ())
         except mysql.connector.Error:
@@ -121,8 +200,9 @@ class _MySQLConnection:
     def execute(self, sql: str, params=None):
         import mysql.connector
 
-        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s
-        mysql_sql = sql.replace("?", "%s") if params is not None else sql
+        # 将 SQLite 的 ? 占位符转为 MySQL 的 %s（跳过字符串字面量与注释）
+        mysql_sql = (_question_to_percent_s(sql)
+                     if params is not None else sql)
         cursor = self._conn.cursor(dictionary=True, buffered=True)
         try:
             cursor.execute(mysql_sql, params or ())

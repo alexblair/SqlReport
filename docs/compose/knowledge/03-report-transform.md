@@ -63,6 +63,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 
 - 导出 CSV：**QUOTE_ALL + BOM + `\n`**；API CSV：**QUOTE_MINIMAL + CRLF + 仅 pretty BOM**（勿混用）。
 - 共用序列化：`export.rows_to_csv`（导出 / API / 审计）。
+- **CSV 公式中和默认关闭**（B6-8）：`rows_to_csv(..., sanitize_formula=False)` 为默认，**默认输出字节必须逐字节不变**；启用时以 `= + - @ \t \r` 开头的单元格加 `'` 前缀（防 Excel/WPS 当公式/DDE 执行），仅导出对话框勾选生效。
 
 ## 写操作护栏（PH-05）
 
