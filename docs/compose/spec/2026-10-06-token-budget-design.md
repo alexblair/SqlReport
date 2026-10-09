@@ -1,6 +1,6 @@
 # Token 预算纪律（硬性 #20）设计
 
-> 状态: 生效
+> 状态: 生效（其中「文档预算」限额口径已于 2026-10-09 被 `2026-10-09-context-slimming-and-aoci-usage-design.md` 修订：18000/26000/48000 → 11000/13000/22000，并新增分卷合计 ≤155000B、`course-state.md` ≤8000B 与 `硬性 #N` 断链门禁；本 spec 的 Token 经济学结论与 R1–R5 继续有效）
 > 取代关系: 本设计取代 `2026-09-28-docs-spec-plan-conventions-design.md` 的「`AGENTS.md` 保持 git 忽略不入库」条款（2026-10-06 用户指示）；其余与 #14/#15/#16/#18/#19 并存互补，不取代别的文件。
 > 对应 plan: ../plan/2026-10-06-token-budget-plan.md
 > 证据报告: ../reports/2026-10-06-token-efficiency-retrospective.md

@@ -297,7 +297,7 @@ if (not int(report.get("allow_write", 1) or 0) and sql_contains_write(_sql)) \
    `allow_write=0` 的拦截语义照旧被验到。
 
 ### 9.5 门禁自证
-新增判定函数若配静态门禁，须按 AGENTS 硬性 #13 用 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证。
+新增判定函数若配静态门禁，须按 AGENTS 硬性 #17 用 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证。
 
 ### 9.6 Redis 契约守卫（对齐 2026-09-29 spec §6.1）
 优化前后同一 SQL 的快照 JSON **逐字节一致**；`redis_fallback` 真实验证沿用

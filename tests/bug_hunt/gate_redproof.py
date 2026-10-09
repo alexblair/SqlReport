@@ -1,7 +1,7 @@
 """gate_redproof.py — 门禁自身的变体证明（RED-GREEN）。
 
 **为什么需要这个脚本**：一条从未失败过的门禁等于没有门禁——它可能只是"恰好路过"当前
-代码，并不能在缺陷回归时拦下来。本脚本把本轮 5 条 UI 门禁各自对应的**历史缺陷打回去**
+代码，并不能在缺陷回归时拦下来。本脚本把本轮 6 条 UI 门禁各自对应的**历史缺陷打回去**
 （运行时变异 / 临时改写源码），要求门禁**必须失败**（RED），还原后**必须通过**（GREEN）。
 
 覆盖的门禁（`tests/test_ui_tokens.py`）：
@@ -10,13 +10,14 @@
   3. `TestPageInitRegistration::...replay_safe`   ← 无条件裸绑 DOMContentLoaded（换页后不执行）
   4. `TestFormControlNameUniqueness`              ← 镜像控件带 name（同名参数重复提交）
   5. `TestRevealClassContracts::...element_level...` ← CSS 只认确认稿类名、JS 切另一个（展开按钮点了没反应）
+  6. `TestSqlEditorScrollContract::...hides_editor_overflow` ← `.sql-editor` 的 overflow:hidden 落在 textarea 自身（② SQL 没有滚动条）
 覆盖的门禁（`tests/test_doc_budget.py`，硬性 #20）：
-  6. `test_agents_md_within_budget`  ← AGENTS.md 注入体积膨胀（每步重发）
-  7. `test_routes_resolve`          ← 路由表引用了不存在的分卷
-  8. `test_no_orphan_volumes`       ← 新增分卷未在三处索引登记
+  7. `test_agents_md_within_budget`  ← AGENTS.md 注入体积膨胀（每步重发）
+  8. `test_routes_resolve`          ← 路由表引用了不存在的分卷
+  9. `test_no_orphan_volumes`       ← 新增分卷未在三处索引登记
 
-第 5 项为纯内存变异（临时把 `render._COMMON_CSS` 改回缺陷版，不碰磁盘），
-故该门禁必须**调用时取值**公共 CSS（`_all_css()`），不能缓存模块级常量。
+第 5、6 项为纯内存变异（临时把 `render._COMMON_CSS` 改回缺陷版，不碰磁盘），
+故这两条门禁必须**调用时取值**公共 CSS（`render._COMMON_CSS`），不能缓存模块级常量。
 
 ⚠️ 第 3 项会**临时改写 `report.py`**（追加一行变异、随即还原）。脚本用 try/finally +
 sha256 校验保证还原；若上次运行被强杀留下 `report.py.redproof.bak`，脚本会拒绝启动，
@@ -197,8 +198,105 @@ def main() -> int:
     _check("孤儿分卷未登记", mutate_orphan_volume,
            lambda: setattr(docbudget, "_load_docs", real_load),
            "tests.test_doc_budget.TestDocBudget.test_no_orphan_volumes")
+    def mutate_volumes_total():
+        docs = _cloned()
+        docs["volumes"]["99-bloat.md"] = "# 占位\n" + "x" * docbudget.LIMIT_VOLUMES_TOTAL
+        docbudget._load_docs = lambda: docs
 
+    _check("分卷合计超预算", mutate_volumes_total,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_volumes_total_within_budget")
+
+    def mutate_course_state_oversize():
+        docs = _cloned()
+        docs["course_state"] = "x" * (docbudget.LIMIT_COURSE_STATE + 1)
+        docbudget._load_docs = lambda: docs
+
+    _check("course-state 超预算", mutate_course_state_oversize,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_course_state_within_budget")
+
+    def mutate_retired_constraint_ref():
+        docs = _cloned()
+        docs["files"]["AGENTS.md"] += "\n补充：按硬性 #16 处理。\n"
+        docbudget._load_docs = lambda: docs
+
+    _check("退役约束号悬空引用", mutate_retired_constraint_ref,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_constraint_refs_resolve")
+
+    def mutate_memory_dup():
+        docs = _cloned()
+        line = "- **重复行变异（实测 2026-10-09）**：" + "x" * 60
+        docs["files"]["MEMORY.md"] = docs["files"]["MEMORY.md"] + "\n" + line + "\n" + line + "\n"
+        docbudget._load_docs = lambda: docs
+
+    _check("MEMORY 重复行", mutate_memory_dup,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_memory_curation")
+
+    def mutate_memory_items():
+        docs = _cloned()
+        extra = "\n".join(f"{i}. **策展测试条目 {i}（用户 2026-10-09 指示）**：占位"
+                          for i in range(11, 30))
+        docs["files"]["MEMORY.md"] = docs["files"]["MEMORY.md"].replace(
+            "## Discovered", extra + "\n\n## Discovered", 1)
+        docbudget._load_docs = lambda: docs
+
+    _check("MEMORY 条目超限", mutate_memory_items,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_memory_curation")
+
+    def mutate_memory_attr():
+        docs = _cloned()
+        docs["files"]["MEMORY.md"] = docs["files"]["MEMORY.md"].replace(
+            "## Discovered", "11. **缺归属标记的条目**：占位\n\n## Discovered", 1)
+        docbudget._load_docs = lambda: docs
+
+    _check("MEMORY 条目缺归属", mutate_memory_attr,
+           lambda: setattr(docbudget, "_load_docs", real_load),
+           "tests.test_doc_budget.TestDocBudget.test_memory_curation")
     assert docbudget._load_docs is real_load, "文档预算门禁变异未还原"
+
+    # --- 9) 编辑框被 overflow:hidden 裁掉（2026-10-09 用户实测：② SQL 没有滚动条）---
+    orig_editor_css = render._COMMON_CSS
+
+    def mutate_editor_overflow():
+        render._COMMON_CSS = orig_editor_css.replace(
+            ".sql-editor{border:1px solid var(--line-strong);",
+            ".sql-editor{overflow:hidden;border:1px solid var(--line-strong);", 1)
+        assert render._COMMON_CSS != orig_editor_css, "变异未命中 .sql-editor 规则"
+
+    _check("编辑框滚动被裁掉", mutate_editor_overflow,
+           lambda: setattr(render, "_COMMON_CSS", orig_editor_css),
+           "tests.test_ui_tokens.TestSqlEditorScrollContract"
+           ".test_no_rule_hides_editor_overflow")
+
+    # --- 10) 隐藏页卡里的 mermaid 自动渲染（2026-10-09 用户实测：备注页卡流程图全空）---
+    orig_init_js = report._MERMAID_INIT_JS
+
+    def mutate_mermaid_autostart():
+        report._MERMAID_INIT_JS = orig_init_js.replace(
+            "startOnLoad: false", "startOnLoad: true", 1)
+        assert report._MERMAID_INIT_JS != orig_init_js, "变异未命中 startOnLoad"
+
+    _check("mermaid 隐藏页卡自动渲染", mutate_mermaid_autostart,
+           lambda: setattr(report, "_MERMAID_INIT_JS", orig_init_js),
+           "tests.test_ui_tokens.TestMermaidTabRenderContract"
+           ".test_mermaid_not_autostarted_for_hidden_tabs")
+
+    # --- 11) 页卡可见后不渲染 mermaid（gotoTab 漏调 renderTabMermaid）------------
+    orig_glue = report._FOOTER_GLUE
+
+    def mutate_tab_render_missing():
+        needle = """renderTabMermaid(document.querySelector('.tabpanel[data-panel="' + key + '"]'));"""
+        report._FOOTER_GLUE = orig_glue.replace(needle, "/* 变异：漏调 */", 1)
+        assert report._FOOTER_GLUE != orig_glue, "变异未命中 gotoTab 的 renderTabMermaid 调用"
+
+    _check("页卡切换不渲染 mermaid", mutate_tab_render_missing,
+           lambda: setattr(report, "_FOOTER_GLUE", orig_glue),
+           "tests.test_ui_tokens.TestMermaidTabRenderContract"
+           ".test_visible_tab_renders_mermaid")
 
     print(f"{'门禁':26} RED(应失败)  GREEN(应通过)  结论")
     failed = 0

@@ -34,7 +34,7 @@ SqlReport 的报表执行链路在数据量上升后响应明显变慢。本次�
 
 ### 2.2 不在范围内
 
-- `render.py` 页面渲染与前端 JS 优化（用户已明确排除；按硬性约束 #11，若后续要动需先出可交互 HTML 确认稿）
+- `render.py` 页面渲染与前端 JS 优化（用户已明确排除；按硬性 #17，若后续要动需先出可交互 HTML 确认稿）
 - DB schema 调整、静态资源策略、缓存分层策略的整体重构
 - 新增产品内的常驻性能埋点或管理端性能页（用户已明确选择「一次性脚本，不改产品」）
 
@@ -294,6 +294,7 @@ P50/P95 · 数据量 `perf_text` 10 万行 / `perf_wide` 5 万行 / `perf_multi_
 | S12 | 多结果集（3 个结果集） | 538.8ms | **12.9ms** | 19.1ms | process |
 
 原始数据：`perf-logs/baseline-<时间戳>.json`（`perf-logs/` 已 gitignore）；原始日志为临时产物，已由 `scripts/agent/cleanup_tmp.py` 清理，上表结论与数值即长期依据。
+复现命令：`SR_USER=<debug 账号> SR_PASS=<密码> venv/bin/python scripts/perf/bench.py --out perf-logs/baseline-<时间戳>.json`（12 场景 S1–S12 端到端 HTTP 压测，输出 JSON 明细与汇总表；原始 JSON 分析完由清理工具统一清空）。
 
 > 注（2026-10-05）：上表 S5 行的「全部 redis」是修复前的**旧实现账本式标注**（MySQL 查询成功即标
 > `redis`）。本次修复后 S5 期望为预热 `mysql` → 正式 20 次 `process`（命中 L1）。历史数值本身不改。

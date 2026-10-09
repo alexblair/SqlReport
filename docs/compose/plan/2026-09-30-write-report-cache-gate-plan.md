@@ -310,7 +310,7 @@ Expected: 各段全绿；任一段红则停下按「两败必停」找根因，�
 结论：**不新增「调用点引用」静态门禁**。理由：源码引用检查对后续重构脆弱（误报成本高于收益），
 而本设计的核心安全属性已由两道更结实的守卫覆盖——① `tests/test_sql_write_detect.py` 的既有断言
 （`sql_contains_write` 行为锁死）；② T1 Step 2 中「分工钉死」的断言（同一 SQL 上两函数判定分道）。
-若实施者认为仍需门禁，按 AGENTS 硬性 #13 用 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证，
+若实施者认为仍需门禁，按 AGENTS 硬性 #17 用 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证，
 并把决定与证据写进执行记录。
 
 - [ ] **Step 4: 知识库与记忆同步**（按上列 Files 逐项改；只改受影响小节，禁止整库重写）
