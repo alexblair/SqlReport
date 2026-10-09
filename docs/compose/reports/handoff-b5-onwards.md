@@ -14,8 +14,13 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅ B8 ✅** |
-| **待做批次** | **B9（最后一批）** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅ B8 ✅ · B9-1 ✅** |
+| **待做批次** | **B9-2（`config.py` 按实体拆分）—— 唯一剩余项** |
+
+> **B9-1 已完成**（`Ran 3175`，提交 `c6179a4`）：`render.py` 七个大常量（1887 行）外移到新建的 `ui_assets.py`，
+> `render.py` 6594 → 4706 行。**纯搬移，字节不变**（8 个常量 sha256+长度双侧对拍一致，vendor `hash8` 仍为 `72429792`）。
+> **B9-2 是唯一剩余项**：`config.py` 按实体拆分（2968 行 / 89 个顶层函数）。
+> ⚠️ 注意：`config.py` 已因 B7-2 而引入 `_escape` 复用，行号会与 plan 原文不同——**必须现查**。
 
 > **B8 已完成**（`Ran 3172`，提交 `3c1e3af`）：A 组 5 项纯删除（含 `_COMMON_CSS` 字节不变证明、
 > 畸形 SVG `rx.5`、死函数 `_get_forwarded_url`）+ B 组 3 项行为修正（GBK `lstrip`、
@@ -152,10 +157,18 @@ venv/bin/python -m unittest tests.test_xxx -t .
 - **8 个常量的 sha256 + 长度基线** + **vendor `hash8 = 72429792`**（契约级护栏）
 - **三处易错点**：`_COMMON_CSS` 有两次赋值（第二次是自引用拼接，B8 后右边只剩 `_BASE_CSS + _COMMON_CSS`）；
   `_COMMON_JS` **不搬**；`config.py:50/51/60` 与 `report.py:53/54/73` **从 render 导入**这些名字 → `render` 必须继续导出
-- **B9-1（常量外移）先做且独立验收**，再做 **B9-2（config 拆分）**
+✅ **B9-1 已完成**（见上方状态表）。**下一步做 B9-2：`config.py` 按实体拆分**（`b9-work-brief.md` §3 有完整指引）。
 
-> ⚠️ brief 已明确：**B9-2 若无法安全完成，只交付 B9-1 是完全可接受的**。
+B9-2 开工前必做（brief §3 已列，此处再强调）：
+1. `grep -rn 'config\.' tests/*.py | wc -l` 量清依赖面
+2. 找出 `server.py` 路由表里指向 `config.handle_*` 的入口（**函数名不能变**）
+3. 找出 `config.py` 内**跨实体共享**的 helper（`_escape` 已是 render 的复用导入、`_get_depth`、`_nav_badges` 等）
+   → 留在 `config.py` 或放公共模块，**不要**复制到多个实体模块
+4. 写「拆分前 `dir(config)` 公开符号集合」作为基线，拆分后断言**无缺失**（允许新增）
+
+> ⚠️ **B9-2 若无法安全完成，不交付也是可接受的**——brief §3 已明确此点。
 > 「结构拆分」的收益是长期可维护性，不值得用一次性大爆炸改动换回归风险。
+> 若判定风险过高，请**只报告原因**，不要勉强拆分。
 
 > 已完成批次的工作包可直接参考：`b5-work-brief.md` ~ `b8-work-brief.md`（含实测基线、必测断言、回归命令与踩坑）。
 
