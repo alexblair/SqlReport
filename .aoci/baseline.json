@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-09T15:16:53Z",
+  "updated_at": "2026-10-09T15:34:04Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "a15eec769a145a544696e901b0958a889e9cb95c0adc6c8455cdc24207de1378",
-      "size": 58099,
-      "normalized_sha256": "a15eec769a145a544696e901b0958a889e9cb95c0adc6c8455cdc24207de1378"
+      "sha256": "104e5fef305f35c7b2eb125f2094574989e6f4eece82f01e85495afadbc0a845",
+      "size": 58655,
+      "normalized_sha256": "104e5fef305f35c7b2eb125f2094574989e6f4eece82f01e85495afadbc0a845"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -167,9 +167,9 @@
     },
     "docs/compose/knowledge/03-report-transform.md": {
       "role": "index",
-      "sha256": "9f5daeab60a9353a11ff8c62f2483b83eef1eb7058ab98d684c0c1883b2177b2",
-      "size": 9966,
-      "normalized_sha256": "9f5daeab60a9353a11ff8c62f2483b83eef1eb7058ab98d684c0c1883b2177b2"
+      "sha256": "1bd380feab330976246118880f6875bffe0abc098df6fa2f5c4337677e71610e",
+      "size": 10273,
+      "normalized_sha256": "1bd380feab330976246118880f6875bffe0abc098df6fa2f5c4337677e71610e"
     },
     "docs/compose/knowledge/04-config-data.md": {
       "role": "index",
@@ -287,9 +287,9 @@
     },
     "docs/compose/plan/2026-10-10-perf-robustness-refactor-plan.md": {
       "role": "index",
-      "sha256": "623038be6eb52e09ad7161baf8d6657a621c48071d4d294fa8ee24c0f683bc23",
-      "size": 74798,
-      "normalized_sha256": "623038be6eb52e09ad7161baf8d6657a621c48071d4d294fa8ee24c0f683bc23"
+      "sha256": "bc0a728425512ac8c75ec075b92df923dede9a4bab7b6672268e3067bee75c08",
+      "size": 74872,
+      "normalized_sha256": "bc0a728425512ac8c75ec075b92df923dede9a4bab7b6672268e3067bee75c08"
     },
     "docs/compose/reports/2026-10-05-closeout-decisions.md": {
       "role": "index",
@@ -314,6 +314,12 @@
       "sha256": "800a424c8ded14943d8557e89f6505cfdcf6a69c006a0d067b7776d95acdff62",
       "size": 16614,
       "normalized_sha256": "800a424c8ded14943d8557e89f6505cfdcf6a69c006a0d067b7776d95acdff62"
+    },
+    "docs/compose/reports/b3-work-brief.md": {
+      "role": "index",
+      "sha256": "74e40ee7c9fdcd6076425d58758b0bcd461029b30a6ba24a0f8857703258e64a",
+      "size": 8790,
+      "normalized_sha256": "74e40ee7c9fdcd6076425d58758b0bcd461029b30a6ba24a0f8857703258e64a"
     },
     "docs/compose/reports/ui-r3-retrospective.md": {
       "role": "index",
@@ -1368,9 +1374,9 @@
     },
     "export.py": {
       "role": "index",
-      "sha256": "a25659e60555eb42b93dba9d170a58e79e7dba5c7c6ba215738348f5a6ec0cbb",
-      "size": 23910,
-      "normalized_sha256": "a25659e60555eb42b93dba9d170a58e79e7dba5c7c6ba215738348f5a6ec0cbb"
+      "sha256": "ab9907259a940bb7e6b676d0dad6c364060276effb5461c7e87fbe86392e9ceb",
+      "size": 24474,
+      "normalized_sha256": "ab9907259a940bb7e6b676d0dad6c364060276effb5461c7e87fbe86392e9ceb"
     },
     "file_permissions.py": {
       "role": "index",
@@ -1821,6 +1827,12 @@
       "sha256": "7f4d75dd5b157d9bf522156ac18ef78819c46d161277178787faf24658f9ec30",
       "size": 18510,
       "normalized_sha256": "7f4d75dd5b157d9bf522156ac18ef78819c46d161277178787faf24658f9ec30"
+    },
+    "tests/test_b3_export_zip_safety.py": {
+      "role": "observe",
+      "sha256": "551965ebdf1e2b39adad0fc01c7ba30ea2a7ed32ffc57be501d6c746cc3e2d73",
+      "size": 3020,
+      "normalized_sha256": "551965ebdf1e2b39adad0fc01c7ba30ea2a7ed32ffc57be501d6c746cc3e2d73"
     },
     "tests/test_base.py": {
       "role": "observe",
