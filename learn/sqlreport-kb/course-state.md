@@ -20,6 +20,7 @@
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成（已同步范围递进/分段全量/路径可移植/两败找根因；2026-09-29 从 AGENTS.md 迁入两败必停全文 + L2 分段命令表 + `-t .` 陷阱 + 性能工具链） |
 | 9 | 代理工作流 | `09-agent-workflow.md` | 完成（2026-09-29 新建：多代理协作纪律 #13–#15 + 执行效率取证纪律 P1–P7；**2026-09-30 新增「代码检索纪律 #18/#19」——codegraph 优先检索、查不到才降级 grep、改完必 sync**） |
 | 10 | Token 预算 | `10-token-budget.md` | 完成（**2026-10-06 新建**：把 4 个历史会话的真实 `usage` 复盘成可执行纪律——成本 ≈ 步数 × 上下文、98.6% 为历史重发；返回体积阈值/批处理/会话分段交接 = 硬性 #20。配套 `scripts/agent/session_cost.py`（自查工具，含自测）与 `tests/test_doc_budget.py`（文档预算门禁）） |
+| 11 | AOCI 使用手册 | `11-aoci-usage.md` | 完成（**2026-10-08 新建**：AOCI 场景矩阵 + 一次任务时间轴 + 九个 MCP 工具 + CLI/面板/Database 卷/失败恢复 = 硬性 #21；根 `AGENTS.md` 同步加路由行与收尾项，并按文档预算把 `aoci:begin` 区块裁剪为最小合同） |
 
 > 第 6 章已于 2026-09-30 随 UI v2「石墨·鸢尾」实施改写（令牌/组件/页面地图口径见 `06-ui-interactions.md` 与 `docs/compose/spec/2026-09-30-ui-v2-design.md`）。
 
@@ -70,6 +71,7 @@
 | 写判定分工：`sql_contains_write`（从严、权限侧）vs `sql_has_persistent_write`（精确、缓存门槛与静态护栏） | practiced | spec 2026-09-30 §5 | 中 | 动 allow_write / skip_cache_read / 静态护栏时 |
 | 静态护栏是**并集**（权限判定 + 持久写判定），不是替换 | practiced | spec 2026-09-30 §3.3 | 高 | 改静态分支条件时 |
 | `SELECT … INTO OUTFILE`/`INTO DUMPFILE` 属持久写（读白名单不豁免） | mastered | spec 2026-10-05 §4.1 + `tests/test_sql_persistent_write.py::TestSqlHasPersistentWriteIntoFile` | 高 | 改写判定首关键词/关键词集合时 |
+| AOCI 认知层使用纪律（#21） | mastered | 11 卷 + AGENTS 硬性 #21 + 实测（checkpoint / doctor / 面板 `/api/state` / maintain 流程） | 高 | 想「每改一个文件就维护一次」或「改 `.md` 不用维护」时 |
 
 ## 复习队列
 
@@ -91,11 +93,21 @@
 
 ```text
 slug=sqlreport-kb
-chapters=0..9 done
+chapters=0..11 done
 kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写死绝对路径
 index=codegraph ok (137 files, 6894 nodes, 17453 edges, v1.4.0)
 sources=code+AGENTS+README+4 explore agents
 gaps=none blocking
+last_sync=2026-10-09 ② SQL 编辑框缺滚动条修复（用户实测：/config/reports/{id}/edit ② SQL）
+           根因：ad109be 把「容器类」.sql-editor{overflow:hidden} 直接挂在 textarea 自身，
+           同优先级下后声明的 .sql-textarea 未写 overflow → 计算样式 hidden、滚动条消失；
+           无头 Chrome 实测：overflowY=hidden / scrollbarGutter=0 / clientHeight 318 vs scrollHeight 1284
+           （同页对照 memo/result_names = auto / 10px）；
+           render.py `_COMMON_CSS` 修 2 处（.sql-editor 去 overflow、.sql-textarea 显式 overflow:auto）；
+           06 卷新增「编辑框滚动契约」段 + 头部同步计数；
+           新门禁 `TestSqlEditorScrollContract`（2 例，test_ui_tokens 总 35 例）；
+           gate_redproof 新增第 6 条（9/9 RED-GREEN）；
+           取证脚本（仓库内已 gitignore 的 run-logs/ 下自建过程脚本）+ make_focus_shot.py（前后截图）
 last_sync=2026-10-06 展开/收起类名契约修复（用户实测：/config/api-endpoints 展开 收起 失效）
            根因：ad109be 只抄确认稿类名（.api-row.open），生产 apiToggleMore 切 .api-more.on；
            同一提交还删了 .tree .kids{display:none}＋.kids.on → 分类树折叠同款失效；
@@ -128,5 +140,10 @@ last_sync=2026-09-30 codegraph 优先检索纪律（用户硬性要求）
            AGENTS.md 新增硬性 #18（检索/阅读代码强制先走 codegraph，查不到才降级 grep/read）
            与 #19（改完 .py/.js/.mjs 必 codegraph sync）；§0 路由表新增检索行、§4 命令块、收尾清单第 7 条
            09 卷新增「代码检索纪律（#18/#19）」：两条等价通道（MCP/CLI）命令表、查询写法、
-           降级白名单、禁止项、同步时机表、本项目 5 条实测坑；同步 INDEX.md §7、knowledge/README.md
+          降级白名单、禁止项、同步时机表、本项目 5 条实测坑；同步 INDEX.md §7、knowledge/README.md
+last_sync=2026-10-09 执行效率治理（定向复盘最近 2 会话 → 机械拦阻）
+          定论：单调用步 76%/73%（律令早有却未触发）、147/149 步超阈 2.5 倍、AOCI maintain 各调 2/3 次重复
+          工具：session_cost.py 新增 --check 一行体检、批处理率、AOCI maintain 计数（含 selftest 14 项）
+          规则：AGENTS.md #20 增加⑤中途体检⑥收尾批量；10 卷 R2 阈值（单调用步 ≤40%）+ R3 事件触发 + R5 批量
+          11 卷：.md 措辞级改动可原样提交；maintain 中间态/重复调用即违规（>1 次仅当 remaining≠0）
 ```

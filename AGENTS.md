@@ -27,6 +27,7 @@
 | 性能测量 / 压测 / 优化 | `08-testing-conventions.md`「性能测量工具链」+ `03-report-transform.md` | 该卷 |
 | 会话 token 超标 / 长任务分段 / 大批量检索前 | `10-token-budget.md` | — |
 | 查历史决策、需求依据 | `docs/compose/spec/` 最新生效 spec（见 §3 开工查证） | 新 spec / 取代旧 spec |
+| 用 AOCI 认知 / 改完维护 AOCI 认知 | `11-aoci-usage.md`（**开工读认知、收尾只维护一次**，硬性 #21） | —（按该卷 §3/§11 维护 AOCI 索引，不是改本卷） |
 
 **分卷全表**：`docs/compose/knowledge/README.md`（入口）· `INDEX.md`（模块/路由/页面/共享语义）。
 
@@ -49,13 +50,14 @@
 11. **UI/视觉/交互任务先出可交互 HTML 确认稿**：未确认不得改生产页面；实施严格按确认稿，不得随意发挥；禁止混乱 DOM/CSS 直塞生产。完整四阶段与自检清单见 `06-ui-interactions.md`。
 12. **同一问题失败 2 次必须停下找根因**：停手 → 只分析（报错/最小复现/相关模块/是否过时测试）→ 写出根因假设 → 再做一次针对性修改 + L0 验证。**禁止第 3 次盲试**。工具层同样：同一工具调用失败 2 次禁止原样重发；被中断的调用不计失败次数，但恢复时先查上一动作是否生效。详见 `08-testing-conventions.md`。
 13. **子代理派发纪律**：同任务**全局至多一个活跃子代理**；派前 Task/Actor 盘点；`cancel` 回执**不作数**（以 `status` + 文件 mtime 双确认为准）。详见 `09-agent-workflow.md`。
-14. **验证前清场与产物落盘**：跑测/截图前查 `status`，无活跃写入者直接执行；**同一测试段执行上限 2 次**（首跑 + 1 次收口，代码变更即重置）；日志与临时产物一律落**仓库内已 gitignore 的目录**（`run-logs/` / `perf-logs/`，本环境 `/tmp` 会被清空）、唯一文件名、**禁止 `rm`**。详见 `09-agent-workflow.md`。
+14. **验证前清场与产物落盘**：跑测/截图前查 `status`，无活跃写入者直接执行；**同一测试段执行上限 2 次**（首跑 + 1 次收口，代码变更即重置）；日志与临时产物一律落**仓库内已 gitignore 的目录**（`run-logs/` / `perf-logs/`，本环境 `/tmp` 会被清空）、唯一文件名，禁止人工 `rm`——任务收尾由批量命令调 `venv/bin/python scripts/agent/cleanup_tmp.py --apply` 统一清理；作为依据/规则/知识沉淀的内容不得留在临时目录，须落 `docs/compose/reports/`。详见 `09-agent-workflow.md`。
 15. **子代理效率预算**：任务书写明轮次预算（单页 ≤40 / 总 ≤120）、重复禁令、轮询退出判据、`timeout_ms`；父会话 turnCount >150 必须介入。详见 `09-agent-workflow.md`。
 16. **执行效率与取证纪律（P1–P7）**：等待协议（>30s 后台落盘 + 带判据短轮询，**禁止整段前台 sleep**）、测试取证双产出（落盘与取数同拍）、编辑三拍（Read 定位 → `old_string` 逐字复制 → Edit，1 败即换小锚点）、先验证后落笔、研究预算、纠正即入库（当轮写入 `MEMORY.md`）、收尾必报（进度表 +【任务完成】简报）。详见 `09-agent-workflow.md`。
 17. **交互改动必须验「两种载入态 + 多轮 + 组合」**：凡改动碰了 JS 交互（面板/拖拽/筛选/排序/导出/换页），验收须同时覆盖**整页加载**与**操作一次后的原位换页态**，并验到**第二/三次操作**与**组合序列**（如 改字段顺序 → 加筛选 → 再排序 → 导出交叉）。换页后 `innerHTML` 不执行内联 `<script>`、不重跑初始化（内联 `onclick` 仍能点，故表现为「按钮能点、拖拽报废」）；新增初始化必须进 `initPage()`/`initReportPage()`，页面级脚本用 `onReady(fn)`；能机械检测的一律做成门禁（新门禁须用 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证）。详见 `06-ui-interactions.md` 硬性 #17 与失败模式库。
-18. **代码检索/阅读强制走 codegraph（codegraph-first）**：任何「读/分析代码、定位符号、查调用链或影响面」的**第一步必须是 codegraph**——`codegraph explore`（接入 MCP 时用 `codegraph_explore` 工具，二者输出同源）。**query 必须带代码词（符号名/文件名/英文技术词）**，**纯中文问句一律查不到**（实测 0 命中），别据此降级。**只有 codegraph 确实查不到才降级** `grep`/`glob`/`read`，且降级前必须把查询**加宽重试**（补符号名/文件名/英文词）。禁止用 grep+read 循环替代 codegraph，禁止用 grep 复核 codegraph 已给出的结论。可直接降级的对象（未索引文件、字符串字面量）与完整命令表见 `09-agent-workflow.md`「代码检索纪律」。
-19. **改完代码必须 `codegraph sync`**：新增/修改/删除任何 `.py`/`.js`/`.mjs` 后，**同一次任务内**跑 `codegraph sync`（大范围重构或目录结构变动跑 `codegraph index` 全量重建）。本机 codegraph 守护进程未常驻，**不存在自动同步**；未 sync 就继续分析，读到的是旧索引。收尾以 `codegraph status` 显示 `pendingChanges` 全 0 为准。
-20. **Token 预算（返回体积 / 批处理 / 会话分段）**：实测 4 个会话 69.7M tokens 中 **98.6% 是历史重发**，成本 ≈ 步数 × 上下文——一步塞进历史的，后面每步都重发。① 单条工具返回 >8k 字符即超阈：先 `grep -c` 计数、`head` 截断、`read` 带 `offset/limit`；② 互不依赖的调用**同步发**（一步 2–4 个），禁止一步一条命令的碎步探索；③ 会话 >60 步或上下文 >120k tokens → 按交接模板落盘换新会话；④ `write`/`edit` 回显全文，大文件改到会话后段一次批量改完；⑤ 收尾跑 `scripts/agent/session_cost.py --last 1` 自查。详见 `10-token-budget.md`。
+18. **代码检索/阅读强制走 codegraph（codegraph-first）**：读/分析代码、定位符号、查调用链或影响面的**第一步必须走 codegraph**（`codegraph explore`；接 MCP 时 `codegraph_explore`，同源）。query **必须带代码词**（符号名/文件名/英文技术词），**纯中文问句一律查不到**，别据此降级。**只有确实查不到才降级** `grep`/`glob`/`read`，且降级前把 query **加宽重试一次**；禁止用 grep+read 循环替代，禁止用 grep 复核已得结论。可降级对象（未索引文件、字符串字面量、`.md`/CSS/HTML）与命令表见 `09-agent-workflow.md`「代码检索纪律」。
+19. **改完代码必须 `codegraph sync`**：新增/修改/删除任何 `.py`/`.js`/`.mjs` 后，**同一次任务内**跑 `codegraph sync`（大范围重构跑 `codegraph index`）。**无自动同步**；收尾以 `codegraph status` 的 `pendingChanges` 全 0 为准。
+20. **Token 预算（返回体积 / 批处理 / 分段 / 中途体检）**：成本 ≈ 步数 × 上下文，98% 是历史重发——一步塞进历史的，后面每步都重发。① 单条返回 >8k 字符即超阈：先 `grep -c` 计数、`head` 截断、`read offset/limit`；后台作业**先落盘再 grep**，禁止整段 `job_output`。② 互不依赖的调用**同步发**（一步 2–4 个）；**单调用步须 ≤40%**。③ 会话 >60 步或上下文 >120k → 落盘交接换新会话。④ `write`/`edit` 回显全文，大文件改到会话后段一次批量改完。⑤ **中途体检**：完成首个交付物后、开始收尾前各跑一次 `scripts/agent/session_cost.py --check`（一行结论）；判为「必须落盘交接」就停手分段。⑥ **收尾取证一次批量发**（测试 + `codegraph status` + `git diff --stat` + `--check` 串成一条 bash），禁止一项一步。详见 `10-token-budget.md`。
+21. **AOCI 认知层使用纪律**：开工先调 `aoci_rules`（需要全貌再 `aoci_overview`）；**纯只读任务不维护**；受管对象（代码 / `.md` / 配置）变化后，**只在本次任务最终稳定态调一次无参数 `aoci_maintain`**，语义由模型读证据创作后**整批** `aoci_update_entry` 提交；证据不足用 `aoci_report`，不猜写。**AOCI 无 hook、不会自动同步**；禁止手改 `aoci*.txt`/`.aoci/` 正式资产。场景矩阵、九个 MCP 工具、CLI 与面板、失败恢复见 `11-aoci-usage.md`。
 
 ---
 
@@ -66,18 +68,8 @@
 **掌握状态**：`learn/sqlreport-kb/course-state.md`
 **代码索引**：仓库根 `codegraph`（v1.4.0，`.codegraph/` 已 gitignore，勿提交）。**读/分析代码强制先走它**（硬性 #18），**改完代码强制 sync**（硬性 #19）——命令表与降级白名单见 `09-agent-workflow.md`「代码检索纪律」。
 
-| 分卷 | 内容 | 何时读 |
-|------|------|--------|
-| `01-architecture.md` | 技术选型、启动链路、应用配置、双引擎、**模块地图**、缓存分层、连接池 | 摸模块 / 改启动 / 改配置 |
-| `02-routing-auth.md` | 请求主流程、**ROUTES 全表**、Session、审计 | 改路由 / 鉴权 |
-| `03-report-transform.md` | execute_report、URL 参数、筛选语法、导出、护栏、**transform 性能要点**、派生态缓存 | 改筛选/排序/导出 |
-| `04-config-data.md` | config_db 实体与 DAL、config 表单、app_config、**表结构变更三处同步** | 改表 / 改 CRUD |
-| `05-api.md` | API Key、CORS、静态 `.json`、预设、JSON 模板 | 改 API |
-| `06-ui-interactions.md` | **UI 任务四阶段流程**、骨架与资产、页面地图、组件库、HTML 门禁 | 改 UI |
-| `07-cache-scheduler-audit.md` | L1/L2/L3 数据流、定时任务、审计 type | 改缓存 / 调度 |
-| `08-testing-conventions.md` | 测试入口、**`-t .` 陷阱**、性能工具链、**两败必停**、**L2 分段命令表**、易踩坑 | 跑测 / 排错 |
-| `09-agent-workflow.md` | **多代理协作纪律**、**执行效率 P1–P7**、汇报节奏 | 派子代理 / 需要取证纪律 |
-| `10-token-budget.md` | **Token 预算（#20）**：真实 usage 账本、返回体积阈值、批处理、会话分段交接、收窄命令表 | 收尾自查 / 长任务 / 大批量检索 |
+**分卷全表与「内容 / 何时读」**：见 `docs/compose/knowledge/README.md` 索引表（**唯一来源**）；「什么时候读哪一卷」见 §0 路由表。**新增分卷必须在 README 与该处登记**，否则 `tests/test_doc_budget.py` 判为孤儿卷。
+**AOCI 认知索引**：`aoci.txt` + `.aoci/`（受管对象含 `.md`）——何时读、何时维护见 `11-aoci-usage.md`（硬性 #21）。
 
 ### 同步规则
 
@@ -86,6 +78,7 @@
 3. **最小充分更新**：只改受影响分卷与 `INDEX`/`README` 的过时表述；禁止整库重写。
 4. **冗余红线**：spec/plan 引用知识库**只写链接**，不复制路由表/共享语义等现状事实。
 5. **代码索引同步**：每次改完 `.py`/`.js`/`.mjs` 跑 `codegraph sync`（硬性 #19）；大改后 `codegraph index`。本卷只是知识库（`.md`），codegraph **不索引** `.md`，故改文档不需要 sync。
+6. **文档预算**（#20 门禁 `tests/test_doc_budget.py`）：`AGENTS.md` 每步注入、`MEMORY.md` 每轮必读、单分卷 ≤48KB；**超限只能把细节挪进分卷，不得抬上限**。
 
 ---
 
@@ -122,10 +115,7 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 # 代码索引（硬性 #18 检索优先 / #19 改完必 sync）
 codegraph explore "<中文意图 + 代码词>"          # 首选：源码 + 调用链 + 波及面（纯中文查不到）
 codegraph status                              # 索引健康 + pendingChanges
-codegraph node <符号>                         # 单符号源码 + callers/callees
-codegraph query <关键词> -l 10                # 只查位置，不回源码
-codegraph callers|callees|impact <符号>        # 依赖面
-codegraph affected <改过的文件>                # 受影响测试文件
+codegraph node|query|callers|impact|affected <符号|文件>   # 单符号与依赖面（完整表见 09 卷）
 codegraph sync                                # 每次改完代码必跑
 ```
 
@@ -150,11 +140,21 @@ codegraph sync                                # 每次改完代码必跑
 6. 交互类改动：按 #17 跑「整页 + 换页态 + 组合序列」，新增/改动门禁跑 `tests/bug_hunt/gate_redproof.py` 自证
 7. **代码索引同步**（#19）：改过 `.py`/`.js`/`.mjs` 就跑 `codegraph sync`，`codegraph status` 确认 `pendingChanges` 全 0
 8. **Token 自查**（#20）：`venv/bin/python scripts/agent/session_cost.py --last 1`；超阈步与步数在简报里报数字
+9. **AOCI 维护**（#21）：改了受管对象就跑一次无参数 `aoci_maintain` → 模型创作并**整批** `aoci_update_entry` → `verify`/`check` 收敛；纯只读任务跳过（流程见 `11-aoci-usage.md` §3/§11）
 
 ---
 
-## 6. 文档中的过时线索（勿盲信）
+## 6. 文档中的过时线索
 
-- README「项目结构」的过时项（`git-purge.sh`、测试文件清单）已于 2026-10-06 修正：改列真实文件（`git-tool.sh` 等）、测试树收敛为目录说明；仓库根 `AGENTS.md` 同日取消 git 忽略、入库并入结构树。仍以**当前目录**为准。
-- README 结构树不再逐文件罗列测试（80+ 文件）；以 `tests/` 实际文件与 discover 为准。
-- 文档与代码冲突时：**以可执行代码 / 测试为准**，并修正文档（中英 README 同步）；若冲突在知识库分卷，**必须回写**。
+历史过时项（README 结构树、测试清单等）见 `docs/compose/knowledge/README.md`「过时线索」；**一切以当前目录、可执行代码与测试为准**，冲突时修正文档（§2 同步规则 2）。
+
+<!-- aoci:begin -->
+## AOCI 仓库认知（最小合同）
+
+AOCI 维护认知索引 `aoci.txt`（Volumes v1：Code 卷 `aoci.code.txt` 127 条；状态在 `.aoci/`）。
+**完整用法（场景矩阵、九个工具、CLI、面板、DB 卷、失败恢复）见 `docs/compose/knowledge/11-aoci-usage.md`（硬性 #21）。**
+
+1. **开工**：`aoci_rules` 取合同；需要全貌再 `aoci_overview`（上下文压缩后恢复须带 `refresh_reasons=["context_compaction"]` 并跟完 cursor）。**纯只读任务不调用维护工具。**
+2. **收尾只维护一次**：受管对象（代码/`.md`/配置）变化后，**所有写入结束**才在最终稳定态调一次无参数 `aoci_maintain` → **整批** `aoci_update_entry`（保留 `source_sha256`/`candidate_id`/批次身份，禁止字段 Patch 或截子集）；**同一静止段内调用 ≥2 次即违规**；唯一例外是上次 `remaining != 0`，或维护后又写入受管对象（此时必须在新的最终稳定态重跑）。措辞级 `.md` 改动条目可原样提交。
+3. 证据不足用 `aoci_report` 不猜写；`repair_required` 修命中候选重提同批；`stopped` 查 `failed_step`/Recovery。禁止手改 `aoci*.txt`/`.aoci/`。完整合同见 `11-aoci-usage.md`；本区块按文档预算（#20）裁剪。
+<!-- aoci:end -->

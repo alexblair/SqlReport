@@ -23,7 +23,7 @@
 - 纯 Python 3 标准库 + 既有依赖，**不新增 pip 依赖**（AGENTS 硬性 #5）。
 - 一切测试/运行走仓库根 `venv/bin/python`；`unittest discover` **必须带 `-t .`**（硬性 #8），否则测试隔离失效并连生产 Redis。
 - **禁止在生产 8099 上做对照或压测**（它会真实执行生产 SQL）。端到端只用本地 `sqlreport_test`（3307）。
-- 日志与临时产物落 `run-logs/` 或 `perf-logs/`，唯一文件名，**禁止 `rm`**（硬性 #14）。
+- 日志与临时产物落 `run-logs/` 或 `perf-logs/`，唯一文件名；任务收尾由 `venv/bin/python scripts/agent/cleanup_tmp.py --apply` 统一清理，**禁止人工 `rm`**（硬性 #14）。
 - **禁止 `git add -A` / `git add .`**：当前工作区有 316 个本任务之前就存在的未提交改动，提交只允许显式列出本任务的文件路径。
 - 改任何 `.py` 后**同一次任务内**跑 `codegraph sync`（硬性 #19），收尾以 `codegraph status` 的 `pendingChanges` 全 0 为准。
 - 用户可感知文字一律简体中文（硬性 #2）。
@@ -372,8 +372,8 @@ git commit -m "docs(kb): 同步持久写判定与静态护栏变更，记录两�
   **Critical C-1（已修）**：`TEMPORARY` 原按「关键词集合里出现过」判定 → `DROP TABLE temporary;` /
   `CREATE TABLE temporary (id INT);` / `CREATE TABLE t (temporary INT);` 三条**真持久写**被判成会话级，
   真实 DDL 被缓存读短路（复核者实证：3 次翻页只执行 1 次）。已收紧为「`CREATE`/`DROP` 的**次关键词**为
-  `TEMPORARY`」+ 双向用例。RED `run-logs/C1-red-20261005-211344.log`（4 条 subTest 失败）→
-  GREEN `run-logs/C1-green-20261005-211402.log`（79 tests OK）→ 收口 `run-logs/C1-L1-20261005-211638.log`
+  `TEMPORARY`」+ 双向用例。RED `run-logs/C1-red-<时间戳>.log`（4 条 subTest 失败）→
+  GREEN `run-logs/C1-green-<时间戳>.log`（79 tests OK）→ 收口 `run-logs/C1-L1-<时间戳>.log`
   （静态门禁 + L1 组 **411 tests OK**）。同批复核的 I-1/I-2/I-3（回归脚本补安全方向交叉复算、静态护栏两类新用例、
   `rebuild_static_endpoint_file` 的 403 正向断言）亦已落地。
 - **生产运行时验收（2026-10-05，8099 + 生产 MySQL/Redis，全程只读取证）**：

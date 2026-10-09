@@ -23,6 +23,7 @@ run.log
 # 本环境 /tmp 会被周期清空，且 nohup 后台进程活不过单次 bash 调用，
 # 故一律落仓库内这些目录并忽略：run-logs/ 放测试与普通任务日志，
 # perf-logs/ 放性能测量产物（scripts/perf 写入）。
+# 这两个目录都可由 `scripts/agent/cleanup_tmp.py`（--apply）随时清空——勿把依据类内容留在里面。
 run-logs/
 perf-logs/
 
@@ -81,3 +82,12 @@ tests/regression/
 
 # UI 截图用 Chrome 调试 profile（临时本地产物，不提交）
 docs/compose/spec/shots/**/.chrome-*/
+
+# AOCI 工具安装目录（本机稳定绝对路径：/opdev/SqlReport/.tools/bin/aoci，另含 cosign 校验器）
+.tools/
+
+# 另一份 aoci 安装副本（非本任务安装；按 git 忽略权威排除在 Managed Scope 之外）
+/tools/aoci/
+
+# SDD 工作区（superpowers 流程的过程产物，非交付物——结论请落 docs/compose/reports/）
+.superpowers/

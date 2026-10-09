@@ -31,13 +31,15 @@
 
 ### 2.2 断层**已经发生**（被文档引用、但文件已丢失）
 
+> 本表所有产物名均为掩码形态——精确名字保留在本 spec 首个提交 `5455c0e` 的历史里，不在正文钉住会消失的文件。
+
 | 文档引用位置 | 引用的临时产物 | 现状 |
 |---|---|---|
-| `spec/2026-09-29-execution-layer-performance-design.md:295` | `perf-logs/baseline-1790691445.json`（自称「原始数据」） | **已丢失** |
-| `knowledge/08-testing-conventions.md:327` | `run-logs/repro_sql_scrollbar.py`（作为样例脚本） | 仍在，但按本设计必被清 |
-| `plan/2026-10-05-cache-source-label-plan.md:610` | `run-logs/sdd/.../progress.md`（执行账本） | **已丢失** |
-| `plan/2026-10-05-cache-source-label-plan.md:586` | `run-logs/accept-8099-*.html`、`accept-8099-page.py`（验收证据） | **已丢失** |
-| `plan/2026-10-05-cache-source-label-plan.md:562` | `run-logs/final-discover-20261005-220227.log`（全量测试证据） | **已丢失** |
+| `spec/2026-09-29-execution-layer-performance-design.md:295` | `perf-logs/baseline-<id>.json`（自称「原始数据」） | **已丢失** |
+| `knowledge/08-testing-conventions.md:327` | `run-logs/repro_*.py`（作为样例脚本） | 仍在，但按本设计必被清 |
+| `plan/2026-10-05-cache-source-label-plan.md:610` | `run-logs/sdd/<任务>/progress.md`（执行账本） | **已丢失** |
+| `plan/2026-10-05-cache-source-label-plan.md:586` | `run-logs/accept-8099-*.html`、`accept-8099-page*.py`（验收证据） | **已丢失** |
+| `plan/2026-10-05-cache-source-label-plan.md:562` | `run-logs/final-discover-<时间戳>.log`（全量测试证据） | **已丢失** |
 | `knowledge/10-token-budget.md:124` / `MEMORY.md:105` | `run-logs/handoff/`（跨会话交接文档） | **已丢失** |
 
 文档中引用这两个目录的形态统计（`grep` 实测）：**具体文件名 24 处**（断层风险源）、占位符/通配符 33 处（合法命令模板）、仅目录名 25 处（合法）。
@@ -129,7 +131,7 @@ venv/bin/python scripts/agent/cleanup_tmp.py --apply      # ← 唯一增量；�
 2. `docs/compose/knowledge/09-agent-workflow.md`（§验证纪律同步 #14；收尾步骤加清理）。
 3. `docs/compose/knowledge/10-token-budget.md`（R3 交接换址；R5 批量命令追加清理调用）。
 4. `docs/compose/knowledge/11-aoci-usage.md`（AOCI Entry 的证据/关系不得指向临时产物；`run-logs/aoci/extract/aoci` 那处失效引用改写）。
-5. `docs/compose/knowledge/08-testing-conventions.md`（日志落盘与取证口径；`run-logs/repro_sql_scrollbar.py` 按 `MEMORY.md` 「产出者溯源」判据认定为**过程脚本、不提升**，该处样例引用改写为不含临时路径的知识性描述）。
+5. `docs/compose/knowledge/08-testing-conventions.md`（日志落盘与取证口径；那处过程脚本引用按 `MEMORY.md` 「产出者溯源」判据认定为**过程脚本、不提升**，引用改写为不含临时路径的知识性描述）。
 6. `MEMORY.md`、`learn/sqlreport-kb/course-state.md`（同任务内同步）。
 7. 新增 `scripts/agent/cleanup_tmp.py`、`tests/test_temp_log_policy.py`；`tests/bug_hunt/gate_redproof.py` 增一条自证。
 8. 存量 24 处文档引用一次性梳理（含 `2026-09-29-execution-layer-performance-design.md` 状态头按「取代两头改」补记）。

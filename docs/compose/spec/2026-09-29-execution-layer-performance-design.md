@@ -2,6 +2,7 @@
 
 > 状态: 生效
 > 取代关系: 无（首次针对执行层性能的设计）
+> 部分条款已被 2026-10-09-temp-artifact-lifecycle-design.md 取代（原始数据取证方式，2026-10-09）
 
 ## 1. 背景与目标
 
@@ -292,7 +293,7 @@ P50/P95 · 数据量 `perf_text` 10 万行 / `perf_wide` 5 万行 / `perf_multi_
 | S11 | 宽表 30 列 × 5万行 | 1710.1ms | **15.1ms** | 20.9ms | process |
 | S12 | 多结果集（3 个结果集） | 538.8ms | **12.9ms** | 19.1ms | process |
 
-原始数据：`perf-logs/baseline-1790691445.json`（`perf-logs/` 已 gitignore）。
+原始数据：`perf-logs/baseline-<时间戳>.json`（`perf-logs/` 已 gitignore）；原始日志为临时产物，已由 `scripts/agent/cleanup_tmp.py` 清理，上表结论与数值即长期依据。
 
 > 注（2026-10-05）：上表 S5 行的「全部 redis」是修复前的**旧实现账本式标注**（MySQL 查询成功即标
 > `redis`）。本次修复后 S5 期望为预热 `mysql` → 正式 20 次 `process`（命中 L1）。历史数值本身不改。

@@ -29,9 +29,12 @@
 
 ```bash
 # 1) 会话原文（zstd 压缩的 JSONL；本机无 python zstandard，用 zstd CLI）
-zstd -dc ~/.dsh/sessions/--opdev-SqlReport--/session-79094439-…/session.v4.jsonl.zstd > run-logs/xx.jsonl
+zstd -dc ~/.dsh/sessions/--opdev-SqlReport--/session-79094439-…/session.v4.jsonl.zstd > run-logs/<会话>.jsonl
 # 2) 一行出报告（本次复盘产品化成的工具）
 venv/bin/python scripts/agent/session_cost.py --session 79094439
+
+# 注：上面落盘的 jsonl 是本次复盘的中间临时产物（run-logs/ 下），
+# 由 scripts/agent/cleanup_tmp.py 清理；结论与数值已固化在本报告与工具里。
 ```
 
 - **真实用量在** `assistant/message.data.usage`（`inputTokens` / `cacheReadTokens` / `cacheWriteTokens`

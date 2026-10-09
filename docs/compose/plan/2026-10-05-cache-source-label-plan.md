@@ -480,26 +480,25 @@ Expected: 至少 1 行；无则先跑 `./venv/bin/python scripts/perf/init_debug
 
 - [ ] **Step 3: 冷加载 → 徽标必须是「实时查询」** ← **未按原样执行**：沙箱内无法访问/重启宿主 8099，改为真实组件栈 in-process 验收（见文末验收记录）
 
-用 `perf-logs/bench-credentials.txt` 的账号登录后 GET `/report?id=<id>`，把 HTML 落 `run-logs/accept-1-cold.html`，
+用 `perf-logs/bench-credentials.txt` 的账号登录后 GET `/report?id=<id>`，把 HTML 落 `run-logs/accept-<序号>-cold.html`，
 并用 `scripts/perf/bench.py` 的 `parse_cache_source`（复用，不重写解析）取文案：
 
 ```bash
 ./venv/bin/python -c "
 from scripts.perf.bench import parse_cache_source
-html = open('run-logs/accept-1-cold.html', encoding='utf-8').read()
+html = open('run-logs/accept-<序号>-cold.html', encoding='utf-8').read()
 print('source =', parse_cache_source(html))" 2>&1 | tail -3
 ```
 Expected: `source = mysql`；同时用 grep 在该 HTML 上确认**不含**「数据来自缓存快照」且含「实时查询」。
 
 - [ ] **Step 4: 300s 内再取一次 → 徽标必须是「本地缓存」** ← **未按原样执行**：沙箱内无法访问/重启宿主 8099，改为真实组件栈 in-process 验收（见文末验收记录）
-
-同 Step 3 再取一次（落 `run-logs/accept-2-l1.html`）
+同 Step 3 再取一次（落 `run-logs/accept-<序号>-l1.html`）
 Expected: `source = process`，HTML 含「本地缓存」、不含「缓存快照」。
 
 - [ ] **Step 5: 等 L1 过期（>300s）后第三次取 → 「缓存快照」** ← **未按原样执行**：沙箱内无法访问/重启宿主 8099，改为真实组件栈 in-process 验收（见文末验收记录）
 
 用**后台作业**（禁止前台整段 sleep）：
-`bash -c 'sleep 310; curl -s -b <cookie> "http://127.0.0.1:8099/report?id=<id>" -o run-logs/accept-3-l2.html'`，
+`bash -c 'sleep 310; curl -s -b <cookie> "http://127.0.0.1:8099/report?id=<id>" -o run-logs/accept-<序号>-l2.html'`，
 落盘后取数：Expected `source = redis`，HTML 含「缓存快照」。
 
 - [x] **Step 6: 全量与分段测试（本任务内只跑一次）**
@@ -559,12 +558,12 @@ git commit -m "docs(plan): 回填 8099 三态生产验收证据与收尾状态"
 | 新用例 RED | `python -m unittest tests.test_cache_source_label` | `FAILED (failures=2, errors=1)` — `'redis' != 'mysql'` ×2、`KeyError: 'snapshot_written'`（与计划 Expected 逐条一致） |
 | 新用例 GREEN | 同上 | **`Ran 9 tests — OK`** |
 | 受影响模块组 | `tests.test_query_cache` + `test_report_extra` + `test_scheduler_primitives` + `test_cache_ui` + `test_report_perf` + `test_derived_cache` + `test_render_extra` + `test_render` | 首跑 `FAILED (failures=6)`（全是 `'mysql' != 'redis'`，与 §6 triage 表逐一吻合）→ 同步断言后 **`Ran 515 tests — OK`** |
-| 全量（官方入口） | `python -m unittest discover -s tests/ -t .` | **`Ran 3002 tests — OK (skipped=4)`**，日志 `run-logs/final-discover-20261005-220227.log` |
+| 全量（官方入口） | `python -m unittest discover -s tests/ -t .` | **`Ran 3002 tests — OK (skipped=4)`**，日志 `run-logs/final-discover-<时间戳>.log` |
 | 脚本/静态门禁 | `py_compile scripts/perf/bench.py scripts/perf/verify_redis_fallback.py` + `tests.bug_hunt.test_static_analysis` | `OK`（5/5） |
 
 **三态生产验收（真实 MySQL `127.0.0.1:3307/sqlreport_test` + 真实 Redis `6379` + 生产渲染器）**
 
-脚本 `run-logs/accept-3state.py`，日志 `run-logs/accept-3state-*.log`；被测报表 3「缓存命中率报表」（`prefer_cache=1` / `cache_ttl_hours=24` / pool 2）：
+脚本 `run-logs/accept-3state-<轮次>.py`，日志 `run-logs/accept-3state-<轮次>.log`；被测报表 3「缓存命中率报表」（`prefer_cache=1` / `cache_ttl_hours=24` / pool 2）：
 
 | 状态 | 序列 | `cache_info`（实测原值） | 徽标 HTML（实测原文） |
 |---|---|---|---|
@@ -583,7 +582,9 @@ git commit -m "docs(plan): 回填 8099 三态生产验收证据与收尾状态"
 | B L1 命中 | 3 | 2s 后 | `本地缓存 (2s 前刷新 · 已启用缓存 · 缓存 24 小时)` | `process` |
 | C L2 命中 | 7（无调度计划） | L1 过期（330s 前刷新）后 | `缓存快照 (330s 前 · 已启用缓存)`；横幅出现 | `redis` |
 
-证据 HTML：`run-logs/accept-8099-cold.html`、`-l1.html`、`-c-old7.html`、`-c-l2-7.html`；脚本 `run-logs/accept-8099-page.py`（复用 `bench.py` 的登录与徽标解析，不重写解析器）。
+证据 HTML：`run-logs/accept-8099-<轮次>.html`（cold / l1 / c-old / c-l2 四态）；脚本 `run-logs/accept-8099-page-<轮次>.py`（复用 `bench.py` 的登录与徽标解析，不重写解析器）。
+
+> 注：上文引用的原始日志/HTML/脚本均为临时产物（`run-logs/` 下），由 `scripts/agent/cleanup_tmp.py` 清理；结论与数值已固化在本记录中。
 
 状态 C 首次尝试（报表 3，22:14）抓到的是 `本地缓存 (100s 前刷新)` —— 反推 22:12:28 有**外部浏览器请求**重建了该报表的 L1；经查报表 3 **不在任何调度计划**（`schedule_reports` 仅 1/2/5），故非本次缺陷，改用无调度的报表 7 复测得 C。
 
@@ -593,7 +594,7 @@ git commit -m "docs(plan): 回填 8099 三态生产验收证据与收尾状态"
 
 ## 独立复核与修复（2026-10-05）
 
-**复核方式**：fresh-context 子代理独立复核 `31bd612..344a043`（复核包留在 `run-logs/sdd/review-31bd612-344a043/`），按 `requesting-code-review/code-reviewer.md` 的判据。
+**复核方式**：fresh-context 子代理独立复核 `31bd612..344a043`（复核包留在 `run-logs/sdd/<任务>/` 下），按 `requesting-code-review/code-reviewer.md` 的判据。
 
 **业务面结论**：生产者改动与 spec §5.1 逐行一致；L2→L1 继承链、`redis_fallback`/`fresh` 语义未被破坏；6 处既有断言均为「精确换值 + 新增断言」，**无弱化**；`render.py` 零改动；无恒真测试。
 
@@ -607,4 +608,4 @@ git commit -m "docs(plan): 回填 8099 三态生产验收证据与收尾状态"
 **Minor（未修，交用户决定）**：M1 `tests/test_cache_ui.py` 方法名 `test_rebuild_shows_redis_cache_info` 与其 docstring 仍描述旧行为；M2 `report.py:109` 的 `CachedResult.source` docstring 仍写「redis / mysql」，实际只会写 `"redis"` 或 `None`；M3 `TestBadgeHonesty` 三例喂手工 `cache_info`，与生产者解耦（页面级三态实测已覆盖该风险）；M4 spec §6 第二行与 §6.1 有轻微重复。
 **随 C1 退回 ui-v2 的 Important I1**：`test_th_min_width_rule` 的断言由「页面级精确 100px」退化为「`render._COMMON_CSS` 中 `\d+px`」，属 ui-v2 未提交工作，已不在此提交内（建议 ui-v2 收口时收紧）。
 
-**执行记录（ledger）**：`run-logs/sdd/2026-10-05-cache-source-label/progress.md`
+**执行记录（ledger）**：`run-logs/sdd/<任务>/progress.md`

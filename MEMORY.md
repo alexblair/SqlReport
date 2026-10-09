@@ -102,9 +102,19 @@
     ① 单条返回 >8k 字符即超阈：一条全库 `grep`（225 命中 / 43k 字符）让该步加 16.3k tokens、
     被后面 143 步重发 ＝ **2.33M tokens（该会话 9.7%）**；先 `grep -c` 计数、`head` 截断、`read` 带 `offset/limit`。
     ② 独立调用**同步发**：会话 1 有 118/147 步只发 1 个调用；每减一步省「该步上下文 + 约 1.6 万固定开销」。
-    ③ 单会话 >60 步或上下文 >120k tokens → 落盘交接（`run-logs/handoff/`）换新会话（长会话是二次成本）。
+    ③ 单会话 >60 步或上下文 >120k tokens → 落盘交接（`docs/compose/reports/`，随任务提交）换新会话（长会话是二次成本）。
     ④ `write`/`edit` 会回显改动后全文（大文件一步 19.9k tokens）→ 放会话后段、一次批量改完。
     自查：`venv/bin/python scripts/agent/session_cost.py --last 1`；详见 `10-token-budget.md`。
+20. **探索性命令必须限长；工具环境配方优先固化成脚本；edit 锚点是闭区间**（2026-10-09 本轮自查，实测数字）：
+    ① 区间/切片命令写错 = 把一整行刷屏：`awk 'NR=792,NR=812'`（`=` 是赋值）把第 812 行打印数百次，
+    叠加 `git show --stat` 的截断输出，单步 +19,128 tokens、被后面 102 步重发 ＝ **1.95M tokens（该会话 14.8%）**。
+    规矩：探索/统计类命令先 `grep -c`/`wc -l` 计数再取数，区间写 `NR>=a && NR<=b`，输出必带 `head`/`sed -n` 窗口。
+    ② 同一工具/环境失败 2 次就**停止换参数**，改控制变量 A/B（一次只变一个），否则整轮空转——
+    本轮无头 Chrome 取证把 `headless` 模式/profile/`window-size`/PIPE 四个变量一起换，空转约 16 步（113 步的 14%）。
+    配方已固化：`scripts/ui-v2/e2e/probe_computed_style.py` + 08 卷易踩坑 #28 + 10 卷追加账本。
+    ③ `edit` 的 `anchor_from..anchor_to` 是**闭区间**，锚点行本身也会被替换，`replace_with` 必须把锚点行内容一起写回，
+    否则整行/整函数被静默删掉（本轮犯 3 次：删 `class TestNoDuplicateDeclarations` 行、删 `run_chrome_base` 与
+    `extract_balanced_card` 函数体）。大段替换不确定时，整文件 `write` 一次比重试锚点更省。
 
 ## Discovered（环境事实）
 
@@ -201,3 +211,21 @@
   另：浅克隆里往返切换时 `git status` 会报 branch 与 `origin/*` “diverged 1 and 1”，属浅历史噪音，不影响工作树。
 - **tag `v2.0.0` 在首次交付前被重指过一次**：从 `1e0ea3a` 改指到定稿提交（目的是让「V2 首个正式版」自带版本切换指南）；
   重指发生在任何用户取用之前（仓库无 Releases、无消费者），**此后不再移动**；`v1-final` 自始至终只指向 `9a975b9`。
+
+- **AOCI 认知层已接入本项目（2026-10-08）**：MCP 九工具 + CLI `.tools/bin/aoci`（**不在 PATH**；`.tools/`、`tools/aoci/` 均 gitignore）+ 只读面板 `http://127.0.0.1:8899`；**无 hook、不会自动同步**，受管对象含 `.md`，收尾在最终稳定态调一次 `aoci_maintain`；用法全文 `docs/compose/knowledge/11-aoci-usage.md`（硬性 #21）。面板「未配置数据库」属正常：Database 卷与 Code 卷独立，且 AOCI 数据源不支持 SQLite。
+- **无头 Chrome（Chrome for Testing 154）在本机的取证配方**（2026-10-09 实测，踩完才通）：`--headless=old` 是唯一稳定模式
+  （`--headless=new` 跑 `--dump-dom`/`--screenshot` 直接挂起）；`--user-data-dir` 要复用同一个 profile 才稳（全新 profile 间歇挂起，重试一次即热）；
+  **不能**用 `subprocess(capture_output=PIPE)`（fork 出的子进程不关管道 → 等到 timeout 的假挂起）；`--window-size`/`--virtual-time-budget`
+  与 `--screenshot` 同用挂起；取证前要剥页面 `<script>`。已封装为 `scripts/ui-v2/e2e/probe_computed_style.py`（含 `--selftest`，一条命令出计算样式 JSON + 聚焦截图）。
+  **补充（2026-10-09 实测）**：挂起只发生在 `--dump-dom`/`--screenshot` 这类**命令行一次性**模式；`--headless=new`
+  + `--remote-debugging-port` + CDP（`Page.captureScreenshot`/`Runtime.evaluate`）稳定可用（本轮全程用它取证）；
+  但 Chrome **必须以受管后台作业启动**（`nohup … &` 在单次 bash 调用结束时会被回收，症状是 CDP 端口先通后拒）。
+- **隐藏页卡里的 mermaid 必须在页卡可见后再渲染**（2026-10-09 用户实测：`/report?id=42` 备注页卡两张流程图只剩空框）：
+  `startOnLoad:true` 在 window load 时把 `display:none` 页卡里的 `<pre class="mermaid">` 也渲染了 —— 隐藏容器量测全 0，
+  mermaid 产出 16×16 空图（viewBox `-8 -8 16 16`）并打上 `data-processed`；事后 `mermaid.run` 对已打标记的节点直接 `continue`，
+  切页也不重画。修法：`report._MERMAID_INIT_JS` 锁 `startOnLoad:false` + `_FOOTER_GLUE.renderTabMermaid`（`gotoTab`/`initReportPage` 都调）；
+  门禁 `TestMermaidTabRenderContract`（已在 gate_redproof 第 10/11 条），e2e `scripts/ui-v2/e2e/mermaid-tab-check.mjs`。
+- **执行效率治理（2026-10-09 复盘最近 2 个会话）**：两场各 147/149 步、23.0M/23.2M tokens，单调用步 **76%/73%**——纪律早有（#20②）却等于没触发；AOCI maintain 各调 2/3 次被后轮取代。
+  已落实机械拦阻：`session_cost.py` 新增 `--check` 一行体检与「批处理率」「AOCI maintain 次数」两个指标；AGENTS.md #20 增设⑤中途体检⑥收尾批量取证；
+  10 卷新增第二批实测与 R2 阈值（单调用步 ≤40%）；11 卷增设 maintain 次数判据（中间态/重复调用即违规）。
+  另注：会话内**整读大文件**（如 300 行工具源码）会按剩余步数反复重发，应 `read offset/limit` 分段取。

@@ -27,9 +27,9 @@
 6. **禁止硬编码仓库主目录绝对路径**（AGENTS #10）。脚本用 `pathlib.Path(__file__).resolve().parents[2]` 推导仓库根。
 7. **禁止修改 `app_config.debug.json` / `app_config.json`**。连接或认证失败时**立即停止并报告用户**，由用户补配置（用户 2026-09-29 明确要求）。
 8. **测试段执行上限 2 次**（首跑 + 1 次收口复跑）。任何源码或测试文件变更后计数重置。**禁止第 3 次执行**。
-9. **测试结果一律落盘再取数**：`python -m unittest … > /tmp/perf-<段>-<时间戳>.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' <log>`。
+9. **测试结果一律落盘再取数**：`python -m unittest … > perf-logs/<段>-<时间戳>.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' <log>`。
 10. **静态分析必须绿**：`python -m unittest tests.bug_hunt.test_static_analysis -v`。新增文件若触发 import 误报，按 `tests/bug_hunt/test_static_analysis.py` 的 `_WILDCARD_FALSE_POSITIVES` 机制登记，而不是删检查。
-11. **临时产物唯一文件名、禁止 `rm`**（AGENTS #14）。
+11. **临时产物唯一文件名**，落仓库内已 gitignore 的 `run-logs/` / `perf-logs/`，任务收尾由 `venv/bin/python scripts/agent/cleanup_tmp.py --apply` 统一清理，**禁止人工 `rm`**（AGENTS #14）。
 12. **两败必停**（AGENTS #12）：同一问题连续 2 次未解决即停手做根因分析，禁止第 3 次盲试。
 
 ## Review Focus
@@ -504,7 +504,7 @@ git commit -m "perf(C-1): 大数据集逐行一致性验证 + 收益对比回填
 - [ ] **Step 2: 跑测试确认失败**
 
 ```bash
-source venv/bin/activate && python -m unittest tests.test_export_cache_path -v > perf-logs/t4b-1.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-1.log
+source venv/bin/activate && python -m unittest tests.test_export_cache_path -v > perf-logs/t4b-1-<时间戳>.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-1-<时间戳>.log
 ```
 
 Expected: `FAILED`（`export_report_to_csv` 还不接受 `report_id`）。
@@ -541,7 +541,7 @@ truncated = bool(result.truncated)
 - [ ] **Step 5: 跑测试确认通过 + L1**
 
 ```bash
-source venv/bin/activate && python -m unittest tests.test_export_cache_path tests.test_export tests.test_max_rows tests.test_output_limit tests.test_api_endpoint tests.test_report > perf-logs/t4b-2.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-2.log
+source venv/bin/activate && python -m unittest tests.test_export_cache_path tests.test_export tests.test_max_rows tests.test_output_limit tests.test_api_endpoint tests.test_report > perf-logs/t4b-2-<时间戳>.log 2>&1; grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )' perf-logs/t4b-2-<时间戳>.log
 ```
 
 Expected: `OK`。**`test_max_rows` / `test_output_limit` 必须绿** —— 它们是全量输出护栏的既有守卫，若变红说明护栏被绕过，**立即回滚**（spec §7）。
