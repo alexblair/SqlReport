@@ -2599,6 +2599,19 @@ def _escape(val) -> str:
     """HTML 转义（自动格式化数值避免科学计数法）"""
     return html_mod.escape(format_cell(val))
 
+_JS_ATTR_ESCAPE = str.maketrans({"\\": "\\\\", "'": "\\'",
+                                "\r": "\\r", "\n": "\\n"})
+
+
+def _js_str(val) -> str:
+    """把字符串转成可安全嵌入单引号 JS 字面量的内容（先 JS 转义）。
+
+    与 _escape 的区别与配合：_escape 产出 &#x27;，浏览器解析 HTML 属性时会
+    解码回 '，从而破坏 JS 字面量——故 JS 上下文必须先过本函数。
+    正确顺序：_escape(_js_str(raw))（先 JS 层，再 HTML 属性层）。
+    """
+    return str(val).translate(_JS_ATTR_ESCAPE).replace("</", "<\\/")
+
 
 def build_flash_html(flash: str, is_error: bool = None) -> str:
     """构建 flash 提示条 HTML。
@@ -3820,9 +3833,9 @@ def _report_delete_confirm(report: dict,
     """
     ep_count = len((api_endpoints_map or {}).get(report.get("id"), []))
     if ep_count > 0:
-        return (f"确定删除报表 {_escape(report.get('name'))}？"
+        return (f"确定删除报表 {report.get('name')}？"
                 f"其下 {ep_count} 个 API 接口将一并删除")
-    return f"确定删除报表 {_escape(report.get('name'))}？"
+    return f"确定删除报表 {report.get('name')}？"
 
 
 def build_delete_form_html(action_url: str, confirm_msg: str,
@@ -3850,7 +3863,7 @@ def build_delete_form_html(action_url: str, confirm_msg: str,
     title_attr = f' title="{_escape(btn_title)}"' if btn_title else ""
     return (
         f'{pad}<form method="post" action="{action_url}" style="display:inline"\n'
-        f'{pad}      onsubmit="return confirm(\'{confirm_msg}\')">\n'
+        f'{pad}      onsubmit="return confirm(\'{_escape(_js_str(confirm_msg))}\')">\n'
         f'{btn_pad}{hidden_html}'
         f'<button type="submit" class="btn btn-danger btn-sm{button_cls}"{title_attr}>{_escape(label)}</button>\n'
         f'{pad}</form>'
@@ -4053,11 +4066,11 @@ def build_pool_section_html(pools: list, report_counts: dict = None,
         move_btns = build_move_buttons_html(p["id"], "pools", i, pool_count)
         ref_count = (report_counts or {}).get(p["id"], 0)
         if ref_count > 0:
-            pool_confirm = (f"确定删除连接池 {_escape(p['name'])}？"
+            pool_confirm = (f"确定删除连接池 {p['name']}？"
                             f"其下 {ref_count} 个报表将失去数据库连接"
                             f"（报表保留但无法执行）")
         else:
-            pool_confirm = f"确定删除连接池 {_escape(p['name'])}？"
+            pool_confirm = f"确定删除连接池 {p['name']}？"
         linked = (pool_reports or {}).get(p["id"]) or []
         if linked:
             linked_cell = "、".join(
@@ -4116,7 +4129,7 @@ def build_user_section_html(users: list, current_username: str = None) -> str:
         else:
             delete_btn = build_delete_form_html(
                 f"/config/users/{u['id']}/delete",
-                f"确定删除用户 {_escape(u['username'])}？"
+                f"确定删除用户 {u['username']}？"
                 f"其全部登录会话将立即失效")
         name_cell = f"<strong>{_escape(u['username'])}</strong>"
         if is_current:
@@ -4180,7 +4193,7 @@ def build_category_manage_section_html(all_cats, cat_tree,
                              "btn btn-ghost btn-sm btn-icon", title="编辑")
         del_btn = build_delete_form_html(
             f"/config/categories/{cat['id']}/delete",
-            f"确定删除分类 {name}？分类下的报表和子分类将变为未分类。",
+            f"确定删除分类 {cat['name']}？分类下的报表和子分类将变为未分类。",
             indent=2, label="✕", btn_title="删除")
         return f"""<div class="cat"{kids_attr}>
   <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
@@ -4720,7 +4733,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
         else:
             toggle_return_to = "/config/api-endpoints"
         toggle_confirm = (" onsubmit=\"return confirm('确定禁用 API 接口 "
-                          f"{_escape(ep_name_raw)}？')\"") if enabled else ""
+                          f"{_escape(_js_str(ep_name_raw))}？')\"") if enabled else ""
         toggle_btn = f"""<form method="post" action="/config/api-endpoints" style="display:inline"{toggle_confirm}>
       <input type="hidden" name="action" value="toggle">
       <input type="hidden" name="endpoint_id" value="{ep_id}">
@@ -4732,7 +4745,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
     {toggle_btn}
     {_link_btn(ep_edit_url, "编辑")}
     {build_delete_form_html(_api_endpoint_url(report_id, ep_id, "delete"),
-                            f"确定删除 API 接口 {_escape(ep_name_raw)}？")}
+                            f"确定删除 API 接口 {ep_name_raw}？")}
     <button type="button" class="btn btn-outline btn-sm api-more-btn" onclick="apiToggleMore(this)">展开 ▾</button>
   </div>"""
         else:
@@ -4740,7 +4753,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
     {toggle_btn}
     {_link_btn(ep_edit_url, "编辑")}
     {build_delete_form_html("/config/api-endpoints",
-                            f"确定删除 API 接口 {_escape(ep_name_raw)}？",
+                            f"确定删除 API 接口 {ep_name_raw}？",
                             extra_hidden='<input type="hidden" name="action" value="delete">\n'
                                          '<input type="hidden" name="endpoint_id" value="' + str(ep_id) + '">')}
     <button type="button" class="btn btn-outline btn-sm api-more-btn" onclick="apiToggleMore(this)">展开 ▾</button>
@@ -6212,7 +6225,7 @@ def build_scheduler_page_html(schedules: list, scheduler_enabled: bool) -> str:
     <form method="post" action="/config/scheduler/toggle/{sid}" style="display:inline">
       <button type="submit" class="btn {toggle_cls} btn-sm">{toggle_label}</button>
     </form>
-    {build_delete_form_html(f"/config/scheduler/delete/{sid}", f"确定删除任务「{_escape(s.get('name') or sid)}」？", button_cls="btn-sm")}
+    {build_delete_form_html(f"/config/scheduler/delete/{sid}", f"确定删除任务「{s.get('name') or sid}」？", button_cls="btn-sm")}
   </td>
 </tr>"""
     if not schedules:

@@ -347,7 +347,7 @@ def _report_form_html(title, action_url, name, sql_query, default_page_size,
         if not allow_write:
             allow_write_html += ('<div class="flash-warn span-full" style="'
                                  + _WARN_BOX_STYLE + '">'
-                                 '{_icon("alert")} 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
+                                 f'{_icon("alert")} 该 SQL 包含写操作语句，未开启时将拒绝执行</div>')
     else:
         allow_write_html = '<input type="hidden" name="allow_write" value="0">'
     # PH-07 全量输出护栏：checkbox + max_rows 输入（hidden 0 保底；开启时保存前 confirm）

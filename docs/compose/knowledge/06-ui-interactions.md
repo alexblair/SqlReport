@@ -73,6 +73,7 @@
 | 「修复上线了但用户那儿还是坏的」 | HTML 响应未禁缓存，标签页长期跑旧内联脚本 | `TestHtmlFreshness`（`Cache-Control: no-store`） |
 | 隐藏页卡里的 mermaid 流程图永远空白（16×16 空框） | `startOnLoad:true` 在 window load 渲染 `display:none` 页卡，量测全 0 并打 `data-processed`，事后 `mermaid.run` 直接跳过 | `TestMermaidTabRenderContract`（须 `startOnLoad:false`，`gotoTab`/`initReportPage` 调 `renderTabMermaid`）+ `scripts/ui-v2/e2e/mermaid-tab-check.mjs` |
 | SQL 编辑框整段没有滚动条（长 SQL 被裁） | `.sql-editor` 按「容器」写带 `overflow:hidden`，而生产把该类直接挂在 textarea 上 | `TestSqlEditorScrollContract`（`.sql-editor` 永不设 overflow，滚动契约归 `.sql-textarea{overflow:auto}`）；复测 `scripts/ui-v2/e2e/probe_computed_style.py` |
+| **删除/禁用按钮的确认框不弹，直接执行（数据安全）** | **HTML 转义误用于 JS 上下文**：`_escape` 产出 `&#x27;`，浏览器解析 HTML 属性时解码回 `'`，JS 源码语法错 → `onsubmit` 为 null → 表单直接提交。名称含 `'`（如 `O'Brien`）或以 `\` 结尾时触发 | `TestDeleteConfirmJsEscape` + `TestToggleConfirmJsEscape`（把生成的 JS 真的 `exec` 一遍断言文案）；**契约：JS 上下文必须先 `_js_str` 再 `_escape`，即 `_escape(_js_str(raw))`，且调用点传原文** |
 
 ## 其他硬约定（压缩；组件/页面/DOM 细节见 `render.py`，codegraph 可查符号）
 

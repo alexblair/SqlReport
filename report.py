@@ -1824,7 +1824,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     if result.truncated:
         trunc_banner = ('<div class="flash-warn" style="'
                         + _BANNER_STYLE + '">'
-                        '{_icon("alert")} 结果超过 '
+                        f'{_icon("alert")} 结果超过 '
                         + str(int(report.get("max_rows") or 100000))
                         + ' 行，已截断显示前 '
                         + str(int(report.get("max_rows") or 100000))
@@ -1891,7 +1891,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 '''
     preview_banner = (
         '<div class="flash flash-warn" style="' + _BANNER_STYLE + '">'
-        '{_icon("search")} 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
+        f'{_icon("search")} 预览模式 — 当前显示的是未保存的临时 SQL 查询结果，点击筛选/排序将跳转到正式报表。'
         '</div>' if sql_override else '')
 
     memo_text = (report.get("memo") or "").strip()

@@ -85,8 +85,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 
 def _render_login_page(error: str = "") -> str:
     """渲染登录页，可选显示错误消息"""
-    err_html = f'<div class="error">{error}</div>' if error else ""
-    return _LOGIN_PAGE.replace("{error}", err_html)
+    return _render_login_page_ex(error=error)
 
 
 def _render_login_page_ex(error: str = "", expired: bool = False,
