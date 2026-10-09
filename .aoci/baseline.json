@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-09T16:35:07Z",
+  "updated_at": "2026-10-09T18:25:38Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "4de8080d1bc302a626bea03b217d47c3f571e2933e8ecfd8ee072fda699ede11",
-      "size": 59605,
-      "normalized_sha256": "4de8080d1bc302a626bea03b217d47c3f571e2933e8ecfd8ee072fda699ede11"
+      "sha256": "4cffe6cbfbe139049f3fd31e7e7d9072158d3e8ed71be4b62cdc0c65da154635",
+      "size": 60857,
+      "normalized_sha256": "4cffe6cbfbe139049f3fd31e7e7d9072158d3e8ed71be4b62cdc0c65da154635"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -131,15 +131,15 @@
     },
     "config.py": {
       "role": "index",
-      "sha256": "b26f656aacb47469761281c9cbd0f0fb2b70e25966adb738a179ad5c6cb72866",
+      "sha256": "e3284e307341c886ff5b1d42d9c85f3809056c3ea9d0aeaa38df3963c8a71b75",
       "size": 143171,
-      "normalized_sha256": "b26f656aacb47469761281c9cbd0f0fb2b70e25966adb738a179ad5c6cb72866"
+      "normalized_sha256": "e3284e307341c886ff5b1d42d9c85f3809056c3ea9d0aeaa38df3963c8a71b75"
     },
     "config_db.py": {
       "role": "index",
-      "sha256": "38e8935bbb484c82bb302d56b68f8ea7ad1a25805ce95dd7d9d2e3360eb5d047",
-      "size": 110723,
-      "normalized_sha256": "38e8935bbb484c82bb302d56b68f8ea7ad1a25805ce95dd7d9d2e3360eb5d047"
+      "sha256": "9f2db1663adced5bcc3cf91e3b691b5505f5f963cd20db50140ee69c1d458506",
+      "size": 111939,
+      "normalized_sha256": "9f2db1663adced5bcc3cf91e3b691b5505f5f963cd20db50140ee69c1d458506"
     },
     "db.py": {
       "role": "index",
@@ -167,9 +167,9 @@
     },
     "docs/compose/knowledge/03-report-transform.md": {
       "role": "index",
-      "sha256": "1bd380feab330976246118880f6875bffe0abc098df6fa2f5c4337677e71610e",
-      "size": 10273,
-      "normalized_sha256": "1bd380feab330976246118880f6875bffe0abc098df6fa2f5c4337677e71610e"
+      "sha256": "f002f587d34012989f4bb74b6f26de9b91662ea1e6b1de5f00ca0c39022d9174",
+      "size": 10727,
+      "normalized_sha256": "f002f587d34012989f4bb74b6f26de9b91662ea1e6b1de5f00ca0c39022d9174"
     },
     "docs/compose/knowledge/04-config-data.md": {
       "role": "index",
@@ -287,9 +287,9 @@
     },
     "docs/compose/plan/2026-10-10-perf-robustness-refactor-plan.md": {
       "role": "index",
-      "sha256": "927bf1315ac501c7a29141b19f246829abdef007bc13848b38c5871f3ebbf712",
-      "size": 74900,
-      "normalized_sha256": "927bf1315ac501c7a29141b19f246829abdef007bc13848b38c5871f3ebbf712"
+      "sha256": "4a6bf9d0369ca0db4297e2cfdfed14352d5bee9e2e2756d3b37f0a89f279ae40",
+      "size": 74993,
+      "normalized_sha256": "4a6bf9d0369ca0db4297e2cfdfed14352d5bee9e2e2756d3b37f0a89f279ae40"
     },
     "docs/compose/reports/2026-10-05-closeout-decisions.md": {
       "role": "index",
@@ -326,6 +326,18 @@
       "sha256": "3ec2977945b6d5862466b9b2d29cf834073a01222606c1471ad0eb5e54d1cfa4",
       "size": 12587,
       "normalized_sha256": "3ec2977945b6d5862466b9b2d29cf834073a01222606c1471ad0eb5e54d1cfa4"
+    },
+    "docs/compose/reports/b5-work-brief.md": {
+      "role": "index",
+      "sha256": "039d5c3c9ae0973475a956c304542bdf83ed4b1106471b83dee75f9c37f0b11f",
+      "size": 16987,
+      "normalized_sha256": "039d5c3c9ae0973475a956c304542bdf83ed4b1106471b83dee75f9c37f0b11f"
+    },
+    "docs/compose/reports/handoff-b5-onwards.md": {
+      "role": "index",
+      "sha256": "bfc23faef83fe5e4bc727440a6d5b0c242afe5e588f0513bc833b34d8358071b",
+      "size": 10009,
+      "normalized_sha256": "bfc23faef83fe5e4bc727440a6d5b0c242afe5e588f0513bc833b34d8358071b"
     },
     "docs/compose/reports/ui-r3-retrospective.md": {
       "role": "index",
@@ -1470,9 +1482,9 @@
     },
     "result_transform.py": {
       "role": "index",
-      "sha256": "d0aa3faf4c43718457ba75de2d93e45904fede64b5cbe0d85b921546b66a98c0",
-      "size": 26024,
-      "normalized_sha256": "d0aa3faf4c43718457ba75de2d93e45904fede64b5cbe0d85b921546b66a98c0"
+      "sha256": "62f3f947a133574b625308c177213a656a594377a4bffeb1c3c70160038e6df6",
+      "size": 26683,
+      "normalized_sha256": "62f3f947a133574b625308c177213a656a594377a4bffeb1c3c70160038e6df6"
     },
     "scheduler.py": {
       "role": "index",
@@ -1845,6 +1857,12 @@
       "sha256": "0e18638e0ac7b8aa3841972a8697953477b70106eca3998a0e301b9188650315",
       "size": 3961,
       "normalized_sha256": "0e18638e0ac7b8aa3841972a8697953477b70106eca3998a0e301b9188650315"
+    },
+    "tests/test_b5_perf.py": {
+      "role": "observe",
+      "sha256": "ed6e36a9cabab51a5dcfb8f4fe73186b6223a1b1e600f6ec5f1993285696c542",
+      "size": 12226,
+      "normalized_sha256": "ed6e36a9cabab51a5dcfb8f4fe73186b6223a1b1e600f6ec5f1993285696c542"
     },
     "tests/test_base.py": {
       "role": "observe",
