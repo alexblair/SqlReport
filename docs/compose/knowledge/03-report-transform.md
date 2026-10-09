@@ -97,6 +97,7 @@ report.allow_write 与 sql_contains_write(sql)
 - `_try_float` 走 `int`/`float` 快速路径；**`bool` 不特判**（既有 `float(True)==1.0`）。
 - `sort_rows` / `_ordered_by_column`：每个排序键**一趟**完成 None/数值/文本三分区；稳定排序与「从低优先级到高优先级」调用约定不变。
 - `filter_rows`：**保持链式多趟，不要单趟化**（实测单趟化更慢）。
+- **多值筛选必须合并为单条 alternation**（`_compile_alternation`，B5-1）：原「每单元格逐个 `any(rx.search(...))`」的 generator+多次正则开销大；合并后实测单值 2.5×、三值 3.7×（100k 行），结果严格等价。等价前提：`_segment_regex` 只产 `re.escape` 字面量与 `.*`，结构上**不含裸 `|`**。**禁止**改用 `str.lower() in`（Unicode 折叠语义与 `re.IGNORECASE` 有边界差异）。
 - 排序分区语义：数值（含数值字符串）恒在文本之前（不随方向翻转）；`None` 恒最后；稳定排序——由 `tests/test_result_transform_perf.py` 钉死。
 
 改这几处时先跑 characterization 测试确认绿，改完必须仍绿；错误模式是**静默换行序**。

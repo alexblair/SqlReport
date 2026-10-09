@@ -945,7 +945,7 @@ def _nav_badges(conn) -> dict:
         ("config-pools", lambda: len(db.get_all_pools(conn))),
         ("config-users", lambda: len(db.get_all_users(conn))),
         ("api", lambda: len(db.get_all_api_endpoints(conn))),
-        ("scheduler", lambda: len(db.get_all_schedules(conn))),
+        ("scheduler", lambda: config_db.count_schedules(conn)),
     ):
         try:
             badges[key] = fn()

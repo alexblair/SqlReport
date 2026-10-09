@@ -1604,13 +1604,28 @@ def get_reports_by_category(conn):
     """
     返回所有分类及其下的报表列表（仅直接归属，不含子分类的报表）。
     每个分类包含 reports 字段，未分类的报表另外返回。
+
+    B5-3：改为一次全表查询后在 Python 分组（原为每分类一次查询，2+C 次）。
+    ⚠️ 排序必须保持 `sort_order, id`（get_reports 的既有 ORDER BY），
+    分组后各组内的相对顺序必须与逐分类查询时逐个一致。
     """
     categories = get_all_categories(conn)
+    # ⚠️ 必须用 get_all_reports（真全量，ORDER BY sort_order, id）。
+    # 不得用 get_reports(conn)——它的 category_id 默认值是 None，
+    # 走的是 `WHERE category_id IS NULL`，只返回**未分类**报表。
+    all_reports = get_all_reports(conn)
+    by_cat: dict = {}
+    unassigned: list = []
+    for r in all_reports:
+        cid = r.get("category_id")
+        if cid is None:
+            unassigned.append(r)
+        else:
+            by_cat.setdefault(cid, []).append(r)
     result = []
     for cat in categories:
-        cat["reports"] = get_reports(conn, category_id=cat["id"])
+        cat["reports"] = by_cat.get(cat["id"], [])
         result.append(cat)
-    unassigned = get_reports(conn, category_id=None)
     return result, unassigned
 
 
@@ -2389,6 +2404,19 @@ def get_schedule(conn, schedule_id: int) -> Optional[dict]:
         "SELECT * FROM report_schedules WHERE id=?", (schedule_id,)
     ).fetchone()
     return dict(row) if row else None
+
+
+def count_schedules(conn) -> int:
+    """定时任务总数（供侧栏徽标，避免取全量 + 每任务一条 JOIN 查询）。"""
+    row = conn.execute("SELECT COUNT(*) AS cnt FROM report_schedules").fetchone()
+    if row is None:
+        return 0
+    # sqlite3.Row / _MySQLRow / tuple 三种形态都要能取到第 1 列；
+    # 纯 dict 形态无整数下标时才回退列名 cnt
+    try:
+        return int(row[0])
+    except (TypeError, IndexError, KeyError):
+        return int(row["cnt"])
 
 
 def get_all_schedules(conn) -> list[dict]:
