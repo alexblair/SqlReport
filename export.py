@@ -335,20 +335,27 @@ def _create_temp_zip(content_bytes: bytes, filename: str,
     """
     将字节内容写入临时文件，创建 ZIP 压缩包，返回 ZIP 字节。
 
+    ⚠️ 安全要点（B3，CWE-22）：`filename` 来自用户填写的报表名，**不可**直接
+    用作磁盘落点名——含 `../` 或绝对路径时会写到 tmpdir 之外。故：
+      - 磁盘落点用固定常量名（`payload<ext>` / `payload.zip`），与报表名无关；
+      - `arcname` 仍传原名，因此**用户看到的 ZIP 内文件名与改动前完全一致**。
+
     函数结束后清理临时目录和临时文件。
     """
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp(prefix="report_export_")
-        # 写入原始内容到临时文件
-        tmpfile_path = os.path.join(tmpdir, filename)
+        # 落盘名与用户可控值解耦：只借用扩展名，其余一律常量
+        _, ext = os.path.splitext(filename)
+        disk_name = "payload" + ext
+        tmpfile_path = os.path.join(tmpdir, disk_name)
         with open(tmpfile_path, "wb") as f:
             f.write(content_bytes)
 
-        # 创建 ZIP 文件
-        zip_path = os.path.join(tmpdir, zip_filename)
+        # zip 文件自身也用固定名
+        zip_path = os.path.join(tmpdir, "payload.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.write(tmpfile_path, arcname=filename)
+            zf.write(tmpfile_path, arcname=filename)   # ← 原名进条目名
 
         # 读取 ZIP 内容
         with open(zip_path, "rb") as f:

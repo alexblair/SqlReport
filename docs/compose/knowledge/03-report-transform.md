@@ -57,6 +57,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 | 写护栏 | 403 `WRITE_DENIED_MESSAGE`（在调用 `execute_report` **之前**判定，不依赖其 `PermissionError`） |
 | 截断载体 | 头 `X-Export-Truncated`；CSV 尾注释；JSON `_meta.truncated`（报表名恰为 `_meta` 时跳过 JSON 标记），取自 `ReportResult.truncated` |
 | ZIP | tempfile → ZIP_DEFLATED → 读回；内 `{报表名}.csv\|json` |
+| ZIP 落盘安全 | **磁盘落点名必须与报表名解耦**（用常量 `payload<ext>` / `payload.zip`），`arcname` 才传原名——报表名用户可控，直接当落点名会让 `/export?zip=1` 写到 tmpdir 之外（CWE-22，2026-10-10 B3 修）。门禁 `tests/test_b3_export_zip_safety.py` |
 | smart_quotes | 1 十进制、2 科学计数法、4 千分位；`json_no_quotes=1` ≡ 全开 |
 
 - 导出 CSV：**QUOTE_ALL + BOM + `\n`**；API CSV：**QUOTE_MINIMAL + CRLF + 仅 pretty BOM**（勿混用）。
