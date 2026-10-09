@@ -18,8 +18,13 @@ import unittest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 只匹配「临时目录 + 其后片段」；片段字符集覆盖文件名与占位符（`<>`、`*`）。
-REF_RE = re.compile(r"(?:run-logs|perf-logs)/([A-Za-z0-9_./<>*\-]*)")
+# 只匹配「临时目录 + 其后片段」；左侧边界排除 `my-run-logs/` 这类同后缀目录。
+# 片段字符集覆盖文件名/占位符（`<>`、`*`）与非 ASCII（中文名），但止于空白/引号/括号/句读——
+# 若把空白也吞进来，紧跟其后的整条命令行会被并入片段，白名单形态（`probe/verify.debug.json`）反而失效。
+REF_RE = re.compile(
+    r"(?<![0-9A-Za-z_/\-])(?:run-logs|perf-logs)/"
+    r"([^\s`\"'()\[\]{}|;，。、；：！？（）【】「」『』…—]*)"
+)
 
 # 白名单：**确有长期价值**、不随清理消失的少数例外（至多 3 条，只降不升）。
 ALLOWED: tuple[tuple[str, str], ...] = (
@@ -122,9 +127,32 @@ class TestTempLogPolicy(unittest.TestCase):
         docs = {"示例.md": "结果落到 `run-logs/`。\n再看 `perf-logs/`，然后收工。"}
         self.assertEqual(_violations(docs), [])
 
+    def test_chinese_named_artifact_flagged(self):
+        """中文名具体产物同样要拦下（旧字符集只收 ASCII，中文名会漏成空片段）。"""
+        docs = {"示例.md": "见 `run-logs/验收-20261009.html`。"}
+        self.assertEqual(_violations(docs), [("示例.md", 1, "验收-20261009.html")])
+
+    def test_lookalike_dirs_not_flagged(self):
+        """同后缀目录（`my-run-logs/`、`perf-logs-old/`）不是本项目的临时目录。"""
+        docs = {"示例.md": "见 `my-run-logs/x.md` 与 `perf-logs-old/a.log`。"}
+        self.assertEqual(_violations(docs), [])
+
     def test_missing_docs_tolerated(self):
         """空集合（文件缺失）不抛异常也不产生违规。"""
         self.assertEqual(_violations({}), [])
+
+    def test_load_docs_sees_expected_shape(self):
+        """自检读盘入口本身没退化（否则主用例会「空转通过」）。"""
+        docs = _load_docs()
+        for rel in ("AGENTS.md", "MEMORY.md"):
+            if os.path.isfile(os.path.join(_ROOT, rel)):
+                self.assertIn(rel, docs)   # 文件存在才断言（裁剪过的检出上可能缺）
+        # 实测 2026-10-09 全量检出扫描到 48 份；取 30 留文档增删余量，
+        # 同时足以抓住「读错根目录 / 漏扫 docs」这类退化。
+        self.assertGreaterEqual(
+            len(docs), 30,
+            f"扫描到的文档数异常（{len(docs)}）——_load_docs 可能读错目录，主用例会空转通过",
+        )
 
 
 if __name__ == "__main__":

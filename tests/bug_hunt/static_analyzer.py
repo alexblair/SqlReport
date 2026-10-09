@@ -35,8 +35,12 @@ PROJECT_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(
 """通过 `tests/bug_hunt/static_analyzer.py` → `tests/` → 项目根路径。"""
 
 IGNORE_DIRS: set[str] = {"venv", ".codegraph", "__pycache__", ".git",
-                          ".opencode", ".tmp"}
-"""递归扫描 .py 文件时跳过的目录名。"""
+                          ".opencode", ".tmp", "run-logs", "perf-logs"}
+"""递归扫描 .py 文件时跳过的目录名。
+
+必须包含硬性 #14 规定的产物目录 run-logs/perf-logs：那里按规则会落临时分析脚本，
+若一并扫描，follow #14 的 Agent 会让本门禁变红（2026-10-09 实测）。
+"""
 
 
 # ---------------------------------------------------------------------------

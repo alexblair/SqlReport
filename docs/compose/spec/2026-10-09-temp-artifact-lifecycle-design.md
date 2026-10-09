@@ -1,7 +1,7 @@
 # 临时产物生命周期与「依据分层」设计
 
 > 状态: 生效
-> 取代关系: 本设计**修订** `AGENTS.md` 硬性 #14 与分卷 `09-agent-workflow.md` §验证纪律中「产物一律落 `run-logs/`/`perf-logs/`、**禁止 `rm`**」的表述（改为「收尾由统一工具清理」）；**取代** `2026-09-29-execution-layer-performance-design.md` 中以 `perf-logs/baseline-*.json` 充当「原始数据依据」的取证方式（改为报告内「结论 + 数值 + 复现命令」）。与硬性 #16/#17/#20/#21 并存互补，不取代 `2026-10-06-token-budget-design.md` 的令牌纪律（本设计只是把清理挂到它的收尾批量命令上）。
+> 取代关系: 本设计**修订** `AGENTS.md` 硬性 #14 与分卷 `09-agent-workflow.md` §验证纪律中「产物一律落 `run-logs/`/`perf-logs/`、**禁止 `rm`**」的表述（改为「收尾由统一工具清理」）；**取代** `2026-09-29-execution-layer-performance-design.md` 中以 `perf-logs/baseline-*.json` 充当「原始数据依据」的取证方式（改为报告内「结论 + 数值 + 复现命令」）。与硬性 #17/#20/#21 并存互补，不取代 `2026-10-06-token-budget-design.md` 的令牌纪律（本设计只是把清理挂到它的收尾批量命令上）。
 > 对应 plan: ../plan/2026-10-09-temp-artifact-lifecycle-plan.md
 > 现场盘点: 2026-10-09，数字与命令见 §2，非推测。
 
@@ -40,7 +40,7 @@
 | `plan/2026-10-05-cache-source-label-plan.md:610` | `run-logs/sdd/<任务>/progress.md`（执行账本） | **已丢失** |
 | `plan/2026-10-05-cache-source-label-plan.md:586` | `run-logs/accept-8099-*.html`、`accept-8099-page*.py`（验收证据） | **已丢失** |
 | `plan/2026-10-05-cache-source-label-plan.md:562` | `run-logs/final-discover-<时间戳>.log`（全量测试证据） | **已丢失** |
-| `knowledge/10-token-budget.md:124` / `MEMORY.md:105` | `run-logs/handoff/`（跨会话交接文档） | **已丢失** |
+| `knowledge/10-token-budget.md:124` / `MEMORY.md:105` | `run-logs/handoff/`（跨会话交接文档；该址已废止，§7 第 3 项改为 `docs/compose/reports/handoff-<日期>-<主题>.md`） | **已丢失** |
 
 文档中引用这两个目录的形态统计（`grep` 实测）：**具体文件名 24 处**（断层风险源）、占位符/通配符 33 处（合法命令模板）、仅目录名 25 处（合法）。
 
