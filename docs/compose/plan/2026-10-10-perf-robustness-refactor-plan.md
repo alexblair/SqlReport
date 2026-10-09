@@ -40,8 +40,8 @@ implementer 最容易踩空、且 spec 未逐条明说的五类：
 
 | 批次 | 主题 | 写域 | 依赖 | 状态 |
 |------|------|------|------|------|
-| B1 | P0 用户可见缺陷速修 | `server.py` `report.py` `config.py` `render.py` | — | ☐ |
-| B2 | P0 配置库连接复用 | `config_db.py` `auth.py` `server.py` | B1 | ☐ |
+| B1 | P0 用户可见缺陷速修 | `server.py` `report.py` `config.py` `render.py` | — | ✅ 完成（Ran 3052） |
+| B2 | P0 配置库连接**池化** | `query_executor.py` `config_db.py` `auth.py` `server.py` `db.py` | B1 | ✅ 完成（Ran 3072） |
 | B3 | P0 ZIP 路径穿越 | `export.py` | — | ☐ |
 | B4 | P0 调度器保活与卡死 | `scheduler.py` | — | ☐ |
 | B5 | P1 性能 | `config_db.py` `report.py` `result_transform.py` `render.py` `config.py` | B2 | ☐ |
