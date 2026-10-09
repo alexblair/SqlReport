@@ -11,6 +11,7 @@
 3. `get_config_db` → `init_db` → 首次创建默认 admin（仅日志提示）
 4. `init_audit_db` → `auth.load_sessions` → 启动轮转过期审计
 5. `ThreadingHTTPServer((HOST, PORT), ReportHandler)`；端口占用尝试 `fuser -k`
+   - **请求读阶段限时**（B6-4）：`ReportHandler.REQUEST_READ_TIMEOUT=30`，在 `setup()`/`handle_one_request()` 武装、在 **`parse_request()`** 解除。⚠️ **不得改回类属性 `timeout`**，也**不得**把解除放在 `handle_one_request()` 的 `finally`——父类把「读请求」与「do_* + flush 响应」包在同一次调用里，写阶段会继续吃超时，慢链路大导出被**静默截断**（实测 2s/暂停 3s → 4 MiB 只发 2588672 字节）。
 6. `start_scheduler_from_config()` → daemon `serve_forever` → join 等 Ctrl+C
 
 各步函数签名与行号见 `server.py`（`codegraph` 可查）。

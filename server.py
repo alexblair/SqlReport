@@ -319,7 +319,80 @@ def _safe_location(location: str) -> str:
 
 
 class ReportHandler(http.server.BaseHTTPRequestHandler):
-    """HTTP 请求处理器"""
+    """HTTP 请求处理器
+
+    B6-4：请求读阶段限时（防慢连接无限占线程）。
+
+    为什么是读阶段而不是类属性 ``timeout``：
+    ``BaseHTTPRequestHandler.setup()`` 会把 ``self.timeout`` 设到**整个请求
+    socket** 上，而 ``wbufsize=0`` 时 ``self.wfile`` 是直接写 socket 的
+    ``_SocketWriter``——于是类属性 timeout 同样作用于**响应写**。L2 实测
+    （run-logs/b6-4-l2-throttle-20261010.py）在 8 MiB 导出 / 500 KB/s 慢链路下：
+
+    * 类属性 ``timeout=10`` → 服务端 ``TimeoutError``，客户端只收到
+      7283712/8388611 字节，**大导出被静默截断**；
+    * 本方案（读阶段限时、写阶段取消）→ 同样链路下响应完整
+      8388611/8388611 字节。
+
+    故此处只对**请求读取**设限，响应头解析完成后立即取消超时。
+    """
+
+    # 请求读阶段超时（秒）。取值依据见 ``setup()`` 注释与 L2 实测报告：
+    # 正常客户端发完请求头远快于此值；slowloris 只连不发会被回收。
+    REQUEST_READ_TIMEOUT = 30
+
+    def setup(self):
+        """B6-4：先按父类建立 connection/rfile/wfile，再只给读阶段设超时。
+
+        注意顺序：``self.connection`` 是父类 ``setup()`` 里才赋值的
+        （``self.connection = self.request``），所以必须 ``super().setup()``
+        在前，不能先 settimeout。
+        """
+        super().setup()
+        self._arm_read_timeout()
+
+    def _arm_read_timeout(self) -> None:
+        """给读阶段武装超时（连接可能已被关闭，忽略异常）。"""
+        try:
+            self.connection.settimeout(self.REQUEST_READ_TIMEOUT)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    def _clear_read_timeout(self) -> None:
+        """解除读超时，让响应写不受限（连接可能已空，忽略异常）。"""
+        try:
+            self.connection.settimeout(None)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    def handle_one_request(self):
+        """B6-4：每个请求开始前重新武装读超时。
+
+        keep-alive 连接会反复进来，所以必须**每次**重新武装；
+        真正的解除发生在 ``parse_request()``（请求头读完、还未派发 do_*）。
+        """
+        self._arm_read_timeout()
+        try:
+            return super().handle_one_request()
+        finally:
+            # 兵底：若在 parse_request 前就失败（如请求行过长/空连接），
+            # 也不能把超时留给后续写阶段。
+            self._clear_read_timeout()
+
+    def parse_request(self):
+        """B6-4：请求行与请求头读完后立即解除超时。
+
+        ⚠️ 为什么在这里而不是 ``handle_one_request`` 的 finally：
+        父类 ``handle_one_request()`` 把**读请求**与**调 do_* + flush 响应**
+        包在同一个调用里，finally 要等响应写完才执行 —— 等于写阶段仍在
+        吃超时，大导出照旧会被静默截断（实测：2s 超时 + 客户端暂停 3s →
+        4 MiB 响应只发出 2588672 字节）。
+        ``parse_request()`` 是请求头读完、派发 do_* 之前的最后一道钩子，
+        在此解除才能让写阶段真正不受限。
+        """
+        ok = super().parse_request()
+        self._clear_read_timeout()
+        return ok
 
     # HTTP 请求日志（日志关闭时静默，开启时写入文件）
     def log_message(self, format, *args):

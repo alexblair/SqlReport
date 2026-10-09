@@ -3,6 +3,7 @@
 import unittest
 from unittest import mock
 import threading
+import http.server
 
 import time
 
@@ -460,3 +461,156 @@ class TestRebuildLock(unittest.TestCase):
                 getattr(redis_cache.RedisConnectionManager, name))
             self.assertEqual(list(sig.parameters), params,
                              "%s 签名被改动" % name)
+
+
+class TestSocketTimeout(unittest.TestCase):
+    """B6-4：请求读阶段限时，防慢连接无限占线程。
+
+    为什么不是类属性 timeout：BaseHTTPRequestHandler.setup() 会把 timeout
+    设到整个请求 socket，而 wbufsize=0 时 wfile 直接写 socket，于是响应写
+    也吃同一个超时。L2 实测（run-logs/b6-4-l2-throttle-20261010.py，
+    8 MiB 导出 / 500 KB/s）显示类属性 timeout=10 会把导出截断到
+    7283712/8388611 字节；读阶段拆分方案同链路下完整。
+    """
+
+    def test_read_phase_timeout_is_configured(self):
+        """必须对读阶段设了超时——否则慢连接可无限占线程。"""
+        import server
+        self.assertIsNotNone(
+            getattr(server.ReportHandler, "REQUEST_READ_TIMEOUT", None),
+            "ReportHandler 未设读阶段超时，慢连接可无限占线程")
+
+    def test_read_phase_timeout_is_sane(self):
+        """取值下限：太小会误杀正常慢客户端；上限：太大留不住线程。
+
+        正常客户端发完请求头远快于 30s；slowloris 会在 30s 内被回收。
+        """
+        import server
+        v = server.ReportHandler.REQUEST_READ_TIMEOUT
+        self.assertGreaterEqual(v, 10, "读超时过短，正常慢客户端会被误杀")
+        self.assertLessEqual(v, 120, "读超时过长，慢连接仍能长期占线程")
+
+    def test_setup_overridden_and_connection_timeout_applied(self):
+        """setup() 必须重写，且真的把读超时设到 socket 上。
+
+        顺序很关键：self.connection 由父类 setup() 赋值，因此不能先
+        settimeout——这里用假 connection 验证确实调用了 settimeout。
+        """
+        import server
+        import http.server
+        self.assertIn("setup", server.ReportHandler.__dict__,
+                      "ReportHandler 未重写 setup，读超时无法落到 socket")
+        h = server.ReportHandler.__new__(server.ReportHandler)
+
+        class _Conn:
+            def __init__(self):
+                self.calls = []
+
+            def settimeout(self, v):
+                self.calls.append(v)
+
+            def setsockopt(self, *a):
+                pass
+
+            def makefile(self, *a, **k):
+                import io
+                return io.BytesIO()
+
+        conn = _Conn()
+        h.request = conn
+        h.client_address = ("127.0.0.1", 0)
+        h.disable_nagle_algorithm = False
+        h.rbufsize = -1
+        h.wbufsize = 0
+        h.setup()
+        self.assertIn(server.ReportHandler.REQUEST_READ_TIMEOUT, conn.calls,
+                      "setup() 未把读超时设到 connection 上")
+
+    def test_no_class_level_whole_socket_timeout(self):
+        """回归护栏：不得回退为类属性 timeout。
+
+        类属性 timeout 会被父类 setup() 设到整个 socket 上，连响应写一起
+        限时——这正是大导出被截断的根因（见本类 docstring 实测数据）。
+        """
+        import server
+        self.assertIsNone(
+            getattr(server.ReportHandler, "timeout", None),
+            "类属性 timeout 会连响应写一起限时，慢链路大导出会被截断；"
+            "请用 setup() 只对读阶段限时")
+
+    def test_write_phase_timeout_is_cleared(self):
+        """读阶段结束后必须把 socket 超时清回 None，响应写才不受限。"""
+        import server
+        self.assertIn("handle_one_request", server.ReportHandler.__dict__,
+                      "未重写 handle_one_request，写阶段无法解除超时")
+        h = server.ReportHandler.__new__(server.ReportHandler)
+        seen = []
+
+        class _Conn:
+            def settimeout(self, v):
+                seen.append(v)
+
+        h.connection = _Conn()
+        # 父类实现经 super() 调用，这里把父类方法换成抛异常以走 finally 分支
+        with mock.patch.object(http.server.BaseHTTPRequestHandler,
+                               "handle_one_request", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                h.handle_one_request()
+        self.assertIn(None, seen,
+                      "handle_one_request 未在读阶段结束后清除超时")
+
+    def test_write_phase_decoupled_from_read_timeout(self):
+        """B6-4 行为护栏：读超时**不得**延续到响应写阶段。
+
+        为什么必须是行为测试（Lead 补充）：
+        只断言「handle_one_request 调了 settimeout(None)」是不够的 ——
+        父类 handle_one_request() 把「读请求」与「调 do_* + flush 响应」
+        包在**同一个调用**里，其 finally 要等响应写完才执行。若只在 finally
+        里清超时，写阶段仍在吃超时，大导出会被**静默截断**而不报错。
+        实测（Lead）：REQUEST_READ_TIMEOUT=2 + 客户端读响应时暂停 3s →
+        4 MiB 响应只发出 2588672 字节。
+
+        本测试直接检查 do_* 执行期间 socket 超时已为 None。
+        """
+        import socket
+        import threading
+        import time
+        import http.server
+
+        import server
+
+        seen = []
+
+        class _H(server.ReportHandler):
+            REQUEST_READ_TIMEOUT = 2
+
+            def do_GET(self):
+                seen.append(self.connection.gettimeout())
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+                self.wfile.flush()
+
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _H)
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            c = socket.create_connection(("127.0.0.1", port))
+            c.sendall(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            time.sleep(0.6)
+            try:
+                c.recv(65536)
+            except OSError:
+                pass
+            c.close()
+            time.sleep(0.3)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+        self.assertTrue(seen, "do_GET 未被调用，测试装置失效")
+        self.assertIsNone(
+            seen[0],
+            "进入 do_* 时 socket 超时仍生效 → 响应写也被限时，"
+            "慢链路大导出会被静默截断；应在 parse_request() 后清除")
