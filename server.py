@@ -359,6 +359,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
     def _handle(self, method: str):
         """基于路由表分发请求"""
         self._session_token = None
+        # 请求级配置库连接复位（keep-alive 下防止读到上一请求的残留）
+        self._req_conn = None
         # 请求级用户名复位（公开页/未登录为 None；认证成功后重新注入）
         render.set_request_user(None)
         parsed = urllib.parse.urlparse(self.path)
@@ -385,11 +387,17 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             return self._send_html(
                 404, _render_error_page(404, "页面不存在"))
 
+        # B2-1：请求内复用——连拿一次，认证段与 handler 段共用
+        self._req_conn = db.get_config_db() if route.needs_db else None
         if route.needs_auth and not self._authenticate():
+            # 认证失败会 send_redirect 并 return —— 必须先把连接还回去，否则泄漏
+            if self._req_conn is not None:
+                self._req_conn.close()
+                self._req_conn = None
             return
 
         if route.needs_db:
-            conn = db.get_config_db()
+            conn = self._req_conn
             try:
                 getattr(self, route.handler)(method, path, query, conn)
             except BodyReadError as e:
@@ -431,7 +439,9 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
             self._send_redirect(f"/login?expired=1&next={target}")
             return False
         # 滑动过期：刷新 session 时间戳 + 下行 cookie Max-Age
-        auth.refresh_session(token)
+        # B2-1：复用本请求已借出的连接（None 时 refresh_session 自建并自关）
+        _auth_conn = getattr(self, "_req_conn", None)
+        auth.refresh_session(token, conn=_auth_conn)
         self._session_token = token
         # 注入当前登录用户名，供侧栏账户区等渲染层读取
         render.set_request_user(user)

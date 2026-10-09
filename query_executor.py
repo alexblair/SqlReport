@@ -168,9 +168,116 @@ class _MySQLConnection:
 # ---------------------------------------------------------------------------
 
 
+# 配置库专属池（包装类见 _ConfigConnection）。
+#
+# ⚠️ 刻意**不复用**用户查询池 `_pools`：两者配置来源不同——本池来自 `app_config`
+# 固定值，用户查询池来自 `pool_config` 参数，混用会让池键语义变模糊。
+# 池里存的是 **raw**（mysql.connector 原生连接），因为真正可池化的只有它；
+# 上层拿到的仍是 `_MySQLConnection`（子类 `_ConfigConnection`）。
+#
+# ⚠️ 池键必须含所有影响连接语义的维度：host/port/user/database/socket 的任一变化
+# 都会指向**不同的库或不同的账号**，混池会让请求读到错误的库。
+_config_pool_lock = threading.Lock()
+_config_pool: dict[tuple, list] = {}
+
+
+def _config_pool_key(cfg: dict) -> tuple:
+    """配置库池的分组键（含所有影响连接语义的维度）。
+
+    socket 为空串时与不配置 socket 等价（连接参数里不会出现 unix_socket 键）。
+    """
+    return (cfg.get("host", "127.0.0.1"), int(cfg.get("port", 3306)),
+            cfg.get("user", "root"), cfg.get("database", "sqlreport_config"),
+            cfg.get("socket") or "")
+
+
+def _take_from_config_pool(key: tuple):
+    """从配置库池取一条活连接；池空或全是死连接时返回 None（调用方降级直连）。
+
+    借出即 **pop**：同一时刻一条连接只可能在一个线程手里（池上限由
+    `_return_to_config_pool` 里的 `_POOL_MAX_SIZE` 约束，与用户查询池共用常量）。
+    """
+    with _config_pool_lock:
+        bucket = _config_pool.get(key)
+        if not bucket:
+            return None
+        while bucket:
+            raw = bucket.pop()
+            if _is_alive(raw):
+                return raw
+            _discard(raw)
+    return None
+
+
+def _return_to_config_pool(key: tuple, raw) -> None:
+    """归还回调：先清理未提交事务并探活，再入池；池满或已死则真关闭。
+
+    ⚠️ **必须先 rollback()**：MySQL 的 DML 会开启隐式事务，若调用方只写了一点就
+    `close()`，未提交事务会留在连接上；直接归还则下一个借出者继承了上一个请求的
+    未提交事务（跨请求串包，可能连带把上一个请求的写入一起提交或回滚）。
+    rollback 本身失败说明连接已不可用，按死连接处理。
+    """
+    try:
+        raw.rollback()
+    except Exception:
+        _discard(raw)
+        return
+    if not _is_alive(raw):
+        _discard(raw)
+        return
+    with _config_pool_lock:
+        bucket = _config_pool.get(key)
+        if bucket is None:
+            bucket = []
+            _config_pool[key] = bucket
+        if len(bucket) >= _POOL_MAX_SIZE:
+            # 池已满：真关闭。防止借用峰值把 MySQL 的 max_connections 撑爆。
+            over = True
+        else:
+            bucket.append(raw)
+            over = False
+    if over:
+        _discard(raw)
+
+
+class _ConfigConnection(_MySQLConnection):
+    """配置库池化连接：**close() 的语义是「归还池」而非「真关闭」**。
+
+    继承 `_MySQLConnection`（而不是像用户查询池那样另起一个包装类）是刻意的：
+    `config_db.py` 的大量 CRUD 依赖 `_MySQLConnection` 的接口（`executescript`、
+    `_MySQLCursor` 兼容等），`isinstance(conn, _MySQLConnection)` 必须继续成立。
+    这里只重写 `close()`，其余行为原样继承。
+
+    归还动作幂等：既有的 `finally: conn.close()` 调用点一律不用改。
+    `_pool_key`/`_released` 是**实例属性**（`_MySQLConnection` 无 `__slots__`）。
+    """
+
+    def __init__(self, raw, pool_key: tuple):
+        super().__init__(raw)
+        self._pool_key = pool_key
+        self._released = False
+
+    def close(self):
+        """归还池。重复调用无副作用（幂等）。"""
+        if self._released:
+            return
+        self._released = True
+        _return_to_config_pool(self._pool_key, self._conn)
+
+
 def _connect_mysql_config() -> _MySQLConnection:
     """
-    根据 app_config 创建 MySQL 连接（用于 config_db 存储）。
+    根据 app_config 创建 MySQL 连接（用于 config_db 存储），走**有界池**跨请求复用。
+
+    ⚠️ **返回值仍是 `_MySQLConnection`（子类 `_ConfigConnection`）**，不是用户查询
+    池的 `_PooledConnection`：`config_db.py` 大量 CRUD 依赖 `_MySQLConnection` 的
+    接口（`executescript`、`_MySQLCursor` 兼容等），换类型会直接打断它们。
+
+    连接语义：`close()` = 归还池（幂等）；池空/连接已死时自动降级为直连，
+    因此池的任何异常都不会导致功能不可用。
+
+    ⚠️ 建连参数（`connection_timeout`/`client_flags=FOUND_ROWS` 等）**不进池键**：
+    它们在同一份 app_config 下恒定，放进键只会让池永远命不中。
 
     注意：使用 late import of db 模块，使 unittest.mock.patch("db._get_db_config")
     能正确拦截内部调用。
@@ -180,24 +287,28 @@ def _connect_mysql_config() -> _MySQLConnection:
 
     import db as _db
     cfg = _db._get_db_config()
-    config = {
-        "host": cfg.get("host", "127.0.0.1"),
-        "port": cfg.get("port", 3306),
-        "user": cfg.get("user", "root"),
-        "password": cfg.get("password", ""),
-        "database": cfg.get("database", "sqlreport_config"),
-        "connection_timeout": 10,
-        "charset": "utf8mb4",
-        # 使 rowcount 返回匹配行数而非实际修改行数（与 SQLite 行为一致）
-        "client_flags": [ClientFlag.FOUND_ROWS],
-    }
-    # 找茬 H1：配置库查询皆短平快，无需 read_timeout（批次5 曾误加 30s）
-    if cfg.get("socket"):
-        config["unix_socket"] = cfg["socket"]
-    elif config["host"] == "localhost":
-        config["host"] = "127.0.0.1"
-    raw = mysql.connector.connect(**config)
-    return _MySQLConnection(raw)
+    # 先看池：命中就完全不碰驱动，这才是「省掉那次建连」的关键。
+    pool_key = _config_pool_key(cfg)
+    raw = _take_from_config_pool(pool_key)
+    if raw is None:
+        config = {
+            "host": cfg.get("host", "127.0.0.1"),
+            "port": cfg.get("port", 3306),
+            "user": cfg.get("user", "root"),
+            "password": cfg.get("password", ""),
+            "database": cfg.get("database", "sqlreport_config"),
+            "connection_timeout": 10,
+            "charset": "utf8mb4",
+            # 使 rowcount 返回匹配行数而非实际修改行数（与 SQLite 行为一致）
+            "client_flags": [ClientFlag.FOUND_ROWS],
+        }
+        # 找茬 H1：配置库查询皆短平快，无需 read_timeout（批次5 曾误加 30s）
+        if cfg.get("socket"):
+            config["unix_socket"] = cfg["socket"]
+        elif config["host"] == "localhost":
+            config["host"] = "127.0.0.1"
+        raw = mysql.connector.connect(**config)
+    return _ConfigConnection(raw, pool_key)
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +366,16 @@ def _pool_key(pool_config: dict, read_timeout: int | None) -> tuple:
 
 
 def _is_alive(raw) -> bool:
-    """探活。ping 失败或抛异常一律按「已死」处理。"""
+    """探活：ping 不抛异常即视为存活。
+
+    ⚠️ **不能写 `bool(raw.ping(...))`**：mysql-connector 的 `ping()` 成功时返回
+    **None**（不是 True），失败时抛异常。故 `bool(ping())` 对**真实 MySQL 恒为 False**，
+    会让连接池“永远拿到死连接”，把池退化成每次直连（2026-10-10 实测：池恒空，
+    每请求仍付 71–82ms 建连）。测试里的 fake 连接返回 True 所以掩盖了这个 bug。
+    """
     try:
-        return bool(raw.ping(reconnect=True))
+        raw.ping(reconnect=True)
+        return True
     except Exception:
         return False
 
@@ -308,10 +426,16 @@ def _take_from_pool(key: tuple):
 
 
 def clear_pools() -> None:
-    """关闭并清空全部池连接（测试清理用；生产路径不需要）。"""
+    """关闭并清空全部池连接，含**配置库专属池**（测试清理用；生产路径不需要）。
+
+    ⚠️ 配置库池必须在同一个入口里清掉：它也是模块级池，漏清会跨用例泄漏连接。
+    """
     with _pools_lock:
         buckets = list(_pools.values())
         _pools.clear()
+    with _config_pool_lock:
+        buckets += list(_config_pool.values())
+        _config_pool.clear()
     for bucket in buckets:
         for raw in bucket:
             _discard(raw)

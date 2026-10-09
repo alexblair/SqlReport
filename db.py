@@ -36,7 +36,7 @@ from config_db import (  # noqa: F401, F403
 
 # 从 query_executor 导入 MySQL 查询执行函数
 from query_executor import (  # noqa: F401, F403
-    _MySQLRow, _MySQLCursor, _MySQLConnection,
+    _MySQLRow, _MySQLCursor, _MySQLConnection, _ConfigConnection,
     _connect_mysql_config,
     create_mysql_connection, _split_sql_statements,
     execute_mysql_query, clear_pools,

@@ -74,6 +74,9 @@ L1 process QueryCache（进程内，TTL ~300s）
 - **池键含 `read_timeout`**：Web 交互 30s、调度器/API 不限制。混池会让调度器慢报表拿到 30s 超时连接而**必然失败**，不可合并。
 - 池空/池满/池中连接已死 → 自动降级直连，池的任何异常都不导致功能不可用。
 - 连接池是**进程级全局**：注入假连接的测试须 `clear_pools()`（`BaseReportTest.setUp` 已统一处理），否则泄漏给下一个用例。
+- **`_is_alive` 必须写「ping 不抛即活」，不得写 `bool(raw.ping(...))`**：mysql-connector 的 `ping()` 成功返回 **None**（失败才抛异常），`bool(None)==False` 会使**真实 MySQL 下所有连接都被判死** → 池恒空、退化成每次直连（实测每请求仍付 71–120ms）。假连接返回 True 会掩盖此 bug，测试断言请用 `ping.side_effect=异常` 表达「死」。
+- **配置库池**（`_config_pool`，2026-10-10 B2-2 新增）：与用户查询池**分开**（配置来源不同）；`_connect_mysql_config()` 取池中 raw 后返回 `_ConfigConnection`（`_MySQLConnection` 子类，`close()`=归还+幂等），**不得**改成返回 `_PooledConnection`（会丢掉 `executescript` 等 `config_db` 依赖的接口）。归还前先 `rollback()`，防下一个借出者继承未提交事务。
+- **请求内复用**（2026-10-10 B2-1）：`_handle` 把连接提到 `_authenticate()` 之前存入 `self._req_conn`，`auth.refresh_session(token, conn=...)` 复用；**认证失败分支必须归还连接**否则泄漏。实测认证请求 159.7ms → **3.6ms**。
 
 ## 运行时勿提交
 

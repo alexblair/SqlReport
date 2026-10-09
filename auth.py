@@ -198,8 +198,11 @@ def get_session_user(token: str) -> Optional[str]:
     return username
 
 
-def refresh_session(token: str) -> None:
-    """刷新 session 时间戳（滑动过期）。"""
+def refresh_session(token: str, conn=None) -> None:
+    """刷新 session 时间戳（滑动过期）。
+
+    conn 传入时复用调用方连接（避免同请求内重复建连）；None 时自建并负责关闭。
+    """
     with _sessions_lock:
         entry = _sessions.get(token)
         if entry is None:
@@ -207,14 +210,16 @@ def refresh_session(token: str) -> None:
         username, _ = entry
         now = time.time()
         _sessions[token] = (username, now)
+    own = conn is None
     try:
-        conn = db.get_config_db()
-        try:
-            db.add_session(conn, token, username)  # REPLACE INTO 更新时间和用户名
-        finally:
-            conn.close()
+        if own:
+            conn = db.get_config_db()
+        db.add_session(conn, token, username)   # REPLACE INTO 更新时间和用户名
     except Exception as e:
         logging.warning("Session 刷新失败: %s", e)
+    finally:
+        if own and conn is not None:
+            conn.close()
 
 
 def remove_session(token: str) -> bool:

@@ -202,7 +202,10 @@ class TestPoolBoundsAndHealth(unittest.TestCase):
     def test_dead_connection_replaced_on_checkout(self, mock_connect):
         """✅ Positive: 借出时探活失败 → 丢弃并新建，不把死连接交给请求。"""
         dead = _fake_conn()
-        dead.ping.return_value = False
+        # 死亡语义 = ping 抛异常（mysql-connector 真实契约：存活时返回 None）。
+        # 2026-10-10 修正：原用 return_value=False 表达死亡，但真实驱动从不为
+        # 存活连接返回 False，反而使 _is_alive 对**存活**连接恒为 False。
+        dead.ping.side_effect = RuntimeError("connection lost")
         fresh = _fake_conn()
         mock_connect.side_effect = [dead, fresh]
 
@@ -218,7 +221,7 @@ class TestPoolBoundsAndHealth(unittest.TestCase):
     def test_dead_connection_discarded_on_return(self, mock_connect):
         """✅ Positive: 归还时探活失败 → 直接关闭，不入池。"""
         dead = _fake_conn()
-        dead.ping.return_value = False
+        dead.ping.side_effect = RuntimeError("connection lost")  # 死亡=抛异常
         mock_connect.return_value = dead
 
         conn = create_mysql_connection(POOL_CFG)
