@@ -14,8 +14,11 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅** |
-| **待做批次** | **B6 → B7 → B8 → B9** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ · B6 部分（3/8）** |
+| **待做批次** | **B6 剩余 5 个（B6-3/8/1/2/4）→ B7 → B8 → B9** |
+
+> **B6 已完成 3/8**（`Ran 3109`，提交 `b0ebd8d`）：B6-5（render 资产失败留痕）、B6-6（static_cache 加锁）、B6-7（UI page_size 封顶 1000，两个入口）。
+> **B6 剩余 5 个**：B6-3（`?`→`%s` 引号感知）、B6-8（CSV 公式中和开关）、B6-1（Redis 自愈，最严重）、B6-2（重建锁）、B6-4（socket 超时，须 L2）。
 
 > **B5 已完成**（`Ran 3101`）。摘要见 §3.1；B5-4（派生态拆级）按 plan 标为可选/风险中，已跳过。
 
@@ -109,7 +112,7 @@ venv/bin/python -m unittest tests.test_xxx -t .
 | 批次 | 主题 | 写域 | 依赖 | 关键内容 |
 |---|---|---|---|---|
 | ~~B5~~ | ~~P1 性能~~ | — | — | ✅ **已完成**（Ran 3101）；写域实为 `config_db.py` `result_transform.py` `config.py`；B5-4 已跳过 |
-| **B6（下一个）** | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3 ✅ B4 ✅ B5 ✅ | ① Redis 冷启动自愈 ② 重建锁 owner/TTL ③ `?`→`%s` 引号感知 ④ socket 超时（**风险中高，须 L2 实测**）⑤ 资产降级加日志（render 首次引入 logging）⑥ `static_cache` 加锁 ⑦ **`page_size` 封顶 1000，仅 UI 层**（严禁加在 `execute_report`！）⑧ CSV 公式中和（默认关+导出页勾选） |
+| **B6（进行中 3/8）** | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3 ✅ B4 ✅ B5 ✅ | ① Redis 冷启动自愈 ② 重建锁 owner/TTL ③ `?`→`%s` 引号感知 ④ socket 超时（**风险中高，须 L2 实测**）⑤ 资产降级加日志（render 首次引入 logging）⑥ `static_cache` 加锁 ⑦ **`page_size` 封顶 1000，仅 UI 层**（严禁加在 `execute_report`！）⑧ CSV 公式中和（默认关+导出页勾选） |
 | **B7** | P1 语义收口 | `config.py` `render.py` `export.py` `report.py` `result_transform.py` | B5 B6 | ① `_escape` 两份语义不同 ② 分类树缩进（**D4 已定：全角 U+3000**，改 `config.py:1181`）③ `transform_rows` 收口 ④ `report.py` 45 行被遮蔽重复定义 |
 | **B8** | P2 死代码清理 | 多文件 | B7 | 12 项（`db.py` 漏转出、隐藏参数抄 3 遍、`MAX_FAIL_COUNT` 死常量、`is_debug_mode` 每次重读、`_ICONS` 畸形 SVG 等） |
 | **B9** | P3 结构拆分 | 新增 `ui_assets.py` 等 | B8 | `render.py` 7 个大常量外移（1887 行→`ui_assets.py`）；`config.py` 按 8 实体拆分（**必须保留 re-export**，19 个测试文件引用 `config.`） |
