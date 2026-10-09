@@ -9,6 +9,7 @@ test_report.py — report.py 单元测试
 
 import unittest
 from unittest.mock import patch, MagicMock
+import re
 import sqlite3
 import db
 import report
@@ -432,6 +433,34 @@ class TestReportExecution(unittest.TestCase):
         self.assertIn("mermaid.initialize", body)
         self.assertIn("securityLevel", body)
         self.assertIn('<pre class="mermaid">', body)
+
+    @patch("report.execute_report")
+    def test_report_mermaid_defers_render_until_tab_visible(self, mock_exec):
+        """备注页卡默认 display:none：mermaid 必须在页卡可见后再渲染（2026-10-09 实测）。
+
+        隐藏容器里量测全 0 → mermaid 退化成 16×16 空图并打上 data-processed，
+        之后 mermaid.run 会跳过它 → 备注页卡只剩一个空框（用户截图现象）。
+        故禁止 startOnLoad 自动渲染，改由页卡切换 / 页面初始化渲染可见面板。
+        """
+        mock_exec.return_value = report.ReportResult(
+            columns=["id"], rows=[(1,)], total=1, page=1, page_size=10,
+        )
+        memo = "```mermaid\nflowchart TD\n A-->B\n```"
+        db.update_report(self.conn, 1, "用户报表", "SELECT id, name, email FROM users",
+                         10, 1, memo=memo)
+        code, body, _ = report.handle_request(self.conn, "GET", "/report",
+                                              "id=1", pool_override=self.mock_pool)
+        self.assertIn("startOnLoad: false", body)
+        self.assertNotIn("startOnLoad: true", body)
+        self.assertIn("renderTabMermaid", body)
+        # 页卡切换与页面初始化都必须触发（换页重放靠 initReportPage）
+        glue = report._FOOTER_GLUE
+        goto = re.search(r"function gotoTab\(key\)\s*\{(.*?)\n\}", glue, re.S)
+        init = re.search(r"function initReportPage\(\)\s*\{(.*?)\n\s*\}", glue, re.S)
+        self.assertIsNotNone(goto, "_FOOTER_GLUE 缺少 gotoTab()")
+        self.assertIsNotNone(init, "_FOOTER_GLUE 缺少 initReportPage()")
+        self.assertIn("renderTabMermaid(", goto.group(1))
+        self.assertIn("renderTabMermaid(", init.group(1))
 
     @patch("report.execute_report")
     def test_report_skips_mermaid_script_without_mermaid(self, mock_exec):

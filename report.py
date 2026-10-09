@@ -477,6 +477,12 @@ def _js_string(s: str) -> str:
 # 报表页胶水 JS（字段面板/排序/结果切换/调试格式化/触屏筛选）。
 # ui-redesign C16：不再内联 _COMMON_JS（公共 JS 统一外链单轨）；
 # SQL 高亮/格式化仍按需随页面 defer 加载（C12）。
+#
+# mermaid 初始化片段（报表页单一来源）：startOnLoad 必须为 false——备注/接口页卡初始
+# display:none，隐藏容器里量测全 0，mermaid 会渲染成 16×16 空图并打上 data-processed
+# （之后 mermaid.run 会跳过它），故改由页卡可见时渲染（见 _FOOTER_GLUE.renderTabMermaid）。
+_MERMAID_INIT_JS = ('mermaid.initialize({ startOnLoad: false, '
+                    'securityLevel: "strict" });')
 _FOOTER_GLUE = r"""
 /* ---- 无刷新导航 ---- */
  /* 统一委托给公共 JS 的 _swapMain：换页后由 _reinitAfterSwap 重跑 <main> 内联脚本并
@@ -501,6 +507,9 @@ _FOOTER_GLUE = r"""
  function initReportPage() {
    initDragHandlers();
    initSortDragHandlers();
+   /* 换页/首屏重放：当前可见页卡里若已有 mermaid（如 @ 直达带锚点），
+      也要渲染出来。隐藏页卡不渲染（见 gotoTab）。 */
+   renderTabMermaid(document.querySelector('.tabpanel.active'));
  }
  function openPanel(id) {
   var el = document.getElementById(id);
@@ -524,6 +533,16 @@ function closeAllPanels() {
   var bd = document.getElementById('report-backdrop');
   if (bd) bd.classList.remove('on');
 }
+/* 渲染指定页卡里尚未处理的 mermaid 图。
+   必须等页卡可见后再调：隐藏容器（display:none）量测全 0，mermaid 会退化成 16×16
+   空图并打上 data-processed，之后 mermaid.run 会跳过该节点 → 备注页卡永远只剩空框。
+   mermaid.run 自身不去重？会：它对已打标记的节点直接 continue，故本函数幂等。 */
+function renderTabMermaid(panel) {
+  if (!panel || !window.mermaid || typeof mermaid.run !== 'function') return;
+  var nodes = panel.querySelectorAll('pre.mermaid:not([data-processed])');
+  if (!nodes.length) return;
+  mermaid.run({ nodes: nodes });
+}
 function gotoTab(key) {
   document.querySelectorAll('.tabs .tab').forEach(function (b) {
     b.classList.toggle('active', b.getAttribute('data-tab') === key);
@@ -531,6 +550,7 @@ function gotoTab(key) {
   document.querySelectorAll('.tabpanel').forEach(function (p) {
     p.classList.toggle('active', p.getAttribute('data-panel') === key);
   });
+  renderTabMermaid(document.querySelector('.tabpanel[data-panel="' + key + '"]'));
 }
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') closeAllPanels();
@@ -1713,6 +1733,9 @@ def _build_report_html(conn, report: dict, result: ReportResult,
     # 备注或任一 API 接口说明含 ```mermaid 块时按需注入 mermaid 渲染脚本
     # （api-desc-markdown T5；渐进增强：JS 加载失败时页面显示 <pre class="mermaid">
     # 转义源码，不空白；无 mermaid 内容时零请求）
+    # startOnLoad 由 _MERMAID_INIT_JS 锁定为 false：备注/接口页卡初始 display:none，
+    # 隐藏容器里量测全 0 → mermaid 会渲染成 16×16 空图并打上 data-processed（事后 run
+    # 会跳过它）→ 改由页卡可见时渲染（_FOOTER_GLUE 的 renderTabMermaid，2026-10-09 修复）。
     mermaid_sources = [report.get("memo") or ""]
     mermaid_sources += [ep.get("description") or "" for ep in api_endpoints]
     mermaid_scripts = ""
@@ -1720,8 +1743,8 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         mermaid_scripts = (
             f'<script src="{markdown_render.MERMAID_JS_URL}"></script>\n'
             '<script>if (window.mermaid) { '
-            'mermaid.initialize({ startOnLoad: true, securityLevel: "strict" }); '
-            '}</script>\n')
+            + _MERMAID_INIT_JS +
+            ' }</script>\n')
 
     # ---- 结果参数（多结果集时附加到 URL） ----
     result_param = f"result={active_index}" if num_results > 1 else ""

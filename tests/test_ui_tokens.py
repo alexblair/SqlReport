@@ -489,6 +489,52 @@ class TestReportsPageStructure(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class TestSqlEditorScrollContract(unittest.TestCase):
+    """② SQL 编辑框的滚动契约（2026-10-09 用户实测反馈「缺少文本滚动条」）。
+
+    事故：`<textarea class="sql-textarea sql-editor">` 同时命中两条规则——
+    `.sql-editor` 是给「容器」写的（圆角裁切 + 边框），里面带 `overflow:hidden`；
+    它落在 textarea 自身后，计算样式变成 `overflow:hidden`，滚动条消失、
+    超出可视区的 SQL 被裁掉。无头 Chrome 实测（60 行 SQL）：
+
+        overflowY=hidden  clientHeight=318  scrollHeight=1284  scrollbarGutter=0
+
+    对照：同页只带 `.sql-textarea` 的 memo/result_names → `overflowY=auto`、gutter=10px。
+    契约：编辑框自己声明 `overflow:auto`；任何命中编辑框类的规则都不得再声明 hidden。
+    """
+
+    EDITOR_CLASSES = ("sql-textarea", "sql-editor")
+
+    @staticmethod
+    def _rules(css):
+        for m in re.finditer(r'([^{}]+)\{([^{}]*)\}', css, re.S):
+            sel = m.group(1).strip()
+            if not sel or sel.startswith('@'):
+                continue
+            yield sel, m.group(2)
+
+    def test_sql_textarea_declares_own_overflow(self):
+        """`.sql-textarea` 必须显式 `overflow:auto`（不靠 UA 默认，也不被别的类覆盖）。"""
+        bodies = [body for sel, body in self._rules(render._COMMON_CSS)
+                  if sel == '.sql-textarea']
+        self.assertTrue(bodies, "缺少 .sql-textarea 规则")
+        self.assertRegex(bodies[-1], r'overflow\s*:\s*auto',
+                         ".sql-textarea 未声明 overflow:auto → 编辑框没有滚动条")
+
+    def test_no_rule_hides_editor_overflow(self):
+        """命中编辑框类（.sql-textarea/.sql-editor）的规则不得声明 overflow(-x|-y):hidden。"""
+        offenders = []
+        for sel, body in self._rules(render._COMMON_CSS):
+            hits = [s.strip() for s in sel.split(',')
+                    if any('.' + cls in s for cls in self.EDITOR_CLASSES)]
+            if not hits:
+                continue
+            if re.search(r'(?<!-)overflow(?:-x|-y)?\s*:\s*hidden', body):
+                offenders.append(f"{','.join(hits)} → {body.strip()[:60]}")
+        self.assertEqual([], offenders,
+                         "编辑框被 overflow:hidden 裁掉（滚动条消失）：" + "; ".join(offenders))
+
+
 class TestNoDuplicateDeclarations(unittest.TestCase):
     """同一条规则内不得重复声明同一属性（后者静默覆盖前者）。
 
@@ -555,6 +601,38 @@ class TestPageInitRegistration(unittest.TestCase):
                 line = src[:m.start()].count("\n") + 1
                 self.fail(f"{mod.__name__}.py:{line} 无条件绑定 DOMContentLoaded："
                           "换页重建 <script> 后不会执行，请改用 onReady(fn) 或交给 initPage/initReportPage")
+
+class TestMermaidTabRenderContract(unittest.TestCase):
+    """备注/接口页卡初始 display:none：mermaid 不得在隐藏容器里自动渲染。
+
+    2026-10-09 用户实测（报表 /report?id=42 备注页卡两张流程图全空，只剩空框）：
+    `startOnLoad:true` 在 window load 时把 display:none 页卡里的
+    `<pre class="mermaid">` 一起渲染了——隐藏容器里量测全 0，mermaid 退化成 16×16
+    空图（viewBox `-8 -8 16 16`）并打上 `data-processed`；之后 `mermaid.run` 对已打标
+    记的节点直接 continue，所以切到备注页卡也不会重画 → 永远空框。
+    契约：① 初始化必须 startOnLoad:false；② 页卡可见时（gotoTab / initReportPage）
+    必须渲染尚未处理的 mermaid 节点。两条均可内存变异（gate_redproof）。
+    """
+
+    def test_mermaid_not_autostarted_for_hidden_tabs(self):
+        init_js = report._MERMAID_INIT_JS
+        self.assertIn("startOnLoad: false", init_js,
+                      "报表页 mermaid 未显式关闭自动渲染：备注/接口页卡初始 display:none，"
+                      "隐藏容器会渲染成 16×16 空图并打 data-processed，切页后不再重画")
+        self.assertNotIn("startOnLoad: true", init_js)
+
+    def test_visible_tab_renders_mermaid(self):
+        glue = report._FOOTER_GLUE
+        self.assertIn("function renderTabMermaid(", glue,
+                      "_FOOTER_GLUE 缺少 renderTabMermaid：页卡可见后无渲染入口")
+        goto = re.search(r"function gotoTab\(key\)\s*\{(.*?)\n\}", glue, re.S)
+        init = re.search(r"function initReportPage\(\)\s*\{(.*?)\n\s*\}", glue, re.S)
+        self.assertIsNotNone(goto, "_FOOTER_GLUE 缺少 gotoTab()")
+        self.assertIsNotNone(init, "_FOOTER_GLUE 缺少 initReportPage()")
+        self.assertIn("renderTabMermaid(", goto.group(1),
+                      "gotoTab 未渲染新可见页卡的 mermaid → 备注页卡仍会空白")
+        self.assertIn("renderTabMermaid(", init.group(1),
+                      "initReportPage 未渲染当前可见页卡 → 换页/首屏重放后不渲染")
 
 
 class TestFormControlNameUniqueness(BaseReportTest):

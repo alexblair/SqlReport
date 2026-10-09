@@ -976,7 +976,12 @@ pre b,pre strong{color:var(--code-kw);font-weight:600}
   padding:1px 5px;color:var(--ink-1);font-size:12.5px;
 }
 /* SQL 编辑器（可编辑，保持浅色表单语境） */
-.sql-editor{border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden;background:var(--bg-surface)}
+/* .sql-editor 是「容器/编辑框」共用的外观类：只给边框与底色，**永不得设 overflow**。
+   生产把该类直接挂在 <textarea class="sql-textarea sql-editor"> 上（config.py 报表编辑页
+   ② SQL），写 overflow:hidden 会把编辑框自己的滚动条一起裁掉——2026-10-09 用户实测反馈
+   「② SQL 缺少文本滚动条」（无头 Chrome：overflowY=hidden、scrollbarGutter=0、
+   60 行 SQL 被裁在 clientHeight 318 / scrollHeight 1284）。滚动契约由 .sql-textarea 声明。 */
+.sql-editor{border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--bg-surface)}
 .sql-toolbar{
   display:flex;align-items:center;gap:var(--sp-2);padding:7px 10px;
   border-bottom:1px solid var(--line-soft);background:var(--bg-subtle);
@@ -984,6 +989,7 @@ pre b,pre strong{color:var(--code-kw);font-weight:600}
 .sql-textarea{
   width:100%;border:0;border-radius:0;font-family:var(--font-mono);font-size:12.5px;line-height:1.75;
   padding:var(--sp-3) 14px;min-height:220px;background:var(--bg-surface);color:var(--ink-1);resize:vertical;
+  overflow:auto;   /* 编辑框自身的滚动契约：长 SQL/备注必须出现滚动条，不靠 UA 默认 */
 }
 .sql-textarea:focus{box-shadow:none;border:0;outline:2px solid var(--accent);outline-offset:-2px}
 /* Markdown 正文 */

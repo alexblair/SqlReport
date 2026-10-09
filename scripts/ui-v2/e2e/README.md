@@ -24,6 +24,7 @@ HOST=127.0.0.1 PORT=8099 venv/bin/python server.py &
 | `swap-reinit.mjs` | **无刷新换页后**拖拽/排序/导出联动/嵌套筛选是否仍可用（换页重初始化回归） | `CDP_PORT=9411 node scripts/ui-v2/e2e/swap-reinit.mjs` |
 | `repro-sort-broken.mjs` | 用户复现步骤：隐藏列→应用→还原→应用→再排序 | `CDP_PORT=9411 node scripts/ui-v2/e2e/repro-sort-broken.mjs` |
 | `api-row-expand-check.mjs` | `/config/api-endpoints` 展开/收起（整页+换页态+多轮+组合）、两处分类树折叠、详情页接口页签 | `CDP_PORT=9411 node scripts/ui-v2/e2e/api-row-expand-check.mjs`（可加 `BASE=http://127.0.0.1:8098`） |
+| `mermaid-tab-check.mjs` | 备注页卡 mermaid：整页加载不渲染（隐藏页卡）→ 点备注渲染 → 第二/三次与跨页卡组合后几何不变 | `CDP_PORT=9411 REPORT_ID=42 node scripts/ui-v2/e2e/mermaid-tab-check.mjs` |
 
 注意：这些脚本默认连 `http://127.0.0.1:8099`，账号 `admin/admin123`（DEBUG 配置库默认账号）；
 `api-row-expand-check.mjs` 支持 `BASE=` 覆盖（可用于另起的验证实例）。
