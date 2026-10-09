@@ -321,3 +321,142 @@ class TestRedisSelfHeal(unittest.TestCase):
         finally:
             redis_cache._redis_manager = None
             redis_cache._redis_last_connect_attempt = 0.0
+
+
+class TestRebuildLock(unittest.TestCase):
+    """B6-2：锁必须有持有者校验与原子过期，不得误删他人锁。"""
+
+    def _mgr(self, client, store=None):
+        cfg = {"enable": True, "key_prefix": "sr_test"}
+        mgr = redis_cache.RedisConnectionManager(cfg)
+        mgr._client = client
+        mgr._available = True
+        return mgr
+
+    @staticmethod
+    def _fake_client(store):
+        """最小 Redis 假客户端：同时支持原子 set 与旧的 setnx/expire。"""
+
+        class Fake:
+            def set(self, k, v, nx=False, ex=None):
+                if nx and k in store:
+                    return None
+                store[k] = v
+                return True
+
+            def get(self, k):
+                return store.get(k)
+
+            def delete(self, k):
+                store.pop(k, None)
+                return 1
+
+            def setnx(self, k, v):
+                if k in store:
+                    return False
+                store[k] = v
+                return True
+
+            def expire(self, k, t):
+                return True
+
+            def ping(self):
+                return True
+
+        return Fake()
+
+    def test_release_does_not_delete_foreign_lock(self):
+        """锁过期后被他人接管 → release 不得删掉别人的锁。"""
+        store = {}
+        mgr = self._mgr(self._fake_client(store))
+        self.assertTrue(mgr.acquire_lock("lock:x"))
+        # 模拟锁过期后被他人获取：直接换掉锁值
+        store["lock:x"] = "someone-else"
+        mgr.release_lock("lock:x")
+        self.assertIn("lock:x", store, "release 删掉了别人的锁！")
+        self.assertEqual(store["lock:x"], "someone-else")
+
+    def test_release_own_lock_removes_it(self):
+        """本进程自己持有的锁必须被正常释放。"""
+        store = {}
+        mgr = self._mgr(self._fake_client(store))
+        self.assertTrue(mgr.acquire_lock("lock:y"))
+        mgr.release_lock("lock:y")
+        self.assertNotIn("lock:y", store)
+
+    def test_acquire_lock_uses_atomic_set_with_ttl(self):
+        """acquire 必须是一次 set(nx=True, ex=timeout)，不得 setnx+expire 两次往返。"""
+        client = mock.MagicMock()
+        client.set.return_value = True
+        mgr = self._mgr(client)
+        self.assertTrue(mgr.acquire_lock("lock:z"))
+        client.set.assert_called_once_with("lock:z", mock.ANY, nx=True,
+                                           ex=redis_cache._LOCK_TIMEOUT)
+        client.setnx.assert_not_called()
+        client.expire.assert_not_called()
+
+    def test_lock_value_is_unique_token_not_constant(self):
+        """锁值必须是唯一 token；恒为常量则无法区分持有者。"""
+        store = {}
+        mgr = self._mgr(self._fake_client(store))
+        self.assertTrue(mgr.acquire_lock("lock:t"))
+        self.assertTrue(store["lock:t"])
+        self.assertNotEqual(store["lock:t"], "1",
+                            "锁值仍为常量 1，release 无法校验持有者")
+
+    def test_release_without_token_is_noop(self):
+        """从未持锁（如 wait_for_lock 超时）不得 delete 任何东西。"""
+        client = mock.MagicMock()
+        mgr = self._mgr(client)
+        mgr.release_lock("lock:never-held")
+        client.delete.assert_not_called()
+
+    def test_release_is_idempotent(self):
+        """重复 release 只删一次。"""
+        store = {}
+        calls = []
+        fake = self._fake_client(store)
+        orig_delete = fake.delete
+
+        def counting_delete(k):
+            calls.append(k)
+            return orig_delete(k)
+
+        fake.delete = counting_delete
+        mgr = self._mgr(fake)
+        self.assertTrue(mgr.acquire_lock("lock:r"))
+        mgr.release_lock("lock:r")
+        mgr.release_lock("lock:r")
+        self.assertEqual(calls, ["lock:r"])
+        self.assertNotIn("lock:r", store)
+
+    def test_wait_for_lock_timeout_drops_no_lock(self):
+        """wait_for_lock 超时（未获锁）不得 delete，也不得遗留 token。"""
+        client = mock.MagicMock()
+        client.set.return_value = None          # 锁始终被他人占用
+        mgr = self._mgr(client)
+        with mock.patch.object(redis_cache, "_LOCK_RETRY_INTERVAL", 0.01):
+            self.assertFalse(mgr.wait_for_lock("lock:w", max_wait=0.05))
+        client.delete.assert_not_called()
+        client.set.assert_called_with("lock:w", mock.ANY, nx=True,
+                                      ex=redis_cache._LOCK_TIMEOUT)
+
+    def test_lock_timeout_covers_slow_reports(self):
+        """TTL 必须覆盖最大合法报表耗时（调度器/API 路径不限超时）。"""
+        self.assertGreaterEqual(
+            redis_cache._LOCK_TIMEOUT, 300,
+            "TTL 过短，慢报表会在持锁期间过期并被他人接管")
+
+    def test_lock_method_signatures_unchanged(self):
+        """三方法签名不得变化（report.py 调用与既有 mock 断言依赖）。"""
+        import inspect
+        expected = {
+            "acquire_lock": ["self", "lock_key", "timeout"],
+            "release_lock": ["self", "lock_key"],
+            "wait_for_lock": ["self", "lock_key", "max_wait"],
+        }
+        for name, params in expected.items():
+            sig = inspect.signature(
+                getattr(redis_cache.RedisConnectionManager, name))
+            self.assertEqual(list(sig.parameters), params,
+                             "%s 签名被改动" % name)

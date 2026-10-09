@@ -106,6 +106,10 @@ class TestExceptionLoggingPaths(unittest.TestCase):
     def test_release_lock_logs_error_on_delete_exception(self):
         """release_lock 中 delete 抛异常时记录 error 日志"""
         mgr, mock_client = _make_available_manager()
+        # 先获取锁，实例才会记录 token；否则 release 未持锁直接 return，
+        # 根本走不到 delete，测不到异常路径
+        self.assertTrue(mgr.acquire_lock("lock:key"))
+        mock_client.get.return_value = mgr._lock_tokens["lock:key"]
         mock_client.delete.side_effect = Exception("连接中断")
 
         with self.assertLogs(level=logging.WARNING) as cm:
@@ -154,12 +158,12 @@ class TestWaitForLockFirstSuccess(unittest.TestCase):
     def test_wait_for_lock_immediate_success(self):
         """acquire_lock 首次即成功，wait_for_lock 立即返回 True"""
         mgr, mock_client = _make_available_manager()
-        mock_client.setnx.return_value = True
+        mock_client.set.return_value = True  # SET NX 获取成功
 
         result = mgr.wait_for_lock("lock:key", max_wait=10)
         self.assertTrue(result)
-        # 只调用一次 acquire_lock（内部调用一次 setnx）
-        self.assertEqual(mock_client.setnx.call_count, 1)
+        # 只调用一次 acquire_lock（内部调用一次原子 set）
+        self.assertEqual(mock_client.set.call_count, 1)
 
 
 # ---------------------------------------------------------------------------

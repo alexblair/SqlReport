@@ -4,7 +4,8 @@ redis_cache.py — Redis 缓存层
 职责：
 1. 连接管理：根据 app_config.json 中的 redis 配置段创建/销毁连接
 2. 健康检查：定时轮询 Redis 可用性
-3. 快照锁：基于 SETNX 的分布式锁，防止同一报表同时被多个请求重建
+3. 快照锁：基于 SET NX EX 的分布式锁，用唯一 token 标识持有者，
+   防止同一报表同时被多个请求重建，且不误删他人的锁
 4. 报表快照读写：将全量结果集序列化为 JSON 存入 Redis
 
 设计：
@@ -19,6 +20,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -87,7 +89,12 @@ def _snapshot_from_json(data: str) -> dict:
 # 常量
 # ---------------------------------------------------------------------------
 
-_LOCK_TIMEOUT = 30       # 锁自动释放时间（秒）
+# 锁自动释放时间（秒）：必须覆盖最大合法报表重建耗时。调度器/API 路径
+# 的 read_timeout=None（query_executor 允许慢报表自然结束），30s 会让慢报表
+# 在持锁期间过期、被其他进程接管；600s 覆盖 10 分钟级慢报表，同时把「持有者
+# 真死」后的重复重建窗口限制在 10 分钟内（等待者最多等 _LOCK_MAX_WAIT=60s
+# 即自行查库，不会活锁）。
+_LOCK_TIMEOUT = 600
 _LOCK_RETRY_INTERVAL = 1 # 锁等待重试间隔（秒）
 _LOCK_MAX_WAIT = 60      # 等待锁的最大时间（秒）
 _HEALTH_CHECK_INTERVAL = 15  # 健康检查间隔（秒）
@@ -179,6 +186,10 @@ class RedisConnectionManager:
         self._client: Any = None
         self._available: bool = False
         self._lock = threading.Lock()
+        # 本实例持有各锁的 token（lock_key -> token）；release 时据此校验
+        # 持有者身份，避免删掉锁过期后他人重建的锁。
+        self._lock_tokens: dict = {}
+        self._lock_tokens_lock = threading.Lock()
         self._health_thread: Optional[threading.Thread] = None
         self._stop_health: bool = False
 
@@ -269,24 +280,40 @@ class RedisConnectionManager:
 
     def acquire_lock(self, lock_key: str,
                      timeout: int = _LOCK_TIMEOUT) -> bool:
-        """尝试获取快照重建锁（SETNX）。"""
+        """尝试获取快照重建锁（SET NX EX 原子写入 + 唯一 token）。"""
         if not self._available or not self._client:
             return False
+        token = uuid.uuid4().hex
         try:
-            ok = self._client.setnx(lock_key, "1")
+            # 单次 SET key token NX EX timeout：不存在则写入并同时设置 TTL。
+            # 消除 setnx 成功但 expire 前崩溃导致的「锁永不过期」死锁。
+            ok = self._client.set(lock_key, token, nx=True, ex=timeout)
             if ok:
-                self._client.expire(lock_key, timeout)
+                with self._lock_tokens_lock:
+                    self._lock_tokens[lock_key] = token
             return bool(ok)
         except Exception as e:
             logging.error("Redis acquire_lock 失败: %s", e)
             return False
 
     def release_lock(self, lock_key: str):
-        """释放快照重建锁。"""
+        """释放快照重建锁（仅当锁值仍是本实例 token 时删除）。"""
         if not self._available or not self._client:
             return
+        with self._lock_tokens_lock:
+            token = self._lock_tokens.pop(lock_key, None)
+        if token is None:
+            # 本实例并未持有该锁（未获取成功 / wait_for_lock 超时 / 已释放）：
+            # 绝不能盲删——否则会删掉锁过期后他人重建的锁。
+            return
         try:
-            self._client.delete(lock_key)
+            # get 比对 + delete 属非严格原子，但已消除误删他人锁的主风险：
+            # 只有锁值仍等于本实例 token（说明锁未过期、未被他人接管）才删除。
+            current = self._client.get(lock_key)
+            if isinstance(current, bytes):
+                current = current.decode("utf-8", "replace")
+            if current == token:
+                self._client.delete(lock_key)
         except Exception as e:
             logging.error("Redis release_lock 失败: %s", e)
 

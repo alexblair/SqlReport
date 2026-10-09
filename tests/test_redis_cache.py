@@ -11,7 +11,7 @@ test_redis_cache.py — redis_cache.py 单元测试
 import logging
 import time
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock, PropertyMock, ANY
 
 from redis_cache import (
     ReportSnapshot,
@@ -196,24 +196,25 @@ class TestRedisConnectionManager(unittest.TestCase):
     def test_acquire_and_release_lock(self, mock_create):
         """获取锁 → 释放锁"""
         mock_client = MagicMock()
-        mock_client.setnx.return_value = True
         mock_create.return_value = mock_client
         mgr = RedisConnectionManager(self.config)
         mgr.connect()
 
         ok = mgr.acquire_lock("my:lock")
         self.assertTrue(ok)
-        mock_client.setnx.assert_called_with("my:lock", "1")
-        mock_client.expire.assert_called_with("my:lock", 30)
+        # 原子 SET NX EX：仅一次往返，ex 为 _LOCK_TIMEOUT(600)，锁值是不透明 token
+        mock_client.set.assert_called_once_with("my:lock", ANY, nx=True, ex=600)
 
+        # 释放前让 get 返回本实例刚写入的 token（否则 release 不删，绝不盲删）
+        mock_client.get.return_value = mgr._lock_tokens["my:lock"]
         mgr.release_lock("my:lock")
-        mock_client.delete.assert_called_with("my:lock")
+        mock_client.delete.assert_called_once_with("my:lock")
 
     @patch("redis_cache.RedisConnectionManager._create_client")
     def test_acquire_lock_failure(self, mock_create):
         """锁已被占用时 acquire_lock 返回 False"""
         mock_client = MagicMock()
-        mock_client.setnx.return_value = False
+        mock_client.set.return_value = None  # SET NX 未获取到时返回 None
         mock_create.return_value = mock_client
         mgr = RedisConnectionManager(self.config)
         mgr.connect()
@@ -248,7 +249,7 @@ class TestRedisConnectionManager(unittest.TestCase):
     def test_wait_for_lock_timeout(self, mock_create):
         """等待锁超时"""
         mock_client = MagicMock()
-        mock_client.setnx.return_value = False  # 锁一直无法获取
+        mock_client.set.return_value = None  # 锁一直无法获取
         mock_create.return_value = mock_client
         mgr = RedisConnectionManager(self.config)
         mgr.connect()
@@ -427,7 +428,7 @@ class TestRedisCacheLogging(unittest.TestCase):
     def test_redis_acquire_lock_logs_error_on_failure(self, mock_create):
         """acquire_lock 失败时记录 error 日志"""
         mock_client = MagicMock()
-        mock_client.setnx.side_effect = Exception("连接超时")
+        mock_client.set.side_effect = Exception("连接超时")
         mock_create.return_value = mock_client
         mgr = RedisConnectionManager(self.config)
         mgr.connect()
