@@ -42,8 +42,8 @@ implementer 最容易踩空、且 spec 未逐条明说的五类：
 |------|------|------|------|------|
 | B1 | P0 用户可见缺陷速修 | `server.py` `report.py` `config.py` `render.py` | — | ✅ 完成（Ran 3052） |
 | B2 | P0 配置库连接**池化** | `query_executor.py` `config_db.py` `auth.py` `server.py` `db.py` | B1 | ✅ 完成（Ran 3072） |
-| B3 | P0 ZIP 路径穿越 | `export.py` | — | ☐ |
-| B4 | P0 调度器保活与卡死 | `scheduler.py` | — | ☐ |
+| B3 | P0 ZIP 路径穿越 | `export.py` | — | ✅ 完成 |
+| B4 | P0 调度器保活与卡死 | `scheduler.py` | — | ✅ 完成（Ran 3083） |
 | B5 | P1 性能 | `config_db.py` `report.py` `result_transform.py` `render.py` `config.py` | B2 | ☐ |
 | B6 | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3,B4,B5 | ☐ |
 | B7 | P1 语义收口 | `config.py` `render.py` `export.py` `report.py` `result_transform.py` | B5,B6 | ☐ |

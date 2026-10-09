@@ -36,8 +36,9 @@
 - 熔断：`fail_count≥5` 自动停派发；手动触发不受限且成功重置  
 - misfire：启动扫描 interval 合并 / daily skip|run_once  
 - 执行：`execute_report(..., force_rebuild=True)`；成功回写 Redis+L1  
-- 保活 tick：剩余 TTL < ahead → rebuild + 联动 `rebuild_static_endpoint_file`  
+- 保活 tick：剩余 TTL < ahead → rebuild + 联动 `rebuild_static_endpoint_file`；**按独立节拍 `_KEEPALIVE_INTERVAL_SECONDS=300` 跑**（曾随 tick_seconds=30 每轮全量扫，`_next_keepalive_at` 是死字段；B4-1 修）；连接必须 try/finally 包住（曾无外壳，SELECT 抛异常即泄漏）
 - 审计：`log_type=scheduler`；任务级开关默认关  
+- **任务永久停摆**（曾：`_run_schedule` 的取连接在 `try:` **之外**，抛异常时 `finally` 不执行 → `sid` 永留 `_running` → 每轮 `run_tick` 都 `continue` 跳过且无告警；B4-2 修，取连接移入 try + `conn=None` 判空关闭）  
 - worker **自建配置库连接**  
 - 页面 `refresh_cache`：主动失效 L1/Redis/该报表静态 API（与保活先算后换不同）
 

@@ -31,6 +31,11 @@ import api_handler
 # 连续失败熔断阈值（B5）：达到后 tick 不再自动派发，手动触发不受限
 MAX_FAIL_COUNT = 5
 
+#: 保活扫描的独立节拍（秒）。保活是「提前重建临近过期的缓存」，
+#: 不需要跟着 tick_seconds（默认 30s）跑——那样每 tick 都要全量扫
+#: report_configs 并探测 Redis，纯浪费。
+_KEEPALIVE_INTERVAL_SECONDS = 300
+
 
 # ---------------------------------------------------------------------------
 # 排除规则树求值（规格 scheduler-composition-exclusion）
@@ -306,7 +311,7 @@ class ReportScheduler:
             except Exception:
                 logging.exception("调度器 tick 异常")
             try:
-                self.run_keepalive_tick()
+                self._maybe_run_keepalive()
             except Exception:
                 logging.exception("调度器保活 tick 异常")
 
@@ -400,8 +405,15 @@ class ReportScheduler:
         finished = time.time()
         duration_ms = int((finished - started) * 1000)
 
-        conn = db.get_config_db()
+        # B4-2：取连接必须放在 try 内。
+        # 曾经 `conn = db.get_config_db()` 在 try **之外**，一旦它抛异常（DB 抖动/
+        # 池不可用），finally 不执行 → sid 永久留在 _running → 之后每次 run_tick
+        # 都 continue 跳过它 → 该任务在本进程生命周期内再也不会被派发且无告警。
+        # conn = None + if conn is not None：防 get_config_db() 自身抛异常时
+        # conn 未绑定，close() 会 NameError 并盖掉真正的异常。
+        conn = None
         try:
+            conn = db.get_config_db()
             cur = config_db.get_schedule(conn, sid)
             if cur is not None:
                 next_run_at = compute_next_run(
@@ -417,7 +429,8 @@ class ReportScheduler:
         finally:
             with self._running_lock:
                 self._running.discard(sid)
-            conn.close()
+            if conn is not None:
+                conn.close()
 
         # B19：自动执行审计（成功与失败均记，供追溯）。
         # log_type=scheduler：审计日志单开"定时任务"类型（2026-08-22 需求），
@@ -604,6 +617,18 @@ class ReportScheduler:
     # 缓存保活（refresh-ahead，B13-B16）
     # ------------------------------------------------------------------
 
+    def _maybe_run_keepalive(self, now: float = None) -> int:
+        """按独立节拍执行保活扫描（未到点直接返回 0）。
+
+        先推时间戳再跑：run_keepalive_tick 抛异常时下个 tick 不会立刻
+        重试，避免异常时的忙循环（B4-1）。
+        """
+        now = time.time() if now is None else now
+        if now < self._next_keepalive_at:
+            return 0
+        self._next_keepalive_at = now + _KEEPALIVE_INTERVAL_SECONDS
+        return self.run_keepalive_tick(now=now)
+
     def run_keepalive_tick(self, now: float = None) -> int:
         """扫描临近过期的保活报表并以先算后换重建；返回重建数。
 
@@ -620,46 +645,48 @@ class ReportScheduler:
 
         rebuilt = 0
         conn = db.get_config_db()
-        # DISTINCT：同一报表可挂多个任务（多对多），不去重会重复重建
-        rows = [dict(r) for r in conn.execute(
-            "SELECT DISTINCT rc.* FROM report_configs rc "
-            "JOIN schedule_reports sr ON sr.report_id=rc.id "
-            "JOIN report_schedules rs ON rs.id=sr.schedule_id "
-            "WHERE rs.enabled=1 AND rs.fail_count<5 AND rc.keepalive_enabled=1 AND "
-            "rc.prefer_cache=1 AND rc.cache_ttl_hours>0").fetchall()]
+        try:
+            # DISTINCT：同一报表可挂多个任务（多对多），不去重会重复重建
+            rows = [dict(r) for r in conn.execute(
+                "SELECT DISTINCT rc.* FROM report_configs rc "
+                "JOIN schedule_reports sr ON sr.report_id=rc.id "
+                "JOIN report_schedules rs ON rs.id=sr.schedule_id "
+                "WHERE rs.enabled=1 AND rs.fail_count<5 AND rc.keepalive_enabled=1 AND "
+                "rc.prefer_cache=1 AND rc.cache_ttl_hours>0").fetchall()]
 
-        for rpt in rows:
-            rid = rpt["id"]
-            try:
-                ahead = int(rpt.get("keepalive_ahead_seconds", 0) or 0)
-                if ahead <= 0:
-                    continue
-                ttl_hours = int(rpt.get("cache_ttl_hours", 0) or 0)
-                version = redis_cache.compute_config_version(
-                    rpt["sql_query"], rpt.get("pool_id"))
-                key = redis_cache.build_snapshot_key(mgr.key_prefix, rid,
-                                                     version)
-                snap = mgr.get_snapshot(key)
-                remaining = snapshot_remaining_ttl(snap, ttl_hours, now)
-                if remaining is None or remaining >= ahead:
-                    continue  # 无快照（等请求自然重建）或仍新鲜
-                # 先算后换：force_rebuild 不删旧快照，新数据原子覆盖（B14）
-                pool_id = rpt.get("pool_id")
-                pool = config_db.get_pool(conn, pool_id) if pool_id else None
-                if pool is None:
-                    raise RuntimeError(f"报表 #{rid} 连接池不可用")
-                report_mod.execute_report(
-                    rid, rpt["sql_query"], pool, page=1,
-                    page_size=rpt.get("default_page_size") or 20,
-                    refresh=False, report=rpt, cache=self._cache,
-                    force_rebuild=True)
-                rebuilt += 1
-                # 静态文件联动：该报表全部静态端点重算落盘（B15），
-                # 任一端点失败不影响其他端点，也不影响保活成功状态
-                self._rebuild_static_files(conn, rpt)
-            except Exception as e:
-                logging.warning("保活重建失败 report=%s: %s", rid, e)
-        conn.close()
+            for rpt in rows:
+                rid = rpt["id"]
+                try:
+                    ahead = int(rpt.get("keepalive_ahead_seconds", 0) or 0)
+                    if ahead <= 0:
+                        continue
+                    ttl_hours = int(rpt.get("cache_ttl_hours", 0) or 0)
+                    version = redis_cache.compute_config_version(
+                        rpt["sql_query"], rpt.get("pool_id"))
+                    key = redis_cache.build_snapshot_key(mgr.key_prefix, rid,
+                                                         version)
+                    snap = mgr.get_snapshot(key)
+                    remaining = snapshot_remaining_ttl(snap, ttl_hours, now)
+                    if remaining is None or remaining >= ahead:
+                        continue  # 无快照（等请求自然重建）或仍新鲜
+                    # 先算后换：force_rebuild 不删旧快照，新数据原子覆盖（B14）
+                    pool_id = rpt.get("pool_id")
+                    pool = config_db.get_pool(conn, pool_id) if pool_id else None
+                    if pool is None:
+                        raise RuntimeError(f"报表 #{rid} 连接池不可用")
+                    report_mod.execute_report(
+                        rid, rpt["sql_query"], pool, page=1,
+                        page_size=rpt.get("default_page_size") or 20,
+                        refresh=False, report=rpt, cache=self._cache,
+                        force_rebuild=True)
+                    rebuilt += 1
+                    # 静态文件联动：该报表全部静态端点重算落盘（B15），
+                    # 任一端点失败不影响其他端点，也不影响保活成功状态
+                    self._rebuild_static_files(conn, rpt)
+                except Exception as e:
+                    logging.warning("保活重建失败 report=%s: %s", rid, e)
+        finally:
+            conn.close()
         return rebuilt
 
     @staticmethod
