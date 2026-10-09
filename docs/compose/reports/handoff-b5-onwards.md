@@ -14,12 +14,14 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅** |
-| **待做批次** | **B8 → B9** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅ B8 ✅** |
+| **待做批次** | **B9（最后一批）** |
 
-> **B7 已完成 4/4**（`Ran 3167`，提交 `d82ff73`）：B7-1 删被遮蔽 48 行、B7-2 `_escape` 收口、
-> B7-3 分类树全角缩进（D4）、B7-4 `transform_rows` 收口。B7 期间 Lead 抓出 **3 处工作包/plan 错误**（见 §6）。
-> B6 已完成 8/8（`Ran 3146`）：B6-5/6/7 → `b0ebd8d`；B6-3/8/1 → `a3886ed`；B6-2 → `1680dc3`；B6-4 → `0937b96`。
+> **B8 已完成**（`Ran 3172`，提交 `3c1e3af`）：A 组 5 项纯删除（含 `_COMMON_CSS` 字节不变证明、
+> 畸形 SVG `rx.5`、死函数 `_get_forwarded_url`）+ B 组 3 项行为修正（GBK `lstrip`、
+> `is_debug_mode` 缓存、路由单次扫描）。本轮 Lead 现查**刻意跳过 3 项 plan 条目**（理由记在 `b8-work-brief.md`）。
+> **B7 已完成 4/4**（`Ran 3167`，`d82ff73`）：删被遮蔽 48 行、`_escape` 收口、分类树全角缩进（D4）、`transform_rows` 收口。
+> B6 已完成 8/8（`Ran 3146`）：`b0ebd8d` / `a3886ed` / `1680dc3` / `0937b96`。
 
 > **B5 已完成**（`Ran 3101`）。摘要见 §3.1；B5-4（派生态拆级）按 plan 标为可选/风险中，已跳过。
 
@@ -143,14 +145,19 @@ venv/bin/python -m unittest tests.test_xxx -t .
 
 ## 7. 下一步（立即可做）
 
-**B8 无阻塞**（依赖 B7 已完成）。B8 = P2 死代码与整批清理（plan §1640 起）。
+**B9 无阻塞**（依赖 B8 已完成）。B9 = P3 结构拆分（plan §1707 起），**风险最高、最后做**。
 
-**写 B8 工作包前必须自己现查**（plan 正文行号已多次漂移，不得照抄）：
-1. `plan §1640-1698` 列了 B8 的清理项清单（`db.py` 漏转出、隐藏参数抄 3 遍、`MAX_FAIL_COUNT` 死常量、`is_debug_mode` 每次重读、`_ICONS` 畸形 SVG 等）—— **逐项用 `grep` 确认是否仍存在**（前批可能已经顺手改了）
-2. B8 写域很宽（`render.py` `config.py` `report.py` `scheduler.py` `server.py` `db.py` 等，见 plan §1859 的写域表）→ **建议按文件拆成多个子任务，每任务一个文件**，避免单次改动面过大
-3. 删除类改动必须写「这几行属于哪个符号」+ 要求 AST 复核（见 §6 的 B7-1 教训）
+✅ **`docs/compose/reports/b9-work-brief.md` 已写好**，内含 Lead 现查的全部事实：
+- **7 个常量搬移清单**（`render.py` L82-6440，共 1887 行）
+- **8 个常量的 sha256 + 长度基线** + **vendor `hash8 = 72429792`**（契约级护栏）
+- **三处易错点**：`_COMMON_CSS` 有两次赋值（第二次是自引用拼接，B8 后右边只剩 `_BASE_CSS + _COMMON_CSS`）；
+  `_COMMON_JS` **不搬**；`config.py:50/51/60` 与 `report.py:53/54/73` **从 render 导入**这些名字 → `render` 必须继续导出
+- **B9-1（常量外移）先做且独立验收**，再做 **B9-2（config 拆分）**
 
-> 已完成批次的工作包可直接参考：`b5-work-brief.md`、`b6-work-brief.md`、`b7-work-brief.md`（含实测基线、必测断言、回归命令与踩坑）。
+> ⚠️ brief 已明确：**B9-2 若无法安全完成，只交付 B9-1 是完全可接受的**。
+> 「结构拆分」的收益是长期可维护性，不值得用一次性大爆炸改动换回归风险。
+
+> 已完成批次的工作包可直接参考：`b5-work-brief.md` ~ `b8-work-brief.md`（含实测基线、必测断言、回归命令与踩坑）。
 
 ### B6 写作时必须预先核实的点（避免重复 B5 的返工）
 
