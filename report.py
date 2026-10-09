@@ -364,54 +364,6 @@ def parse_result_names(raw: str, count: int = None) -> list[str]:
 # _PAGE_HEADER 已删除：页面头部（<head>/导航栏/公共 CSS）统一由
 # render.render_page_header 生成，见 _render_page_header()。
 
-# 常见 MySQL 错误码 → 业务用户可读提示（spec ux-optimization 批次3#10）。
-# 命中映射时页面展示人话 + 折叠原始错误供技术排查；未命中保留原文。
-_DB_ERROR_HINTS = {
-    1064: "SQL 语法有误，请检查报表的 SQL 语句",
-    1146: "查询的数据表不存在，可能已被删除或改名",
-    1054: "查询的字段不存在，可能已被删除或改名",
-    1142: "数据库账号缺少执行该操作的权限，请联系管理员",
-    1044: "数据库账号缺少访问该库的权限，请联系管理员",
-    2003: "无法连接数据库服务器，请稍后重试或联系管理员检查连接池配置",
-    2005: "数据库主机名无法解析，请检查连接池配置",
-    1045: "数据库账号或密码被拒绝，请检查连接池配置",
-    1205: "数据库锁等待超时，可能有其他任务占用，请稍后重试",
-    1049: "数据库不存在，请检查连接池配置",
-}
-
-
-def humanize_db_error(e) -> tuple[str, str]:
-    """把数据库异常翻译为业务用户可读文案（批次3#10）。
-
-    返回 (friendly, raw)：friendly 为人话主文案；raw 保留原始错误文本，
-    由 render_sql_error_section 折叠展示。errno 提取双通道：优先取
-    mysql.connector.Error 的 errno 属性，否则从消息 "(NNNN)" 模式正则匹配
-    （兼容测试 mock 与第三方包装异常）。未命中映射时 friendly 即原文。
-    """
-    msg = str(e)
-    errno = getattr(e, "errno", None)
-    if not isinstance(errno, int):
-        m = re.search(r"\((\d{4})\)", msg)
-        errno = int(m.group(1)) if m else None
-    hint = _DB_ERROR_HINTS.get(errno) if errno else None
-    return (hint or msg, msg)
-
-
-def render_sql_error_section(friendly: str, raw: str) -> str:
-    """渲染 SQL 执行错误区块：人话主文案 + <details> 折叠原始错误。
-
-    原始错误默认折叠——业务用户只需看懂出了什么问题；
-    需要排查的技术人员可展开复制完整信息反馈给管理员。
-    """
-    from html import escape as _h  # 局部引用避免与模块级 _escape 混淆
-    return (
-        f'<div class="flash flash-error">查询失败：{_h(friendly)}'
-        f'<details><summary style="cursor:pointer;'
-        f'color:#94a3b8;font-size:13px">查看原始错误信息</summary>'
-        f'<pre style="white-space:pre-wrap;word-break:break-all;'
-        f'font-size:12px;color:#7f1d1d;margin:6px 0 0">{_h(raw)}</pre>'
-        f'</details></div>')
-
 
 # 常见 MySQL 错误码 → 用户可读文案（spec ux-optimization 批次3#10）。
 # 数值 errno 优先取异常属性，其次从消息文本 "(HY000)" 形式代码正则提取。
