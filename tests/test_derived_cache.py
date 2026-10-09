@@ -25,6 +25,7 @@ from unittest.mock import patch, MagicMock
 
 import redis_cache
 import report
+import result_transform
 from report import QueryCache, execute_report
 
 
@@ -42,7 +43,7 @@ ROWS = [{"columns": ["id", "v"],
 def _counting_transforms():
     """把 filter_rows / sort_rows 包成带调用计数的版本（走真实实现）。"""
     calls = {"filter": 0, "sort": 0}
-    real_filter, real_sort = report.filter_rows, report.sort_rows
+    real_filter, real_sort = result_transform.filter_rows, result_transform.sort_rows
 
     def counting_filter(*a, **kw):
         calls["filter"] += 1
@@ -67,8 +68,8 @@ class DerivedCacheTestBase(unittest.TestCase):
         params.update(kw)
         with patch("report.db.execute_mysql_query", return_value=ROWS), \
              patch("report.db.create_mysql_connection", return_value=MagicMock()), \
-             patch("report.filter_rows", self.cfilter), \
-             patch("report.sort_rows", self.csort):
+             patch("result_transform.filter_rows", self.cfilter), \
+             patch("result_transform.sort_rows", self.csort):
             return execute_report(1, "SELECT * FROM t", POOL, **params)
 
 
@@ -85,8 +86,8 @@ class TestDerivedCacheHit(unittest.TestCase):
         params.update(kw)
         with patch("report.db.execute_mysql_query", return_value=ROWS), \
              patch("report.db.create_mysql_connection", return_value=MagicMock()), \
-             patch("report.filter_rows", self.cfilter), \
-             patch("report.sort_rows", self.csort):
+             patch("result_transform.filter_rows", self.cfilter), \
+             patch("result_transform.sort_rows", self.csort):
             return execute_report(1, "SELECT * FROM t", POOL, **params)
 
     def test_second_page_request_skips_filter_and_sort(self):
@@ -140,8 +141,8 @@ class TestDerivedCacheLifecycle(unittest.TestCase):
         params.update(kw)
         with patch("report.db.execute_mysql_query", return_value=ROWS), \
              patch("report.db.create_mysql_connection", return_value=MagicMock()), \
-             patch("report.filter_rows", self.cfilter), \
-             patch("report.sort_rows", self.csort):
+             patch("result_transform.filter_rows", self.cfilter), \
+             patch("result_transform.sort_rows", self.csort):
             return execute_report(1, "SELECT * FROM t", POOL, **params)
 
     def test_l1_expiry_discards_derived(self):
@@ -177,8 +178,8 @@ class TestDerivedCacheLifecycle(unittest.TestCase):
                      "rows": [(i, f"n{i:03d}") for i in range(900, 950)]}]
         with patch("report.db.execute_mysql_query", return_value=new_rows), \
              patch("report.db.create_mysql_connection", return_value=MagicMock()), \
-             patch("report.filter_rows", self.cfilter), \
-             patch("report.sort_rows", self.csort):
+             patch("result_transform.filter_rows", self.cfilter), \
+             patch("result_transform.sort_rows", self.csort):
             r2 = execute_report(1, "SELECT * FROM t", POOL,
                                 report=REPORT_CFG, cache=self.cache,
                                 page=1, page_size=10,
@@ -204,8 +205,8 @@ class TestDerivedCacheLifecycle(unittest.TestCase):
             with patch("report.db.execute_mysql_query", return_value=ROWS), \
                  patch("report.db.create_mysql_connection",
                        return_value=MagicMock()), \
-                 patch("report.filter_rows", self.cfilter), \
-                 patch("report.sort_rows", self.csort):
+                 patch("result_transform.filter_rows", self.cfilter), \
+                 patch("result_transform.sort_rows", self.csort):
                 execute_report(1, "DELETE FROM t", POOL, report=cfg,
                                cache=self.cache, page_size=10,
                                sorts=[("v", "asc")])
@@ -236,8 +237,8 @@ class TestDerivedCacheLifecycle(unittest.TestCase):
                        side_effect=counting_source), \
                  patch("report.db.create_mysql_connection",
                        return_value=MagicMock()), \
-                 patch("report.filter_rows", self.cfilter), \
-                 patch("report.sort_rows", self.csort):
+                 patch("result_transform.filter_rows", self.cfilter), \
+                 patch("result_transform.sort_rows", self.csort):
                 results.append(execute_report(
                     1, sql, POOL, report=cfg, cache=self.cache,
                     page=page, page_size=10, sorts=[("v", "asc")]))

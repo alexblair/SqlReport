@@ -49,7 +49,7 @@ from render import format_cell
 from report import (parse_filters, parse_sorts, parse_result_index,
                    WRITE_DENIED_MESSAGE, parse_nested_filter)
 from query_executor import sql_contains_write
-from result_transform import filter_rows, sort_rows, select_columns, column_indices, filter_rows_nested
+from result_transform import select_columns, column_indices, transform_rows
 
 
 # 导出取「全量行」用的 page_size 哨兵。Python 切片对超大 stop 会自动截到末尾，
@@ -122,14 +122,9 @@ def _load_and_transform(sql_query: str, pool_config: dict,
             rows = rows[:max_rows]
             truncated = True
 
-        # 应用内存筛选（与报表页面的筛选逻辑一致）
-        rows = filter_rows(rows, all_columns, filters or [])
-        # 嵌套筛选（FR-013）：在普通筛选之上叠加 AND/OR 条件树
-        if nested_filter:
-            rows = filter_rows_nested(rows, all_columns, nested_filter)
-        # 应用排序（与报表页面的筛选逻辑一致）
-        if sorts:
-            rows = sort_rows(rows, all_columns, sorts)
+        # B7-4 收口：筛选 → 嵌套筛选 → 排序 统一走 result_transform.transform_rows
+        # （与报表页面 / API 同一实现，硬性 #3）
+        rows = transform_rows(rows, all_columns, filters, sorts, nested_filter)
 
     # 确定输出列（按用户自定义顺序，无效列名回退全部列）
     output_columns = select_columns(all_columns, columns)

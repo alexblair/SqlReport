@@ -15,7 +15,7 @@
 3. **读白名单不豁免写文件**：`SELECT … INTO OUTFILE` / `INTO DUMPFILE` 写的是 **MySQL 服务端磁盘**，首关键词虽是 SELECT 也必须判写；判定挂在**相邻关键词对** `(INTO, OUTFILE|DUMPFILE)` 上并插在读白名单分支**之前**（关键词集合用 `codegraph node sql_contains_write` 核对）。
 4. 优先 Redis 快照（`prefer_cache`）→ 否则查 MySQL → 写回快照（分布式锁）；预览 SQL 与配置不一致**不写 Redis**。
 5. L1 `QueryCache` 进程缓存全量行。**全量输出护栏**：`allow_all_output=0` 且 `max_rows>0` → 截断并置 `truncated`；`_cache_matches_limit_policy` 拒绝「已截断但当前要全量」的旧缓存。
-6. 内存顺序：`filter_rows` → `filter_rows_nested` → `sort_rows` → `select_columns` → 分页。
+6. 内存顺序：**`transform_rows`（= `filter_rows` → `filter_rows_nested` → `sort_rows` 的单一实现）** → `select_columns` → 分页。报表页、导出、API **三处必须走这同一个函数**（B7-4 收口；曾三处各写一遍）。
 
 Web 路径 `read_timeout=30`；调度器/API 默认不设（防长查询被截）。`force_rebuild=True` 仅调度保活「先算后换」，用户路径勿传。
 
@@ -41,6 +41,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 - 多列之间 **AND**；未知列/操作符静默跳过；空多值（`" , "`）→ 条件忽略。
 - `invalid_numeric_filters` → 仅报表页 flash。
 - 嵌套：`filter_rows_nested` + `validate_nested_filter`；`resolve_expression` 支持 `now()/today()/yesterday()/tomorrow()/date_add/date_sub`（`now()` 实际返回**今天日期**串）。
+- `column_indices(display_cols, all_columns) -> list[int]` 是列序映射的单一实现；**不要**再手写 `{name: idx ...}` + 列表推导（B7-4 已收口）。
 
 ## 导出（`export.handle_export`）
 

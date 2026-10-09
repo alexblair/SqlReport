@@ -632,3 +632,18 @@ def column_indices(display_cols: list[str], all_columns: list[str]) -> list[int]
     """将显示列列表映射为在 all_columns 中的索引列表（调用方保证列存在）。"""
     index_map = {name: idx for idx, name in enumerate(all_columns)}
     return [index_map[c] for c in display_cols]
+
+
+def transform_rows(all_rows, columns, filters, sorts, nested_filter):
+    """筛选 → 嵌套筛选 → 排序（报表页 / 导出 / API 共用的单一实现）。
+
+    语义与 report._transform_rows 逐字一致：
+      * ``filters`` 为 None/空 → 恒等（filter_rows 内部处理）；
+      * ``nested_filter`` 为假值 → 跳过嵌套筛选（FR-013：与普通 filters 并存）；
+      * ``sorts`` 为 None/空 → 恒等（sort_rows 对空 sorts 直接返回原列表）。
+    纯函数，不含分页/截断逻辑（分页不属变换层）。
+    """
+    filtered = filter_rows(all_rows, columns, filters or [])
+    if nested_filter:
+        filtered = filter_rows_nested(filtered, columns, nested_filter)
+    return sort_rows(filtered, columns, sorts or [])

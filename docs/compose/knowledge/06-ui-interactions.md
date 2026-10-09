@@ -9,6 +9,8 @@
 - **公共 CSS/JS 用内容 hash 版本锁目录**：`ensure_common_assets()` 写 `static/vendor/self@{sha8}/common.css|js`，hash = `sha256(CSS+"\n;;;"+JS)` 前 8 位（改 JS 也换 URL）；`/static/vendor/` 直出 + `immutable`。外链 URL 另有进程级缓存（`_COMMON_ASSET_URLS`）：改了 `render.py`/`report.py`/`config.py` 必须**重启服务再验**，否则仍指向旧 hash 目录。
 - **`render.py` 有模块级 `logger`**（`logging.getLogger(__name__)`）：`_get_common_asset_urls` 写盘失败必须 `logger.exception` 留痕——失败会把 `("", "")` 哨兵**永久缓存**，之后每页内联约 100KB 且永不重试（曾静默无信号，B6-5）。**禁止**在模块级调 `basicConfig`（`setup_logging` 之前 render 就可能被 import）。
 - **HTML 响应必须 `Cache-Control: no-store`**：页脚脚本内联在 HTML 里，不设禁缓存时用户标签页可能长期执行旧脚本（症状「修复上线了但用户那儿还是坏的」）。
+- **`_escape` 只有一份**（`render._escape`，`config` 直接 import 复用，B7-2）：它先 `format_cell` 再 `escape` → `Decimal` 不会显示成科学计数法。**不得**在别处另写 `html.escape(str(v))`。
+- **`<option>` 里的层级缩进必须用全角 `\u3000`**（B7-3 / D4）：半角空格会被 HTML 折叠 → 缩进不可见。每级 1 个全角。
 - 术语：全部用户可感知文字简体中文；术语表见 `docs/compose/spec/ui-redesign-visual-spec.md` §5（UI v2 未重定术语，该节继续有效；prefer_cache/Redis 快照等实现词禁止直出 UI）。
 
 ## 统一 UI 体系（必须复用）

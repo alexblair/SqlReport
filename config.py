@@ -58,6 +58,7 @@ from render import (
     _build_desc_summary_html,
     _WARN_BOX_STYLE,
     _MD_CSS,
+    _escape,
 )
 from report import parse_result_names
 import markdown_render
@@ -200,11 +201,6 @@ _REPORTS_EXTRA_CSS = ""  # 报表配置页样式已并入 render._COMMON_CSS
 # + Markdown 排版 CSS（_MD_CSS 必须在 _CONFIG_EXTRA_CSS 之后，保证列表缩进等规则生效）
 _CONFIG_MD_EXTRA_CSS = (_CONFIG_EXTRA_CSS + markdown_render.codehilite_css()
                         + _MD_CSS)
-
-
-def _escape(text: str) -> str:
-    """HTML 转义"""
-    return html_mod.escape(str(text) if text is not None else "")
 
 
 def _link_btn(url: str, label: str, cls: str = "btn btn-outline btn-sm") -> str:
@@ -1178,7 +1174,8 @@ def render_category_form_page(conn, category_id: int = None, flash: str = None, 
         if c["id"] in descendants:
             continue
         sel = ' selected' if cur_parent_id != "" and str(c["id"]) == str(cur_parent_id) else ''
-        prefix = "  " * _get_depth(c, all_cats)
+        # 缩进用全角 U+3000：半角空格在 <option> 中会被 HTML 折叠为不可见（D4 裁决）
+        prefix = "\u3000" * _get_depth(c, all_cats)
         parent_opts += f'<option value="{c["id"]}"{sel}>{prefix}{_escape(c["name"])}</option>'
 
     form_html = f"""<div class="card">

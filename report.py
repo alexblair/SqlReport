@@ -34,10 +34,11 @@ import redis_cache
 import static_cache
 import app_config
 import config_db
-from result_transform import (filter_rows, sort_rows, select_columns,
+from result_transform import (select_columns,
                               calc_total_pages, invalid_numeric_filters,
-                              NUMERIC_FILTER_OPS, filter_rows_nested,
-                              validate_nested_filter)
+                              NUMERIC_FILTER_OPS,
+                              validate_nested_filter, column_indices,
+                              transform_rows)
 from query_executor import sql_contains_write, sql_has_persistent_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
@@ -1263,12 +1264,12 @@ def execute_report(report_id: int, sql_query: str, pool_config: dict,
 
 
 def _transform_rows(all_rows, columns, filters, sorts, nested_filter):
-    """筛选 → 嵌套筛选 → 排序。派生态缓存的「计算」部分（纯函数）。"""
-    filtered = filter_rows(all_rows, columns, filters or [])
-    if nested_filter:
-        # 嵌套筛选（FR-005 与既有 filters 并存；FR-006 纯函数不污染缓存）
-        filtered = filter_rows_nested(filtered, columns, nested_filter)
-    return sort_rows(filtered, columns, sorts or [])
+    """筛选 → 嵌套筛选 → 排序。派生态缓存的「计算」部分（纯函数）。
+
+    B7-4 收口：单一实现已上提到 result_transform.transform_rows，
+    本函数保留为薄委托（派生缓存与既有测试仍引用该名字）。
+    """
+    return transform_rows(all_rows, columns, filters, sorts, nested_filter)
 
 
 def _cache_matches_limit_policy(truncated: bool, limit_rows: bool) -> bool:
@@ -1737,8 +1738,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
         all_columns, display_columns, sorts, filters, report_id, qs_page_size, cols_param, result_param,
         nested_filter=nested_filter)
 
-    col_index_map = {name: idx for idx, name in enumerate(all_columns)}
-    display_indices = [col_index_map[c] for c in display_columns]
+    display_indices = column_indices(display_columns, all_columns)
     # 批次5#19：空态区分——有筛选时显示「没有符合筛选条件的行」+ 清除筛选链接
     clear_filters_href = build_clear_filters_href(
         report_id, qs_page_size, sorts, cols_param, result_param, nested_filter=nested_filter)
