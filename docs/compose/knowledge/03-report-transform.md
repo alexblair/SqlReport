@@ -23,6 +23,7 @@ Web 路径 `read_timeout=30`；调度器/API 默认不设（防长查询被截�
 
 ```text
 GET /report[?id=&page=&page_size=&sort=&dir=&f_=&op_=&cols=&result=&nested_filter=&flash=]
+（`page_size` **仅 UI 分页**，上限 `MAX_UI_PAGE_SIZE=1000`，必须在 handle_request 与 refresh_cache **两个入口**都夹紧；**不适用** API 翻页与导出全量 —— B6-7）
 POST /report  action=refresh_cache
 POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 取最后值）
 ```

@@ -269,6 +269,17 @@ def parse_nested_filter(qs) -> dict | None:
     return parsed
 
 
+# UI 报表页「每页显示多少条」的硬上限（用户裁决，B6-7）。
+# 前端下拉仅提供 [10, 20, 50, 100, 200]，但 URL/POST 可传任意大值 → 会一次性
+# 物化并渲染整表；此上限封死该放大路径。
+MAX_UI_PAGE_SIZE = 1000
+
+
+def _clamp_ui_page_size(value: int) -> int:
+    """仅用于 UI 输入夹紧；不适用于导出全量、API 翻页、报表配置的「允许全部输出」。"""
+    return max(1, min(int(value), MAX_UI_PAGE_SIZE))
+
+
 def parse_sorts(qs):
     """
     从 parse_qs 结果中解析多字段排序参数。
@@ -2070,7 +2081,7 @@ def _handle_refresh_cache(conn, form_data: dict) -> tuple[int, str, dict]:
             page_size = None
             parsed_page_size = app_config.safe_int(_qs_val(form_data, "page_size"), None)
             if parsed_page_size is not None:
-                page_size = max(1, parsed_page_size)
+                page_size = _clamp_ui_page_size(parsed_page_size)
             sorts = parse_sorts(form_data)
             filters = _parse_filters(form_data)
             active_index = parse_result_index(form_data)
@@ -2214,7 +2225,7 @@ def handle_request(conn, method: str, path: str, query: str,
     if "page_size" in qs and qs["page_size"][0]:
         parsed_page_size = app_config.safe_int(qs["page_size"][0], None)
         if parsed_page_size is not None:
-            page_size = max(1, parsed_page_size)
+            page_size = _clamp_ui_page_size(parsed_page_size)
 
     # 多字段排序
     sorts = parse_sorts(qs)

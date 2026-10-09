@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from collections import OrderedDict
 
@@ -36,6 +37,8 @@ import file_permissions
 # 注意：仅用于 meta.last_invalidated_at 展示；命中判定不再依赖该记录
 _MAX_LAST_INVALIDATED = 512
 _last_invalidated: OrderedDict[str, float] = OrderedDict()
+# 该表在 ThreadingHTTPServer 下被多线程读写，读写均需持锁
+_last_invalidated_lock = threading.Lock()
 
 # 静态缓存文件统一后缀
 JSON_SUFFIX = ".json"
@@ -242,15 +245,17 @@ def write_versioned_file(file_path: str, version8: str, content: str) -> bool:
 
 def record_invalidated(url_path: str) -> None:
     """记录 url_path 的静态文件被判定失效的时刻（进程内存，有界容量）。"""
-    _last_invalidated[url_path] = time.time()
-    _last_invalidated.move_to_end(url_path)
-    if len(_last_invalidated) > _MAX_LAST_INVALIDATED:
-        _last_invalidated.popitem(last=False)
+    with _last_invalidated_lock:
+        _last_invalidated[url_path] = time.time()
+        _last_invalidated.move_to_end(url_path)
+        if len(_last_invalidated) > _MAX_LAST_INVALIDATED:
+            _last_invalidated.popitem(last=False)
 
 
 def get_last_invalidated(url_path: str) -> float | None:
     """返回 url_path 上次失效时刻；进程重启后无记录返回 None。"""
-    return _last_invalidated.get(url_path)
+    with _last_invalidated_lock:
+        return _last_invalidated.get(url_path)
 
 
 def invalidate(url_path: str) -> bool:

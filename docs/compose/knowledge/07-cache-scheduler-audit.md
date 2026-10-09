@@ -21,7 +21,7 @@
 
 ## L3 静态 API 缓存（`static_cache`）
 
-见 `05-api.md`。`enable` 默认 true；`try_read` 校验版本+TTL(mtime)；`write_versioned_file` 无 meta 模板端点；`invalidate` 删稳定+全部 v*；`record_invalidated` 仅展示不参与命中。
+见 `05-api.md`。`enable` 默认 true；`try_read` 校验版本+TTL(mtime)；`write_versioned_file` 无 meta 模板端点；`invalidate` 删稳定+全部 v*；`record_invalidated` 仅展示不参与命中（`_last_invalidated` 有界 512，读写均持 `_last_invalidated_lock` —— B6-6）。
 
 ## 定时任务（`scheduler`）
 

@@ -19,6 +19,7 @@ import time
 import json
 import hashlib
 import os
+import logging
 import threading
 from decimal import Decimal
 import app_config
@@ -28,6 +29,8 @@ import static_cache
 from filter_help import (render_filter_help, FILTER_HINT_SUFFIX,
                        render_nested_filter_help_popup, nested_filter_help_content)
 import markdown_render
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SVG 图标辅助（替代 emoji 字符，符合设计规范 icon 集合）
@@ -2298,6 +2301,7 @@ def _get_common_asset_urls() -> tuple[str, str]:
                 try:
                     urls = ensure_common_assets()
                 except Exception:
+                    logger.exception("公共资产写入失败，回退内联")
                     urls = None
                 _COMMON_ASSET_URLS = urls or ("", "")
     return _COMMON_ASSET_URLS

@@ -7,6 +7,7 @@
 - **设计令牌唯一来源 = `render.py` 的 `_BASE_CSS: :root`**（色板 / 字阶 11·12·13·14·16·18·22·28 / 间距 4px 栅格 / 圆角 / 阴影 / 焦点圈）。页面与分卷**不得另起颜色、间距取值**；颜色、背景、边框、字体、内外边距、尺寸、阴影、透明度一律走 class/令牌，`style="…"` 只允许 display/visibility/gap/flex/align/text-align/overflow 等布局行为性声明。
 - 视觉只在两层：`render._BASE_CSS`（令牌 + 基座 + 登录页）+ `render._COMMON_CSS`（页壳/组件/页面级规则）。`report._CSS` / `config._CONFIG_EXTRA_CSS` / `config._REPORTS_EXTRA_CSS` / server 登录页与错误页内联样式均为同名空常量（仅兼容既有引用）。局部样式走 `render_page_header(extra_css=...)`，**不要改 `_COMMON_CSS` 塞局部样式**。
 - **公共 CSS/JS 用内容 hash 版本锁目录**：`ensure_common_assets()` 写 `static/vendor/self@{sha8}/common.css|js`，hash = `sha256(CSS+"\n;;;"+JS)` 前 8 位（改 JS 也换 URL）；`/static/vendor/` 直出 + `immutable`。外链 URL 另有进程级缓存（`_COMMON_ASSET_URLS`）：改了 `render.py`/`report.py`/`config.py` 必须**重启服务再验**，否则仍指向旧 hash 目录。
+- **`render.py` 有模块级 `logger`**（`logging.getLogger(__name__)`）：`_get_common_asset_urls` 写盘失败必须 `logger.exception` 留痕——失败会把 `("", "")` 哨兵**永久缓存**，之后每页内联约 100KB 且永不重试（曾静默无信号，B6-5）。**禁止**在模块级调 `basicConfig`（`setup_logging` 之前 render 就可能被 import）。
 - **HTML 响应必须 `Cache-Control: no-store`**：页脚脚本内联在 HTML 里，不设禁缓存时用户标签页可能长期执行旧脚本（症状「修复上线了但用户那儿还是坏的」）。
 - 术语：全部用户可感知文字简体中文；术语表见 `docs/compose/spec/ui-redesign-visual-spec.md` §5（UI v2 未重定术语，该节继续有效；prefer_cache/Redis 快照等实现词禁止直出 UI）。
 
