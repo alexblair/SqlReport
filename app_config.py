@@ -54,6 +54,15 @@ TRUTHY_VALUES = frozenset({"true", "1", "yes"})
 
 _config: dict[str, Any] | None = None
 
+# B8-1：DEBUG 覆盖配置缓存。is_debug_mode() 在配置页请求路径上被调用
+# （config.py 调用点），不能每次调用都 open() + json.load()。
+# 缓存键 = 解析后的 DEBUG 配置路径：环境变量换了路径即立即失效；
+# 显式重载（reload_config() 或 _config 被置 None 后的 get_config()）
+# 走 _invalidate_debug_config_cache() 清空。
+_DEBUG_CACHE_UNSET = object()
+_debug_config_cache: Any = _DEBUG_CACHE_UNSET
+_debug_config_cache_path: str | None = None
+
 # ---------------------------------------------------------------------------
 # 加载
 # ---------------------------------------------------------------------------
@@ -73,20 +82,38 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _invalidate_debug_config_cache() -> None:
+    """清空 DEBUG 覆盖配置缓存（重载路径专用：reload_config / _config 置 None）。"""
+    global _debug_config_cache, _debug_config_cache_path
+    _debug_config_cache = _DEBUG_CACHE_UNSET
+    _debug_config_cache_path = None
+
+
 def _load_debug_config() -> dict[str, Any] | None:
     """读取 DEBUG 配置文件（默认 app_config.debug.json，可用 DEBUG_CONFIG_FILE 覆盖）。
 
     文件不存在时返回 None；存在但解析失败时打印警告并返回 None（不阻断启动）。
+
+    B8-1：结果按「解析后的 DEBUG 配置路径」缓存，避免 is_debug_mode() 在请求
+    路径上重复 open()+json.load()。路径变化或被 _invalidate_debug_config_cache()
+    清空时重新读取，因此 env 改变后仍然立刻反映。
     """
+    global _debug_config_cache, _debug_config_cache_path
     path = os.environ.get("DEBUG_CONFIG_FILE", DEFAULT_DEBUG_CONFIG_PATH)
+    if _debug_config_cache is not _DEBUG_CACHE_UNSET \
+            and _debug_config_cache_path == path:
+        return _debug_config_cache
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            result = json.load(f)
     except FileNotFoundError:
-        return None
+        result = None
     except (json.JSONDecodeError, OSError) as e:
         print(f"[app_config] 警告: DEBUG 配置文件 {path} 解析失败 ({e})，忽略覆盖")
-        return None
+        result = None
+    _debug_config_cache = result
+    _debug_config_cache_path = path
+    return result
 
 
 def _apply_debug_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -160,6 +187,8 @@ def get_config() -> dict[str, Any]:
     """获取应用配置（懒加载，首次调用时从文件读取）。"""
     global _config
     if _config is None:
+        # 重新走加载路径 = 重新读取 DEBUG 覆盖（缓存失效）
+        _invalidate_debug_config_cache()
         _config = _load_config()
     return _config
 
@@ -167,6 +196,7 @@ def get_config() -> dict[str, Any]:
 def reload_config() -> dict[str, Any]:
     """强制重新加载配置文件（测试用）。"""
     global _config
+    _invalidate_debug_config_cache()
     _config = _load_config()
     return _config
 

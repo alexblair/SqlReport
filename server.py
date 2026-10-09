@@ -248,44 +248,50 @@ def _vendor_mime_for(path: str) -> str | None:
     return _VENDOR_MIME_MAP.get(ext)
 
 
-def _match_route(method: str, path: str) -> RouteEntry | None:
-    """在路由表中查找匹配的路由条目。
+def _scan_routes(path: str, method: str | None = None
+                 ) -> tuple[RouteEntry | None, list[str]]:
+    """单次遍历路由表，返回 (匹配条目, 该路径允许的方法列表)。
+
+    B8-2：404/405 路径原先要扫两遍 ROUTES（`_match_route` 未命中后
+    再调 `_allowed_methods_for_path`）；合并为一次遍历，可观测行为
+    （405 的 Allow 头内容与顺序、404/405 分流条件）完全不变。
 
     Args:
-        method: HTTP 方法（GET/POST/OPTIONS）。
         path: URL 路径。
+        method: 请求方法；None 表示只收集该路径允许的方法。
 
     Returns:
-        匹配的 RouteEntry，未匹配返回 None（方法不支持或路径未知）。
+        (匹配的 RouteEntry 或 None, 允许的方法列表)。
     """
+    matched: RouteEntry | None = None
+    methods: set[str] = set()
     for route in ROUTES:
         if not route.pattern.search(path):
             continue
         if route.method == "*":
             # 通配路由仅实际分发 GET/POST/OPTIONS，其余方法视为不支持
-            if method not in ("GET", "POST", "OPTIONS"):
-                continue
-        elif method != route.method:
-            continue
-        return route
-    return None
+            methods.update(("GET", "POST", "OPTIONS"))
+            if matched is None and method in ("GET", "POST", "OPTIONS"):
+                matched = route
+        else:
+            methods.add(route.method)
+            if matched is None and method == route.method:
+                matched = route
+    return matched, sorted(methods, key=_METHOD_ORDER.get)
 
 
 _METHOD_ORDER = {m: i for i, m in enumerate(
     ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"))}
 
 
+def _match_route(method: str, path: str) -> RouteEntry | None:
+    """在路由表中查找匹配的路由条目（薄包装，保留给既有调用方/测试）。"""
+    return _scan_routes(path, method)[0]
+
+
 def _allowed_methods_for_path(path: str) -> list[str]:
-    """计算路径允许的 HTTP 方法列表（用于 405 响应 Allow 头）。"""
-    methods: set[str] = set()
-    for route in ROUTES:
-        if not route.pattern.search(path):
-            continue
-        if route.method == "*":
-            methods.update(("GET", "POST", "OPTIONS"))
-        else:
-            methods.add(route.method)
-    return sorted(methods, key=_METHOD_ORDER.get)
+    """计算路径允许的 HTTP 方法列表（用于 405 响应 Allow 头；薄包装）。"""
+    return _scan_routes(path)[1]
 
 
 class BodyReadError(Exception):
@@ -450,9 +456,8 @@ class ReportHandler(http.server.BaseHTTPRequestHandler):
                     {"Allow": "GET"})
             return self._serve_static_vendor(path)
 
-        route = _match_route(method, path)
+        route, allowed = _scan_routes(path, method)
         if route is None:
-            allowed = _allowed_methods_for_path(path)
             if allowed:
                 return self._send_html(
                     405, _render_error_page(405, "方法不允许"),
@@ -962,17 +967,6 @@ def _get_client_ip(headers, client_address) -> str:
         if ips:
             return ips[0]
     return client_address[0]
-
-
-def _get_forwarded_url(headers, path: str) -> str:
-    """
-    构建代理透传后的原始 URL。
-
-    优先 X-Forwarded-Host/Proto，其次 Host 头。
-    """
-    proto = headers.get("X-Forwarded-Proto", "http")
-    host = headers.get("X-Forwarded-Host", "") or headers.get("Host", "localhost")
-    return f"{proto}://{host}{path}"
 
 
 # ---------------------------------------------------------------------------

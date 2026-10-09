@@ -320,13 +320,15 @@ def _encode_content(content: str, charset: str) -> bytes:
     将字符串内容编码为指定字符集的字节。
 
     charset 支持 'gbk' 和 'utf8'。
-    GBK 编码时移除 BOM 字符（\ufeff），因为 GBK 不支持该字符。
+    GBK 编码时仅移除开头的 BOM 字符（\ufeff），因为 GBK 不支持该字符；
+    正文中间合法出现的 \ufeff 必须保留（B8-3：原 replace 会误删数据）。
     编码失败时使用 replace 策略。
     """
     if charset == "utf8":
         return content.encode("utf-8")
-    # GBK 编码：先移除 BOM 字符（CSV 导出时写入的 \ufeff 不可编码为 GBK）
-    clean = content.replace("\ufeff", "")
+    # GBK 编码：只剥离开头 BOM（CSV 导出时写入的 \ufeff 不可编码为 GBK），
+    # 不得用 replace —— 那会连带删除单元格内合法的 U+FEFF
+    clean = content.lstrip("\ufeff")
     return clean.encode("gbk", errors="replace")
 
 

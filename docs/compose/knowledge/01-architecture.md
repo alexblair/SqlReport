@@ -31,6 +31,7 @@
 | `CONFIG_FILE` / `DEBUG_CONFIG_FILE` | 显式 CONFIG_FILE 且未设 DEBUG_CONFIG_FILE → **跳过** debug 叠加 |
 
 `get_server_config` 中 `HOST`/`PORT` 环境变量优先级最高。读取 API（`get_config`/`reload_config`/`is_debug_mode`/`get_trust_xff`/`get_active_db_config`/`get_redis_config`/`serialize_*`）与分段字段（`server`/`log`/`redis`/`static_cache`/`file_permissions`/`audit_db`/`config_db[]`/`test_mysql` 等）见 `app_config.py`。
+`_load_debug_config` 带**按路径为键**的缓存（B8-1）；env 换路径会自动重读，改动命令式清缓存用 `_invalidate_debug_config_cache()`（`reload_config()` 与 `get_config()` 的 `_config is None` 重载路径已自动调它）。
 
 ### 测试与 DEBUG 的隔离（硬性）
 

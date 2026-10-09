@@ -9,7 +9,7 @@ test_auth_session.py — 认证与会话域补充测试（批次 T1）
 5. 登录参数 SQL 注入防护
 6. 首次启动默认 admin/admin123 自动创建
 7. session 字典并发安全
-8. X-Forwarded-For 客户端 IP 提取与 _get_forwarded_url 行为
+8. X-Forwarded-For 客户端 IP 提取（_get_client_ip）行为
 9. _send_html 写响应时客户端断开 → BrokenPipeError/ConnectionResetError 静默
 10. 认证审计事件链路（login / login_failed / logout 写入 audit_db）
 11. 同一用户两次登录产生两个独立 session
@@ -433,7 +433,7 @@ class TestHomeRedirect(unittest.TestCase):
 
 
 class TestProxyHelpers(unittest.TestCase):
-    """代理辅助函数（_get_client_ip / _get_forwarded_url）测试"""
+    """代理辅助函数（_get_client_ip）测试"""
 
     def test_get_client_ip_default_ignores_xff(self):
         """缺口8（修复）：默认（trust_xff=False）客户端 IP 取 socket 对端地址。
@@ -467,24 +467,6 @@ class TestProxyHelpers(unittest.TestCase):
         self.assertEqual(srv._get_client_ip(headers, ("10.0.0.1", 1234)), "10.0.0.1")
         with patch("server.get_trust_xff", return_value=True):
             self.assertEqual(srv._get_client_ip(headers, ("10.0.0.1", 1234)), "10.0.0.1")
-
-    def test_get_forwarded_url_proto_host_priority(self):
-        """缺口8：X-Forwarded-Proto/Host 优先于 Host 头"""
-        headers = {
-            "X-Forwarded-Proto": "https",
-            "X-Forwarded-Host": "app.example.com",
-            "Host": "internal:8080",
-        }
-        self.assertEqual(srv._get_forwarded_url(headers, "/report"), "https://app.example.com/report")
-
-    def test_get_forwarded_url_host_fallback(self):
-        """缺口8：无 X-Forwarded-Host 时回退 Host 头，proto 默认 http"""
-        headers = {"Host": "example.com:8000"}
-        self.assertEqual(srv._get_forwarded_url(headers, "/config"), "http://example.com:8000/config")
-
-    def test_get_forwarded_url_defaults(self):
-        """缺口8：无任何头时默认 http://localhost"""
-        self.assertEqual(srv._get_forwarded_url({}, "/login"), "http://localhost/login")
 
 
 class TestSendHtmlClientDisconnect(unittest.TestCase):

@@ -43,7 +43,7 @@ _ICONS = {
     "settings": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.3 3.3l1.4 1.4M11.3 11.3l1.4 1.4M3.3 12.7l1.4-1.4M11.3 4.7l1.4-1.4"/></svg>',
     "list": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/></svg>',
     "folder": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 3a1 1 0 011-1h4l2 2h5a1 1 0 011 1v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>',
-    "chart": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="10" width="3" height="4" rx.5"/><rect x="6.5" y="6" width="3" height="8" rx.5"/><rect x="11" y="2" width="3" height="12" rx.5"/></svg>',
+    "chart": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="10" width="3" height="4" rx="0.5"/><rect x="6.5" y="6" width="3" height="8" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg>',
     "key": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14.5 1.5l-3 3M3 9V6a3 3 0 013-3h3"/><circle cx="8.5" cy="8.5" r="2.5"/></svg>',
     "calendar": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx1.5"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="5" y1="1.5" x2="5" y2="4"/><line x1="11" y1="1.5" x2="11" y2="4"/></svg>',
     "refresh": '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,8 4.5,5.5 7,8"/><path d="M11 2.5A5.5 5.5 0 0114 7h-2a3.5 3.5 0 00-3.5-3.5"/></svg>',
@@ -1468,11 +1468,9 @@ table.sched-reports .bind-col{width:56px;text-align:center}
 """
 
 # 迷你按钮公共样式（config 页与 report 页共享；类拆分与内联现状视觉等价）
-_MINIBTN_CSS = ""  # 迷你按钮变体已并入 _COMMON_CSS 第 22 节（保留变量名兼容既有引用）
 
 # 黄色警示条公共样式（色值统一为较新的 #fefce8 系；!important 覆盖
 # report 页 .controls .cache-badge 等既有类，保证与内联时代视觉一致）
-_FLASH_WARN_CSS = ""  # flash-warn 已并入 _COMMON_CSS（保留变量名兼容既有引用）
 
 # 黄色警示框内联样式（flash-warn 块级组件：表单警示、结果集名称警示共用，防样式漂移）
 _WARN_BOX_STYLE = "margin:8px 0;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;font-size:13px"
@@ -1535,9 +1533,8 @@ _MD_CSS = """
 .md-body del { color: #64748b; }
 """
 
-_B6_CSS = ""  # 检索过滤框/最近查看卡片已并入 _COMMON_CSS 第 22 节（保留变量名兼容既有引用）
 
-_COMMON_CSS = _BASE_CSS + _COMMON_CSS + _MINIBTN_CSS + _FLASH_WARN_CSS + _B6_CSS
+_COMMON_CSS = _BASE_CSS + _COMMON_CSS
 
 # ---------------------------------------------------------------------------
 # 公共 JavaScript（交互式 UI 组件）
@@ -4487,10 +4484,8 @@ function setReportsView(v, save) {{
                     ep_key = "有 Key" if ep.get("api_key") else "无 Key"
                     tooltip_lines.append(f"  [{ep_status}] {ep_name} ({ep_path}) - {ep_format}, {ep_key}")
                 tooltip = "\\n".join(tooltip_lines)
-                api_cell = f'<a href="/config/reports/{rpt_id}/edit#api-endpoints" title="{_escape(tooltip)}">🔌 {summary}</a>'
                 api_plain = f'🔌 {summary}'
             else:
-                api_cell = '<span>—</span>'
                 api_plain = "—"
 
             # 确认稿 r3 反馈①：SQL 摘要窄列单行截断，完整 SQL 悬浮 title 预览
@@ -4580,7 +4575,6 @@ function setReportsView(v, save) {{
   </div>
 {inner}
 </section>"""
-        return html
         return html
 
     tab_html = _render_report_sections(cat_tree)

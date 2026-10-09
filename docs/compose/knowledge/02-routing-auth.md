@@ -6,7 +6,7 @@
 1. urlparse → path.rstrip("/") → unquote
 2. /static/vendor/ 前缀 → 白名单静态（仅 GET；MIME 白名单；realpath 防穿越；
    Cache-Control: public, max-age=31536000, immutable）
-3. _match_route（ROUTES 列表顺序首次匹配；method="*" 仅 GET/POST/OPTIONS）
+3. `_scan_routes`（**一次遍历**同时给出匹配条目与该路径的允许方法，B8-2；`_match_route`/`_allowed_methods_for_path` 保留为薄包装供测试与兼容）——ROUTES 列表顺序首次匹配；method="*" 仅 GET/POST/OPTIONS
    无匹配：有 Allow→405；否则 404（统一 _render_error_page）
 4. needs_auth → _authenticate
    Cookie session_id → auth.get_session_user

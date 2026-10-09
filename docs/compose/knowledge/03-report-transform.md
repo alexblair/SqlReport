@@ -53,7 +53,7 @@ POST /report/preview   sql_query / id / pool_id / allow_write（hidden+checkbox 
 
 | 项 | 行为 |
 |----|------|
-| 默认 | CSV + **gbk** 字符集；GBK 剥 BOM（仅 CSV）。**JSON 恒 UTF-8**（RFC 8259，与 `/api/*` 一致）：解析后强制 `charset="utf8"`，ZIP 内 `.json` 同样是 UTF-8，面板选别的字符集会被忽略 |
+| 默认 | CSV + **gbk** 字符集；GBK 剥 BOM（仅 CSV）——**必须用 `lstrip("\ufeff")`，不得用 `replace`**（后者会吃掉单元格数据里合法出现的 U+FEFF，B8-3）。**JSON 恒 UTF-8**（RFC 8259，与 `/api/*` 一致）：解析后强制 `charset="utf8"`，ZIP 内 `.json` 同样是 UTF-8，面板选别的字符集会被忽略 |
 | 变换顺序 | 查询 → 选结果集 → **先 max_rows 截断** → 筛选 → 排序 → 列 |
 | **数据来源** | 走 `report.execute_report`（**复用 L1 进程缓存 / L2 Redis 快照**）；`report_id=None` 时保留旧的直连分支 |
 | 写护栏 | 403 `WRITE_DENIED_MESSAGE`（在调用 `execute_report` **之前**判定，不依赖其 `PermissionError`） |

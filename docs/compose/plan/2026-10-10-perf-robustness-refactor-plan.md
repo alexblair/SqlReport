@@ -47,7 +47,7 @@ implementer 最容易踩空、且 spec 未逐条明说的五类：
 | B5 | P1 性能 | `config_db.py` `result_transform.py` `config.py` | B2 | ✅ 完成（Ran 3101；B5-4 派生态拆级按计划跳过——标为可选/风险中，收益仅未命中时体现） |
 | B6 | P1 健壮性 + `page_size` 封顶 + CSV 开关 | `redis_cache.py` `server.py` `static_cache.py` `render.py` `query_executor.py` `report.py` `export.py` | B3,B4,B5 | ✅ 完成 8/8（Ran 3146） |
 | B7 | P1 语义收口 | `config.py` `render.py` `export.py` `report.py` `result_transform.py` | B5,B6 | ✅ 完成 4/4（Ran 3167） |
-| B8 | P2 死代码清理 | 多文件 | B7 | ☐ |
+| B8 | P2 死代码清理 | 多文件 | B7 | ✅ 完成（Ran 3172） |
 | B9 | P3 结构拆分 | 新增 `ui_assets.py` 等 | B8 | ☐ |
 
 **断点续做**：以本表**未勾选的第一行**为起点；若其「依赖」列任一为 ☐，**不得开始**。
