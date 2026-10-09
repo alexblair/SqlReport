@@ -17,12 +17,15 @@
     venv/bin/python scripts/agent/session_cost.py --session <id>
     venv/bin/python scripts/agent/session_cost.py --all        # 汇总本项目全部会话
     venv/bin/python scripts/agent/session_cost.py --selftest   # 纯内存自测（不读磁盘）
+    venv/bin/python scripts/agent/session_cost.py --check      # 中途体检：一行结论（步数/上下文/批处理率）
 
 输出只给长度与片段，绝不整贴正文 —— 工具自身即 token 效率示范。
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -35,6 +38,7 @@ MAX_ADD_TOKENS = 8000      # 单步新增上下文上限（超出即「超阈步
 MAX_STEPS = 60             # 单会话步数上限（超出建议落盘交接、换会话续做）
 MAX_PEAK_TOKENS = 120000   # 单步上下文上限（超出后每步都在为历史付全价）
 TOP_N = 6                  # 报告里列出的最贵步数
+MAX_ONE_CALL_RATIO = 40    # 单调用步占比上限（%）：碎步是成本主乘数（硬性 #20②）
 
 
 def project_root() -> Path:
@@ -172,7 +176,14 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     if n > MAX_STEPS:
         violations.append({"kind": "会话步数超阈", "step": n, "value": n,
                            "limit": MAX_STEPS, "calls": []})
-
+    one_call = sum(1 for s in seq if len(s["calls"]) == 1)
+    aoci_steps = sum(1 for s in seq if any(c[0].startswith("mcp__aoci") for c in s["calls"]))
+    maintain_calls = sum(1 for s in seq for c in s["calls"] if c[0].endswith("aoci_maintain"))
+    aoci_read_calls = sum(1 for s in seq for c in s["calls"]
+                          if c[0].endswith(("aoci_search", "aoci_get_entries",
+                                            "aoci_overview", "aoci_header")))
+    precheck_calls = sum(1 for s in seq for c in s["calls"]
+                         if any("aoci_precheck" in str(x) for x in c))
     return {
         "steps": n,
         "total": total,
@@ -189,6 +200,11 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "tools": tools,
         "errors": errors,
         "users": users,
+        "one_call_steps": one_call,
+        "aoci_steps": aoci_steps,
+        "maintain_calls": maintain_calls,
+        "aoci_read_calls": aoci_read_calls,
+        "precheck_calls": precheck_calls,
         "dups": {k: v for k, v in dup_counter.items() if v > 1},
         "violations": violations,
     }
@@ -210,6 +226,16 @@ def render(summary: dict[str, Any], label: str) -> str:
                f"平均每步≈{s['total'] // n:,} tokens")
     hist = ", ".join(f"{k}调用:{v}步" for k, v in sorted(s["calls_hist"].items()))
     out.append(f"工具调用 {s['calls_total']} 次，批处理分布 {hist}")
+    one = s.get("one_call_steps", 0)
+    out.append(f"批处理率：单调用步 {one}/{n} = {100 * one // max(n, 1)}%"
+               f"（#20② 目标 ≤{MAX_ONE_CALL_RATIO}%；一步 2–4 个互不依赖调用最省）")
+    if s.get("maintain_calls"):
+        out.append(f"AOCI maintain 调用 {s['maintain_calls']} 次"
+                   f"（硬性 #21：仅最终稳定态一次；中间态或重复调用即违规）")
+    _pre = s.get("precheck_calls", 0)
+    if _pre or s.get("aoci_read_calls") or s.get("maintain_calls"):
+        out.append(f"AOCI 改前定向读 {_pre} 次（aoci_precheck）/ MCP 读 "
+                   f"{s.get('aoci_read_calls', 0)} 次（#21：改前定向读优先，收尾 maintain 一次）")
     if s["users"]:
         out.append("人类消息：" + " ／ ".join(u[:60].replace("\n", " ") for u in s["users"][:4]))
     out.append("")
@@ -244,6 +270,49 @@ def render(summary: dict[str, Any], label: str) -> str:
     return "\n".join(out)
 
 
+def check(summary: dict[str, Any]) -> int:
+    """中途体检：只打一行结论（约 60 字符），供会话中途随时自查（硬性 #20③）。"""
+    n = summary["steps"]
+    if not n:
+        print("CHECK 无 usage 记录 → 无法体检")
+        return 0
+    one = summary.get("one_call_steps", 0)
+    ratio = 100 * one // max(n, 1)
+    over_steps = n > MAX_STEPS
+    over_ctx = summary["ctx_last"] > MAX_PEAK_TOKENS
+    over_batch = ratio > MAX_ONE_CALL_RATIO
+    dup_maintain = summary.get("maintain_calls", 0) > 1
+    if over_steps or over_ctx:
+        verdict = "必须落盘交接并换会话"
+    elif over_batch or dup_maintain:
+        verdict = "先收窄返回体积 / 提高批处理 / 停止重复 maintain"
+    else:
+        verdict = "续做"
+    print(f"CHECK 步数={n} ctx={summary['ctx_last']:,} 单调用步={ratio}% "
+          f"超阈步={sum(1 for v in summary['violations'] if v['kind'] == '单步新增超阈')} "
+          f"AOCI-读={summary.get('precheck_calls', 0) + summary.get('aoci_read_calls', 0)}次"
+          f"(预检{summary.get('precheck_calls', 0)}) "
+          f"maintain={summary.get('maintain_calls', 0)}次 → {verdict}")
+    return 1 if (over_steps or over_ctx or over_batch or dup_maintain) else 0
+
+
+def _check(args: Any) -> int:
+    """`--check`：体检指定/最近会话，只输出一行（供中途自查，成本约 60 字符）。"""
+    home = Path(args.home) if args.home else session_home()
+    cwd = Path(args.cwd) if args.cwd else project_root()
+    if args.file:
+        return check(analyze(load_records(Path(args.file))))
+    sessions = iter_sessions(home, cwd)
+    if args.session:
+        hit = [s for s in sessions
+               if s["id"].lstrip("session-").startswith(args.session.lstrip("session-"))]
+        sessions = hit or sessions
+    if not sessions:
+        print(f"未找到会话：{home / 'sessions' / session_slug(cwd)}")
+        return 1
+    return check(analyze(load_records(sessions[0]["path"])))
+
+
 def _selftest() -> int:
     """纯内存自测：构造合成会话，断言成本模型与体检判定。"""
     def usage(inp: int, cr: int, out_: int) -> dict[str, int]:
@@ -267,6 +336,10 @@ def _selftest() -> int:
         {"type": "assistant/message", "data": {"usage": usage(50, 200000, 300)}},
     ]
     s = analyze(recs)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = check(s)
+    check_line = buf.getvalue().strip()
     checks = [
         ("步数", s["steps"], 3),
         ("Σtotal", s["total"], 1000 + 9000 + 100 + 50 + 80000 + 200 + 50 + 200000 + 300),
@@ -280,6 +353,12 @@ def _selftest() -> int:
          len([v for v in s["violations"] if v["kind"] == "单步新增超阈"]), 2),
         ("超阈步上下文判定",
          len([v for v in s["violations"] if v["kind"] == "单步上下文超阈"]), 1),
+        ("中途体检退出码（末步 200k 上下文 → 判超标）", rc, 1),
+        ("中途体检输出为单行", len(check_line.splitlines()), 1),
+        ("单调用步数", s["one_call_steps"], 2),
+        ("AOCI maintain 计数", s["maintain_calls"], 0),
+        ("AOCI 读计数", s["aoci_read_calls"], 0),
+        ("AOCI 预检计数", s["precheck_calls"], 0),
     ]
     bad = [(name, got, want) for name, got, want in checks if got != want]
     if bad:
@@ -302,7 +381,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cwd", metavar="DIR", help="目标工作目录（默认仓库根）")
     ap.add_argument("--home", metavar="DIR", help="DSH 数据目录（默认 $DSH_HOME 或 ~/.dsh）")
     ap.add_argument("--selftest", action="store_true", help="跑纯内存自测")
+    ap.add_argument("--check", action="store_true",
+                    help="中途体检：只输出一行（步数/上下文/批处理率/AOCI 重复）")
     args = ap.parse_args(argv)
+
+    if args.check:
+        return _check(args)
 
     if args.selftest:
         return _selftest()
