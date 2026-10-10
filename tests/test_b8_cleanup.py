@@ -234,3 +234,131 @@ class TestB8BehaviorFixes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFailCountThresholdWired(unittest.TestCase):
+    """B8 第 6 项：熔断阈值必须由常量驱动，不得在 SQL 里写死。
+
+    问题（Lead 现查）：`scheduler.MAX_FAIL_COUNT = 5` 定义了但全仓**零引用**，
+    而阈值 `5` 硬编码在 3 处 SQL 字符串里（`scheduler.py` 2 处、
+    `config_db.py` 1 处）。未来改常量会「看起来生效、实际不生效」——
+    这正是用户口中的「假 BUG」：改完阈值测试仍按 5 走，排查半天。
+
+    本测试从两个层面锁死：
+    1. **源码层**：这些 SQL 必须用参数化阈值，不得出现字面量 `fail_count<5`
+    2. **行为层**：真的改常量后，到期筛选与熔断判断都随之改变
+    """
+
+    # ---- 1. 源码层：不得再有写死的阈值 ----
+
+    def test_no_hardcoded_threshold_in_sql_sources(self):
+        """scheduler.py 与 config_db.py 的 SQL 里不得出现写死的 fail_count<5。"""
+        import pathlib
+        import re
+        bad = []
+        for name in ("scheduler.py", "config_db.py"):
+            src = pathlib.Path(name).read_text(encoding="utf-8")
+            for m in re.finditer(r"fail_count\s*<\s*(\d+)", src):
+                bad.append(f"{name}: 写死 fail_count<{m.group(1)}")
+        self.assertEqual(bad, [], f"阈值仍被写死在 SQL 里：{bad}")
+
+    def test_single_source_of_truth_constant_exists(self):
+        """必须存在唯一权威常量，且 scheduler 侧别名与之一致。"""
+        import config_db
+        import scheduler
+        self.assertTrue(hasattr(config_db, "MAX_FAIL_COUNT"),
+                        "config_db 未定义 MAX_FAIL_COUNT（SQL 执行方应持有权威值）")
+        self.assertEqual(scheduler.MAX_FAIL_COUNT, config_db.MAX_FAIL_COUNT,
+                         "scheduler.MAX_FAIL_COUNT 与权威常量不一致（双份常量陷阱）")
+
+    def test_all_threshold_sql_uses_placeholder(self):
+        """三处阈值 SQL 都必须用 ? 占位符传参，而不是拼字面量。"""
+        import pathlib
+        import re
+        hits = 0
+        for name in ("scheduler.py", "config_db.py"):
+            src = pathlib.Path(name).read_text(encoding="utf-8")
+            # 找出所有提到 fail_count 比较的 SQL 片段
+            for m in re.finditer(r"fail_count\s*<\s*(\?|\d+)", src):
+                hits += 1
+                self.assertEqual(
+                    m.group(1), "?",
+                    f"{name}: fail_count 比较未参数化（实际 `fail_count<{m.group(1)}`）")
+        # 阈值 SQL 至少两处：config_db.get_due_schedules （tick 与启动扫描共用）
+        # 与 scheduler 保活扫描。注：run_startup_scan 原本自写的那份已改为
+        # 委托 get_due_schedules，故总数由 3 降为 2（属消除重复实现，非覆盖面缩小）。
+        self.assertGreaterEqual(hits, 2, f"阈值 SQL 只找到 {hits} 处，应至少 2 处")
+
+    # ---- 2. 行为层：改常量必须真生效 ----
+
+    def _make_conn(self):
+        from tests import init_test_db
+        from tests.test_base import make_config_db
+        from tests.test_scheduler_db import SQL_CREATE_REPORT_SCHEDULES
+        conn = make_config_db()
+        init_test_db(conn)
+        conn.executescript(SQL_CREATE_REPORT_SCHEDULES)
+        conn.execute(
+            "INSERT INTO report_configs (name, sql_query) VALUES ('r1','SELECT 1')")
+        conn.commit()
+        return conn
+
+    def _add_sched(self, conn, next_run_at, fail_count):
+        rid = conn.execute("SELECT id FROM report_configs LIMIT 1").fetchone()["id"]
+        import config_db
+        sid = config_db.upsert_schedule(conn, name=f"s{fail_count}-{next_run_at}",
+                                        report_ids=[rid],
+                                        schedule_type="interval",
+                                        interval_minutes=60)
+        conn.execute("UPDATE report_schedules SET fail_count=?, next_run_at=? WHERE id=?",
+                     (fail_count, next_run_at, sid))
+        conn.commit()
+        return sid
+
+    def test_threshold_change_actually_takes_effect(self):
+        """把权威常量改小后，到期筛选必须立即按新阈值过滤（行为级证明）。"""
+        import config_db
+        conn = self._make_conn()
+        try:
+            # fail_count=3 的任务：阈值 5 时应到期；阈值 2 时应被过滤掉
+            self._add_sched(conn, next_run_at=1000.0, fail_count=3)
+
+            with mock.patch.object(config_db, "MAX_FAIL_COUNT", 5):
+                self.assertEqual(len(config_db.get_due_schedules(conn, 1000.0)), 1,
+                                 "阈值 5 时 fail_count=3 应可派发")
+
+            with mock.patch.object(config_db, "MAX_FAIL_COUNT", 2):
+                self.assertEqual(len(config_db.get_due_schedules(conn, 1000.0)), 0,
+                                 "阈值改为 2 后 fail_count=3 必须被熔断——"
+                                 "若仍返回 1，说明阈值没生效（假 BUG）")
+        finally:
+            conn.close()
+
+    def test_startup_scan_respects_constant(self):
+        """启动补跑扫描必须复用 get_due_schedules，不得自写一份带阈值的 SQL。"""
+        import config_db
+        import scheduler
+        conn = self._make_conn()
+        sched = scheduler.ReportScheduler()
+        try:
+            self._add_sched(conn, next_run_at=1000.0, fail_count=3)
+            seen = {}
+            real_due = config_db.get_due_schedules   # 先存原函数，避免 patch 后递归调自身
+
+            def _fake_due(c, now):
+                seen["args"] = (c, now)
+                return real_due(c, now)
+
+            with mock.patch.object(config_db, "get_config_db", return_value=conn), \
+                 mock.patch.object(config_db, "get_due_schedules",
+                                   side_effect=_fake_due) as spy:
+                sched.run_startup_scan(now=2000.0)
+
+            self.assertTrue(spy.called,
+                            "run_startup_scan 未调用 get_due_schedules——"
+                            "说明它仍在自写带阈值的 SQL（第二处硬编码点）")
+            self.assertEqual(seen["args"][1], 2000.0,
+                             "未把 now 透传给共享查询")
+        finally:
+            sched.shutdown(timeout=1.0)
+            conn.close()

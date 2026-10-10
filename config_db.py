@@ -23,6 +23,12 @@ import static_cache
 from app_config import get_active_db_config as _get_active_db_config
 
 
+# 连续失败熔断阈值（调度侧语义，但阈值 SQL 在本模块执行 → 权威值放这里；
+# scheduler.MAX_FAIL_COUNT 引用同一对象，避免「双份常量」陷阱）。
+# 所有阈值 SQL 必须用 ? 占位符传参：写死数字会让改常量「看起来生效、
+# 实际不生效」，排查时表现为假 BUG。
+MAX_FAIL_COUNT = 5
+
 # 哨兵对象，用于区分"未传此参数"和"传了 None（设为 NULL）"
 _UNSET = object()
 
@@ -2439,11 +2445,11 @@ def get_all_schedules(conn) -> list[dict]:
 
 
 def get_due_schedules(conn, now: float) -> list[dict]:
-    """返回已到期且可执行的启用任务（next_run_at ≤ now 且 fail_count < 5）。"""
+    """返回已到期且可执行的启用任务（next_run_at ≤ now 且 fail_count < MAX_FAIL_COUNT）。"""
     rows = conn.execute(
-        "SELECT * FROM report_schedules WHERE enabled=1 AND fail_count<5 "
+        "SELECT * FROM report_schedules WHERE enabled=1 AND fail_count<? "
         "AND next_run_at IS NOT NULL AND next_run_at<=?",
-        (now,)).fetchall()
+        (MAX_FAIL_COUNT, now)).fetchall()
     return [dict(r) for r in rows]
 
 

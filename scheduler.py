@@ -28,8 +28,10 @@ import redis_cache
 import report as report_mod
 import api_handler
 
-# 连续失败熔断阈值（B5）：达到后 tick 不再自动派发，手动触发不受限
-MAX_FAIL_COUNT = 5
+# 连续失败熔断阈值：达到后 tick 不再自动派发，手动触发不受限。
+# 权威值在 config_db（阈值 SQL 由它执行）；此处引用同一对象，**不得另赋字面量**
+# ——各写一份会形成「改一个、另一个不生效」的双份常量陷阱。
+MAX_FAIL_COUNT = config_db.MAX_FAIL_COUNT
 
 #: 保活扫描的独立节拍（秒）。保活是「提前重建临近过期的缓存」，
 #: 不需要跟着 tick_seconds（默认 30s）跑——那样每 tick 都要全量扫
@@ -550,10 +552,9 @@ class ReportScheduler:
         stats = {"ran": 0, "skipped": 0}
         conn = db.get_config_db()
         try:
-            rows = [dict(r) for r in conn.execute(
-                "SELECT * FROM report_schedules WHERE enabled=1 AND "
-                "fail_count<5 AND next_run_at IS NOT NULL AND next_run_at<=?",
-                (now,)).fetchall()]
+            # 与 tick 派发共用同一查询（阈值由 config_db.MAX_FAIL_COUNT 驱动）：
+            # 待查「已到期且未熔断」的单一实现，避免两份 SQL 各自漂移。
+            rows = config_db.get_due_schedules(conn, now)
             for sched in rows:
                 stype = sched["schedule_type"]
                 # S7：错过时刻命中排除 → 视为正确跳过（推进 next_run_at，不补跑）。
@@ -651,8 +652,9 @@ class ReportScheduler:
                 "SELECT DISTINCT rc.* FROM report_configs rc "
                 "JOIN schedule_reports sr ON sr.report_id=rc.id "
                 "JOIN report_schedules rs ON rs.id=sr.schedule_id "
-                "WHERE rs.enabled=1 AND rs.fail_count<5 AND rc.keepalive_enabled=1 AND "
-                "rc.prefer_cache=1 AND rc.cache_ttl_hours>0").fetchall()]
+                "WHERE rs.enabled=1 AND rs.fail_count<? AND rc.keepalive_enabled=1 AND "
+                "rc.prefer_cache=1 AND rc.cache_ttl_hours>0",
+                (config_db.MAX_FAIL_COUNT,)).fetchall()]
 
             for rpt in rows:
                 rid = rpt["id"]

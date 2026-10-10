@@ -35,8 +35,8 @@
 - **排除规则**（静默窗口）：叶子 `dow/tod/date/date_range`，`AND/OR` + **`children`**（大写 op，**≠ nested_filter 的 conditions**）  
 - `evaluate_exclusions`：解析失败 → **False + warning（按不排除执行）**  
 - 多报表按 `order_index`；单绑定失败不中断整包  
-- 熔断：`fail_count≥5` 自动停派发；手动触发不受限且成功重置  
-- misfire：启动扫描 interval 合并 / daily skip|run_once  
+- 熔断：`fail_count ≥ config_db.MAX_FAIL_COUNT`（默认 5）自动停派发；手动触发不受限且成功重置。**权威值在 `config_db`**（阈值 SQL 由它执行），`scheduler.MAX_FAIL_COUNT` 引用同一对象；**所有阈值 SQL 必须用 `?` 传参**，写死数字会形成「改常量不生效」的假 BUG（B8-6）
+- misfire：启动扫描 interval 合并 / daily skip|run_once；**启动扫描与 tick 派发共用 `config_db.get_due_schedules`**（不得各写一份带阈值的 SQL）
 - 执行：`execute_report(..., force_rebuild=True)`；成功回写 Redis+L1  
 - 保活 tick：剩余 TTL < ahead → rebuild + 联动 `rebuild_static_endpoint_file`；**按独立节拍 `_KEEPALIVE_INTERVAL_SECONDS=300` 跑**（曾随 tick_seconds=30 每轮全量扫，`_next_keepalive_at` 是死字段；B4-1 修）；连接必须 try/finally 包住（曾无外壳，SELECT 抛异常即泄漏）
 - 审计：`log_type=scheduler`；任务级开关默认关  
