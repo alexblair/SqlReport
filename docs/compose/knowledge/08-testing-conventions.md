@@ -38,6 +38,8 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 - **故意不进 discover**：`tests/integration/`（真层，需 DEBUG 配置 / MySQL，否则 skip）、`tests/manual_*.py`（`manual_` 前缀不被收集，须显式运行）。
 - **同一测试段执行上限 2 次**（首跑 + 收口复跑，代码变更即重置，硬性 #14）；输出统一落 `run-logs/<段>-<时间戳>.log` 再 `grep -E '^(OK|FAILED|Ran |ERROR: |FAIL: )'`，落盘与取数同一动作，禁止只把管道结果留在对话里。
 
+- **批次内不跑全量（2026-10-10 实测）**：9 批重构会话里 `unittest` bash 调用 186 次，其中全量 `discover -s tests` **159 次**，返回 220,647 字符（≈55k tokens 一次性注入，并被后续每步重发）。规则收敛为：**子任务/单文件改动只跑定向**（`-m unittest tests.test_x -v` 或 `-s tests/test_x.py`），**全量 `discover` 每批只在收尾跑 1 次**；同批已有绿全量日志时，后续子任务直接引用日志、不重跑（硬性 #14 的「同段 ≤2 次」不豁免批次内的重复全量）。
+
 ## 需求变更同任务改写测试（硬性 #8）
 
 - 需求变更的**同一次任务**内改写受影响断言、夹具、脚本；禁止保留旧逻辑制造假失败。
