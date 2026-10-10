@@ -40,7 +40,11 @@ POST form → config.handle_* / handle_request
 **late import `db`**：为 `mock.patch("db._get_engine")` 友好——勿改成顶层 import。  
 新符号加 config_db 后**同步 `db.py` 导入列表**。
 
-## config.py 表单模式
+## 配置页表单模式（`config.py` + `config_pages/`）
+
+> B9-2 后：`config.py` 只管路由解析/共享助手/入口分发，各实体页实现在 `config_pages/<实体>.py`；
+> `config.py` 末尾再导出全部名字，**外部一律继续用 `config.X`**（`server.py` 按名字分发）。
+> 子模块通过 `import config` 在**调用期**取共享助手（`config._parse_form_data` 等），所以再导出块必须保留。
 
 - GET `render_*_form_page` → POST `handle_*_add/edit/delete/copy/move`
 - `_save_or_render`：`action=save` 200 留页；`action=save_close` 302 回列表 + flash

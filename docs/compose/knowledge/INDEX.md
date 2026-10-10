@@ -10,7 +10,8 @@
 | 模块 | 职责 |
 |------|------|
 | `server.py` | HTTP 入口、`ROUTES`、鉴权中间件、vendor 静态 |
-| `config.py` | `/config*` 页面与表单 CRUD |
+| `config.py` | `/config*` 路由解析、跨实体共享助手、表单入口分发；**页面与 CRUD 实现已拆到 `config_pages/`**（branding/users/pools/categories/scheduler/api_endpoints/reports），`config.py` 末尾再导出以保持 139 个符号名兼容 |
+| `config_pages/` | 按实体的配置页实现（B9-2 拆分）；通过 `import config` 在**调用期**取共享助手与常量 |
 | `config_db.py` | 配置库 DAL、双引擎 schema/迁移 |
 | `db.py` | 兼容转发层（仅 re-export；新代码直连 `config_db`/`query_executor`） |
 | `report.py` | 报表页、分页排序筛选 URL 解析、`execute_report` |
@@ -19,7 +20,8 @@
 | `export.py` | CSV/JSON/ZIP 导出 |
 | `api_handler.py` | `/api/*`、Key、CORS、静态 `.json`、预设/模板 |
 | `query_executor.py` | MySQL 事务多语句、有界连接池、`sql_contains_write` / `sql_has_persistent_write` |
-| `render.py` | **全站 UI 单一来源**（CSS/JS/`build_*`/图标辅助） |
+| `render.py` | **全站 UI 单一来源**（`build_*`/图标辅助/页壳）；CSS/JS 大常量已外移到 `ui_assets.py`（B9-1），`render._X` 名字仍可用 |
+| `ui_assets.py` | 七个 UI 静态字串常量（BASE_CSS/COMMON_CSS/MD_CSS/3 个 JS/EXCL_EDITOR_JS）；纯字面量容器，**不得加逻辑** |
 | `redis_cache.py` | L2 Redis 快照、分布式锁 |
 | `static_cache.py` | API `.json` 静态文件缓存 |
 | `scheduler.py` | 进程内定时任务线程 |
