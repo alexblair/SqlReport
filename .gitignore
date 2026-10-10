@@ -83,5 +83,7 @@ tests/regression/
 # UI 截图用 Chrome 调试 profile（临时本地产物，不提交）
 docs/compose/spec/shots/**/.chrome-*/
 
-# SDD 工作区（superpowers 流程的过程产物，非交付物——结论请落 docs/compose/reports/）
+# SDD 工作区（superpowers 流程的过程产物，非交付物；跑完即归档结论到 docs/compose/reports/ 并删除）
+# 兜底防误提交——第三方技能脚本硬编码会重建该目录，成因与约束见
+# docs/compose/reports/2026-10-10-sdd-workspace-migration.md
 .superpowers/

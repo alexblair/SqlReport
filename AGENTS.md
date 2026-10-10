@@ -59,11 +59,12 @@
 
 ## 3 spec / plan 约定
 
-1. **路径唯一**：spec 只在 `docs/compose/spec/`、plan 只在 `docs/compose/plan/`（同日期同主题一一对应）；**禁止 `docs/superpowers/`**；`knowledge/` 只放知识库。
+1. **路径唯一**：spec 只在 `docs/compose/spec/`、plan 只在 `docs/compose/plan/`（同日期同主题一一对应）；**禁止 `docs/superpowers/`**；`knowledge/` 只放知识库；**文档类内容一律以 `docs/compose/` 为起点**，仓库根不得新增文档目录（含 `.superpowers/`）。
 2. **格式**：状态头、取代两头改、plan 模板以 `docs/compose/spec/2026-09-28-docs-spec-plan-conventions-design.md` §3/§4 为准。
 3. **开工查证**：`ls -t docs/compose/spec/` 取最新 → 读状态头找生效版 → 冲突按「**当次指示 > 本文件 > 最新生效 spec > 旧/被取代 spec > plan**」裁决并记入新 spec。
 4. **取代两头改**：旧 spec 状态头改「已被 X 取代」+ 日期 + 原因，新 spec 写 `取代关系:`；只改新不改旧 = 未完成。
-5. `docs/` 与仓库根 `AGENTS.md` 随任务正常提交。
+5. **过程产物不留仓库**：SDD 等流程技能的过程产物（`task-*-brief.md`、`task-*-report.md`、`review-*.diff`、`progress.md`）**跑完即把结论归档进 `docs/compose/reports/` 并删除目录**——技能脚本硬编码路径会重建 `.superpowers/`，`git check-ignore` 兜底防误提交（成因见 `docs/compose/reports/2026-10-10-sdd-workspace-migration.md`）。
+6. `docs/` 与仓库根 `AGENTS.md` 随任务正常提交。
 
 ---
 
