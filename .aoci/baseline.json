@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-10T01:46:28Z",
+  "updated_at": "2026-10-10T06:34:52Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "047c2cd8fbfc2a7c3bd4df98ce893b1da83bdc583c5bbeaec7aef243ad97dda2",
-      "size": 68461,
-      "normalized_sha256": "047c2cd8fbfc2a7c3bd4df98ce893b1da83bdc583c5bbeaec7aef243ad97dda2"
+      "sha256": "34e1a93e0bf4a80e421fd8a1653f6b78e546dc05df703e152c2d722f3386655c",
+      "size": 68586,
+      "normalized_sha256": "34e1a93e0bf4a80e421fd8a1653f6b78e546dc05df703e152c2d722f3386655c"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -137,9 +137,9 @@
     },
     "config_db.py": {
       "role": "index",
-      "sha256": "9f2db1663adced5bcc3cf91e3b691b5505f5f963cd20db50140ee69c1d458506",
-      "size": 111939,
-      "normalized_sha256": "9f2db1663adced5bcc3cf91e3b691b5505f5f963cd20db50140ee69c1d458506"
+      "sha256": "5f34497277fb46c2f7485d0f835b1cf6d4c2410fbfca21b5f429b97bc029c9f8",
+      "size": 112328,
+      "normalized_sha256": "5f34497277fb46c2f7485d0f835b1cf6d4c2410fbfca21b5f429b97bc029c9f8"
     },
     "config_pages/__init__.py": {
       "role": "index",
@@ -239,9 +239,9 @@
     },
     "docs/compose/knowledge/07-cache-scheduler-audit.md": {
       "role": "index",
-      "sha256": "ee90d140cc71022f51a0cce5a9042cb0c7b6131b4b03d0146e60bd44832a3575",
-      "size": 6872,
-      "normalized_sha256": "ee90d140cc71022f51a0cce5a9042cb0c7b6131b4b03d0146e60bd44832a3575"
+      "sha256": "57f677ab0b337818ac8f9f29339dfc64c536fd1726b84af63019d8419f7a16fb",
+      "size": 7236,
+      "normalized_sha256": "57f677ab0b337818ac8f9f29339dfc64c536fd1726b84af63019d8419f7a16fb"
     },
     "docs/compose/knowledge/08-testing-conventions.md": {
       "role": "index",
@@ -1560,9 +1560,9 @@
     },
     "scheduler.py": {
       "role": "index",
-      "sha256": "642d6a40d6fcfa292d9ca36728609ca43209e0e943d2150fc020897d5593a854",
-      "size": 34737,
-      "normalized_sha256": "642d6a40d6fcfa292d9ca36728609ca43209e0e943d2150fc020897d5593a854"
+      "sha256": "a25edddd2c62a0a8679b758ae63e5d62280dccd60e4b3be48558eaac1e0b2c94",
+      "size": 35017,
+      "normalized_sha256": "a25edddd2c62a0a8679b758ae63e5d62280dccd60e4b3be48558eaac1e0b2c94"
     },
     "scripts/agent/aoci_precheck.py": {
       "role": "index",
@@ -1950,9 +1950,9 @@
     },
     "tests/test_b8_cleanup.py": {
       "role": "observe",
-      "sha256": "2b173e265ec9dd0ea9a17cceafd342b409370987cdb8a19664216cc0312c40a4",
-      "size": 11037,
-      "normalized_sha256": "2b173e265ec9dd0ea9a17cceafd342b409370987cdb8a19664216cc0312c40a4"
+      "sha256": "1293be38a811989548ff0bc0a0b2a54990b070b92c9065b78487c196477eb0ae",
+      "size": 17385,
+      "normalized_sha256": "1293be38a811989548ff0bc0a0b2a54990b070b92c9065b78487c196477eb0ae"
     },
     "tests/test_b9_moves.py": {
       "role": "observe",
