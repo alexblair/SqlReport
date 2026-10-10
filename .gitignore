@@ -83,11 +83,5 @@ tests/regression/
 # UI 截图用 Chrome 调试 profile（临时本地产物，不提交）
 docs/compose/spec/shots/**/.chrome-*/
 
-# AOCI 工具安装目录（本机稳定绝对路径：/opdev/SqlReport/.tools/bin/aoci，另含 cosign 校验器）
-.tools/
-
-# 另一份 aoci 安装副本（非本任务安装；按 git 忽略权威排除在 Managed Scope 之外）
-/tools/aoci/
-
 # SDD 工作区（superpowers 流程的过程产物，非交付物——结论请落 docs/compose/reports/）
 .superpowers/

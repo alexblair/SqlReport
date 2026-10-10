@@ -20,7 +20,6 @@
 | 8 | 测试与坑 | `08-testing-conventions.md` | 完成 |
 | 9 | 代理工作流 | `09-agent-workflow.md` | 完成 |
 | 10 | Token 预算 | `10-token-budget.md` | 完成（硬性 #20） |
-| 11 | AOCI 使用手册 | `11-aoci-usage.md` | 完成（硬性 #21） |
 
 入口：`docs/compose/knowledge/README.md` + `INDEX.md`。
 
@@ -59,7 +58,6 @@
 | 写判定分工：`sql_contains_write` vs `sql_has_persistent_write` | practiced | 动 allow_write / skip_cache_read / 静态护栏时 |
 | 静态护栏是**并集**（权限判定 + 持久写判定） | practiced | 改静态分支条件时 |
 | `INTO OUTFILE`/`INTO DUMPFILE` 属持久写 | mastered | 改写判定关键词时 |
-| AOCI 认知层使用纪律（硬性 #21） | mastered | 想「每改一个文件就维护一次」时 |
 | 端到端压测噪声约 ±6%，收益须用隔离 A/B | practiced | 做性能对比时 |
 
 ## 复习队列
@@ -75,7 +73,7 @@
 
 ```text
 slug=sqlreport-kb
-chapters=0..11 done
+chapters=0..10 done
 kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写死绝对路径
 index=codegraph ok（计数与版本以 docs/compose/knowledge/README.md 为准）
 sources=code+AGENTS+README+explore agents

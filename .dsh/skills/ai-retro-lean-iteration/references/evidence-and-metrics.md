@@ -2,8 +2,7 @@
 
 > 本文件是 `ai-retro-lean-iteration` 的支撑件。**目的：把「AI 表现」变成可复现的数值证据**，
 > 使每条优化点都能回溯到「会话 · 步 + 实测数值」，而不是印象。
-> 全部命令与口径在本项目实测过（来源：`docs/compose/reports/2026-10-06-token-efficiency-retrospective.md`
-> 与 `docs/compose/reports/2026-10-09-aoci-effectiveness-evaluation.md`）。
+> 全部命令与口径在本项目实测过（来源：`docs/compose/reports/2026-10-06-token-efficiency-retrospective.md`）。
 
 ## 1 数据源（实测事实）
 
@@ -33,7 +32,6 @@ venv/bin/python scripts/agent/session_cost.py --check           # 一行体检�
 - **最贵步**：`新增 tokens × 剩余步数 ≈ 重发成本`，并列出该步调用的工具名
 - 工具返回体积与错误次数、**重复调用**（同工具同参数，`×N`）
 - 预算体检违规项（单步新增超阈 / 单步上下文超阈 / 步数超阈）
-- AOCI：改前定向读（precheck）/ MCP 读 / `maintain` 次数（对照硬性 #21）
 
 ## 3 指标口径（务必按此表述，避免口径战）
 
@@ -68,4 +66,4 @@ ctx(步 i)      = inputTokens + cacheReadTokens + cacheWriteTokens      # 该步
   收尾 `venv/bin/python scripts/agent/cleanup_tmp.py --apply`（硬性 #14）。
 - **结论 + 数值 + 复现命令**必须落 `docs/compose/reports/YYYY-MM-DD-<主题>.md`（长期依据）；
   临时目录里的具体文件名不得写进文档（门禁 `tests/test_temp_log_policy.py` 会拦）。
-- 拿不到数据时**登记待办**（AOCI `aoci_report`）或直接说明缺口，**不许用印象补数**。
+- 拿不到数据时**如实说明缺口**，**不许用印象补数**。

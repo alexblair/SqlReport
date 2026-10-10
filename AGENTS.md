@@ -1,15 +1,13 @@
 # AGENTS.md — SqlReport 开发代理指引
 
 面向在本仓库工作的 AI / 开发代理。**只写「没有帮助就会做错」的事**；通用常识、模块细节、流程全文见分卷。
-最小集：**15 条硬性约束** + 入口引导 + 环境命令 + 收尾检查单。
+最小集：**14 条硬性约束** + 入口引导 + 环境命令 + 收尾检查单。
 
 ---
 
 ## 0 入口引导：先读哪一卷、改完必更新哪一卷
 
 **开工**：按「你要做的事」读「先读」列的分卷（只读相关章节，禁止整卷通读）；**收尾**按「改完必更新」列更新分卷（硬性 #7，与代码同一次任务内完成）。
-**改前定向读（硬性 #21）**：本次要改的代码/文档先跑 `venv/bin/python scripts/agent/aoci_precheck.py <文件…>`（~1K tokens；`NO-ENTRY` = 无认知）。分工：**AOCI 管「改它要小心什么」，codegraph 管「改它还会碰到谁」，分卷管「按什么流程做」**。
-
 | 你要做的事 | 先读（分卷） | 改完必更新 |
 |------------|-------------|-----------|
 | 摸不清该动哪些模块 / 模块职责 | `INDEX.md`、`01-architecture.md` | `INDEX.md` |
@@ -22,7 +20,6 @@
 | 改启动链路、`app_config`、依赖安装 | `01-architecture.md` | 该卷 + 双 README（镜像对） |
 | 跑测试 / 改测试 / 验证改动、卡住反复失败 | `08-testing-conventions.md` | 该卷（新踩坑必记） |
 | 查历史决策、需求依据 | `docs/compose/spec/` 最新生效 spec（§3） | 新 spec / 取代旧 spec |
-| AOCI 认知（改前定向读、收尾维护） | `11-aoci-usage.md`（硬性 #21） | —（维护 AOCI 索引，不是改本卷） |
 
 **分卷全表**：`docs/compose/knowledge/README.md`（入口）· `INDEX.md`（模块/路由/页面/共享语义）。
 
@@ -45,7 +42,6 @@
 18. **代码检索 codegraph-first**：`codegraph explore`（MCP `codegraph_explore`）必须是第一步，query 带代码词（纯中文查不到）；确查不到才降级 `grep`/`glob`/`read`，降级前先加宽重试；禁 grep+read 循环替代检索。→ `09-agent-workflow.md`
 19. **改完 `.py`/`.js`/`.mjs` 必须同任务内 `codegraph sync`**（大重构 `codegraph index`）；收尾以 `codegraph status` 的 `pendingChanges` 全 0 为准。
 20. **Token 预算**：成本 ≈ 步数 × 上下文。① 单条返回 >8k 字符即超阈（先计数/截断/分段读；后台作业先落盘再 grep）。② 互不依赖调用**同步发**（一步 2–4 个），单调用步 ≤40%。③ >60 步或上下文 >120k → 落盘交接换会话。④ `session_cost.py --check` 体检，收尾取证**一次批量发**。→ `10-token-budget.md`
-21. **AOCI 认知层**：**改前**定向读本次要改的文件；**收尾**在最终稳定态调**一次** `aoci_maintain` → **整批** `aoci_update_entry`（保留绑定字段；同一静止段 ≥2 次即违规）。`aoci_rules`/`aoci_overview` 仅压缩恢复或最小块失效时用（日常禁拉全量）；禁手改 `aoci*.txt`/`.aoci/`；纯只读任务不维护。→ `11-aoci-usage.md`
 22. **用户要求与掌握的最新依据冲突时，立即向用户确认**：不自我怀疑兜圈、不擅自取舍；依据优先级见 §3，UI 历史设计图只是取证不是现行依据。→ `06-ui-interactions.md`
 
 ---
@@ -82,7 +78,6 @@ python -m unittest discover -s tests/ -t . -v   # 全量（含 bug_hunt 静态�
 codegraph explore "<中文意图 + 代码词>"          # 检索首选
 codegraph status                                # 索引健康/pendingChanges
 codegraph sync                                  # 改完代码必跑（硬性 #19）
-venv/bin/python scripts/agent/aoci_precheck.py <文件…>   # 改前定向读（硬性 #21）
 venv/bin/python scripts/agent/session_cost.py --check    # token 体检（#20）
 ```
 - 测试框架以 **`unittest`** 为准；静态分析随 discover 跑（ERROR 即失败）；变异扫描 `tests/bug_hunt/bug_hunt_mutation.py` 手动、勿常规。
@@ -96,16 +91,5 @@ venv/bin/python scripts/agent/session_cost.py --check    # token 体检（#20）
 1. 测试 L0/L1 →（需要时）L2 分段全量绿（本任务内一次）
 2. 知识库按 §0「改完必更新」列同步；spec 已按 §3 查证
 3. 硬性 #19：`codegraph sync` 后 `pendingChanges` 全 0；硬性 #17：交互改动跑「整页 + 换页态 + 组合序列」
-4. 硬性 #21：`maintain` 一次 + 整批提交 + `check` 收敛（纯只读跳过）
-5. **收尾一次批量取证**（禁一项一步）：测试 + `codegraph status` + `git diff --stat` + `session_cost.py --check`；结论**报证据**（Ran N / 文件:行 / 数据），不报「应该是」
+4. **收尾一次批量取证**（禁一项一步）：测试 + `codegraph status` + `git diff --stat` + `session_cost.py --check`；结论**报证据**（Ran N / 文件:行 / 数据），不报「应该是」
 
-
-<!-- aoci:begin -->
-## AOCI 仓库认知（最小合同）
-
-AOCI 维护认知索引 `aoci.txt`（Volumes v1：Code 卷 `aoci.code.txt`；状态在 `.aoci/`）；完整用法见 `docs/compose/knowledge/11-aoci-usage.md`（硬性 #21 的展开）。
-
-1. **改前**：`venv/bin/python scripts/agent/aoci_precheck.py <本次要改的文件…>`；需要全貌或压缩后恢复才用 `aoci_overview`；`aoci_rules` 仅在最小块失效时调用。**纯只读任务不维护。**
-2. **收尾只维护一次**：写入全部结束后的最终稳定态调一次 `aoci_maintain` → **整批** `aoci_update_entry`（保留绑定字段，禁字段 Patch/截子集）；同一静止段 ≥2 次即违规。措辞级 `.md` 改动条目可原样提交。
-3. `check --json` 看 `executable_targets`（为 0 不调 maintain）→ `maintain` → 整批提交 → `check` 收敛；证据不足用 `aoci_report`；禁手改 `aoci*.txt`/`.aoci/`。
-<!-- aoci:end -->

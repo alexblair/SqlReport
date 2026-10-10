@@ -12,7 +12,7 @@
 `tests/bug_hunt/gate_redproof.py` 靠**内存变异**（monkeypatch `_load_docs`）证明
 本门禁真的会红，不需要改写磁盘文件。
 阈值调整原则：只允许「把细节从最小集挪进分卷」后再放宽，不允许直接抬上限。
-2026-10-09 起改为**有量化目标的下调**（见 `docs/compose/spec/2026-10-09-context-slimming-and-aoci-usage-design.md`）：
+2026-10-09 起改为**有量化目标的下调**：
 退役的硬性约束号登记在 `RETIRED_CONSTRAINTS`，任何 `硬性 #N` 引用必须落在 `LIVE_CONSTRAINTS`，否则视为悬空指引。
 阈值调整原则：只允许「把细节从最小集挪进分卷」后再放宽，不允许直接抬上限。
 """
@@ -30,9 +30,9 @@ LIMIT_VOLUME = 22000         # 单个知识库分卷（按需读）
 LIMIT_VOLUMES_TOTAL = 155000 # 知识库分卷合计：防止「分卷慢慢膨胀」绕开单卷上限
 LIMIT_COURSE_STATE = 8000    # learn/sqlreport-kb/course-state.md（开工查证会读）
 
-# 硬性约束编号（AGENTS.md §1）：引用必须落在 LIVE；退役号不复用（2026-10-09 瘦身）
-LIVE_CONSTRAINTS = frozenset({1, 2, 3, 5, 6, 7, 8, 12, 14, 17, 18, 19, 20, 21, 22})
-RETIRED_CONSTRAINTS = frozenset({4, 9, 10, 11, 13, 15, 16})
+# 硬性约束编号（AGENTS.md §1）：引用必须落在 LIVE；退役号不复用（2026-10-09 瘦身；2026-10-10 退役 #21）
+LIVE_CONSTRAINTS = frozenset({1, 2, 3, 5, 6, 7, 8, 12, 14, 17, 18, 19, 20, 22})
+RETIRED_CONSTRAINTS = frozenset({4, 9, 10, 11, 13, 15, 16, 21})
 _CONSTRAINT_REF_RE = re.compile(r"硬性(?:约束)?\s*#(\d{1,2})")
 
 # MEMORY.md 策展门禁（2026-10-09）：记忆不得垃圾桶化——条数有上限、每条带归属、禁止重复行
@@ -165,7 +165,7 @@ def _violations(docs: dict) -> list:
             if n in LIVE_CONSTRAINTS or (where, n) in seen:
                 continue
             seen.add((where, n))
-            why = "已于 2026-10-09 退役" if n in RETIRED_CONSTRAINTS else "不存在"
+            why = "已退役" if n in RETIRED_CONSTRAINTS else "不存在"
             out.append(f"CONSTRAINT|{where} 引用了{why}的硬性 #{n}")
     return out
 

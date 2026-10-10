@@ -31,7 +31,7 @@ description: 当要复盘一段历史会话里 AI 的实际运行表现（token 
 
 见 `references/evidence-and-metrics.md`：数据源、命令表、指标口径、陷阱。
 
-- 首选 `venv/bin/python scripts/agent/session_cost.py`——它已输出「最贵步 · 重发成本 / 工具返回体积 / 重复调用 / 单调用步占比 / AOCI 读写比 / 预算违规项」。
+- 首选 `venv/bin/python scripts/agent/session_cost.py`——它已输出「最贵步 · 重发成本 / 工具返回体积 / 重复调用 / 单调用步占比 / 预算违规项」。
 - 开工前先看 `docs/compose/reports/` 最近 2 份报告：**已有结论的不重复分析**。
 - 工具缺字段 → 写成「工具改动建议」（交付物 ②）；**不得现场自建统计脚本**（禁重复造轮子）。
 - 复盘自身也受 token 纪律约束：> 60 步或上下文 > 120k 要落盘交接（结论 + 数值 + 复现命令落 `docs/compose/reports/`）。
@@ -53,10 +53,9 @@ description: 当要复盘一段历史会话里 AI 的实际运行表现（token 
 
 ## §5 落地与验收
 
-1. 改前定向读：`venv/bin/python scripts/agent/aoci_precheck.py <本次要改的文件…>`。
-2. 只改 `.md` → 无需 codegraph sync；动了 `.py`/`.js` → 同任务内 `codegraph sync`。
-3. 知识库改动同任务内同步；报告落 `docs/compose/reports/YYYY-MM-DD-<主题>.md`。
-4. 收尾 `venv/bin/python scripts/agent/cleanup_tmp.py --apply`；回报「改了什么 / 实测数值 / 未做什么」，禁写「应该是」。
+1. 只改 `.md` → 无需 codegraph sync；动了 `.py`/`.js` → 同任务内 `codegraph sync`。
+2. 知识库改动同任务内同步；报告落 `docs/compose/reports/YYYY-MM-DD-<主题>.md`。
+3. 收尾 `venv/bin/python scripts/agent/cleanup_tmp.py --apply`；回报「改了什么 / 实测数值 / 未做什么」，禁写「应该是」。
 
 ## 反合理化表
 
@@ -81,4 +80,3 @@ description: 当要复盘一段历史会话里 AI 的实际运行表现（token 
 ## 何时不用
 
 - 用户只要一次性的结论、明确不要改动 → 只做 §1+§2，不要输出变更清单
-- 纯只读任务（不产生优化动作）→ 不维护 AOCI（硬性 #21）

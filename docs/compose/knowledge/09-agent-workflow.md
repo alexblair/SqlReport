@@ -18,7 +18,7 @@
 - **查代码先走 codegraph**（`explore` 一个命令 = 源码 + 调用链 + 波及面）；**改完 `.py`/`.js`/`.mjs` 跑 `codegraph sync`**。
 - 等待 >30s 的任务用**后台作业 + 带判据短轮询**，**禁止整段前台 sleep**（硬性 #20）。
 - 验证前先确认无活跃写入者；同一测试段 ≤2 次（硬性 #14）。
-- **浏览器/探针 profile 一律建在 `run-logs/` 下**（如 CDP 取证 `--user-data-dir=run-logs/chrome-profile-<用途>`）：建在 `docs/` 等受管目录会被 AOCI 遍历并污染受管范围（2026-10-09 实操踩坑：`docs/compose/spec/shots/r3/` 下遗留 199MB `.chrome-*` profile），而 `cleanup_tmp.py` 只覆盖 `run-logs/`+`perf-logs/`。
+- **浏览器/探针 profile 一律建在 `run-logs/` 下**（如 CDP 取证 `--user-data-dir=run-logs/chrome-profile-<用途>`）：`docs/` 属受管目录，遗留物会被误提交（2026-10-09 实操踩坑：`docs/compose/spec/shots/r3/` 下遗留 199MB `.chrome-*` profile），而 `cleanup_tmp.py` 只覆盖 `run-logs/`+`perf-logs/`。
 - 收尾只报证据（测试 Ran N / 数据 / `文件:行`），不报「应该是」。
 - **复盘 AI 历史运行表现 → 做最小改动优化**：用项目技能 `.dsh/skills/ai-retro-lean-iteration/SKILL.md`（范围确认硬门禁 + 取证命令表 + 三份交付物模板）。
 
