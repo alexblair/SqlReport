@@ -25,7 +25,10 @@
 
 > **B8 已完成**（`Ran 3172`，提交 `3c1e3af`）：A 组 5 项纯删除（含 `_COMMON_CSS` 字节不变证明、
 > 畸形 SVG `rx.5`、死函数 `_get_forwarded_url`）+ B 组 3 项行为修正（GBK `lstrip`、
-> `is_debug_mode` 缓存、路由单次扫描）。本轮 Lead 现查**刻意跳过 3 项 plan 条目**（理由记在 `b8-work-brief.md`）。
+> `is_debug_mode` 缓存、路由单次扫描）。
+> **B8-6 随后补做**（`Ran 3185`，提交 `9e52ad3`）：熔断阈值改由 `config_db.MAX_FAIL_COUNT` 驱动，
+> 3 处 SQL 全部参数化（原为写死的 `fail_count<5`）→ 消除「改常量不生效」的假 BUG。
+> 另发现 `run_startup_scan` 与 `get_due_schedules` 是同一查询的两份实现，已合并。
 > **B7 已完成 4/4**（`Ran 3167`，`d82ff73`）：删被遮蔽 48 行、`_escape` 收口、分类树全角缩进（D4）、`transform_rows` 收口。
 > B6 已完成 8/8（`Ran 3146`）：`b0ebd8d` / `a3886ed` / `1680dc3` / `0937b96`。
 
