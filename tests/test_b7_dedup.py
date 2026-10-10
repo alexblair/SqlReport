@@ -87,8 +87,11 @@ class TestCategoryIndent(unittest.TestCase):
 
     def test_indent_is_fullwidth(self):
         import config
+        import config_pages.categories
         import inspect
-        src = inspect.getsource(config)
+        # B9-2：分类渲染函数已搬到 config_pages/categories.py，源码护栏需同时覆盖两处
+        src = (inspect.getsource(config)
+               + inspect.getsource(config_pages.categories))
         # 定位 _get_depth 参与的那行
         self.assertIn("\\u3000", src,
                       "未使用全角 U+3000 缩进；半角空格在 <option> 中会被 HTML 折叠")

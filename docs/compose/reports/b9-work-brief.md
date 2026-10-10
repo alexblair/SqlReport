@@ -169,6 +169,39 @@ venv/bin/python -m unittest discover -s tests -p 'test_config*.py' -t . 2>&1 | t
 
 ⚠️ **本任务风险高于 B9-1，且收益主要是可维护性**。现状：`config.py` 2968 行、89 个顶层函数。
 
+### ✅ Lead 已完成 B9-2 侦察（下列事实可直接采信，不用重查）
+
+**依赖面**：`grep -rn 'config\.' tests/*.py` = **517 处**；`tests/` 真正引用的 `config.<name>` 符号 **33 个**。
+其中 **8 个是 `config.py` 的 import 副产物**（拆分后最易丢失，必须继续可得）：
+`config.db`、`config.json`、`config._escape`、`config._CONFIG_EXTRA_CSS`、
+`config._REPORTS_EXTRA_CSS`、`config.build_api_endpoint_form_html`
+（另 `config.debug` / `config.py` 本身就不存在，是拼接串误匹配，无需处理）。
+
+**命名空间基线**：`dir(config)` 公开符号共 **139 个**，基线已固化在
+`tests/test_b9_moves.py::TestConfigNamespacePreserved` 内（**不依赖会被清空的临时目录**）；
+拆分后必须无缺失。
+
+**结构性事实（重要，决定了拆分是否安全）**：
+- **无任何 `global` 声明**，也**无模块级可变状态**（只有 `_PATH_PATTERN` 正则与几个常量字符串）
+  → 拆开后**不会有跨模块共享状态被复制**的问题
+- 函数依赖关系清晰：**只有 21 个 shared 助手**，跨簇边很少
+
+**各簇规模（Lead 用 AST 统计）**：
+| 簇 | 函数数 | 行数 | 依赖 shared 助手 |
+|---|---|---|---|
+| reports | 13 | 562 | — |
+| api_endpoints | 11 | 437 | — |
+| pools | 13 | 243 | — |
+| scheduler | 9 | 224 | — |
+| categories | 12 | 195 | `_parse_form_data`、`render_overview` |
+| **branding** | **3** | **174** | **0 个 ← 最干净，建议第一个拆** |
+| users | 8 | 103 | `_nav_badges`、`_parse_form_data`、`render_overview` |
+| shared/other | 20 | 736 | （留 `config.py`） |
+
+> ⚠️ **建议**：先从 **`branding`**（3 个函数、0 个 shared 依赖）开始，
+> 它是唯一**不依赖任何 shared 助手**的簇 → 搬迁风险最低，可当作整条链路（新建子包 + re-export
+> + 命名空间断言）的**验证样板**。样板跑通后再逐簇搬其他组。
+
 ### ⚠️ 最重要的约束
 **`config.` 命名空间必须继续暴露原有全部符号**——Lead 已确认**大量测试文件**引用
 `config.xxx`（前缀引用），且 `server.py` 的路由分发直接指向 `config.handle_*`。

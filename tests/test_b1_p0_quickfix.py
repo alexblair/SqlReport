@@ -29,14 +29,16 @@ class TestBannerFString(unittest.TestCase):
 
 class TestConfigWarnBanner(unittest.TestCase):
     def test_no_raw_icon_literal_in_config_module_source(self):
-        """config.py 不得再有落单的 {_icon(...)} 字面量（非 f-string）。"""
+        """config.py（及 B9-2 拆分出的 config_pages/）不得有落单的 {_icon(...)} 字面量。"""
         import ast, pathlib
-        src = pathlib.Path("config.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
-        bad = [n.lineno for n in ast.walk(tree)
-               if isinstance(n, ast.Constant) and isinstance(n.value, str)
-               and '{_icon(' in n.value]
-        self.assertEqual(bad, [], f"config.py 存在未插值的 {{_icon}} 字面量: 行 {bad}")
+        paths = [pathlib.Path("config.py")] + sorted(pathlib.Path("config_pages").glob("*.py"))
+        bad = []
+        for p in paths:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            bad += [(str(p), n.lineno) for n in ast.walk(tree)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and '{_icon(' in n.value]
+        self.assertEqual(bad, [], f"存在未插值的 {{_icon}} 字面量: {bad}")
 
 
 class TestDeleteConfirmJsEscape(unittest.TestCase):
