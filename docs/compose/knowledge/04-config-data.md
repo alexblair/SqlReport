@@ -28,12 +28,13 @@ POST form → config.handle_* / handle_request
 
 - SQLite：`executescript`；`PRAGMA table_info`；WAL+FK  
 - MySQL：按 `;` 拆执行；`SHOW COLUMNS`；`database` 反引号  
-- 占位符统一 `?`；时间用 Python `time.strftime` 参数化（避 SQLite 方言）
+- 占位符统一 `?`；时间用 Python `time.strftime` 参数化（避 SQLite 方言）  
+- **MySQL 1093**：`DELETE`/`UPDATE` 的**目标表不得出现在子查询 FROM 中**（MySQL 8.0 解析期即报错，与数据无关）；须派生表包装 `SELECT id FROM (SELECT … FROM 目标表 …) AS x`。SQLite 允许自引用 → 单测会绿、线上删报表必挂（2026-10-10 事故）
 
 **迁移**：`init_db` → 引擎 DDL → `_init_sqlite_migrations` / `_init_sqlite` 对应迁移号幂等。  
 迁移 14/15：api_keys 多 Key、smart_quote_flags；16：schedules；17：任务多绑定改造。
 
-**级联**：删报表应用层级联端点+静态缓存+调度绑定（**不依赖 SQLite FK**）。  
+**级联**：删报表应用层级联端点+静态缓存+调度绑定（**不依赖 SQLite FK**）；孤儿任务清理 `delete_schedules_by_report` 须遵上「MySQL 1093」（单删/批量删均走此路径，异常未捕获时页面 500）。  
 `delete_pool` 先将报表 `pool_id` 置 NULL。  
 `_UNSET` 哨兵：update 显式 NULL vs 不更新。
 

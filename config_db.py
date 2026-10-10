@@ -2556,9 +2556,13 @@ def delete_schedules_by_report(conn, report_id: int) -> None:
     if not _report_schedules_table_exists(conn):
         return
     conn.execute("DELETE FROM schedule_reports WHERE report_id=?", (report_id,))
-    # 清理无任何绑定的孤儿任务
+    # 清理无任何绑定的孤儿任务。子查询必须经派生表包装：MySQL 8.0 禁止
+    # DELETE/UPDATE 的目标表出现在子查询 FROM 中（解析期 1093），而 SQLite
+    # 允许自引用——直接自引用会让线上删报表必失败（批量删 flash 1093、
+    # 单删未捕获异常 500）。派生表写法双引擎等价。
     conn.execute(
         "DELETE FROM report_schedules WHERE id IN ("
-        "SELECT s.id FROM report_schedules s "
+        "SELECT id FROM ("
+        "SELECT s.id AS id FROM report_schedules s "
         "LEFT JOIN schedule_reports sr ON sr.schedule_id=s.id "
-        "WHERE sr.schedule_id IS NULL)")
+        "WHERE sr.schedule_id IS NULL) AS _orphan_schedules)")

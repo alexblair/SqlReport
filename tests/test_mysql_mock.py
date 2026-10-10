@@ -15,6 +15,7 @@ test_mysql_mock.py — MySQL config_db mock 测试框架
 5. _MySQLConnection 连接包装器的 execute/commit/close 等基本功能
 """
 
+import re
 import unittest
 from unittest.mock import patch, MagicMock, call
 from decimal import Decimal
@@ -1573,7 +1574,7 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
         calls = self.mock_cursor.execute.call_args_list
         # 端点快照查询 → 删端点行（快照为空则缓存失效无文件调用）
         # → 探测任务表（mock 下判为存在）→ 拆本报表绑定，
-        # 清理孤儿任务（无任何绑定）→ 删报表行
+        # 清理孤儿任务（无任何绑定，经派生表包装避 MySQL 1093）→ 删报表行
         self.assertEqual(
             calls,
             [call("SELECT * FROM api_endpoints WHERE report_id=%s ORDER BY id",
@@ -1583,8 +1584,9 @@ class TestMySQLReportCRUD(_MySQLCRUDTestBase):
                   "AND name='report_schedules'", ()),
              call("DELETE FROM schedule_reports WHERE report_id=%s", (1,)),
              call("DELETE FROM report_schedules WHERE id IN ("
-                  "SELECT s.id FROM report_schedules s LEFT JOIN schedule_reports "
-                  "sr ON sr.schedule_id=s.id WHERE sr.schedule_id IS NULL)", ()),
+                  "SELECT id FROM (SELECT s.id AS id FROM report_schedules s "
+                  "LEFT JOIN schedule_reports sr ON sr.schedule_id=s.id "
+                  "WHERE sr.schedule_id IS NULL) AS _orphan_schedules)", ()),
              call("DELETE FROM report_configs WHERE id=%s", (1,))]
         )
         # 2 次 commit：delete_api_endpoints_by_report 端点清理自带 1 次
@@ -2512,6 +2514,27 @@ class TestScheduleMySQLDialect(_MySQLConnectionTestBase):
         self.assertIn("ADD COLUMN name ", mysql_seg)
         self.assertIn("ADD COLUMN exclusions TEXT", mysql_seg)
         self.assertIn("ADD COLUMN audit_enabled ", mysql_seg)
+
+    def test_delete_report_orphan_cleanup_not_self_referencing(self):
+        """回归（2026-10-10 线上事故）：孤儿任务清理不得自引用 report_schedules。
+
+        `DELETE FROM report_schedules WHERE id IN (SELECT ... FROM
+        report_schedules ...)` 在 MySQL 8.0 **解析期**即报 1093（You can't
+        specify target table 'report_schedules' for update in FROM clause），
+        与库中数据无关；同一条 SQL 在 SQLite 下完全合法 → 单测全绿、线上
+        删任意报表必失败（批量删 flash 1093；单删未捕获异常 500）。
+        钉住：子查询必须经派生表包装，使目标表不出现在子查询的 FROM 中。
+        """
+        self.mock_cursor.rowcount = 1
+        db.delete_report(self.conn, 1)
+        dels = [c.args[0] for c in self.mock_cursor.execute.call_args_list
+                if (c.args and str(c.args[0]).startswith(
+                    "DELETE FROM report_schedules"))]
+        self.assertEqual(len(dels), 1, msg=f"应有 1 条孤儿清理 DELETE：{dels}")
+        sql = " ".join(str(dels[0]).split())
+        self.assertIsNone(
+            re.search(r"IN\s*\(\s*SELECT[^()]*FROM\s+report_schedules", sql),
+            msg=f"孤儿清理自引用目标表，MySQL 8.0 报 1093: {sql}")
 
 
 # ---------------------------------------------------------------------------
