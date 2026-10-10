@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-08T06:43:54Z",
-  "updated_at": "2026-10-10T01:38:00Z",
+  "updated_at": "2026-10-10T01:46:28Z",
   "files": {
     ".dsh/skills/ai-retro-lean-iteration/SKILL.md": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "1b37bfbdc099a82f19c0068451886a24505ae1e13517cceb9969d5ac5a9b251d",
-      "size": 68458,
-      "normalized_sha256": "1b37bfbdc099a82f19c0068451886a24505ae1e13517cceb9969d5ac5a9b251d"
+      "sha256": "047c2cd8fbfc2a7c3bd4df98ce893b1da83bdc583c5bbeaec7aef243ad97dda2",
+      "size": 68461,
+      "normalized_sha256": "047c2cd8fbfc2a7c3bd4df98ce893b1da83bdc583c5bbeaec7aef243ad97dda2"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -407,9 +407,9 @@
     },
     "docs/compose/reports/handoff-b5-onwards.md": {
       "role": "index",
-      "sha256": "61be64cf37f48d7025c1a9e852e08ebc40e4c1c6c112e387bf18f462932d0241",
-      "size": 16569,
-      "normalized_sha256": "61be64cf37f48d7025c1a9e852e08ebc40e4c1c6c112e387bf18f462932d0241"
+      "sha256": "4f9df7e48da8b73e9ba98491ff6e4fd2e4033d93f6804d6f2039a5923a1c245f",
+      "size": 16644,
+      "normalized_sha256": "4f9df7e48da8b73e9ba98491ff6e4fd2e4033d93f6804d6f2039a5923a1c245f"
     },
     "docs/compose/reports/ui-r3-retrospective.md": {
       "role": "index",
