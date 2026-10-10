@@ -14,13 +14,14 @@
 | **工作区** | 干净（仅 1 个收工前既存的 `AGENTS.md.backup.*` 未跟踪文件） |
 | **codegraph** | `Index is up to date` |
 | **AOCI** | `guide complete=true, next_action=none`（B4 时点） |
-| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅ B8 ✅ · B9-1 ✅** |
-| **待做批次** | **B9-2（`config.py` 按实体拆分）—— 唯一剩余项** |
+| **已完成批次** | **B1 ✅ B2 ✅ B3 ✅ B4 ✅ B5 ✅ B6 ✅ B7 ✅ B8 ✅ B9 ✅（全部 9 批次）** |
+| **待做批次** | **无 —— 目标已达成** |
 
-> **B9-1 已完成**（`Ran 3175`，提交 `c6179a4`）：`render.py` 七个大常量（1887 行）外移到新建的 `ui_assets.py`，
-> `render.py` 6594 → 4706 行。**纯搬移，字节不变**（8 个常量 sha256+长度双侧对拍一致，vendor `hash8` 仍为 `72429792`）。
-> **B9-2 是唯一剩余项**：`config.py` 按实体拆分（2968 行 / 89 个顶层函数）。
-> ⚠️ 注意：`config.py` 已因 B7-2 而引入 `_escape` 复用，行号会与 plan 原文不同——**必须现查**。
+> **全部 9 个批次已完成**（收尾全量 `Ran 3180 tests, OK (skipped=4)`，起点 3042）。
+> **B9-2 已完成**（`Ran 3180`，提交 `60fbebe`）：`config.py` 2968 → 981 行，拆出 `config_pages/`
+> 7 个实体模块（共搬出 70/89 个函数）；`config.` 命名空间 **139/139 无缺失**（含 6 个 import 副产物）。
+> **B9-1 已完成**（`Ran 3175`，`c6179a4`）：`render.py` 七个常量（1887 行）外移 `ui_assets.py`，字节不变。
+> 后续若继续维护：`config_pages/` 子模块靠调用期 `import config` 取共享助手，**再导出块不得删**。
 
 > **B8 已完成**（`Ran 3172`，提交 `3c1e3af`）：A 组 5 项纯删除（含 `_COMMON_CSS` 字节不变证明、
 > 畸形 SVG `rx.5`、死函数 `_get_forwarded_url`）+ B 组 3 项行为修正（GBK `lstrip`、
