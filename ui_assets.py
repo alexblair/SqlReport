@@ -457,6 +457,15 @@ input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disab
 input:focus,select:focus,textarea:focus{
   outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft-2);background:var(--bg-surface);
 }
+/* 深色代码面控件（.code-textarea 等以 --code-bg 为底的输入域）不参与上面的
+   「聚焦翻白」——它们是深底浅字，通用 :focus 规则的 background 会把底翻成白色
+   而文字仍是 --code-ink，实际对比度 14.88:1 → 1.25:1，内容完全不可辨认
+   （用户实测：报表编辑页「规则 → 当前规则」点击后一片空白）。
+   此处以「元素选择器 + 类名」提特异性并单独回写深色底，
+   保留主色边框 + 焦点圈，聚焦反馈不丢。 */
+textarea.code-textarea:focus{
+  background:var(--code-bg);color:var(--code-ink);
+}
 input:disabled,select:disabled,textarea:disabled{background:var(--bg-subtle);color:var(--ink-4);cursor:not-allowed}
 select{
   appearance:none;-webkit-appearance:none;padding-right:26px;cursor:pointer;
@@ -797,6 +806,17 @@ th:first-child + th{min-width:156px}
   color:var(--ink-2);transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
 }
 .tree .cat:hover{background:var(--bg-hover);color:var(--ink-1)}
+/* 独立展开箭头（BUG-3：行点击改为右侧定位后，折叠职责移到这里）。
+   仅含子分类的行渲染按钮；无子级的行渲染等宽占位，保证左侧图标对齐。 */
+.tree .cat-expand{
+  width:18px;height:18px;flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;
+  padding:0;margin-left:-4px;border:0;border-radius:var(--r-xs);background:transparent;
+  color:var(--ink-3);font-size:var(--fs-11);line-height:1;cursor:pointer;
+  transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
+}
+.tree .cat-expand:hover{background:var(--accent-soft);color:var(--accent-ink)}
+.tree .cat-expand .chev{display:inline-flex;pointer-events:none}
+.tree .cat-expand-space{width:18px;flex:0 0 18px;display:inline-block;margin-left:-4px}
 .tree .cat.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 .tree .cat .ico{width:15px;height:15px;flex:0 0 15px;color:var(--ink-4)}
 .tree .cat.active .ico{color:var(--accent)}
@@ -1109,7 +1129,14 @@ html[data-tint=pine] .sidebar .brand .logo{background:linear-gradient(150deg,#3f
 .cat-block .cat-head .tree-toggle{font-size:var(--fs-13);font-weight:600;padding:2px 0}
 .cat-block .cat-head .tree-toggle .chev{transition:transform var(--t-fast) var(--ease);display:inline-flex}
 .cat-block.collapsed .cat-head .tree-toggle .chev{transform:rotate(-90deg)}
-.cat-block.collapsed > .cat-body,.cat-block.collapsed > .cat-children{display:none}
+/* 折叠只作用「当前这一级」：本级的列表体（.cat-body）与卡片体（.cat-cards）
+   必须一同隐藏，下级容器（.cat-children）整体收起。
+   历史缺陷：只写了 .cat-body/.cat-children —— 卡片视图下 .rpt-grid.cat-cards
+   不在选择器内且当时不带 .hidden，点折叠只收起下级、本级卡片留在原地
+   （用户实测：折叠被错误地用到下一级，且无法实现当前级别全部折叠）。 */
+.cat-block.collapsed > .cat-body,
+.cat-block.collapsed > .cat-cards,
+.cat-block.collapsed > .cat-children{display:none}
 
 /* 层级导轨：父子关系靠「竖线 + 节点横线 + 逐级缩进 + 字号下沉」表达，不靠表格缩进 */
 .cat-children{position:relative;margin-left:22px;padding:10px 0 10px 20px;border-left:1px solid var(--line)}
@@ -1212,6 +1239,10 @@ html[data-tint=pine] .sidebar .brand .logo{background:linear-gradient(150deg,#3f
 /* —— JS 运行时切换的动态类（必须存在，否则交互无视觉反馈） —— */
 @keyframes rowHighlightFade{from{background:var(--accent-soft-2)}to{background:transparent}}
 .row-highlight{animation:rowHighlightFade 2s ease forwards}
+/* 左树定位锚点（BUG-3）：「全部报表」无对应 .cat-block，用零高锚点代表右侧顶部。
+   scroll-margin-top 避开粘性页头，保证定位后目标不被遗住。 */
+.cat-anchor{height:0;scroll-margin-top:72px}
+.cat-block{scroll-margin-top:72px}
 .flash.fading-out{opacity:0;transition:opacity .5s ease}
 .btn-group{display:inline-flex;gap:8px;flex-wrap:wrap}
 .btn-link{background:none;border:none;color:var(--accent-ink);height:auto;padding:0;font-weight:500}

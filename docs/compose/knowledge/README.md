@@ -33,8 +33,8 @@
 | [05-api.md](./05-api.md) | 报表即 API、Key、CORS、静态 `.json` |
 | [06-ui-interactions.md](./06-ui-interactions.md) | **UI 任务四阶段流程**、UI 组件、页面交互、render 单一来源 |
 | [07-cache-scheduler-audit.md](./07-cache-scheduler-audit.md) | 缓存分层、定时任务、审计 type |
-| [08-testing-conventions.md](./08-testing-conventions.md) | 测试入口、**`-t .` 陷阱**、性能工具链、**两败必停**、**L2 分段命令表**、易踩坑清单 |
-| [09-agent-workflow.md](./09-agent-workflow.md) | **多代理协作纪律**、**执行效率与取证纪律（P1–P7）**、**代码检索纪律（#18/#19：codegraph 优先 + 改完 sync）**、汇报节奏 |
+| [08-testing-conventions.md](./08-testing-conventions.md) | 测试入口、**何时才跑测试（前置门槛）**、**`-t .` 陷阱**、性能工具链、**两败必停**、**L2 分段命令表**、易踩坑清单 |
+| [09-agent-workflow.md](./09-agent-workflow.md) | **多代理协作纪律**、**执行效率与取证纪律（P1–P7）**、**GitHub 提交流程（固定 4 步 + 6 条禁止）**、**代码检索纪律（#18/#19：codegraph 优先 + 改完 sync）**、**网页检索纪律（#23：何时搜/工具选择/实测陷阱/引用）**、汇报节奏 |
 | [10-token-budget.md](./10-token-budget.md) | **Token 预算（#20）**：真实 `usage` 账本（成本 ≈ 步数 × 上下文）、返回体积阈值与收窄命令表、批处理、会话分段交接模板、收尾自查工具 |
 
 **跨会话记忆与流程资产**（不在知识库分卷内，但每轮开工必查）：
@@ -42,7 +42,7 @@
 | 文档 | 内容 |
 |------|------|
 | `MEMORY.md`（仓库根） | **开工必读**：Rules（用户纠正 + 复盘结论）+ Discovered 环境事实 |
-| `docs/compose/consult/TEMPLATE.md` | 外部求援模板：2 轮未解即产出自包含咨询 MD，交用户联网回填 |
+| `docs/compose/consult/TEMPLATE.md` | 外部求援模板：**自己搜 2–4 次仍无解才用**（先看 09 卷「网页检索纪律」）；交用户联网回填 |
 | `docs/compose/spec/shots/r3/` | 截图自证管线 `shot-verify.mjs`（像素↔DOM 回验）+ 取证脚本 |
 | `docs/compose/reports/ui-r3-retrospective.md` | R3 复盘：token 消耗分解、典型错误根因、开工自检清单 |
 
@@ -52,7 +52,7 @@
 
 ## 关键硬约束（摘自 AGENTS.md）
 
-> **完整条目与指路见仓库根 `AGENTS.md` §1**（14 条，每条一行）；此处只是速览。
+> **完整条目与指路见仓库根 `AGENTS.md` §1**（条数以 `AGENTS.md` 实测为准）；此处只是速览。
 
 - 全部用户可感知文字：**简体中文**
 - 禁止重复造轮子：UI/筛选/导出/API/缓存/配置 CRUD 必须复用单一实现

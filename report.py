@@ -1522,10 +1522,9 @@ def render_report_selector(conn) -> str:
       node.classList.add('active');
       cat = node.getAttribute('data-cat') || 'all';
       apply();
-      if (node.getAttribute('data-has-kids') === '1') {
-        var k = node.nextElementSibling;
-        if (k && k.classList.contains('kids')) k.classList.toggle('on');
-      }
+      /* 交互统一（BUG-3 同源）：行点击只做筛选/选中；展开折叠属于独立箭头
+         [data-chevron] 的分支，不在这里再做一次。历史写法在本分支又 toggle 了
+         一次 .kids，导致「点一下既筛选又折叠」，与 /config/reports 左树行为冲突。 */
     });
   }
   // 最近查看挂载点：有记录时隐藏占位

@@ -11,8 +11,11 @@ class TestAssetsByteIdentical(unittest.TestCase):
 
     BASELINE = {
         "_BASE_CSS": ("ae3a4bbd0272f2a2", 9055),
-        "_COMMON_CSS": ("bb7ec576421bc83e", 79531),
-        "_COMMON_JS": ("5bcbeaccdfb1c635", 21412),
+        # 2026-10-12 交互 BUG 修复（焦点白底 / 折叠错级 / 树定位）后重算：
+        # _COMMON_CSS +1454B（.cat-expand、折叠规则覆盖卡片体、代码面焦点豁免等）
+        # _COMMON_JS  +2472B（catTreeLocate / toggleCatKids / initCatTreeLocate）
+        "_COMMON_CSS": ("ca1ce971b686b04d", 80985),
+        "_COMMON_JS": ("01e7e1c9b9fa09b7", 23884),
         "_MD_CSS": ("c352588586b20dc3", 2492),
         "_SQL_HIGHLIGHT_JS": ("b747870a03686a41", 1343),
         "_SQL_FORMATTER_JS": ("b46730d48db26945", 3116),
@@ -30,11 +33,15 @@ class TestAssetsByteIdentical(unittest.TestCase):
                              f"{name} 字节变了")
 
     def test_vendor_hash8_unchanged(self):
-        """vendor 目录名 self@{hash8} 必须不变（否则静态资源 URL 变化）。"""
+        """vendor 目录名 self@{hash8} 随资产内容变化（改 CSS/JS 必换 URL）。
+
+        本用例锁定当前值：内容一变就必须同步更新，避免「改了资产却沿用旧
+        URL」导致浏览器长期跑旧脚本（见知识库 06 卷「内容 hash 版本锁目录」）。
+        """
         import render
         self.assertEqual(
             render.content_hash8(render._COMMON_CSS + "\n;;;\n" + render._COMMON_JS),
-            "72429792")
+            "8fdec733")
 
     def test_ui_assets_exists_and_render_reexports(self):
         """外移后 render 必须继续导出这些名字（config/report 从 render 导入）。"""

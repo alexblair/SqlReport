@@ -77,6 +77,9 @@
 | 隐藏页卡里的 mermaid 流程图永远空白（16×16 空框） | `startOnLoad:true` 在 window load 渲染 `display:none` 页卡，量测全 0 并打 `data-processed`，事后 `mermaid.run` 直接跳过 | `TestMermaidTabRenderContract`（须 `startOnLoad:false`，`gotoTab`/`initReportPage` 调 `renderTabMermaid`）+ `scripts/ui-v2/e2e/mermaid-tab-check.mjs` |
 | SQL 编辑框整段没有滚动条（长 SQL 被裁） | `.sql-editor` 按「容器」写带 `overflow:hidden`，而生产把该类直接挂在 textarea 上 | `TestSqlEditorScrollContract`（`.sql-editor` 永不设 overflow，滚动契约归 `.sql-textarea{overflow:auto}`）；复测 `scripts/ui-v2/e2e/probe_computed_style.py` |
 | **删除/禁用按钮的确认框不弹，直接执行（数据安全）** | **HTML 转义误用于 JS 上下文**：`_escape` 产出 `&#x27;`，浏览器解析 HTML 属性时解码回 `'`，JS 源码语法错 → `onsubmit` 为 null → 表单直接提交。名称含 `'`（如 `O'Brien`）或以 `\` 结尾时触发 | `TestDeleteConfirmJsEscape` + `TestToggleConfirmJsEscape`（把生成的 JS 真的 `exec` 一遍断言文案）；**契约：JS 上下文必须先 `_js_str` 再 `_escape`，即 `_escape(_js_str(raw))`，且调用点传原文** |
+| **文本框聚焦后文字消失（深色代码面被翻白）** | 通用 `input:focus,select:focus,textarea:focus` 把 `background` 设为 `var(--bg-surface)`，特异性 (0,1,1) 高于 `.code-textarea` (0,1,0) → 深底浅字的「当前规则」框聚焦变白底浅字，对比度 14.88:1 → **1.25:1** | `TestFocusDoesNotBreakCodeSurface`（按 CSS 规则实算对比度，不钉类名；新组件自动纳入）；**契约：凡以 `--code-bg` 为底的控件必须自带 `:focus` 高特异性回写底色，或在通用 `:focus` 规则里成对声明 `color`** |
+| **卡片视图下折叠「作用到下一级」、本级折不掉** | `.cat-block.collapsed > .cat-body` 漏了本级**卡片体** `.cat-cards`（它当时也不带 `.hidden`）；且 `toggleCatBlock` 语义必须只切「按钮所属的那一个」块 | `TestCategoryCollapseScopedToOwnLevel`（折叠规则必须同时覆盖 `.cat-body`/`.cat-cards`/`.cat-children`；toggle 不得出现 `querySelectorAll`/`children`/`nextElementSibling`） |
+| **点分类树层级只折叠、无法定位右侧分组** | 树行 `onclick` 直接切 `.kids` 的 `.on`，把「定位」与「折叠」两件事混在一次点击里；两棵树（`/config/reports` 左树与报表中心 `#rc-tree`）行为还不一致 | `TestCategoryTreeLocatesRightPane` + `TestTreeRowClickConsistency`；**契约：行点击 = 本树主职责（定位/筛选），折叠只归独立箭头（`.cat-expand` / `[data-chevron]`）**；E2E `scripts/ui-v2/e2e/cat-focus-check.mjs` |
 
 ## 其他硬约定（压缩；组件/页面/DOM 细节见 `render.py`，codegraph 可查符号）
 
@@ -84,6 +87,8 @@
 - **class 不得撞名**：`.sql-head` 是「SQL 列表头」钩子，曾被挪用为代码工具条致表头错乱；代码面工具条统一用 `.code-head`。
 - **动态类必须有样式**：JS 运行时切换的 `.hidden`/`.show`/`.fading-out`/`.row-highlight`/`.btn.loading`/`.filter-input-touch`/`query-loading-overlay.show` 必须在公共层定义（遮罩默认 `display:none`，仅 `.show` 显示）；由 JS 切 class 的组件（`.side-panel`/`.modal`）基础态必须隐藏，`.on`/`.open`/`.show` 才显示。
 - **侧栏收缩三态记忆**：`sqlreport_sidebar_collapsed` 无值=默认、1=收起、0=展开；改语义须同步 `_SIDEBAR_BOOTSTRAP_JS`、`sbStoreWrite` 与 `_COMMON_CSS` 三处；读写异常向 UI 明示（`window.__sbStorageErr` + `showFlashWarn`），不静默降级。
+- **树/列表行的点击语义（交互统一，2026-10-12）**：一次点击只能有一件事。折叠必须归**独立箭头**（`.cat-expand` / `[data-chevron]`），行点击做本树主职责（`/config/reports` 左树 = `catTreeLocate` 滚动定位 + `.row-highlight` 高亮；报表中心 `#rc-tree` = 筛选/选中）。新增树组件必须同时提供两件东西：行级主行为 + 独立展开箭头。
+- **代码面颜色契约**：凡以 `--code-bg`（深色）为底的控件，必须自带 `:focus` 规则回写 `background/color`；通用 `:focus` 规则的特异性 (0,1,1) 会盖过单类名 (0,1,0)。
 - **`buildReportUrl(overrides)`**：报表页 URL 唯一构造，显式处理 id/page_size/result/sort/dir/cols，其余参数（`nested_filter`、`sql_query`、`f_*`、`op_*`）一律透传。
 - **JSON 导出恒 UTF-8**：`export.handle_export` 解析后强制 `charset="utf8"`（含 ZIP 内 `.json`）；导出面板选 JSON 时把字符集单选置为 UTF-8 并禁用，CSV 仍默认 GBK。镜像控件**不带 `name`**，避免同名参数重复提交。
 - **`_PAGE_HEADER_TEMPLATE.substitute` 有两处调用**（`render_page_header` 与 `render_audit_page`）：新增模板占位符必须两处同步传参，漏一处即 `KeyError`。

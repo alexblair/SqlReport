@@ -297,6 +297,53 @@ def main() -> int:
            lambda: setattr(report, "_FOOTER_GLUE", orig_glue),
            "tests.test_ui_tokens.TestMermaidTabRenderContract"
            ".test_visible_tab_renders_mermaid")
+    # --- 12) 焦点把深色代码面翻白（2026-10-12 用户实测：当前规则框点一下就看不清）---
+    # 纯内存变异：把「深面豁免」规则改回只写 outline（即只剩通用 :focus 翻白）
+    orig_focus_css = render._COMMON_CSS
+
+    def mutate_focus_whiteout():
+        render._COMMON_CSS = orig_focus_css.replace(
+            "textarea.code-textarea:focus{\n  background:var(--code-bg);color:var(--code-ink);\n}",
+            "textarea.code-textarea:focus{outline:2px solid var(--accent);}", 1)
+        assert render._COMMON_CSS != orig_focus_css, "变异未命中 .code-textarea 焦点豁免规则"
+
+    _check("焦点翻白代码面", mutate_focus_whiteout,
+           lambda: setattr(render, "_COMMON_CSS", orig_focus_css),
+           "tests.test_ui_tokens.TestFocusDoesNotBreakCodeSurface"
+           ".test_focus_rule_must_not_override_dark_surface")
+
+    # --- 13) 折叠规则漏掉卡片体（2026-10-12 用户实测：卡片视图折叠作用到下一级）---
+    def mutate_collapse_missing_cards():
+        # 仅把选择器列表中的 .cat-cards 一行删掉（注释块不参与匹配）
+        render._COMMON_CSS = orig_focus_css.replace(
+            ".cat-block.collapsed > .cat-body,\n"
+            ".cat-block.collapsed > .cat-cards,\n"
+            ".cat-block.collapsed > .cat-children{display:none}",
+            ".cat-block.collapsed > .cat-body,\n"
+            ".cat-block.collapsed > .cat-children{display:none}", 1)
+        assert render._COMMON_CSS != orig_focus_css, "变异未命中折叠规则"
+
+    _check("折叠漏卡片体", mutate_collapse_missing_cards,
+           lambda: setattr(render, "_COMMON_CSS", orig_focus_css),
+           "tests.test_ui_tokens.TestCategoryCollapseScopedToOwnLevel"
+           ".test_collapsed_rule_covers_both_view_bodies")
+
+    # --- 14) 树行点击变回折叠（2026-10-12 用户实测：点层级应定位右侧而非折叠）---
+    orig_common_js = render._COMMON_JS
+
+    def mutate_row_click_collapses():
+        render._COMMON_JS = orig_common_js.replace(
+            'if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button, .cat-expand")) return;\n  catTreeLocate(node);',
+            'if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button")) return;\n  var _k = node && node.getAttribute("data-kids");\n  var _e = _k && document.getElementById(_k);\n  if (_e) _e.classList.toggle("on");', 1)
+        assert render._COMMON_JS != orig_common_js, "变异未命中 toggleCatNode 委派点"
+
+    _check("树行点击仍折叠", mutate_row_click_collapses,
+           lambda: setattr(render, "_COMMON_JS", orig_common_js),
+           "tests.test_ui_tokens.TestCategoryTreeLocatesRightPane"
+           ".test_row_click_locates_instead_of_collapsing")
+
+    assert render._COMMON_CSS == orig_focus_css and render._COMMON_JS == orig_common_js, \
+        "UI 门禁变异未还原（_COMMON_CSS/_COMMON_JS）"
 
     print(f"{'门禁':26} RED(应失败)  GREEN(应通过)  结论")
     failed = 0

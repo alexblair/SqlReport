@@ -31,7 +31,7 @@ LIMIT_VOLUMES_TOTAL = 155000 # 知识库分卷合计：防止「分卷慢慢膨�
 LIMIT_COURSE_STATE = 8000    # learn/sqlreport-kb/course-state.md（开工查证会读）
 
 # 硬性约束编号（AGENTS.md §1）：引用必须落在 LIVE；退役号不复用（2026-10-09 瘦身；2026-10-10 退役 #21）
-LIVE_CONSTRAINTS = frozenset({1, 2, 3, 5, 6, 7, 8, 12, 14, 17, 18, 19, 20, 22})
+LIVE_CONSTRAINTS = frozenset({1, 2, 3, 5, 6, 7, 8, 12, 14, 17, 18, 19, 20, 22, 23})
 RETIRED_CONSTRAINTS = frozenset({4, 9, 10, 11, 13, 15, 16, 21})
 _CONSTRAINT_REF_RE = re.compile(r"硬性(?:约束)?\s*#(\d{1,2})")
 

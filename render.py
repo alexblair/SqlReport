@@ -124,12 +124,64 @@ function toggleCatTree(btn) {
   btn.textContent = (collapsed ? "\u25b6 " : "\u25bc ") + "报表分类";
   try { localStorage.setItem("cat_tree_collapsed", collapsed ? "1" : "0"); } catch (e) {}
 }
-function toggleCatNode(ev, row) {
-  if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button")) return;
+function toggleCatNode(ev, node) {
+  /* 兼容入口：历史树行 onclick="toggleCatNode(event,this)" 传入旧结构。
+     现行语义（BUG-3 修复）：点击树行 = 定位右侧分类区块，不再折叠。
+     折叠职责已移交给独立的展开箭头（.cat-expand → toggleCatKids）。 */
+  if (ev && ev.target && ev.target.closest && ev.target.closest(".ops, form, a, button, .cat-expand")) return;
+  catTreeLocate(node);
+}
+function toggleCatKids(ev, btn) {
+  /* 独立展开箭头：只切换「本行自己的」下级容器 .kids 的 .on。
+     不向往外扩散、不碰兄弟节点、不碰右侧列表，与左侧行点击（定位）职责分离。 */
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  var row = btn && btn.closest ? btn.closest(".cat") : null;
+  if (!row) return;
   var id = row.getAttribute("data-kids");
   if (!id) return;
   var kids = document.getElementById(id);
-  if (kids) kids.classList.toggle("on");
+  if (!kids) return;
+  var open = kids.classList.toggle("on");
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  var ch = btn.querySelector(".chev");
+  if (ch) ch.textContent = open ? "\u25be" : "\u25b8";
+}
+function catTreeLocate(node) {
+  /* BUG-3：点击左树层级 → 右栏（列表或卡片）滚动定位到该分类分组，并高亮。
+     复用既有锚点高亮机制（.row-highlight），不再自己造一套。
+     目标区块对两种视图都成立：定位到 .cat-block 本身（卡片/列表都在其中）。 */
+  var row = node && node.closest ? node.closest("[data-target]") : node;
+  if (!row || !row.getAttribute) return;
+  var target = row.getAttribute("data-target");
+  if (!target) return;
+  var block = document.getElementById(target);
+  if (!block) return;
+  /* 左树高亮当前层级（单一实现：沿用 .cat.active） */
+  var cats = document.querySelectorAll(".tree .cat");
+  for (var i = 0; i < cats.length; i++) cats[i].classList.remove("active");
+  if (row.classList && row.classList.contains("cat")) row.classList.add("active");
+  /* 目标分组若折叠则先展开，否则定位过去看不到内容 */
+  block.classList.remove("collapsed");
+  /* 滚动定位：优先最近可滚动祖先，直接用 scrollIntoView 即可 */
+  if (block.scrollIntoView) block.scrollIntoView({block: "start", behavior: "smooth"});
+  /* 高亮复用既有 .row-highlight（重播动画需先移除再加回） */
+  block.classList.remove("row-highlight");
+  void block.offsetWidth;
+  block.classList.add("row-highlight");
+  /* 可分享锚点（不写历史，避免污染回退链） */
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState(null, "", "#" + target);
+  }
+}
+function initCatTreeLocate() {
+  /* 幂等：刷新左树高亮态——页面带 #cat-block-N 时高亮对应层级。
+     点击走内联 onclick（innerHTML 换页后天然可用），无需重绑。 */
+  var hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return;
+  var rows = document.querySelectorAll(".tree .cat[data-target]");
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].getAttribute("data-target") === hash) rows[i].classList.add("active");
+  }
 }
 function apiToggleMore(btn) {
   var row = btn && btn.closest && btn.closest(".api-row");
@@ -166,8 +218,13 @@ function selectAllInSection(el) {
   updateBatchCount();
 }
 function toggleCatBlock(btn) {
+  /* 只切换「按钮所属的那一个」分类块——不做后代/兄弟批量操作。
+     本级的列表体与卡片体都由 .cat-block.collapsed > .cat-body/.cat-cards 收起，
+     下级容器 .cat-children 整体隐藏但各自 collapsed 状态保留（不串味）。 */
   var b = btn.closest('.cat-block');
-  if (b) b.classList.toggle('collapsed');
+  if (!b) return;
+  var collapsed = b.classList.toggle('collapsed');
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 function submitBatchPost(actionUrl, ids, extraFields) {
   var form = document.createElement('form');
@@ -492,6 +549,7 @@ function initPage() {
   initCatTree();
   initFlashMessages();
   initAnchorRowHighlight();
+  initCatTreeLocate();
   initQueryLoadingOverlay();
   initConfigFilter();
   initRecentReports();
@@ -2676,8 +2734,9 @@ def build_category_manage_section_html(all_cats, cat_tree,
     """渲染分类管理区块（分类树 + 排序 + CRUD，纯数据 → HTML，无 DB 调用）
 
     ui-redesign R2-A：左树按已确认原型改为 flex 行——图标 + 名称 + 报表数角标 +
-    ghost 操作（✎↑↓✕，悬停提亮）；子分类包 .kids 容器逐级缩进，行点击折叠/展开
-    （toggleCatNode）；不再使用 ├─ 文本引导线。
+    ghost 操作（✎↑↓✕，悬停提亮）；子分类包 .kids 容器逐级缩进。
+    行点击 = 右侧定位（catTreeLocate，BUG-3），折叠由独立箭头 .cat-expand
+    （toggleCatKids）承担；不再使用 ├─ 文本引导线。
     config-reports-merge：区块整体可折叠
     （localStorage 记忆折叠状态，标题栏按钮折叠时仍可见）。
     确认稿 r3：树顶渲染「全部报表 N」静态高亮首行（total_reports=全量报表数，
@@ -2693,8 +2752,12 @@ def build_category_manage_section_html(all_cats, cat_tree,
         move_btns = build_move_buttons_html(cat["id"], "categories", idx, n)
         count = counts.get(cat["id"])
         count_html = f'<span class="cnt">{count}</span>' if count else ""
-        kids_attr = (f' data-kids="cat-kids-{cat["id"]}"'
-                     f' onclick="toggleCatNode(event,this)"' if has_children else "")
+        # BUG-3：data-target 指向右栏对应分组区块 id；行点击走 catTreeLocate 定位
+        # 而不是折叠。折叠能力保留在独立箭头 .cat-expand 上（只对含有子级的行渲染）。
+        row_attrs = f' data-target="cat-block-{cat["id"]}"'
+        if has_children:
+            row_attrs += f' data-kids="cat-kids-{cat["id"]}"'
+        row_attrs += ' onclick="toggleCatNode(event,this)"'
         name = _escape(cat["name"])
         edit_btn = _link_btn(f"/config/categories/{cat['id']}/edit", "✎",
                              "btn btn-ghost btn-sm btn-icon", title="编辑")
@@ -2702,7 +2765,12 @@ def build_category_manage_section_html(all_cats, cat_tree,
             f"/config/categories/{cat['id']}/delete",
             f"确定删除分类 {cat['name']}？分类下的报表和子分类将变为未分类。",
             indent=2, label="✕", btn_title="删除")
-        return f"""<div class="cat"{kids_attr}>
+        expand_btn = (
+            '<button type="button" class="cat-expand" aria-expanded="true"'
+            ' onclick="toggleCatKids(event,this)" title="折叠/展开子分类">'
+            '<span class="chev">\u25be</span></button>' if has_children else '<span class="cat-expand-space"></span>')
+        return f"""<div class="cat"{row_attrs}>
+  {expand_btn}
   <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
   <span class="nm" title="{name}">{name}</span>
   <span class="ops">
@@ -2731,7 +2799,9 @@ def build_category_manage_section_html(all_cats, cat_tree,
     # 确认稿 r3：树顶「全部报表 N」静态高亮首行（列表 SVG 图标，沿用 R2-A 图标体系）
     all_row = ""
     if total_reports is not None:
-        all_row = ('<div class="cat active" aria-current="true">'
+        # 「全部报表」同样参与定位（交互统一）：定位到右侧首个分组。
+        all_row = ('<div class="cat active" aria-current="true" data-target="cat-block-all"'
+                   ' onclick="toggleCatNode(event,this)" role="button" tabindex="0">'
                    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
                    'stroke-width="1.5" aria-hidden="true">'
                    '<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/>'
@@ -3065,9 +3135,10 @@ function setReportsView(v, save) {{
                 # 层级导轨：子级容器负责缩进 + 竖线 + 节点横线，不再用内联 margin/border
                 inner += f'<div class="cat-children">{_render_report_sections(node["children"], depth + 1)}</div>'
             icon = _icon("folder") if has_children else _icon("chart")
-            html += f"""<section class="section cat-block cat-depth-{min(depth + 1, 3)}">
+            # id 供左树 data-target 定位（BUG-3）；每个分类区块唯一。
+            html += f"""<section class="section cat-block cat-depth-{min(depth + 1, 3)}" id="cat-block-{node['id']}">
   <div class="cat-head">
-    <button type="button" class="tree-toggle" onclick="toggleCatBlock(this)" title="折叠/展开"><span class="chev">▼</span></button>
+    <button type="button" class="tree-toggle" onclick="toggleCatBlock(this)" title="折叠/展开本分类（不影响下级分类）" aria-expanded="true"><span class="chev">▼</span></button>
     <span class="cat-depth-dot"></span>
     <span class="cat-name"><span class="ico">{icon}</span>{_escape(node['name'])}</span>
     <span class="badge badge-neutral">{len(reports)} 个报表</span>
@@ -3078,7 +3149,10 @@ function setReportsView(v, save) {{
 </section>"""
         return html
 
-    tab_html = _render_report_sections(cat_tree)
+    # 「全部报表」定位锚点：置于右侧全部分组之前（交互统一：左树每一项都能定位）。
+    # 用空锚点而非首个 cat-block，保证「全部报表」= 列表顶部语义，不误高亮某个分类。
+    all_anchor = '<div id="cat-block-all" class="cat-anchor" aria-hidden="true"></div>'
+    tab_html = all_anchor + _render_report_sections(cat_tree)
     uncat_rows, uncat_cards = _render_report_rows(unclassified_reports)
     # 批次5#17：未分类区块不再内联批量操作条（页面级单实例移至列表容器之后）
     uncat_section = f"""<section class="section cat-block cat-depth-1">

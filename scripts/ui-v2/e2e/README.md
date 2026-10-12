@@ -25,6 +25,7 @@ HOST=127.0.0.1 PORT=8099 venv/bin/python server.py &
 | `repro-sort-broken.mjs` | 用户复现步骤：隐藏列→应用→还原→应用→再排序 | `CDP_PORT=9411 node scripts/ui-v2/e2e/repro-sort-broken.mjs` |
 | `api-row-expand-check.mjs` | `/config/api-endpoints` 展开/收起（整页+换页态+多轮+组合）、两处分类树折叠、详情页接口页签 | `CDP_PORT=9411 node scripts/ui-v2/e2e/api-row-expand-check.mjs`（可加 `BASE=http://127.0.0.1:8098`） |
 | `mermaid-tab-check.mjs` | 备注页卡 mermaid：整页加载不渲染（隐藏页卡）→ 点备注渲染 → 第二/三次与跨页卡组合后几何不变 | `CDP_PORT=9411 REPORT_ID=42 node scripts/ui-v2/e2e/mermaid-tab-check.mjs` |
+| `cat-focus-check.mjs` | 三处交互修复实测：① `#current-rules-json` 聚焦后对比度 ≥4.5（整页/二次聚焦/页签换页）；② 列表**与卡片**视图下折叠本级内容体 `display:none`；③ 点左树层级→右侧滚动定位+高亮+自动展开，行点击不再折叠，独立箭头仍可折叠（含组合序列） | `CDP_PORT=9411 node scripts/ui-v2/e2e/cat-focus-check.mjs`（支持 `BASE=`） |
 
 注意：这些脚本默认连 `http://127.0.0.1:8099`，账号 `admin/admin123`（DEBUG 配置库默认账号）；
 `api-row-expand-check.mjs` 支持 `BASE=` 覆盖（可用于另起的验证实例）。

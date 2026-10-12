@@ -13,13 +13,14 @@
 2. **改 UI 先代码层定位，浏览器取证按需（用户 2026-10-09 指示）**：Chrome/CDP 证据最硬但最慢（十秒~分钟级）；能代码层定性的不截图；需要运行时计算样式/几何/交互证据时才起浏览器，且**一次会话批量验完**，禁止"改一行截一次图"。
 3. **依据冲突或需求歧义，先问不猜（用户指示）**：用户要求与「最新依据」冲突、或卡点是「以哪版为准」（选择/裁决）而非技术未知时，**停下问一个选择题**（1 次调用，不自我怀疑兜圈、不擅自取舍；反例：改 UI 时执着对比历史 shot 图）；**需求歧义直接问比写咨询文档快**；裁决按「当次指示 > AGENTS.md > 最新生效 spec > 旧 spec/plan」，**历史设计图只是取证**。
 4. **文档分层铁律（用户 2026-09-29 纠正）**：`AGENTS.md` 只放「每次任务都要读」的最小集（硬约束 + 入口路由 + 环境命令 + 收尾检查单）；「只在特定任务才需要」的全文进分卷。**新内容默认进分卷**，只有「不读就会做错且每次都遇到」才进 AGENTS.md。
-5. **卡住即外部求援（用户 2026-09-29 流程）**：训练未覆盖且 **2 轮未解** → 停止猜测循环，产出**自包含**《咨询文档》交用户联网检索（模板 `docs/compose/consult/TEMPLATE.md`）：目标、项目背景与技术约束、现象带实测数值、逐轮尝试与效果、精确 query、答案格式与禁忌——对方无法访问本仓库。
+5. **技术未知先自检索，咨询文档仅作兜底（用户 2026-10-10 更新）**：报错/API 用法/库行为等**技术未知不等轮次，先 `web_search`（要正文再 `web_fetch`）**；**自己搜 2–4 次仍无解**（需内网资料、需人类账号、需业务裁决）才产出**自包含**《咨询文档》交用户（模板 `docs/compose/consult/TEMPLATE.md`）：目标、项目背景与技术约束、现象带实测数值、逐轮尝试与效果、精确 query、答案格式与禁忌——对方无法访问本仓库。用法与实测陷阱见 `09-agent-workflow.md`「网页检索纪律」（硬性 #23）。
 7. **版本线纪律（用户指示）**：`V1` 冻结（GitHub ruleset `V1-freeze`，id 24514074）、`V2` 为默认分支承接后续提交；**禁止向 V1 推送**；切换口径唯一来源 `docs/version-switch-guide.md`。
 8. **改 `render.py`/`report.py`/`config.py` 后必须重启服务再验（实测 2026-09-30）**：外链公共 CSS/JS 走内容哈希目录 + 进程级 URL 缓存（`_COMMON_ASSET_URLS`），不重启看不到变化；交付前提醒用户硬刷新。
 9. **照抄确认稿前必做结构 diff（用户两次反馈才定位）**：确认稿与生产的同名 class 数量/位置可能不同——`grep -c 'class="X"'` 对比源码渲染数量，不一致先问用户或先改结构。
 10. **`edit` 锚点是闭区间（实测 2026-10-09）**：`anchor_from..anchor_to` 的锚点行本身会被替换，`replace_with` 必须写回锚点行内容；大段替换不确定时整文件 `write` 一次更省。
 11. **线上库操作须限定范围；用户给的「某类操作没问题」前提必须实证（用户 2026-10-10 指示）**：线上 config 库（MySQL 3307）**只允许动用户指定报表（reports=43）或自建临时报表，禁止碰其他报表**（自建临时报表用完自清）；用户前提与语句级/日志证据冲突时**以证据为准并回报差异**——本次「已知新建报表未报错」不成立：日志里 id=43 刚建（14:53:07）即单删 500（14:53:44）。
 12. **文档资产位置铁律：一切以 `docs/compose/` 为起点（用户 2026-10-10 指示）**：仓库根**不得**新增文档目录或陈旧副本——`.superpowers/` 是第三方 superpowers 技能 `subagent-driven-development` 硬编码的过程 scratch（无配置可改，跑 SDD 必重建），**跑完即把结论归档进 `docs/compose/reports/` 并删除目录**；`AGENTS.md` 才是唯一依据。成因见 `docs/compose/reports/2026-10-10-sdd-workspace-migration.md`。
+13. **跑测试的前置条件（用户 2026-10-10 纠正）**：**全量/全局测试只在「参与了功能与代码的修改」或「独立测试任务」时才跑**；纯文档/规则/注释/规则类改动**不跑测试**（最多跑直接覆盖该文件的门禁且只跑那一个）。反例：本次仅改 `.md` 规则却跑了两次全量 `discover`——第一次 exit 0 但丢了 `Ran N` 证据，第二次 688KB 日志中途被 SIGTERM，纯浪费预算。详见 `08-testing-conventions.md`「何时才跑测试（前置门槛）」。
 
 ## Discovered（环境事实）
 
@@ -28,6 +29,7 @@
 - **外部已起的 8099 实例本会话看不见也重启不了（实测 2026-10-05）**：bash 跑在 `bwrap --unshare-pid` 里，`pgrep`/`ss -ltnp` 看不到宿主 `server.py`，`./test_env.sh restart` 会以"端口被本命名空间外进程占用"拒绝。要验证改动就另起隔离实例：产物与配置都放 `run-logs/` 内，`DEBUG_CONFIG_FILE` 指向该配置，`scheduler.enable=false` 避免与宿主双跑定时任务，`redis.key_prefix`/`audit_db`/`static_cache` 也都指向该目录。
 - **codegraph（本机 v1.4.0，实测 2026-10-06）**：**只索引 `.py` 与 `.js`/`.mjs`**，`.md`/`.json`/`.html`/`.css`/`.sh` 一律不索引（这些直接 grep/read）；`explore` 按代码词匹配，**纯中文问句 0 命中**（不是降级 grep 的理由）；**无守护进程、无自动同步** → 改完代码手动 `codegraph sync`；`codegraph index` 全量重建**必须在单条命令内跑完**（后台起会被沙箱杀掉、卡在 `state=indexing`，需 `codegraph unlock`）。命令表见 `09-agent-workflow.md`。
 - **无头 Chrome 取证配方（实测 2026-10-09）**：命令行一次性模式 `--screenshot`/`--dump-dom` 在本容器**必挂**（`--headless=old` 是唯一稳定的一次性模式）；**不能用 `subprocess(capture_output=PIPE)`**（fork 出的子进程不关管道 → 假挂起到 timeout）；`--window-size`/`--virtual-time-budget` 与 `--screenshot` 同用也挂。稳定路线是 `--headless=new` + `--remote-debugging-port` + CDP（Node24 内置全局 `WebSocket` 即可连），但 **Chrome 必须以受管后台作业启动**、**CDP server 随 shell 退出被回收（严禁跨命令复用）**。已封装为 `scripts/ui-v2/e2e/probe_computed_style.py`（含 `--selftest`）。
+- **UI 取证的三个必踩坑（实测 2026-10-12，一次会话白跑了 6 轮）**：① **`server.py`、Chrome、e2e 脚本必须在同一条 bash 里起**（`--unshare-pid` 下跨调用看不见也杀不掉旧进程；`fuser`/`ss` 也无效）；② **8099 上可能赖着旧进程**，它照旧代码服务而不报绑端口错 → 验证改动**一律换新端口**（如 `PORT=8130`）+ `BASE=` 覆盖；③ **HTML 的 `<style>` 快照会滞后**：新增的 `__pycache__` 之外还有进程级 `_COMMON_ASSET_URLS` 缓存，**必须重启服务再验**，否则会在「改了却没生效」上兜圈（症状：页面里资产 hash 仍是旧值、新加的 `data-*` 属性不出现）。另外 `/tmp` 在每次调用间是独立 tmpfs，脚本产物**写 `run-logs/`**。
 - **本地 debug 栈可直接用（实测 2026-10-05）**：调试配置是工作树里的 `app_config.debug.json`（gitignore），也是 `app_config.py` 的默认路径——不设任何环境变量即生效（Redis db0/前缀 `sr_debug`、sqlite `config.debug.db`、数据池指向 `127.0.0.1:3307/sqlreport_test`）。**旧文档里的 `DEBUG_CONFIG_FILE=app_config.debug.json1` 已不存在**；只有要换配置文件时才需要设 `DEBUG_CONFIG_FILE`。
 - **`run-logs/` 里的克隆副本会污染静态分析门禁（实测 2026-10-06）**：`static_analyzer.IGNORE_DIRS` 不含 `run-logs/`、`perf-logs/`，放在里面的 `git clone`/`worktree` 副本会被扫到 → 全量 discover 报 ERROR（产品代码零回归）。跑全量前确认 `run-logs/` 下无 `.py` 克隆产物，**不要为此放宽门禁**。
 - **`git update-index --chmod=±x <file>` 会把工作树内容重读进索引（实测 2026-10-05）**：用它修权限位噪音时会把该文件**全部未提交改动**一并暂存 → 提交后在干净检出上自测失败。正确做法：先精确暂存（`git add -p` / `git apply --cached`），权限位改用 `git update-index --chmod=-x --cacheinfo 100644,$(git rev-parse HEAD:<path>),<path>`；改完必须用 `git worktree add --detach <dir> HEAD` 验证「干净检出 HEAD 能自绿」。
