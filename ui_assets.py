@@ -1917,6 +1917,7 @@ EXCL_EDITOR_JS = """
 
   function init(){
     var form=hiddenBox().closest("form");
+    if(!form)return;
     form.addEventListener("submit",function(){
       if(sourceBox().style.display!=="none")
         hiddenBox().value=sourceBox().value.trim();

@@ -342,6 +342,38 @@ def main() -> int:
            "tests.test_ui_tokens.TestCategoryTreeLocatesRightPane"
            ".test_row_click_locates_instead_of_collapsing")
 
+    # --- 8) 内联处理器裸插值（2026-09-30 删除确认框事故同款） ----------------
+    # 把 A-1 改回未转义的裸露插值：若值含单引号，浏览器解码 HTML 实体后
+    # JS 字面量断裂 → onchange 变 null → 交互静默失效。
+    render_py = render.__file__
+    rbackup = render_py + ".redproof.bak"
+    if os.path.exists(rbackup):
+        print(f"[中止] 发现残留 {rbackup}：请先删除并 git checkout -- render.py")
+        return 2
+    rbefore = _sha256(render_py)
+    BARE_OLD = "toggleFilterInput('{js_arg(filter_input_name)}', this)"
+    BARE_NEW = "toggleFilterInput('{filter_input_name}', this)"
+
+    def mutate_bare():
+        shutil.copy2(render_py, rbackup)
+        with open(render_py, encoding="utf-8") as fh:
+            text = fh.read()
+        assert BARE_OLD in text, "变异未命中 A-1 内联处理器"
+        with open(render_py, "w", encoding="utf-8") as fh:
+            fh.write(text.replace(BARE_OLD, BARE_NEW, 1))
+
+    def restore_bare():
+        shutil.move(rbackup, render_py)
+        assert _sha256(render_py) == rbefore, "render.py 还原后 sha256 不一致！"
+
+    try:
+        _check("内联处理器裸插值", mutate_bare, restore_bare,
+               "tests.test_ui_tokens.TestInlineHandlerArgEscaping"
+               ".test_no_bare_interpolation_in_inline_handlers")
+    finally:
+        if os.path.exists(rbackup):        # 异常路径兜底
+            shutil.move(rbackup, render_py)
+
     assert render._COMMON_CSS == orig_focus_css and render._COMMON_JS == orig_common_js, \
         "UI 门禁变异未还原（_COMMON_CSS/_COMMON_JS）"
 

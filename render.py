@@ -1172,6 +1172,19 @@ def _js_str(val) -> str:
     """
     return str(val).translate(_JS_ATTR_ESCAPE).replace("</", "<\\/")
 
+def js_arg(val) -> str:
+    """把值安全嵌入 **HTML 内联事件属性** 里的 JS 字符串字面量（单点原语）。
+
+    即 `_escape(_js_str(raw))` 的封装，顺序永远是「先 JS 层、后 HTML 属性层」。
+    内联 `on*="..."` 中的值若只过 `_escape`，`&#x27;` 会在浏览器解析 HTML 属性时
+    解码回单引号，破坏 JS 字面量 → 事件处理器静默失效 → 破坏性表单直接提交
+    （2026-09-30 删除确认框事故）。**新增内联处理器一律走本函数**，门禁
+    `tests/test_ui_tokens.py::TestInlineHandlerArgEscaping` 强制。
+    对不含反斜杠/单引号/换行/`</` 的值是恒等变换，故常规数据下渲染输出零差异。
+    """
+    return _escape(_js_str(val))
+
+
 
 def build_flash_html(flash: str, is_error: bool = None) -> str:
     """构建 flash 提示条 HTML。
@@ -1935,7 +1948,7 @@ def build_table_header_html(columns, display_columns, sorts, filters,
   <div class="filter-row" style="display:flex;gap:2px;align-items:center">
     <select class="filter-op" form="{filter_form_id}" name="{filter_op_name}"
       style="flex-shrink:0;cursor:pointer"
-      onchange="toggleFilterInput('{filter_input_name}', this)">{op_options}</select>
+      onchange="toggleFilterInput('{js_arg(filter_input_name)}', this)">{op_options}</select>
     <input type="text" class="filter-input" form="{filter_form_id}"
       name="{filter_input_name}" placeholder="筛选 {_escape(col)}{FILTER_HINT_SUFFIX}"
       value="{_escape(cur_fval)}" title="{_escape(cur_fval)}"
@@ -3297,7 +3310,7 @@ def build_api_endpoints_list_html(api_endpoints: list[dict],
             key_html = (f'<code>{api_key_display}</code> '
                         f'<code id="api-key-raw-{ep_id}" style="display:none">'
                         f'{_escape(api_key_raw)}</code>'
-                        f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{ep_id}\')" '
+                        f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{js_arg(ep_id)}\')" '
                         f'title="复制完整 API Key" '
                         f'class="btn-mini btn-mini-outline-key">复制</button>')
         else:
@@ -4077,7 +4090,7 @@ def build_api_key_manage_html(keys: list, report_id: int, endpoint_id: int) -> s
             f'{kname}</span>'
             f'<code>{kdisp}</code>'
             f'<code id="api-key-raw-{kid}" style="display:none">{_escape(kraw)}</code>'
-            f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{kid}\')" '
+            f'<button type="button" onclick="copyToClipboard(\'api-key-raw-{js_arg(kid)}\')" '
             f'title="复制完整 API Key" class="btn-mini btn-mini-outline-key">复制</button>'
             f'{state}{toggle_form}{del_form}'
             f'</div>')
@@ -4134,7 +4147,7 @@ def render_audit_page(
     range_presets = {"today": "今天", "yesterday": "昨天", "last7": "近7天", "last30": "近30天"}
     range_btns = ""
     for rkey, rlabel in range_presets.items():
-        range_btns += f'<button type="button" class="btn btn-sm btn-outline" onclick="setAuditDateRange(\'{rkey}\')">{rlabel}</button>'
+        range_btns += f'<button type="button" class="btn btn-sm btn-outline" onclick="setAuditDateRange(\'{js_arg(rkey)}\')">{rlabel}</button>'
     date_from = filters.get("date_from", "")
     date_to = filters.get("date_to", "")
     session_user_val = filters.get("session_user", "")
@@ -4401,14 +4414,14 @@ def build_collapse_section_html(title: str, content: str,
     mem_ctl = ""
     if multiline:
         return (f'<div class="debug-info"{mem_attrs}{style_attr}>\n'
-                f'<button class="debug-toggle" onclick="toggleSection(this, \'{title}\')" type="button">{btn_text}</button>\n'
+                f'<button class="debug-toggle" onclick="toggleSection(this, \'{js_arg(title)}\')" type="button">{btn_text}</button>\n'
                 f'<div class="debug-content{hidden_cls}">\n'
                 f'{content}\n'
                 f'</div>\n'
                 f'{mem_ctl}\n'
                 f'</div>')
     return (f'<div class="debug-info"{mem_attrs}{style_attr}>'
-            f'<button class="debug-toggle" onclick="toggleSection(this, \'{title}\')" type="button">{btn_text}</button>'
+            f'<button class="debug-toggle" onclick="toggleSection(this, \'{js_arg(title)}\')" type="button">{btn_text}</button>'
             f'<div class="debug-content{hidden_cls}">{content}</div>'
             f'{mem_ctl}'
             '</div>')
@@ -4436,7 +4449,7 @@ def _build_api_url_row(code_id: str, label: str, url_path: str,
                     f'style="white-space:nowrap">去开启 ↗</a>'
                     if edit_url else "")
     else:
-        copy_btn = (f'<button onclick="copyToClipboard(\'{code_id}\')" '
+        copy_btn = (f'<button onclick="copyToClipboard(\'{js_arg(code_id)}\')" '
                     f'class="btn-mini btn-mini-solid btn-mini-primary">复制</button>')
         fix_link = ""
     return (f'<div style="margin:2px 0;opacity:{"0.55" if disabled else "1"}">'

@@ -10,6 +10,7 @@
 - **`render.py` 有模块级 `logger`**（`logging.getLogger(__name__)`）：`_get_common_asset_urls` 写盘失败必须 `logger.exception` 留痕——失败会把 `("", "")` 哨兵**永久缓存**，之后每页内联约 100KB 且永不重试（曾静默无信号，B6-5）。**禁止**在模块级调 `basicConfig`（`setup_logging` 之前 render 就可能被 import）。
 - **HTML 响应必须 `Cache-Control: no-store`**：页脚脚本内联在 HTML 里，不设禁缓存时用户标签页可能长期执行旧脚本（症状「修复上线了但用户那儿还是坏的」）。
 - **`_escape` 只有一份**（`render._escape`，`config` 直接 import 复用，B7-2）：它先 `format_cell` 再 `escape` → `Decimal` 不会显示成科学计数法。**不得**在别处另写 `html.escape(str(v))`。
+- **JS 上下文一律走 `render.js_arg(x)`**（= `_escape(_js_str(x))` 单点原语）：内联 `on*="..."` 的值只过 `_escape` 时，`&#x27;` 会被浏览器解析属性时解码回 `'`，JS 字面量断裂 → 处理器变 `null` → **破坏性表单直接提交**。门禁 `TestInlineHandlerArgEscaping` 强制，RED-GREEN 已自证（`gate_redproof.py` 第 8 条）。
 - **`<option>` 里的层级缩进必须用全角 `\u3000`**（B7-3 / D4）：半角空格会被 HTML 折叠 → 缩进不可见。每级 1 个全角。
 - 术语：全部用户可感知文字简体中文；术语表见 `docs/compose/spec/ui-redesign-visual-spec.md` §5（UI v2 未重定术语，该节继续有效；prefer_cache/Redis 快照等实现词禁止直出 UI）。
 
@@ -80,6 +81,15 @@
 | **文本框聚焦后文字消失（深色代码面被翻白）** | 通用 `input:focus,select:focus,textarea:focus` 把 `background` 设为 `var(--bg-surface)`，特异性 (0,1,1) 高于 `.code-textarea` (0,1,0) → 深底浅字的「当前规则」框聚焦变白底浅字，对比度 14.88:1 → **1.25:1** | `TestFocusDoesNotBreakCodeSurface`（按 CSS 规则实算对比度，不钉类名；新组件自动纳入）；**契约：凡以 `--code-bg` 为底的控件必须自带 `:focus` 高特异性回写底色，或在通用 `:focus` 规则里成对声明 `color`** |
 | **卡片视图下折叠「作用到下一级」、本级折不掉** | `.cat-block.collapsed > .cat-body` 漏了本级**卡片体** `.cat-cards`（它当时也不带 `.hidden`）；且 `toggleCatBlock` 语义必须只切「按钮所属的那一个」块 | `TestCategoryCollapseScopedToOwnLevel`（折叠规则必须同时覆盖 `.cat-body`/`.cat-cards`/`.cat-children`；toggle 不得出现 `querySelectorAll`/`children`/`nextElementSibling`） |
 | **点分类树层级只折叠、无法定位右侧分组** | 树行 `onclick` 直接切 `.kids` 的 `.on`，把「定位」与「折叠」两件事混在一次点击里；两棵树（`/config/reports` 左树与报表中心 `#rc-tree`）行为还不一致 | `TestCategoryTreeLocatesRightPane` + `TestTreeRowClickConsistency`；**契约：行点击 = 本树主职责（定位/筛选），折叠只归独立箭头（`.cat-expand` / `[data-chevron]`）**；E2E `scripts/ui-v2/e2e/cat-focus-check.mjs` |
+
+| **同一事故复发：8 处内联处理器仍是裸插值** | 2026-09-30 只修了删除按钮一个点，没变成规则；`toggleFilterInput` 的入参直接派生自**用户写的 SQL 列名** | `TestInlineHandlerArgEscaping`（`render.js_arg` 单点原语 + 全生产模块扫描） |
+| **换页后页面级脚本静默不执行** | 换页重放门禁的扫描范围被硬编码成 `(render, report, config)`，`config_pages/*` 与 `ui_assets.py` 全在射程外 | 扫描范围改 `_ui_source_files()` **自动发现**（含 `config_pages/*.py`）；**新增模块/配置页自动入射程** |
+
+**已评估并否决的改造（勿重做）**：
+
+- ❌ **内联 `on*` 改事件委托**：内联属性在 `innerHTML` 重解析时天然存活，`_reinitAfterSwap` 已解决重初始化；改委托要动拖拽（历史事故高发区），风险 > 收益。
+- ❌ **类名全量迁 `data-*`**：现有 3 道门禁（`TestJsToggledClassesHaveStyles` / `TestRevealClassContracts` / alias 表）已覆盖，改 1,470 行 CSS 的 churn 不抵增量。`ALLOW` 已拆出 `ALIASES`（确认稿别名故意不被生产切换，不参与死条目检查）。
+- ❌ **「元素级 `addEventListener` 须有存在性守卫」门禁**：实测命中 12 处、**11 处误报**（`forEach` 回调参数 / `createElement` 结果不可能为 null；多变量守卫 `if (!a || !b)` 匹配不到），假阳性率 92% 的门禁会训练人忽略告警 → **负收益，不落地**。详见 spec §3.4。
 
 ## 其他硬约定（压缩；组件/页面/DOM 细节见 `render.py`，codegraph 可查符号）
 

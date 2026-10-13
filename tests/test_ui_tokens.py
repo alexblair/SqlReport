@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+import glob
+import os
 import re
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,23 @@ import config
 import report
 
 from tests import BaseReportTest
+
+
+#: 产出页面级 HTML / JS 字面量的生产模块。**自动发现，勿回退成硬编码三元组。**
+#: 历史缺口：本清单曾是 `(render, report, config)`，于是 `config_pages/branding.py`
+#: 的裸 IIFE 与 `ui_assets.py` 的 `EXCL_EDITOR_JS` 完全落在换页重放扫描之外——
+#: 今天碰巧合规，下一次 AI 加代码没有任何机制会拦它（spec 2026-10-12-ai-safe-ui-contracts §3.2）。
+_UI_MODULE_NAMES = ("render", "report", "config", "api_handler", "export",
+                    "audit_page", "ui_assets")
+
+
+def _ui_source_files():
+    """所有纳入 UI 契约扫描的生产源码路径（配置页按目录自动发现）。"""
+    import importlib
+    root = os.path.dirname(os.path.abspath(render.__file__))
+    files = [importlib.import_module(n).__file__ for n in _UI_MODULE_NAMES]
+    files.extend(sorted(glob.glob(os.path.join(root, "config_pages", "*.py"))))
+    return files
 
 
 # ---------------------------------------------------------------------------
@@ -184,15 +203,20 @@ class TestJsToggledClassesHaveStyles(unittest.TestCase):
     因此这里直接从生产 JS 源码里提取 classList 操作的字面量，逐个回查 CSS。
     """
 
-    #: 无视觉语义的纯状态标记（由更高层规则或业务逻辑消费），不要求独立规则
-    ALLOW = {"active", "hidden", "sb-rail", "sb-wide", "on", "open", "show",
-             "picked", "collapsed", "row-highlight", "fading-out", "loading",
-             "filter-input-touch", "nofilter", "contains"}
+    #: JS 运行时切换、但**不需要独立 CSS 规则**的纯状态标记（由更高层规则消费）。
+    #: 注意：这里只放「真的被切换」的类——放进无人切换的名字会让门禁悄悄失效。
+    ALLOW = {"active", "hidden", "sb-rail", "sb-wide", "on", "collapsed",
+             "row-highlight", "fading-out", "filter-input-touch"}
+
+    #: 确认稿别名：生产 JS 只切主类名，这些名字是同义选择器，CSS 必须定义。
+    #: 它们**故意不被生产切换**，故不参与下方「死条目」检查；
+    #: 其 CSS 覆盖由 test_state_aliases_cover_production_names 负责。
+    ALIASES = {"open", "show"}
 
     def _js_sources(self):
         out = []
-        for mod in (render, report, config):
-            out.append(open(mod.__file__, encoding="utf-8").read())
+        for path in _ui_source_files():
+            out.append(open(path, encoding="utf-8").read())
         try:
             import filter_help
             out.append(open(filter_help.__file__, encoding="utf-8").read())
@@ -207,11 +231,26 @@ class TestJsToggledClassesHaveStyles(unittest.TestCase):
         self.assertTrue(changed, "未能从 JS 中提取任何 classList 字面量（正则失配？）")
         missing = []
         for cls in sorted(changed):
-            if cls in self.ALLOW:
+            if cls in self.ALLOW or cls in self.ALIASES:
                 continue
             if not re.search(r'[.\s,]' + re.escape(cls) + r'(?![\w-])', ALL_CSS):
                 missing.append(cls)
         self.assertEqual([], missing, f"JS 会切换但这些 class 在公共 CSS 中无规则：{missing}")
+
+    def test_allow_table_has_no_dead_entries(self):
+        """ALLOW 是豁免表——一旦生产里没人再切这个类，它就成了门禁腐化的入口。
+
+        故反向断言：表内每个类都必须仍被生产 JS 切换。新增类请连同理由一起入表，
+        删类请同步删表，历史遗留的死条目一律清掉（spec 2026-10-12-ai-safe-ui-contracts §4.2）。
+        """
+        src = self._js_sources()
+        toggled = set(re.findall(r"classList\.(?:add|remove|toggle)\(\s*['\"]([\w-]+)['\"]", src))
+        toggled |= set(re.findall(r"className\s*=\s*['\"]([\w-]+)['\"]", src))
+        dead = sorted(c for c in self.ALLOW if c not in toggled)
+        self.assertEqual([], dead, f"ALLOW 豁免表里的类已无人切换（门禁腐化入口）：{dead}")
+        for alias in sorted(self.ALIASES):
+            self.assertRegex(ALL_CSS, r"[.\s,]" + re.escape(alias) + r"(?![\w-])",
+                             f"别名类 .{alias} 在公共 CSS 中没有规则")
 
     def test_modal_supports_sibling_sections(self):
         """生产导出对话框是 head/body/foot 三个并列兄弟（无包装盒）。
@@ -312,6 +351,73 @@ class TestRevealClassContracts(unittest.TestCase):
                         ".tree .kids 缺 display:none 基础态（子分类永不隐藏）")
         self.assertTrue(re.search(r'\.tree\s+\.kids\.on\s*\{[^}]*display\s*:\s*block', self._all_css()),
                         ".tree .kids.on 缺 display:block 展开规则（分类树折叠失效）")
+
+class TestInlineHandlerArgEscaping(unittest.TestCase):
+    """内联事件属性（`on*="..."`）里嵌入的值必须走 `render.js_arg()`。
+
+    实测事故（2026-09-30）：删除确认框把 **HTML 转义误用于 JS 上下文**——`_escape`
+    产出的 `&#x27;` 会在浏览器解析 HTML 属性时解码回 `'`，JS 字面量随即断裂 →
+    `onsubmit` 变 `null` → 表单直接提交，破坏性操作**静默失去确认框**。
+
+    当时的修复只打在删除按钮那一个点上；2026-10-12 全量盘点发现仍有 8 处同样的
+    裸露插值，其中 `toggleFilterInput` 的入参直接派生自**用户自己写的 SQL 列名**。
+    本门禁把「一处修对」变成「不可能再错」。
+
+    契约：正则命中「on* 属性里出现 f-string 插值」时，该行必须含
+    `js_arg(` 或显式 `_escape(_js_str(`；无插值的字面量处理器（如
+    `onclick="gotoTab('memo')"`）是合法写法，**不得误伤**。
+    """
+
+    #: 合规写法标记
+    COMPLIANT = ("js_arg(", "_escape(_js_str(")
+
+    #: on*="…" 里出现 `{`（f-string 插值）即视为嵌数据
+    HANDLER_RE = re.compile(r'on(?:click|submit|change|input)\s*=\s*"[^"]*\{')
+
+    def _violations(self):
+        bad = []
+        for path in _ui_source_files():
+            with open(path, encoding="utf-8") as fh:
+                for lineno, line in enumerate(fh, 1):
+                    if not self.HANDLER_RE.search(line):
+                        continue
+                    if any(mark in line for mark in self.COMPLIANT):
+                        continue
+                    bad.append("%s:%d  %s"
+                               % (os.path.basename(path), lineno, line.strip()[:90]))
+        return bad
+
+    def test_no_bare_interpolation_in_inline_handlers(self):
+        bad = self._violations()
+        self.assertEqual(
+            [], bad,
+            "内联事件属性里存在未走 js_arg() 的插值——值含单引号/反斜杠时处理器会"
+            "静默失效、破坏性表单直接提交。请改用 render.js_arg(x)"
+            "（spec 2026-10-12-ai-safe-ui-contracts §2.3）：%s" % bad)
+
+    def test_gate_detects_a_bare_interpolation(self):
+        """门禁自身的判别力自证：对一条明知违规的样例必须报错。"""
+        sample = (r"""            onchange="toggleFilterInput('{filter_input_name}', this)">""")
+        self.assertTrue(self.HANDLER_RE.search(sample))
+        self.assertFalse(any(m in sample for m in self.COMPLIANT))
+
+    def test_literal_handlers_are_not_false_positive(self):
+        """无插值的字面量处理器是合法写法，门禁不得误伤。"""
+        for literal in (r"""onclick="gotoTab('memo'""" + '"',
+                        r"""onclick="toggleSection(this, '标题'""" + '"',
+                        r"""onsubmit="return confirm('\'确定吗\'')" """):
+            with self.subTest(literal=literal):
+                self.assertFalse(self.HANDLER_RE.search(literal))
+
+    def test_scan_scope_auto_discovers_config_pages_and_ui_assets(self):
+        """扫描范围必须自动发现——这是 2026-09-30 那类缺陷的根因防线。"""
+        names = {os.path.basename(p) for p in _ui_source_files()}
+        self.assertIn("ui_assets.py", names)
+        self.assertIn("branding.py", names)
+        self.assertIn("scheduler.py", names, "config_pages/*.py 未被自动发现")
+        # config_pages/__init__.py 会被 glob 扫到，但它不含 UI 代码，无害
+        self.assertIn("__init__.py", names, "glob 未覆盖到 config_pages 目录")
+
 
 class TestInlineJsSyntax(unittest.TestCase):
     """内联 JS 必须语法合法（整块脚本一个语法错误 → 该页所有函数都不存在）。
@@ -600,15 +706,15 @@ class TestPageInitRegistration(unittest.TestCase):
                              f"{label} 中这些初始化不会被 {entry}() 调用 → 换页后不重放：{missing}")
 
     def test_dom_content_loaded_bindings_are_replay_safe(self):
-        for mod in (render, report, config):
-            with open(mod.__file__, encoding="utf-8") as fh:
+        for _path in _ui_source_files():
+            with open(_path, encoding="utf-8") as fh:
                 src = fh.read()
             for m in re.finditer(r"addEventListener\(\s*['\"]DOMContentLoaded['\"]", src):
                 window = src[max(0, m.start() - 220):m.end() + 140]
                 if any(p.search(window) for p in self.ALLOWED):
                     continue
                 line = src[:m.start()].count("\n") + 1
-                self.fail(f"{mod.__name__}.py:{line} 无条件绑定 DOMContentLoaded："
+                self.fail(f"{os.path.basename(_path)}:{line} 无条件绑定 DOMContentLoaded："
                           "换页重建 <script> 后不会执行，请改用 onReady(fn) 或交给 initPage/initReportPage")
 
 class TestMermaidTabRenderContract(unittest.TestCase):

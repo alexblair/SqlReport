@@ -82,6 +82,8 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 - 加测优先钉**共享行为**：筛选语法、写护栏、导出截断、API 鉴权、HTML 结构——改一处会波及三端（具体文件见 `INDEX.md` 共享语义表）。
 - **characterization 测试的期望值必须来自未改动实现的实测**，不能靠推导；改这类「不许变」的行为按「先写测试 → 确认绿 → 改代码 → 确认仍绿」。
 - 测试必须能**独立于执行顺序**通过，否则是隐藏的进程级全局污染（见易踩坑）。
+- **UI 契约门禁的扫描范围必须自动发现**：`tests/test_ui_tokens.py::_ui_source_files()` 用 `glob` 收 `config_pages/*.py` + 模块清单。**回退成硬编码模块元组 = 埋雷**——2026-10-12 盘点发现范围曾是 `(render, report, config)`，配置页与 `ui_assets.py` 全在射程外（详见 06 卷失败模式表）。新增页面模块只改 `_UI_MODULE_NAMES`。
+- **豁免表（`ALLOW`）不许有死条目**：无人再切换的类留在表里 = 门禁腐化入口，由 `test_allow_table_has_no_dead_entries` 反向拦截；别名类另放 `ALIASES`，不参与该检查。**新门禁先跑 `tests/bug_hunt/gate_redproof.py` 做 RED-GREEN 自证**（硬性 #17）。
 
 ## 性能测量工具链（`scripts/perf/`）
 

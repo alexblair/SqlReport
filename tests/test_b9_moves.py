@@ -20,7 +20,11 @@ class TestAssetsByteIdentical(unittest.TestCase):
         "_SQL_HIGHLIGHT_JS": ("b747870a03686a41", 1343),
         "_SQL_FORMATTER_JS": ("b46730d48db26945", 3116),
         "_API_TEMPLATE_JS": ("d59b15d3f972c38e", 7611),
-        "_EXCL_EDITOR_JS": ("acd4d5e83cde6b4a", 7434),
+        # 2026-10-12 转义契约批次（spec ai-safe-ui-contracts §3.4）：EXCL_EDITOR_JS 的
+        # init() 里 hiddenBox().closest("form") 无存在性守卫，为 null 会抛错并终止该
+        # init()；补 `if(!form)return;`（+21B）。_COMMON_CSS/_COMMON_JS 未动，
+        # 故 vendor hash8 8fdec733 不变。
+        "_EXCL_EDITOR_JS": ("03cfd182603b59ae", 7455),
     }
 
     def test_render_constants_match_baseline(self):

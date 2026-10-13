@@ -55,7 +55,7 @@ from render import (
     _icon,
     render_page_header,
     render_page_footer,
-    _OP_MAP, DEFAULT_OP, _escape, format_cell,
+    _OP_MAP, DEFAULT_OP, _escape, format_cell, js_arg,
     build_filter_params as _build_filter_params,
     build_cols_param as _build_cols_param,
     build_pagination_html as _build_pagination,
@@ -1868,7 +1868,7 @@ def _build_report_html(conn, report: dict, result: ReportResult,
 
     def _tab(key: str, label: str, active: bool = False, badge: str = "") -> str:
         cls = "tab active" if active else "tab"
-        return f'<button type="button" class="{cls}" role="tab" data-tab="{key}" onclick="gotoTab(\'{key}\')">{label}{badge}</button>'
+        return f'<button type="button" class="{cls}" role="tab" data-tab="{key}" onclick="gotoTab(\'{js_arg(key)}\')">{label}{badge}</button>'
 
     api_badge = (f'<span class="badge badge-info">'
                  f'{len(api_endpoints)}</span>') if api_endpoints else ""
