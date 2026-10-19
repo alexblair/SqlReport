@@ -97,6 +97,8 @@
 - **class 不得撞名**：`.sql-head` 是「SQL 列表头」钩子，曾被挪用为代码工具条致表头错乱；代码面工具条统一用 `.code-head`。
 - **动态类必须有样式**：JS 运行时切换的 `.hidden`/`.show`/`.fading-out`/`.row-highlight`/`.btn.loading`/`.filter-input-touch`/`query-loading-overlay.show` 必须在公共层定义（遮罩默认 `display:none`，仅 `.show` 显示）；由 JS 切 class 的组件（`.side-panel`/`.modal`）基础态必须隐藏，`.on`/`.open`/`.show` 才显示。
 - **侧栏收缩三态记忆**：`sqlreport_sidebar_collapsed` 无值=默认、1=收起、0=展开；改语义须同步 `_SIDEBAR_BOOTSTRAP_JS`、`sbStoreWrite` 与 `_COMMON_CSS` 三处；读写异常向 UI 明示（`window.__sbStorageErr` + `showFlashWarn`），不静默降级。
+- **报表卡片的写状态三态**（2026-10-13）：徽标 =「SQL 含写」×「allow_write」的组合，**不是** allow_write 单值——纯读无标 / 含写拒绝=黄「禁止写」/ 含写放行=红「写操作」（`report.render_report_selector` 的 `_badge`）。旧实现 `if not allow_write` 给 9/10 张纯读报表挂红标（用户噪音）。
+- **执行失败错误引导**（2026-10-19）：所有执行失败页统一走 `report.render_sql_error_section` 三段式（发生什么/可能原因/如何解决）+ 正文【编辑】链接 + 右侧「编辑报表」按钮（均 `target=_blank`）；文案字典 `report._ERROR_GUIDES`——**新增错误类型就加词条**（用户不懂程序，别只抛异常）；`report_id<=0` 预览不出口。样式在 `_COMMON_CSS` 的 `.flash-*` 组，禁止页面级补丁。
 - **树/列表行的点击语义（交互统一，2026-10-12）**：一次点击只能有一件事。折叠必须归**独立箭头**（`.cat-expand` / `[data-chevron]`），行点击做本树主职责（`/config/reports` 左树 = `catTreeLocate` 滚动定位 + `.row-highlight` 高亮；报表中心 `#rc-tree` = 筛选/选中）。新增树组件必须同时提供两件东西：行级主行为 + 独立展开箭头。
 - **代码面颜色契约**：凡以 `--code-bg`（深色）为底的控件，必须自带 `:focus` 规则回写 `background/color`；通用 `:focus` 规则的特异性 (0,1,1) 会盖过单类名 (0,1,0)。
 - **`buildReportUrl(overrides)`**：报表页 URL 唯一构造，显式处理 id/page_size/result/sort/dir/cols，其余参数（`nested_filter`、`sql_query`、`f_*`、`op_*`）一律透传。
@@ -136,3 +138,4 @@
 3. **能做成门禁的优先做成门禁**：门禁毫秒级且可回归，截图不能回归。
 4. 报结论必须写清证据来源（`文件:行` / 门禁名 / 截图路径）；**不得用未验证截图下 CSS/交互结论**（`MEMORY.md` Rules #1）。
 5. 用户报 BUG 时：**代码定位 → 根因假设 →（必要时）一次取证 → 修复 → 门禁复验**，不要先截图再猜。
+6. **取证实例的启停走 `./test_env.sh`**，禁裸 `python server.py &`；沙箱内换端口起隔离实例（判据见 [08-testing-conventions.md](08-testing-conventions.md)「取证手段选择」）。

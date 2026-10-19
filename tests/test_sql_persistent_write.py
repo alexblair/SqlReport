@@ -66,16 +66,21 @@ class TestSqlHasPersistentWriteReadStatements(unittest.TestCase):
         self.assertFalse(sql_contains_write(sql))
 
     def test_replace_function_in_cte_is_read(self):
-        """Review Focus 4 / 报表 17 回归：`REPLACE(` 是字符串函数，不是 REPLACE INTO。"""
+        """报表 17 回归：`REPLACE(` 是字符串函数，不是 REPLACE INTO。
+
+        2026-10-19 修复：`sql_contains_write` 的 WITH 分支与
+        `sql_has_persistent_write` 对齐（介词紧跟 `(` 即函数调用），
+        两个函数对纯读 CTE 必须给出同一个结论。
+        """
         sql = "WITH x AS (SELECT REPLACE(a, ',', '') AS a FROM t) SELECT * FROM x"
         self.assertFalse(sql_has_persistent_write(sql))
-        self.assertTrue(sql_contains_write(sql), "旧判定的误报在此固定下来")
+        self.assertFalse(sql_contains_write(sql))
 
     def test_insert_function_in_cte_is_read(self):
         """同族：`INSERT(` 也是字符串函数。"""
         sql = "WITH x AS (SELECT INSERT('abc', 1, 1, 'x') AS s FROM t) SELECT * FROM x"
         self.assertFalse(sql_has_persistent_write(sql))
-        self.assertTrue(sql_contains_write(sql))
+        self.assertFalse(sql_contains_write(sql))
 
     def test_plain_select_with_function_named_like_write(self):
         self.assertFalse(sql_has_persistent_write(

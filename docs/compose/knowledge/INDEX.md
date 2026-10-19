@@ -91,6 +91,9 @@
 | 排序/列选择 | `sort_rows` / `select_columns` | report / export / api |
 | 筛选帮助文案 | `filter_help.py` | report / audit |
 | 写护栏文案 | `report.WRITE_DENIED_MESSAGE` 等 | report / export / api / config 编辑 |
+| 执行失败错误引导 | `report._ERROR_GUIDES` → `error_guide` → `render_sql_error_section`（三段式 + 【编辑】入口） | report 页面所有失败出口；新增错误类型时补词条 |
+| allow_write 保存归一 | `config_pages.reports._parse_report_form`（纯读强制 0，含写以勾选为准） | config add/edit/copy 三链路 |
+| 报表卡片写状态 | `report.render_report_selector`：纯读无标 / 含写拒绝=禁止写黄 / 含写放行=写操作红 | `/report` 报表中心卡片 |
 | 用户可见术语（缓存/品牌等） | `docs/compose/spec/ui-redesign-visual-spec.md` §5 术语表 | render 缓存徽标/横幅、标题 |
 | 全量输出护栏 | `allow_all_output` + `max_rows` | report / export / api |
 | 页面骨架/CSS/JS | `render.render_page_header/footer`、`_NAV_GROUPS`（侧栏三态收缩 + `set_request_user`）、`_BASE/_COMMON_*`（设计令牌）；hash 含 CSS+JS | 全站 |

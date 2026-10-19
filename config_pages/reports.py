@@ -475,8 +475,11 @@ def _parse_report_form(data: dict) -> dict:
         "result_names": data.get("result_names") or "",
         "prefer_cache": int(data.get("prefer_cache", 1) or 0),
         "cache_ttl_hours": int(data.get("cache_ttl_hours", 0) or 0),
-        # 表单始终携带隐藏 allow_write=0（checkbox 勾选时提交 0,1，取最后一个为 1）
-        "allow_write": int(data.get("allow_write", 0) or 0),
+        # 表单始终携带隐藏 allow_write=0（checkbox 勾选时提交 0,1，取最后一个为 1）；
+        # 保存归一（m00163）：SQL 不含写动作时强制 0（开关对纯读报表空转，
+        # 留着只会在报表中心招出「禁止写」黄标 → 用户噪音）；含写时以用户勾选为准。
+        "allow_write": (int(data.get("allow_write", 0) or 0)
+                        if sql_contains_write(data.get("sql_query") or "") else 0),
         # 全量输出护栏（PH-07）：hidden 0 + checkbox 1，勾选时提交 0,1 取最后为 1；
         # max_rows 非法/空值时回退默认 100000（仅关闭全量输出时生效）
         "allow_all_output": int(data.get("allow_all_output", 0) or 0),

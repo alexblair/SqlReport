@@ -20,6 +20,7 @@
 
 **本地测试环境**：`./test_env.sh start|stop|restart|status|log|fg`，默认 `0.0.0.0:8099`；`HOST`/`PORT` 环境变量优先级最高（不改配置文件）。不设 `CONFIG_FILE` 时自动叠加 `app_config.debug.json`，落 `*.debug.db` / `run.debug.log`；PID 与控制台日志在 `run-logs/`。停止走 SIGINT（命中 `server.py` 优雅关闭分支）→ SIGTERM → SIGKILL 逐级兜底；可用 `TEST_PORT`/`TEST_HOST`/`TEST_BASE_CONFIG=1` 覆盖。
 
+**收口规则（本地服务 / Chrome 取证 / 接口测试）**：实例启停**一律走 `test_env.sh`**，禁止裸 `python server.py &`（无 PID 记录、无优雅停止、无法判断是否被旧实例占着）。⚠️ **沙箱例外**：bash 跑在 `bwrap --unshare-pid` 里时看不见宿主已占的端口，`restart` 会以「端口被本命名空间外进程占用」拒绝 → 改 `TEST_PORT=<新端口> ./test_env.sh start` 起隔离实例（e2e 脚本同时用 `BASE=` 指向它），且 `server.py` + Chrome + 脚本必须放在**同一条 bash** 里起。实测坑见 `MEMORY.md` Discovered。
 **双 README 约定**：`README.md`（英）与 `README-CN.md` 是镜像对，改一处必须中英同步；改依赖同步三处：`requirements.txt` + 双 README + `install.sh`。版本线纪律（V1 冻结 / V2 主干）见仓库根 `MEMORY.md` Rule 7，用户侧切换步骤的单一来源是 `docs/version-switch-guide.md`，本卷不复制。
 
 ## 应用配置（`app_config.py`）

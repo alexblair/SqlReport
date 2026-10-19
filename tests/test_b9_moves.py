@@ -14,7 +14,9 @@ class TestAssetsByteIdentical(unittest.TestCase):
         # 2026-10-12 交互 BUG 修复（焦点白底 / 折叠错级 / 树定位）后重算：
         # _COMMON_CSS +1454B（.cat-expand、折叠规则覆盖卡片体、代码面焦点豁免等）
         # _COMMON_JS  +2472B（catTreeLocate / toggleCatKids / initCatTreeLocate）
-        "_COMMON_CSS": ("ca1ce971b686b04d", 80985),
+        # 2026-10-19 执行失败错误引导（flash-title/flash-hint/flash-actions/
+        # flash-details）：_COMMON_CSS +763B，vendor hash8 改为 f7bcdcb2。
+        "_COMMON_CSS": ("0d8fced6de360d5e", 81748),
         "_COMMON_JS": ("01e7e1c9b9fa09b7", 23884),
         "_MD_CSS": ("c352588586b20dc3", 2492),
         "_SQL_HIGHLIGHT_JS": ("b747870a03686a41", 1343),
@@ -23,7 +25,7 @@ class TestAssetsByteIdentical(unittest.TestCase):
         # 2026-10-12 转义契约批次（spec ai-safe-ui-contracts §3.4）：EXCL_EDITOR_JS 的
         # init() 里 hiddenBox().closest("form") 无存在性守卫，为 null 会抛错并终止该
         # init()；补 `if(!form)return;`（+21B）。_COMMON_CSS/_COMMON_JS 未动，
-        # 故 vendor hash8 8fdec733 不变。
+        # 故该常量字节未动。
         "_EXCL_EDITOR_JS": ("03cfd182603b59ae", 7455),
     }
 
@@ -45,7 +47,7 @@ class TestAssetsByteIdentical(unittest.TestCase):
         import render
         self.assertEqual(
             render.content_hash8(render._COMMON_CSS + "\n;;;\n" + render._COMMON_JS),
-            "8fdec733")
+            "f7bcdcb2")
 
     def test_ui_assets_exists_and_render_reexports(self):
         """外移后 render 必须继续导出这些名字（config/report 从 render 导入）。"""

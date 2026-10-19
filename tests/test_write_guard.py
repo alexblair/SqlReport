@@ -200,6 +200,120 @@ class TestReportFormSaveWriteGuard(BaseConfigTest):
             "SELECT allow_write FROM report_configs WHERE name='副本'").fetchone()
         self.assertEqual(row[0], 1)
 
+    # --- m00163：保存时按 SQL 是否含写归一 allow_write ---
+
+    def test_add_read_sql_forces_allow_write_zero(self):
+        """新增：纯读 SQL + 表单提交 allow_write=1 → 强制落库 0"""
+        code, _ = config.handle_report_add(
+            self.conn,
+            "name=只读报表&sql_query=SELECT+1&default_page_size=20&allow_write=1")
+        self.assertEqual(code, 302)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT allow_write FROM report_configs WHERE name='只读报表'"
+            ).fetchone()[0], 0)
+
+    def test_edit_read_sql_forces_allow_write_zero(self):
+        """编辑：SQL 从写改回纯读 + 表单提交 1 → 强制落库 0"""
+        rid = db.add_report(self.conn, "报表A", "DELETE FROM t", 20, None,
+                            allow_write=1)
+        config.handle_report_edit(
+            self.conn, rid,
+            "name=报表A&sql_query=SELECT+1&default_page_size=20&allow_write=1")
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT allow_write FROM report_configs WHERE id=?", (rid,)
+            ).fetchone()[0], 0)
+
+    def test_write_sql_keeps_user_choice(self):
+        """新增：含写 SQL 时以用户勾选为准（1 → 1，0 → 0）"""
+        config.handle_report_add(
+            self.conn,
+            "name=写报表&sql_query=DELETE+FROM+t&default_page_size=20&allow_write=1")
+        config.handle_report_add(
+            self.conn,
+            "name=禁写报表&sql_query=DELETE+FROM+t&default_page_size=20&allow_write=0")
+        rows = dict(self.conn.execute(
+            "SELECT name, allow_write FROM report_configs "
+            "WHERE name IN ('写报表', '禁写报表')").fetchall())
+        self.assertEqual(rows["写报表"], 1)
+        self.assertEqual(rows["禁写报表"], 0)
+
+    def test_copy_read_sql_forces_allow_write_zero(self):
+        """复制：纯读 SQL + 表单提交 1 → 强制落库 0"""
+        rid = db.add_report(self.conn, "源报表", "DELETE FROM t", 20, None,
+                            allow_write=1)
+        config.handle_report_copy(
+            self.conn, rid,
+            "name=只读副本&sql_query=SELECT+1&default_page_size=20&allow_write=1")
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT allow_write FROM report_configs WHERE name='只读副本'"
+            ).fetchone()[0], 0)
+
+
+# ===================================================================
+# 报表中心卡片写状态徽标（三态）
+# ===================================================================
+
+
+class TestReportSelectorWriteBadge(BaseConfigTest):
+    """报表中心卡片徽标：无标识 / 禁止写（黄）/ 写操作（红）
+
+    判定依据是「SQL 是否含写」与「allow_write」的组合，不是 allow_write 单值：
+    - 纯读 → 无标识（与 allow_write 取值无关）
+    - 含写 + allow_write=0 → 禁止写（黄）
+    - 含写 + allow_write=1 → 写操作（红）
+    """
+
+    DENY = '<span class="badge badge-warn">禁止写</span>'
+    ALLOW = '<span class="badge badge-danger">写操作</span>'
+
+    def _add(self, name, sql, allow_write):
+        rid = db.add_report(self.conn, name, sql, 20, None, allow_write=allow_write)
+        self.conn.commit()
+        return rid
+
+    def test_read_only_report_has_no_badge(self):
+        """纯读 + allow_write=0 → 无写状态徽标"""
+        self._add("只读报表", "SELECT 1", 0)
+        html = report.render_report_selector(self.conn)
+        self.assertIn("只读报表", html)
+        self.assertNotIn(self.DENY, html)
+        self.assertNotIn(self.ALLOW, html)
+        self.assertNotIn("写护栏", html)
+
+    def test_read_sql_with_allow_write_one_has_no_badge(self):
+        """纯读 + allow_write=1（存量历史值）→ 仍无徽标"""
+        self._add("历史报表", "SELECT 1", 1)
+        html = report.render_report_selector(self.conn)
+        self.assertNotIn(self.DENY, html)
+        self.assertNotIn(self.ALLOW, html)
+
+    def test_write_sql_disallowed_shows_deny_badge(self):
+        """含写 + allow_write=0 → 黄色『禁止写』"""
+        self._add("禁写报表", "DELETE FROM t", 0)
+        html = report.render_report_selector(self.conn)
+        self.assertIn(self.DENY, html)
+        self.assertNotIn(self.ALLOW, html)
+        self.assertNotIn("写护栏", html)
+
+    def test_write_sql_allowed_shows_allow_badge(self):
+        """含写 + allow_write=1 → 红色『写操作』"""
+        self._add("写报表", "DELETE FROM t", 1)
+        html = report.render_report_selector(self.conn)
+        self.assertIn(self.ALLOW, html)
+        self.assertNotIn(self.DENY, html)
+
+    def test_mixed_reports_badges_are_per_card(self):
+        """多报表混合：每张卡片按自身 SQL + allow_write 判定"""
+        self._add("只读报表", "SELECT 1", 0)
+        self._add("禁写报表", "DELETE FROM t", 0)
+        self._add("写报表", "DELETE FROM t", 1)
+        html = report.render_report_selector(self.conn)
+        self.assertEqual(html.count(self.DENY), 1)
+        self.assertEqual(html.count(self.ALLOW), 1)
+
 
 # ===================================================================
 # execute_report 拦截（单元级）

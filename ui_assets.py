@@ -744,6 +744,18 @@ th:first-child + th{min-width:156px}
 .flash-warn{background:var(--warn-soft);border-color:var(--warn-line);border-left-color:var(--warn);color:var(--warn-ink)}
 .flash-error,.flash-danger{background:var(--danger-soft);border-color:var(--danger-line);border-left-color:var(--danger);color:var(--danger-ink)}
 .flash-warn a,.flash-info a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+/* 执行失败「错误引导」：发生了什么 / 可能原因 / 如何解决 / 【编辑】入口
+   （spec 2026-10-19 错误引导确认稿 v2，渲染入口为 report.render_sql_error_section） */
+.flash-title{font-weight:600}
+.flash-hint{margin-top:4px;font-size:var(--fs-12);line-height:var(--lh-12);color:var(--ink-2)}
+.flash-hint strong{font-weight:600;color:var(--ink-1)}
+.flash .grow{min-width:0}
+.flash-actions{margin-left:auto;flex:0 0 auto;display:flex;align-items:center;gap:var(--sp-2)}
+.flash-error a:not(.btn){color:inherit;text-decoration:underline;text-underline-offset:2px}
+.flash-error .flash-hint a{font-weight:600}
+.flash-details{margin-top:6px}
+.flash-details summary{cursor:pointer;font-size:var(--fs-12);color:var(--ink-2)}
+.flash-details pre{white-space:pre-wrap;font-size:var(--fs-12);color:var(--ink-2);margin:6px 0 0}
 .memo-bar{
   display:flex;align-items:center;gap:var(--sp-3);padding:9px var(--sp-3);margin-bottom:var(--sp-3);
   background:var(--bg-surface);border:1px solid var(--line);border-left:3px solid var(--accent-line);

@@ -6,7 +6,8 @@
 前置：
 ```bash
 # 1) 启动本地实例（仓库根，venv）
-HOST=127.0.0.1 PORT=8099 venv/bin/python server.py &
+# 1) 启动本地实例（仓库根，venv）：启停一律走 ./test_env.sh，禁裸 python server.py &
+./test_env.sh start                              # 默认 0.0.0.0:8099，与脚本默认 BASE 对齐
 # 2) 启动 headless Chrome（CDP 端口自选，需与 CDP_PORT 一致）
 /opt/chrome-offline/chrome-linux64/chrome --headless=new --no-sandbox \
   --remote-debugging-port=9411 --user-data-dir=run-logs/ui-v2/.chrome-e2e about:blank &
@@ -29,6 +30,11 @@ HOST=127.0.0.1 PORT=8099 venv/bin/python server.py &
 
 注意：这些脚本默认连 `http://127.0.0.1:8099`，账号 `admin/admin123`（DEBUG 配置库默认账号）；
 `api-row-expand-check.mjs` 支持 `BASE=` 覆盖（可用于另起的验证实例）。
+
+⚠️ **沙箱（`bwrap --unshare-pid`）内 `./test_env.sh restart` 会因看不见宿主已占的端口而失败**，改
+`TEST_PORT=<新端口> ./test_env.sh start` 起隔离实例，并给脚本加 `BASE=http://127.0.0.1:<新端口>`；
+服务、Chrome、脚本必须在**同一条 bash** 里起，末尾 `./test_env.sh stop` 收场。判据见
+[docs/compose/knowledge/01-architecture.md](../../../docs/compose/knowledge/01-architecture.md)。
 脚本属于开发期资产，**不参与 unittest discover**（需要浏览器），但与 `tests/test_ui_tokens.py` 的
 静态门禁互补：门禁管「规则/类名/令牌/对比度」，E2E 管「点下去真的有反应、结果真的变了」。
 

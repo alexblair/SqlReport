@@ -722,8 +722,8 @@ def _has_into_file_write(keywords) -> bool:
     """关键词序列中是否存在相邻的 (INTO, OUTFILE|DUMPFILE)。
 
     Args:
-        keywords: 关键词可迭代对象——`sql_contains_write` 传字符串列表，
-            `sql_has_persistent_write` 传 (关键词, 结束偏移) 元组的生成器。
+        keywords: 关键词可迭代对象——两个写判定函数都传
+            `(关键词, 结束偏移)` 元组（用生成器只取关键词即可）。
     """
     previous = None
     for keyword in keywords:
@@ -801,9 +801,9 @@ def sql_contains_write(sql) -> bool:
     """检测 SQL 是否包含写语句（INSERT/UPDATE/DELETE/DDL 等）。
 
     复用 _split_sql_statements 逐条分割，逐条取关键词判定：
-    - 首关键词在白名单 SELECT/SHOW/DESCRIBE/DESC/EXPLAIN → 读
-    - 首关键词为 WITH → 扫描该语句全部关键词，命中写关键词即判写
-      （覆盖 MySQL 8 CTE+DML）；否则视为 CTE 读
+    - 首关键词为 WITH → 扫描该语句的写动词，仅当命中「后面不紧跟 `(`」者判写
+      （覆盖 MySQL 8 CTE+DML，同时排除 `REPLACE()`/`INSERT()` 字符串函数）；
+      否则视为 CTE 读
     - 其余首关键词 → 写；无任何关键词的语句（纯注释/空）跳过不计
 
     判定从严：真实写语句必有写关键词，宁可按写处理（用户可开启
@@ -812,18 +812,18 @@ def sql_contains_write(sql) -> bool:
     if not sql or not sql.strip():
         return False
     for statement in _split_sql_statements(sql):
-        keywords = list(_iter_sql_keywords(statement))
+        keywords = list(_iter_sql_keywords_with_pos(statement))
         if not keywords:
             continue  # 纯注释/空语句：不构成写操作
-        if _has_into_file_write(keywords):
+        if _has_into_file_write(kw for kw, _ in keywords):
             # `SELECT … INTO OUTFILE`/`DUMPFILE`：首关键词是 SELECT，但写的是
             # MySQL 服务端磁盘 → 必须与其它写语句同等拦截（spec 2026-10-05 §4.2）。
             return True
-        first = keywords[0]
+        first = keywords[0][0]
         if first in _READ_STATEMENT_KEYWORDS:
             continue
         if first == "WITH":
-            if any(kw in _WRITE_STATEMENT_KEYWORDS for kw in keywords[1:]):
+            if _with_statement_has_write(statement, keywords):
                 return True
             continue
         return True
@@ -837,6 +837,27 @@ _WITH_WRITE_VERBS = frozenset({
     "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER",
     "TRUNCATE", "CALL", "GRANT", "REVOKE",
 })
+
+
+def _with_statement_has_write(statement: str, keywords) -> bool:
+    """WITH 语句是否含写动词（两个写判定函数共用，避免规则漂移）。
+
+    规则（spec 2026-09-30 §3.2 / §5.2）：只看 `_WITH_WRITE_VERBS`，且要求动词
+    后面**不紧跟 `(`**——`REPLACE(` / `INSERT(` 是字符串函数，不是语句动词。
+
+    Args:
+        statement: 单条语句原文（拿结束偏移向后跳过空白与注释）。
+        keywords: `_iter_sql_keywords_with_pos(statement)` 的结果列表，
+            首元素是 WITH 本身。
+    """
+    for kw, end in keywords[1:]:
+        if kw not in _WITH_WRITE_VERBS:
+            continue
+        k = _skip_ws_and_comments(statement, end)
+        if k >= len(statement) or statement[k] != "(":
+            return True
+    return False
+
 
 # SET 语句中出现这些关键词即不是「会话级用户变量」赋值，一律从严按持久写。
 _SET_NON_USER_SCOPE_KEYWORDS = frozenset(
@@ -929,15 +950,7 @@ def sql_has_persistent_write(sql) -> bool:
                     kw in _SET_NON_USER_SCOPE_KEYWORDS for kw, _ in keywords):
                 continue
         if first == "WITH":
-            hit = False
-            for kw, end in keywords[1:]:
-                if kw not in _WITH_WRITE_VERBS:
-                    continue
-                k = _skip_ws_and_comments(statement, end)
-                if k >= len(statement) or statement[k] != "(":
-                    hit = True
-                    break
-            if not hit:
+            if not _with_statement_has_write(statement, keywords):
                 continue
         return True
     return False

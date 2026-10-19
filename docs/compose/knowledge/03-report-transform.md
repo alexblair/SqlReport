@@ -11,7 +11,7 @@
 流程要点：
 
 1. **写护栏在读缓存之前**：`allow_write` 缺省按 0（新建表单）/ 存量缺字段按历史契约当 1；`report is None` 裸调用**不拦**；护栏通过后**含持久写 SQL 仍令 `skip_cache_read`**——热快照不得短路写执行，每次真实跑库，缓存回填照常。
-2. **写判定分两个函数**：`sql_contains_write`（从严，服务权限与警示）与 `sql_has_persistent_write`（精确，只服务缓存门槛与静态护栏）。会话级语句（`CREATE`/`DROP TEMPORARY TABLE`、`SET @用户变量`）与 CTE 里的 `REPLACE()`/`INSERT()` 字符串函数调用**不再**跳过缓存读。
+2. **写判定分两个函数**：`sql_contains_write`（从严，服务权限与警示）与 `sql_has_persistent_write`（精确，只服务缓存门槛与静态护栏）。会话级语句（`CREATE`/`DROP TEMPORARY TABLE`、`SET @用户变量`）与 CTE 里的 `REPLACE()`/`INSERT()` 字符串函数调用**不再**跳缓存读（两者对纯读 CTE 共用 `_with_statement_has_write`，结论必须一致）。
 3. **读白名单不豁免写文件**：`SELECT … INTO OUTFILE` / `INTO DUMPFILE` 写的是 **MySQL 服务端磁盘**，首关键词虽是 SELECT 也必须判写；判定挂在**相邻关键词对** `(INTO, OUTFILE|DUMPFILE)` 上并插在读白名单分支**之前**（关键词集合用 `codegraph node sql_contains_write` 核对）。
 4. 优先 Redis 快照（`prefer_cache`）→ 否则查 MySQL → 写回快照（分布式锁）；预览 SQL 与配置不一致**不写 Redis**。
 5. L1 `QueryCache` 进程缓存全量行。**全量输出护栏**：`allow_all_output=0` 且 `max_rows>0` → 截断并置 `truncated`；`_cache_matches_limit_policy` 拒绝「已截断但当前要全量」的旧缓存。
@@ -76,9 +76,16 @@ report.allow_write 与 sql_contains_write(sql)
   → 静态 .json 生成/hit 再拦一次（并集：权限判定 + 持久写判定，不是替换）
   → 允许时页面 WRITE_ALLOWED_BANNER
 文案: report.WRITE_DENIED_MESSAGE / WRITE_ALLOWED_BANNER
+执行失败错误引导: report._ERROR_GUIDES → error_guide(...) → render_sql_error_section(...)
 ```
 
-`sql_contains_write`：首词 SELECT/SHOW/DESC/EXPLAIN=读（**例外 `INTO OUTFILE`/`INTO DUMPFILE` 判写**）；WITH 扫写集；其余（含 `SET`、未知首词）从严当写。
+**执行失败错误引导（2026-10-19，spec 确认稿 `2026-10-19-error-guide-edit-entry-confirm.html`）**：所有执行失败（含写拦截、连接池缺失、数据库错误码、预览）统一走 `render_sql_error_section(friendly, raw, report_id=..., error=e, guide_key=...)`，版式三段式「查询执行失败：发生了什么 / 可能原因 / 如何解决」+ 统一收尾句（【编辑】链接，`target=_blank`）+ 右侧 `.flash-actions` 里的「编辑报表」按钮 + `<details>` 折叠原始错误。文案字典 `_ERROR_GUIDES`（`{title, cause, fix}`，数字键**不自带 message**，主文案运行时取 `_DB_ERRNO_HINTS` 防两处漂移；`write_denied` 直接引用常量；`unknown` 兜底用 friendly）。`error_guide` 选择优先级：显式 `guide_key` > `PermissionError` → `write_denied` > `_error_errno()` 命中的数字词条 > `unknown`。`report_id<=0`（预览）不出入口。API/导出是 JSON/纯文本，仍只回 `WRITE_DENIED_MESSAGE` 常量，引导只在页面渲染层。**新增错误类型 = 加一条 `_ERROR_GUIDES` 词条（用户不懂程序，要给「最精准的解决方案」，不是只抛错误）。**
+
+`sql_contains_write`：首词 SELECT/SHOW/DESC/EXPLAIN=读（**例外 `INTO OUTFILE`/`INTO DUMPFILE` 判写**）；首词 WITH 时只扫**写动词集** `_WITH_WRITE_VERBS`（**不含 `SET`**）且要求动词**后面不紧跟 `(`**（紧跟 `(` = `REPLACE()`/`INSERT()` 字符串函数，判读）——与 `sql_has_persistent_write` 共用 `_with_statement_has_write`，两函数对纯读 CTE 必须同结论；其余（含 `SET`、未知首词）从严当写。2026-10-19 修：报表 17（WITH 里含 `LENGTH(REPLACE(t.ancestors, ',', ''))`）曾被判写而拒执行。
+
+**保存归一（表单层，三链路单点）**：`config_pages.reports._parse_report_form` 里 `allow_write = 用户勾选 if sql_contains_write(sql_query) else 0` —— 纯读报表永远落 0（开关对其空转，只会招出徽标噪音），含写时以用户勾选为准。add/edit/copy 共用本函数，`db.add_report/update_report` **不做**该判定（测试与脚本直调 db 的语义不变）。
+
+**报表中心卡片写状态三态**（`report.render_report_selector(fn:_card)`，只看「SQL 含写」×「allow_write」，不单看 allow_write）：纯读 → **无徽标**；含写且 `allow_write=0` → **禁止写**（`badge badge-warn` 黄）；含写且 `allow_write=1` → **写操作**（`badge badge-danger` 红）。旧文案「写护栏」已废（历史事故：`if not allow_write` 会把 9/10 张纯读报表误标成红标）。
 
 ## 多结果集
 
@@ -125,7 +132,7 @@ report.allow_write 与 sql_contains_write(sql)
 ## 易踩坑
 
 1. **禁止**在 export/api 重写匹配语义。
-2. `humanize_db_error` / `render_sql_error_section` 在 `report.py` **定义两次**，后者覆盖前者。
+2. `humanize_db_error` / `render_sql_error_section` 各只定义一次（B7 已去重，`tests/test_b7_dedup.py` 锁死）；改其中任一都要同步 `tests/test_trust_baseline.py` 与 `tests/test_error_guide.py` 的断言。
 3. 截断在筛选**之前**——筛后 N 行 ≠ 导出 N 行。
 4. 三端写护栏同文案同条件；导出必须传 `report_config` 给 `execute_report`，否则**全量输出护栏失效**。
 5. 导出改走 `execute_report` 后会读写进程级 L1 缓存——写导出测试必须清 `report._query_cache`，否则读到别的用例的 mock 数据。

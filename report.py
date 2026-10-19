@@ -42,7 +42,7 @@ from result_transform import (select_columns,
 from query_executor import sql_contains_write, sql_has_persistent_write
 
 # PH-05 写操作护栏：拦截与警示共用文案（页面 flash / API 结构化错误 / 导出拒绝一致）
-WRITE_DENIED_MESSAGE = "该报表包含写操作语句且未开启『允许执行写操作』，请到编辑页开启"
+WRITE_DENIED_MESSAGE = "该报表包含写操作语句且未开启『允许执行写操作』"
 WRITE_ALLOWED_BANNER = "本报表包含写操作语句，执行会修改数据库数据"
 # 报表页顶部警示条共享样式（预览模式警示条与写操作警示条共用，防样式漂移）
 _BANNER_STYLE = "padding:6px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:600"
@@ -369,7 +369,7 @@ def parse_result_names(raw: str, count: int = None) -> list[str]:
 # 常见 MySQL 错误码 → 用户可读文案（spec ux-optimization 批次3#10）。
 # 数值 errno 优先取异常属性，其次从消息文本 "(HY000)" 形式代码正则提取。
 _DB_ERRNO_HINTS = {
-    1064: "SQL 语法有误：请检查报表 SQL（该错误通常需要管理员修正）",
+    1064: "SQL 语法有误，数据库无法解析这条语句",
     1146: "查询的数据表不存在：表可能已被删除或改名",
     1054: "查询的字段不存在：列可能已被删除或改名",
     1142: "数据库权限不足：当前账号无权访问该表",
@@ -386,6 +386,19 @@ _DB_ERRNO_HINTS = {
 _READ_TIMEOUT_MSG_MARKERS = ("Read timed out",)
 
 
+def _error_errno(e: Exception, raw: str) -> int:
+    """从异常属性或消息文本中取 MySQL 数值错误码，取不到返回 None。
+
+    两种形态都认：异常自带 `errno` 属性；文本里的 "(HY000)" 括注码与行首裸码。
+    供 humanize_db_error 与 error_guide 共用，避免两处正则各写一遍而漂移。
+    """
+    errno = getattr(e, "errno", None)
+    if isinstance(errno, int):
+        return errno
+    m = re.search(r"\((\d{4})\)", raw) or re.match(r"^(\d{4})\s", raw)
+    return int(m.group(1)) if m else None
+
+
 def humanize_db_error(e: Exception) -> tuple[str, str]:
     """把数据库异常翻译为用户可读文案。
 
@@ -394,10 +407,7 @@ def humanize_db_error(e: Exception) -> tuple[str, str]:
     批次5#18：errno 1969 或消息含 "Read timed out" 时映射为查询超时人话。
     """
     raw = str(e)
-    errno = getattr(e, "errno", None)
-    if not isinstance(errno, int):
-        m = re.search(r"\((\d{4})\)", raw) or re.match(r"^(\d{4})\s", raw)
-        errno = int(m.group(1)) if m else None
+    errno = _error_errno(e, raw)
     hint = _DB_ERRNO_HINTS.get(errno)
     if not hint and any(marker in raw for marker in _READ_TIMEOUT_MSG_MARKERS):
         hint = _DB_ERRNO_HINTS[1969]
@@ -406,14 +416,151 @@ def humanize_db_error(e: Exception) -> tuple[str, str]:
     return hint, raw
 
 
-def render_sql_error_section(friendly: str, raw: str) -> str:
-    """渲染报表执行错误区块：人话主文案 + <details> 折叠原始错误。"""
-    return (f'<div class="flash flash-error">查询执行失败：'
-            f'{_escape(friendly)}'
-            f'<details><summary style="cursor:pointer;'
-            f'color:#64748b;font-size:12px">查看原始错误信息</summary>'
-            f'<pre style="white-space:pre-wrap;font-size:12px;color:#7f1d1d;'
-            f'margin:6px 0 0">{_escape(raw)}</pre></details></div>')
+# 执行失败「错误引导」字典（spec 2026-10-19 错误引导确认稿 v2）。
+# 结构：title（发生了什么）/ cause（可能原因）/ fix（如何解决）。
+# - 数字键与 _DB_ERRNO_HINTS 一一对应：主文案取自那张表，避免两处文案各写一份而漂移；
+# - "unknown" 兜底：主文案用调用方传入的 friendly（humanize 对未识别异常原样返回）；
+# - 维护约定：出现新的错误类型只在此加词条，渲染层不改（禁止散落 if-else）。
+#   用户原话（2026-10-19）：要时刻理解「用户是不懂你的程序的，你需要给他最精准的
+#   解决方案，引导他解决问题，而不是仅仅抛出错误」。
+_ERROR_GUIDES = {
+    "write_denied": {
+        "title": "写操作被拦截",
+        "message": WRITE_DENIED_MESSAGE,
+        "cause": "系统判定这条 SQL 含写语句（INSERT/UPDATE/DELETE/DDL 等），"
+                 "而报表配置里没有勾选「允许执行写操作」。",
+        "fix": "先确认这条 SQL 是否确实要写库：确实要写，勾选「允许执行写操作」保存；"
+               "如果它只是查询，说明写判定可能有误，请把下方原始错误发给管理员复核。",
+    },
+    "pool_missing": {
+        "title": "报表关联的连接池不存在",
+        "message": "这条报表绑定的连接池不存在",
+        "cause": "连接池可能已被删除或改名，报表仍指向旧的连接池编号。",
+        "fix": "先到「配置管理 → 连接池」确认可用的连接池，"
+               "再在本报表编辑页重新选择并保存。",
+    },
+    "1064": {
+        "title": "SQL 语法错误（1064）",
+        "cause": "SQL 里可能有拼写错误、缺少逗号、括号不匹配，"
+                 "或用了当前 MySQL 版本不支持的写法。",
+        "fix": "对照下方原始错误里 near 后面的片段定位出错处，修正 SQL 后保存。",
+    },
+    "1146": {
+        "title": "数据表不存在（1146）",
+        "cause": "SQL 引用的表可能已被删除或改名，"
+                 "也可能引用了别的库却没写库名前缀。",
+        "fix": "核对 FROM / JOIN 里的表名与库名（跨库需写成 库名.表名）。",
+    },
+    "1054": {
+        "title": "字段不存在（1054）",
+        "cause": "SQL 引用的列可能已被删除或改名，"
+                 "也可能是列名大小写、表别名写错。",
+        "fix": "核对 SELECT / WHERE / ORDER BY / GROUP BY 里用到的列名。",
+    },
+    "1142": {
+        "title": "数据库权限不足（1142）",
+        "cause": "该报表所用连接池的数据库账号没有访问这张表的权限。",
+        "fix": "确认 SQL 需要的库表后，联系管理员为对应连接池账号授权；"
+               "若只是临时查看，可改用有权限的库表。",
+    },
+    "1044": {
+        "title": "数据库权限不足（1044）",
+        "cause": "该报表所用连接池的数据库账号没有访问这个库的权限。",
+        "fix": "联系管理员为对应连接池账号授权，或改用可访问的库。",
+    },
+    "1045": {
+        "title": "账号或密码被拒绝（1045）",
+        "cause": "连接池里保存的账号/密码与数据库实际不一致，密码可能已被修改。",
+        "fix": "由管理员到「配置管理 → 连接池」核对账号与密码（本报表 SQL 无需改动）。",
+    },
+    "2003": {
+        "title": "无法连接数据库（2003）",
+        "cause": "数据库没启动、网络不通，或连接池里的主机/端口配置有误。",
+        "fix": "稍后重试；仍失败请管理员在「配置管理 → 连接池」核对主机与端口。",
+    },
+    "2005": {
+        "title": "数据库地址无法识别（2005）",
+        "cause": "连接池里填的主机名无法解析，可能是拼写错误或 DNS 不可用。",
+        "fix": "请管理员在「配置管理 → 连接池」把主机改成 IP 或正确域名后重试。",
+    },
+    "1205": {
+        "title": "锁等待超时（1205）",
+        "cause": "有其它任务正在修改该表并持有锁。",
+        "fix": "稍后重试；频繁出现请让管理员确认是否有长事务占用这张表。",
+    },
+    "1969": {
+        "title": "查询超时（1969）",
+        "cause": "数据量过大、缺少可用索引，或数据库当前繁忙。",
+        "fix": "先加上筛选条件或缩小时间范围再试；"
+               "长期如此需优化 SQL（命中索引字段、拆子查询）。",
+    },
+    "unknown": {
+        "title": "未识别的错误",
+        "message": None,   # 兜底：直接用调用方传入的 friendly（通常即原始错误文本）
+        "cause": "系统暂时没有这类错误的对应说明。",
+        "fix": "核对 SQL 与所用连接池是否匹配；仍无法解决，"
+               "请把下方原始错误信息发给管理员。",
+    },
+}
+
+
+def error_guide(friendly: str, raw: str, error: Exception = None,
+                guide_key: str = "") -> dict:
+    """挑选错误引导词条，返回 {key, title, message, cause, fix}。
+
+    优先级：显式 guide_key（调用方已定性，如连接池缺失）> 异常类型（PermissionError
+    即写操作拦截）> 错误码 > unknown 兜底。数字词条的主文案统一取自
+    `_DB_ERRNO_HINTS`，两个函数都不会各写一份人话。
+    """
+    key = guide_key
+    if not key:
+        if isinstance(error, PermissionError):
+            key = "write_denied"
+        else:
+            errno = _error_errno(error, raw)
+            key = str(errno) if errno is not None and str(errno) in _ERROR_GUIDES else "unknown"
+    guide = _ERROR_GUIDES.get(key) or _ERROR_GUIDES["unknown"]
+    message = guide.get("message")
+    if not message and str(key).isdigit():
+        message = _DB_ERRNO_HINTS.get(int(key))
+    if not message:
+        message = friendly or raw
+    return {"key": key, "title": guide["title"], "message": message,
+            "cause": guide["cause"], "fix": guide["fix"]}
+
+
+def render_sql_error_section(friendly: str, raw: str, report_id: int = 0,
+                             error: Exception = None,
+                             guide_key: str = "") -> str:
+    """渲染执行失败区块：发生了什么 + 可能原因 + 如何解决 + 折叠的原始错误。
+
+    报表存在（report_id > 0）时一律带【编辑】入口：文案内的【编辑】与右侧按钮指向
+    同一编辑页、新窗口打开——用户看到报错时能当场去改，而不是拿着错误信息无处可去。
+    引导文案来自 `_ERROR_GUIDES` 字典（spec 2026-10-19 错误引导 v2）。
+    """
+    guide = error_guide(friendly, raw, error, guide_key)
+    try:
+        rid = int(report_id or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    action = ""
+    tail = ""
+    if rid > 0:
+        url = f"/config/reports/{rid}/edit"
+        action = (f'<div class="flash-actions">'
+                  f'<a href="{url}" class="btn btn-outline btn-sm" target="_blank" '
+                  f'rel="noopener">{_icon("edit")}编辑报表</a></div>')
+        tail = (f' 需要修正这条报表时，点击 <a href="{url}" target="_blank" '
+                f'rel="noopener">【编辑】</a> 打开该报表的编辑页（新窗口），'
+                f'改完保存后回到本页重新执行即可。')
+    return ('<div class="flash flash-error"><div class="grow">'
+            f'<div class="flash-title">查询执行失败：{_escape(guide["message"])}</div>'
+            f'<div class="flash-hint"><strong>可能原因</strong>：'
+            f'{_escape(guide["cause"])}</div>'
+            f'<div class="flash-hint"><strong>如何解决</strong>：'
+            f'{_escape(guide["fix"])}{tail}</div>'
+            '<details class="flash-details"><summary>查看原始错误信息</summary>'
+            f'<pre>{_escape(raw)}</pre></details></div>{action}</div>')
 
 
 def _render_page_header(title: str = None) -> str:
@@ -1358,7 +1505,9 @@ def render_report_selector(conn) -> str:
         m = {
             "sched": '<span class="badge badge-warn">定时</span>',
             "keep": '<span class="badge badge-ok">保活</span>',
-            "write": '<span class="badge badge-danger">写护栏</span>',
+            # 写状态三态（m00206）：纯读不挂标；含写拒绝=黄，含写放行=红
+            "deny": '<span class="badge badge-warn">禁止写</span>',
+            "write": '<span class="badge badge-danger">写操作</span>',
         }
         return m.get(kind, "")
 
@@ -1374,8 +1523,13 @@ def render_report_selector(conn) -> str:
             tags.append(_badge("sched"))
         if r.get("keepalive_enabled"):
             tags.append(_badge("keep"))
-        if not r.get("allow_write", 1):
-            tags.append(_badge("write"))
+        # 徽标只看「SQL 是否含写」+「allow_write」的组合，不看 allow_write 单值：
+        # 纯读报表 historically 会被压成 0，旧逻辑（not allow_write）于是招出红标噪音。
+        if sql_contains_write(r.get("sql_query") or ""):
+            if int(r.get("allow_write", 1) or 0):
+                tags.append(_badge("write"))
+            else:
+                tags.append(_badge("deny"))
         n_api = api_count.get(rid, 0)
         if n_api:
             tags.append(f'<span class="badge badge-info">{n_api} 个 API</span>')
@@ -1587,7 +1741,10 @@ def render_report_page(conn, report_id: int, page: int = 1,
         pool_config = db.get_pool(conn, pool_id)
         if not pool_config:
             return (_render_page_header() +
-                    f'<div class="flash flash-error">错误: 报表 "{_escape(report["name"])}" 关联的连接池不存在</div>' +
+                    render_sql_error_section(
+                        f'报表「{report["name"]}」关联的连接池不存在',
+                        f'报表 #{report_id} 关联的连接池（pool_id={pool_id}）在配置中不存在',
+                        report_id=report_id, guide_key="pool_missing") +
                     _footer())
 
     actual_sql = sql_override or report["sql_query"]
@@ -1604,7 +1761,8 @@ def render_report_page(conn, report_id: int, page: int = 1,
         pool_user = pool_config.get("user", "?")
         friendly, raw = humanize_db_error(e)
         return (_render_page_header() +
-                render_sql_error_section(friendly, raw) +
+                render_sql_error_section(friendly, raw, report_id=report_id,
+                                         error=e) +
                 f'<div class="flash flash-error">连接池: {_escape(str(pool_name))}'
                 f' ({_escape(str(pool_host))}:{pool_port}, 用户: {_escape(str(pool_user))})'
                 f'</div>' + _footer())
