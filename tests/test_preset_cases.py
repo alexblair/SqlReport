@@ -208,8 +208,16 @@ class TestTestMysql(unittest.TestCase):
         cfg = {"enable": True, "host": "9.9.9.9", "port": 3306,
                "user": "tu", "password": "tp", "database": "test_db", "tables": []}
         data = preset_cases.load_preset(PRESET_PATH)
-        res = preset_cases.import_preset_test_cases(conn, data, PRESET_PATH,
-                                                    test_mysql_cfg=cfg)
+        # 9.9.9.9 不可达：真实建连会阻塞 connection_timeout=10s（setup_test_mysql_tables
+        # 内 preset_cases.py 的 _mysql_connector.connect）。本用例只验证「连接池被覆盖为
+        # test_mysql 的连接信息 + test_mysql 汇总非空」，用假驱动替换真实 TCP，
+        # 并断言配置确实到达建连层（取代原先靠 10s 超时等待的隐式覆盖）。
+        fake, _conn, _cur = self._fake_connector()
+        with unittest.mock.patch.object(preset_cases, "_mysql_connector", fake):
+            res = preset_cases.import_preset_test_cases(conn, data, PRESET_PATH,
+                                                        test_mysql_cfg=cfg)
+        self.assertEqual(fake.connect.call_args.kwargs.get("host"), "9.9.9.9")
+        self.assertEqual(fake.connect.call_args.kwargs.get("port"), 3306)
         # 导入的连接池应被覆盖为 test_mysql 的连接信息
         rows = conn.execute(
             "SELECT host, port, `database`, user FROM connection_pools").fetchall()

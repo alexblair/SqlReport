@@ -34,6 +34,7 @@
 | Session 滑动 + 限流 + next 白名单 | mastered | 改登录 |
 | result_transform 单一语义 | mastered | 改筛选 |
 | 写护栏三端 + 静态 `.json` 再拦 | mastered | 改 allow_write |
+| allow_write 保存归一（纯读强制 0）与卡片三态徽标 | mastered | 改报表保存/报表中心卡片 |
 | 导出默认 gbk、先截断后筛 | mastered | 改导出 |
 | 双引擎迁移三处同步 | mastered | 改表 |
 | API Key 语义（公开 vs 全禁）、CORS 空≠允许 | mastered | 改鉴权/跨域 |
@@ -55,10 +56,12 @@
 | `filter_rows` 单趟化反而更慢 | mastered | 想优化 filter 时 |
 | 测试进程会连生产 Redis（无隔离时） | mastered | 写涉及缓存的测试时 |
 | 断言「隔离是否生效」的测试不能自己 import tests | mastered | 写环境守卫类测试时 |
-| 写判定分工：`sql_contains_write` vs `sql_has_persistent_write` | practiced | 动 allow_write / skip_cache_read / 静态护栏时 |
+| 写判定分工：`sql_contains_write` vs `sql_has_persistent_write` | mastered | 动 allow_write / skip_cache_read / 静态护栏时；两函数对 WITH 共用 `_with_statement_has_write`（写动词集不含 SET + 紧跟 `(` 即函数调用），对纯读 CTE 必须同结论（报表 17 误判教训） |
+| 执行失败错误引导：`_ERROR_GUIDES` → `error_guide` → `render_sql_error_section` | practiced | 新增报错/改报错页时；三段式（发生什么/可能原因/如何解决）+【编辑】入口；数字键主文案取 `_DB_ERRNO_HINTS` 防漂移 |
 | 静态护栏是**并集**（权限判定 + 持久写判定） | practiced | 改静态分支条件时 |
 | `INTO OUTFILE`/`INTO DUMPFILE` 属持久写 | mastered | 改写判定关键词时 |
 | 端到端压测噪声约 ±6%，收益须用隔离 A/B | practiced | 做性能对比时 |
+| 全量测试治理：慢用例治因 → 后台起跑 → 预算红线 | practiced | 新增慢用例/改全量时机时；数据见 `docs/compose/reports/test-fullrun-perf-20261020.md`（363s→42.5s）|
 
 ## 复习队列
 
@@ -78,7 +81,7 @@ kb=<repo>/docs/compose/knowledge/   # 仓库根相对；主目录可变，勿写
 index=codegraph ok（计数与版本以 docs/compose/knowledge/README.md 为准）
 sources=code+AGENTS+README+explore agents
 gaps=none blocking
-last_sync=2026-10-09（SQL 编辑框滚动条契约修复 + 执行效率治理；更早的 last_sync 流水已压缩）
+last_sync=2026-10-19（报表 17 写判定误报修复 + 执行失败错误引导体系：所有失败页三段式引导与【编辑】入口；更早的 last_sync 流水已压缩）
 ```
 
 > 变更史归档在 `docs/compose/reports/` 与各 spec；本文件只保留当前状态。

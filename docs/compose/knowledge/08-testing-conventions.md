@@ -54,6 +54,16 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 
 - **批次内不跑全量（2026-10-10 实测）**：9 批重构会话里 `unittest` bash 调用 186 次，其中全量 `discover -s tests` **159 次**，返回 220,647 字符（≈55k tokens 一次性注入，并被后续每步重发）。规则收敛为：**子任务/单文件改动只跑定向**（`-m unittest tests.test_x -v` 或 `-s tests/test_x.py`），**全量 `discover` 每批只在收尾跑 1 次**；同批已有绿全量日志时，后续子任务直接引用日志、不重跑（硬性 #14 的「同段 ≤2 次」不豁免批次内的重复全量）。
 
+### 全量的时机、预算与慢用例治理（2026-10-20 实测）
+
+- **时机：冻结即后台起跑**。全量只在代码冻结后跑一次，且起跑即丢后台（`venv/bin/python scripts/agent/test_timing.py`），用这段时间做知识库更新 / `git diff` 复查 / `codegraph sync`，跑完先看 `RAN=` 汇总行再决定继续。改前实测 363s（纯串行阻塞 6 分钟，收尾期无其它事可做），治理后 **42.4s**。
+- **官方脚本 `scripts/agent/test_timing.py`**（纯标准库，逐条计时）：`--quick` 只跑静态分析（≈8s，失败即停，可当前置门禁）；默认跑全量并打印 top10 慢用例，单条 >5s 打 `WARN`、全量 >90s 打预算 `WARN`，日志落 `run-logs/`；`--report` / `--reuse` 按「HEAD + `git diff` + 未跟踪 py 内容」指纹判断能否直接引用上次结果（代码未变不重跑，硬性 #14 的「同段 ≤2 次」也更易守住）。
+- **预算红线 ≤90s**：超了说明又长出病态等待，按下条清单治，**不得抬预算**。
+- **慢用例治因、不跳过**：等真实节拍 → 测试内 patch 常量（`patch.object(scheduler, "_KEEPALIVE_INTERVAL_SECONDS", 0.05)`；`scheduler.py:270` 会把 `tick_seconds<1` 钳到 1s，故还要 `self.sched._tick_seconds = 0.01`）；等真实网络超时 → patch 连接器（`preset_cases._mysql_connector`）而非缩短断言；每条例行起停 `HTTPServer` → 类级共享 server + `serve_forever(poll_interval=0.01)`（`shutdown()` 默认要等一轮 0.5s poll，这是 0.51s/条的真凶）。
+- **AST 门禁 `tests/test_no_slow_waits.py`**：`tests/` 内 `time.sleep(>1s)`、`wait/join/acquire(timeout>30s)` 即失败；确需真实等待时同行写 `slow-wait-ok: <原因>`。生产常量引起的节拍等待静态看不见，由上面脚本的 >5s WARN 兜底。
+- **不做分片并行**：`tests/test_server.py`（`TEST_PORT = 19080`）、`tests/test_health.py`（19081）固定端口需独占分片；治理后全量已 42s 且可后台跑，收益不值得引入非官方入口与端口脆弱性。
+- 完整基线 / 根因 / 改后数据见 [reports/test-fullrun-perf-20261020.md](../reports/test-fullrun-perf-20261020.md)。
+
 ## 需求变更同任务改写测试（硬性 #8）
 
 - 需求变更的**同一次任务**内改写受影响断言、夹具、脚本；禁止保留旧逻辑制造假失败。
@@ -99,6 +109,7 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 - **只有需要运行时证据才起 Chrome**：计算样式/几何/布局、DOM 事件层交互（换页初始化、拖拽、渲染时机）、代码层无法判定的视觉现象、修复后的最终视觉确认。
 - **一次会话批量验完**，禁止「改一行 → 截一次图」；能做成门禁的优先做成门禁（毫秒级且可回归）。
 - 判据表与工具见 [06-ui-interactions.md](06-ui-interactions.md)「取证成本纪律」。
+- **实例启停一律走 `./test_env.sh`**（`start|status|restart|stop`），禁裸 `python server.py &`；⚠️ 沙箱（`bwrap --unshare-pid`）内 `restart` 会因看不见宿主端口而失败 → 改 `TEST_PORT=<新端口> start`，且服务 + Chrome + 脚本同一条 bash。完整判据见 [01-architecture.md](01-architecture.md)。
 
 ## 禁止提交的运行时/本地物
 
@@ -114,7 +125,7 @@ python -m unittest tests.test_auth.TestSession.test_sliding_expiry_keeps_session
 6. **CDP/E2E 验收脚本自身的坑**（都是「测了个假绿/假红」）：陈旧 cookie 拿到登录页；`Page.navigate` 清空 `window.*` 自定义钩子；选择器想当然（`#f_customer` 实际是 `[name="f_customer"]`）；拖拽语义是「**插到目标项之前**」，故 `drag(i, i+1)` 与拖到自己都是 no-op；把**条件渲染**的函数当存在性判据。
 7. **改了 `render.py` / `report.py` / `config.py` 但服务没重启** → 页面内联 JS 从内存直出，验到的是旧行为（HTML 带 `Cache-Control: no-store`，用户标签页方不跑旧脚本）。
 8. **断言公共 CSS 别对着报表页 `body` 断言**：公共样式走外链 `/static/vendor/self@<hash>/common.css`，**不内联**，故「产物里必须出现某条 CSS 规则」在正常环境**必红**；应断言公共样式单一来源 `render._COMMON_CSS`，并另加一条「页面确实携带公共样式」。
-9. **`run-logs/` 里的克隆副本污染静态分析门禁**：`tests/bug_hunt/static_analyzer.py` 只跳过 `IGNORE_DIRS`（`venv`/`.codegraph`/`__pycache__`/`.git`/`.opencode`/`.tmp`），**不跳过 `run-logs/`、`perf-logs/`** → 留在其中的 `git clone`/`worktree` 被判「无法导入模块 test_base」，全量 discover 因此 ERROR。跑全量前确认 `run-logs/` 下无 `.py` 克隆产物（或把克隆放到仓库外），**不要**为此放宽门禁。
+9. **`git clone`/worktree 副本会污染静态分析门禁**：`IGNORE_DIRS` 已含 `venv`/`.codegraph`/`__pycache__`/`.git`/`.opencode`/`.tmp`/**`run-logs`/`perf-logs`**，但仓库内其它位置（如自建临时目录、`tests/` 下的拷贝）里的副本仍会被扫到，被判「无法导入模块 test_base」→ 全量 discover ERROR。克隆一律放仓库外，**不要**为此放宽门禁。
 10. **新增门禁 ≠ 门禁有效**：从未失败过的门禁可能只是恰好路过当前代码，新门禁必须做 RED-GREEN 自证（`venv/bin/python tests/bug_hunt/gate_redproof.py`，不进 discover）；门禁读「可能缺失的文件」须用 `_maybe_read()` 式容错并在文件存在时才断言，同时另加结构断言防止读盘入口空转通过。
 
 ## 文档过时线索

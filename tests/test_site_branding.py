@@ -175,29 +175,44 @@ class TestUploadPipeline(unittest.TestCase):
 
 class TestFaviconServing(BrandingSettingsMixin, BaseConfigTest):
     """favicon 三模式分派与 HTTP 响应（矩阵 A 组 M1-M13）。"""
+    # 类级共享 server：原先每条用例起停一个 ThreadingHTTPServer，shutdown() 最小
+    # 等待 ≈ serve_forever 默认 poll_interval=0.5s，15 条用例白等 ~7.5s。
+    # 可共享的前提：_handle_favicon 每个请求都重新调 branding.resolve_favicon_bytes()
+    # 读配置，BrandingSettingsMixin 每条用例又都 invalidate 进程缓存，故改配置后
+    # 同一端口的下一个请求即生效（无启动时配置缓存）。
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), srv.ReportHandler)
+        cls._port = cls._server.server_address[1]
+        cls._server_thread = threading.Thread(
+            target=cls._server.serve_forever,
+            kwargs={"poll_interval": 0.01}, daemon=True)
+        cls._server_thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._server.shutdown()
+        cls._server.server_close()
+        cls._server_thread.join(timeout=2)
+        super().tearDownClass()
 
     def _set_settings(self, **kv):
         self._swap_db(**kv)
 
     def _get_favicon(self):
-        server = http.server.ThreadingHTTPServer(
-            ("127.0.0.1", 0), srv.ReportHandler)
-        port = server.server_address[1]
-        t = threading.Thread(target=server.serve_forever, daemon=True)
-        t.start()
+        """复用类级 server 端口发 GET（不再逐条起停 server）。"""
+        c = http.client.HTTPConnection("127.0.0.1", self._port, timeout=5)
         try:
-            c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             c.request("GET", "/favicon.ico")
             resp = c.getresponse()
             body = resp.read()
             headers = dict(resp.getheaders())
             status = resp.status
-            c.close()
             return status, body, headers
         finally:
-            server.shutdown()
-            server.server_close()
-            t.join(timeout=2)
+            c.close()
 
     def test_m1_fresh_install_returns_builtin(self):
         status, body, _ = self._get_favicon()
@@ -275,13 +290,10 @@ class TestFaviconServing(BrandingSettingsMixin, BaseConfigTest):
             self.assertEqual(body, srv._FAVICON_BYTES)
 
     def test_m24_unauthenticated_post_redirects_to_login(self):
-        server = http.server.ThreadingHTTPServer(
-            ("127.0.0.1", 0), srv.ReportHandler)
-        port = server.server_address[1]
-        t = threading.Thread(target=server.serve_forever, daemon=True)
-        t.start()
+        # 复用类级共享 server（同 _get_favicon）：本用例只验证未登录 POST 被重定向，
+        # 无需独立端口，逐条起停只会多付一次 poll_interval≈0.5s。
+        c = http.client.HTTPConnection("127.0.0.1", self._port, timeout=5)
         try:
-            c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             body = urllib.parse.urlencode({
                 "favicon_mode": "color", "favicon_color": "#FF0000",
                 "title_prefix": "", "favicon_data": ""})
@@ -292,11 +304,8 @@ class TestFaviconServing(BrandingSettingsMixin, BaseConfigTest):
             resp.read()
             self.assertEqual(resp.status, 302)
             self.assertIn("/login", resp.getheader("Location") or "")
-            c.close()
         finally:
-            server.shutdown()
-            server.server_close()
-            t.join(timeout=2)
+            c.close()
 
     def test_m5_invalid_color_falls_back(self):
         self._set_settings(favicon_mode="color", favicon_color="#GG0000")

@@ -11,7 +11,13 @@ ERROR 级别的发现会导致测试失败；WARNING/INFO 只记录到 stderr，
 import unittest
 import sys
 
-from tests.bug_hunt.static_analyzer import run_all_checkers
+import os
+import shutil
+import tempfile
+
+from tests.bug_hunt.static_analyzer import (
+    PROJECT_ROOT, ImportChecker, UndefinedNameChecker, run_all_checkers,
+)
 
 
 _KNOWN_FALSE_POSITIVES: set[str] = {
@@ -109,3 +115,50 @@ class TestStaticAnalysis(unittest.TestCase):
                   file=sys.stderr)
             for info in self.findings["infos"]:
                 print(f"    {info}", file=sys.stderr)
+
+
+class TestAnalyzerFalsePositiveRegressions(unittest.TestCase):
+    """锁定 2026-10-20 修掉的静态分析误报。
+
+    背景：`__builtins__` 在本仓库加载器下是 dict，`dir(dict)` 不含
+    `int/len/str`，曾一次性误报 6558 条 WARNING，把真 ERROR 淹在日志里；
+    相对导入不解析又多报 8 条 ERROR。改完必须防止回退。
+    """
+
+    def _write(self, source: str) -> str:
+        d = tempfile.mkdtemp(prefix="sa_regress_")
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "sample_mod.py")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(source)
+        return p
+
+    def test_builtin_names_are_not_reported_undefined(self):
+        p = self._write("def f(x):\n    return len(x) + int('1') + str(x)\n")
+        checker = UndefinedNameChecker()
+        checker.check([p])
+        self.assertEqual(checker.findings, [])
+
+    def test_real_undefined_name_still_reported(self):
+        p = self._write("def f():\n    return nope_xyz_20261020 + 1\n")
+        checker = UndefinedNameChecker()
+        checker.check([p])
+        self.assertTrue(any("nope_xyz_20261020" in f for f in checker.findings),
+                        f"真未定义名称必须仍被报出，实际: {checker.findings}")
+
+    def test_module_magic_and_global_decl_are_available(self):
+        p = self._write(
+            "STATE = None\n\ndef f():\n    global STATE\n"
+            "    STATE = __file__, __name__\n"
+        )
+        checker = UndefinedNameChecker()
+        checker.check([p])
+        self.assertEqual(checker.findings, [])
+
+    def test_relative_import_is_resolved(self):
+        init_py = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), os.pardir, "__init__.py"))
+        checker = ImportChecker(project_root=PROJECT_ROOT)
+        checker.check([init_py])
+        bad = [f for f in checker.findings if "无法导入" in f]
+        self.assertEqual(bad, [], f"相对导入应可解析，实际: {bad}")

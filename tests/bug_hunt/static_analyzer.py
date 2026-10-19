@@ -18,6 +18,7 @@ static_analyzer.py — Python 静态分析工具模块，自动发现代码中�
 """
 
 import ast
+import builtins
 import os
 import re
 import sys
@@ -41,6 +42,12 @@ IGNORE_DIRS: set[str] = {"venv", ".codegraph", "__pycache__", ".git",
 必须包含硬性 #14 规定的产物目录 run-logs/perf-logs：那里按规则会落临时分析脚本，
 若一并扫描，follow #14 的 Agent 会让本门禁变红（2026-10-09 实测）。
 """
+
+_MODULE_MAGIC_NAMES: set[str] = {
+    "__file__", "__name__", "__doc__", "__package__", "__spec__",
+    "__loader__", "__builtins__", "__annotations__", "__dict__",
+}
+"""模块级天然存在的魔法名，不应被报成未定义。"""
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +212,11 @@ class ImportChecker(BugFinder):
                            module: str, name: str,
                            imported_name: str) -> None:
         """检查 'from X import Y' 语句。"""
+        level = getattr(node, "level", 0) or 0
+        if level:
+            # 相对导入按源文件所在包解析（`from .test_base import x`）：
+            # 不解析会去绝对导入 `test_base`，恒报「无法导入模块」（2026-10-20 实测 8 条）。
+            module = self._resolve_relative(filepath, level, module)
         if not module:
             return
         success, mod = self._import_module(module)
@@ -213,14 +225,48 @@ class ImportChecker(BugFinder):
                         f"无法导入模块 '{module}'")
             return
         if mod is not None and not hasattr(mod, name):
+            # `from pkg import submodule` 是合法写法（包 __init__ 未主动导入子模块）：
+            # 先试子模块，成功则不算问题（2026-10-20 实测 4 条误报）。
+            sub_ok, _ = self._import_module(f"{module}.{name}")
+            if sub_ok:
+                return
             self.report("WARNING", filepath, node.lineno, node.col_offset,
                         f"模块 '{module}' 中没有名称 '{name}'"
                         f"（导入为 {imported_name}）")
+
+    def _resolve_relative(self, filepath: str, level: int, module: str) -> str:
+        """把相对导入解析为绝对模块名（`from .x import y` → `pkg.x`）。"""
+        rel = os.path.relpath(filepath, self.project_root)
+        parts = rel[:-3].split(os.sep) if rel.endswith(".py") else rel.split(os.sep)
+        parts = parts[:-1]                 # 去掉模块文件名，得到所在包
+        if level > 1:
+            parts = parts[:max(0, len(parts) - (level - 1))]
+        base = ".".join(parts)
+        if not base:
+            return module
+        return f"{base}.{module}" if module else base
 
 
 # ---------------------------------------------------------------------------
 # UndefinedNameChecker — 未定义名称检查
 # ---------------------------------------------------------------------------
+
+def _iter_module_level_nodes(tree: ast.Module):
+    """遍历模块级节点，下钻复合语句但不下钻函数/类体。
+
+    本仓库大量使用 `try: import pymysql / except ImportError: ...` 这类
+    fallback 导入，导入语句不在 `tree.body` 直接子节点里；不收集就会把
+    `config_db`/`_init_sqlite_migrations` 等报成「可能未定义」（2026-10-20 实测）。
+    """
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
 
 class UndefinedNameChecker(BugFinder):
     """检查函数/方法体中是否存在使用前未定义的名称。
@@ -231,7 +277,11 @@ class UndefinedNameChecker(BugFinder):
 
     def __init__(self, project_root: str = PROJECT_ROOT):
         super().__init__(project_root)
-        self._builtins: set[str] = set(dir(__builtins__))
+        # 显式用 builtins 模块取内建名：模块级 `__builtins__` 在不同加载器下
+        # 可能是 dict（本仓库实测即为 dict），`dir(dict)` 不含 int/len/str，
+        # 会把内建名全报成「可能未定义的名称」（2026-10-20 实测 6558 条误报，
+        # 反而把真 ERROR 淹没）。
+        self._builtins: set[str] = set(dir(builtins))
 
     def check(self, py_files: list[str]) -> None:
         for fp in py_files:
@@ -252,7 +302,7 @@ class UndefinedNameChecker(BugFinder):
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         self._check_func_def(
                             item, module_globals, filepath,
-                            inherited={node.name}
+                            inherited={node.name, "self", "cls"}
                         )
 
     @staticmethod
@@ -275,6 +325,16 @@ class UndefinedNameChecker(BugFinder):
             elif isinstance(stmt, ast.ImportFrom):
                 for alias in stmt.names:
                     names.add(alias.asname or alias.name)
+        # 复合语句（try/if/with）内的模块级导入同样算已定义
+        for node in _iter_module_level_nodes(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    names.add(alias.asname or alias.name)
+        # 模块级魔法名天然存在，不应报未定义
+        names.update(_MODULE_MAGIC_NAMES)
         return names
 
     @staticmethod
@@ -308,6 +368,24 @@ class UndefinedNameChecker(BugFinder):
                 defined.add(child.id)
             if isinstance(child, ast.ExceptHandler) and child.name:
                 defined.add(child.name)
+            # 函数内的延迟导入（本仓库常见）也算本作用域已定义
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    defined.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(child, ast.ImportFrom):
+                for alias in child.names:
+                    defined.add(alias.asname or alias.name)
+            # lambda 形参在 AST 中是独立作用域，但在此处近似为本函数可用名（
+            # 降误报优先：本仓库大量 `lambda *a, **kw:` 写法）
+            if isinstance(child, ast.Lambda):
+                lam_args = child.args
+                for a in (list(lam_args.args) + list(lam_args.kwonlyargs)
+                          + list(lam_args.posonlyargs)):
+                    defined.add(a.arg)
+                if lam_args.vararg:
+                    defined.add(lam_args.vararg.arg)
+                if lam_args.kwarg:
+                    defined.add(lam_args.kwarg.arg)
         return defined
 
     def _check_func_def(self, node, module_globals, filepath, inherited):
@@ -319,7 +397,10 @@ class UndefinedNameChecker(BugFinder):
                 global_names.update(child.names)
         available = (params | body_defs | module_globals |
                      self._builtins | inherited)
-        available.difference_update(global_names)
+        # `global x` 声明的是模块级已存在名称，应视为可用；
+        # 旧实现用 difference_update 把它从可用集里剔除，必然误报（2026-10-20 实测
+        # redis_cache.py 的 `global _redis_manager` 被报未定义 16 次）。
+        available.update(global_names)
         self._check_load_names(node, available, filepath)
         for child in ast.walk(node):
             if child is node:
@@ -337,17 +418,22 @@ class UndefinedNameChecker(BugFinder):
                                              item_inherited)
 
     def _check_load_names(self, node, available, filepath):
-        for child in ast.walk(node):
-            if child is node:
-                continue
+        # 只检查本作用域：用 iter_child_nodes 而非 ast.walk 下钻，遇到嵌套
+        # 函数/类/lambda 就停下（它们各自有独立作用域、由 _check_func_def 单独检）。
+        # 旧实现用 ast.walk 会把嵌套 def 的形参（如 `**kw`）当外层 Load 报出来，
+        # 2026-10-20 实测这类误报占剩余 WARNING 的 90%。
+        stack = list(getattr(node, "body", []))
+        while stack:
+            child = stack.pop()
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef)):
+                                  ast.ClassDef, ast.Lambda)):
                 continue
             if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
                 if child.id not in available:
                     self.report("WARNING", filepath, child.lineno,
                                 child.col_offset,
                                 f"可能未定义的名称 '{child.id}'")
+            stack.extend(ast.iter_child_nodes(child))
 
 
 def _extract_store_names(node: ast.AST) -> set[str]:

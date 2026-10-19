@@ -427,7 +427,14 @@ class TestTickLoopExceptions(unittest.TestCase):
                 mock_tick.assert_not_called()
 
     def test_tick_exception_does_not_break_loop(self):
-        """行 304-307: tick 异常不阻断主循环。"""
+        """行 304-307: tick 异常不阻断主循环。
+
+        本类级 fixture 传 tick_seconds=0.01，但构造函数把它钳到 1s
+        （scheduler.py:270 `max(1, int(tick_seconds))`），本用例需要两个
+        轮次，改节拍前要白等约 2s（2026-10-20 实测 2.00s）。这里直接把
+        实例节拍降到 0.01s，循环逻辑与断言完全不变。
+        """
+        self.sched._tick_seconds = 0.01
         call_count = {"n": 0}
         def _tick_side_effect(*a, **kw):
             call_count["n"] += 1
@@ -439,9 +446,16 @@ class TestTickLoopExceptions(unittest.TestCase):
             with patch.object(self.sched, "run_tick", side_effect=_tick_side_effect):
                 with patch.object(self.sched, "run_keepalive_tick"):
                     self.sched._tick_loop()
-
     def test_keepalive_exception_does_not_break_loop(self):
-        """行 308-311: 保活 tick 异常不阻断主循环。"""
+        """行 308-311: 保活 tick 异常不阻断主循环。
+
+        保活节拍真实值 300s（scheduler.py:39 `_KEEPALIVE_INTERVAL_SECONDS`），
+        `_maybe_run_keepalive`（scheduler.py:621-631）先把下次到期时间推到
+        now+300 再调用；不 patch 该常量时，第二次保活要等真实 300s 节拍
+        到期——2026-10-20 全量实测本用例独占 301.09s，占全量的 83%。
+        这里把节拍常量与实例 tick 节拍都降到毫秒级，执行路径与断言不变。
+        """
+        self.sched._tick_seconds = 0.01
         call_count = {"n": 0}
         def _ka_side_effect(*a, **kw):
             call_count["n"] += 1
@@ -451,8 +465,9 @@ class TestTickLoopExceptions(unittest.TestCase):
 
         with patch.object(self.sched, "run_startup_scan"):
             with patch.object(self.sched, "run_tick"):
-                with patch.object(self.sched, "run_keepalive_tick", side_effect=_ka_side_effect):
-                    self.sched._tick_loop()
+                with patch.object(scheduler, "_KEEPALIVE_INTERVAL_SECONDS", 0.05):
+                    with patch.object(self.sched, "run_keepalive_tick", side_effect=_ka_side_effect):
+                        self.sched._tick_loop()
 
 
 # ---------------------------------------------------------------------------

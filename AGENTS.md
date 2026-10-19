@@ -19,6 +19,7 @@
 | 改缓存分层、定时任务、审计 type | `07-cache-scheduler-audit.md` | 该卷 |
 | 改启动链路、`app_config`、依赖安装 | `01-architecture.md` | 该卷 + 双 README（镜像对） |
 | 跑测试 / 改测试 / 验证改动、卡住反复失败 | `08-testing-conventions.md` | 该卷（新踩坑必记） |
+| 起本地服务 / Chrome 取证 / 接口测试 | `01-architecture.md`（+ `08-testing-conventions.md`） | 该卷 |
 | 报错看不懂 / 不确定 API 用法 / 需外部事实 | `09-agent-workflow.md`「网页检索纪律」（硬性 #23） | — |
 | 查历史决策、需求依据 | `docs/compose/spec/` 最新生效 spec（§3） | 新 spec / 取代旧 spec |
 
@@ -76,7 +77,8 @@
 
 ```bash
 ./install.sh && source venv/bin/activate        # 必须先激活 venv
-python server.py                                # 默认 0.0.0.0:8080
+python server.py                                # 仅生产入口（默认 0.0.0.0:8080）；本地测试/取证禁用本行
+./test_env.sh start|stop|restart|status|log|fg   # 本地测试环境唯一入口（默认 0.0.0.0:8099，自动隔离 *.debug.db）
 python -m unittest discover -s tests/ -t . -v   # 全量（含 bug_hunt 静态分析）；-t . 不可省
 codegraph explore "<中文意图 + 代码词>"          # 检索首选
 codegraph status                                # 索引健康/pendingChanges
@@ -95,4 +97,5 @@ venv/bin/python scripts/agent/session_cost.py --check    # token 体检（#20）
 2. 知识库按 §0「改完必更新」列同步；spec 已按 §3 查证
 3. 硬性 #19：`codegraph sync` 后 `pendingChanges` 全 0；硬性 #17：交互改动跑「整页 + 换页态 + 组合序列」
 4. **收尾一次批量取证**（禁一项一步）：测试 + `codegraph status` + `git diff --stat` + `session_cost.py --check`；结论**报证据**（Ran N / 文件:行 / 数据），不报「应该是」
+5. **todo 清单归零**：任务清单（`todo_write`）在交付前必须全部 `completed`；每完成一项立即回填，不得等到收尾。**GUI 上还有待处理项的，视为未收尾**（有需放弃的项就显式说明）
 
