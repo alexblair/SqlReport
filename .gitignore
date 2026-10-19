@@ -29,7 +29,7 @@ perf-logs/
 
 # 配置（含密码）
 app_config.json
-app_config.debug.json
+app_config.debug.json*
 *.debug.db
 *.debug.log
 
