@@ -21,6 +21,7 @@
 | 跑测试 / 改测试 / 验证改动、卡住反复失败 | `08-testing-conventions.md` | 该卷（新踩坑必记） |
 | 起本地服务 / Chrome 取证 / 接口测试 | `01-architecture.md`（+ `08-testing-conventions.md`） | 该卷 |
 | 报错看不懂 / 不确定 API 用法 / 需外部事实 | `09-agent-workflow.md`「网页检索纪律」（硬性 #23） | — |
+| 更新系统架构图（自动/手工） | `.dsh/skills/system-architecture-map/SKILL.md` | 该 HTML |
 | 查历史决策、需求依据 | `docs/compose/spec/` 最新生效 spec（§3） | 新 spec / 取代旧 spec |
 
 **分卷全表**：`docs/compose/knowledge/README.md`（入口）· `INDEX.md`（模块/路由/页面/共享语义）。
@@ -98,4 +99,5 @@ venv/bin/python scripts/agent/session_cost.py --check    # token 体检（#20）
 3. 硬性 #19：`codegraph sync` 后 `pendingChanges` 全 0；硬性 #17：交互改动跑「整页 + 换页态 + 组合序列」
 4. **收尾一次批量取证**（禁一项一步）：测试 + `codegraph status` + `git diff --stat` + `session_cost.py --check`；结论**报证据**（Ran N / 文件:行 / 数据），不报「应该是」
 5. **todo 清单归零**：任务清单（`todo_write`）在交付前必须全部 `completed`；每完成一项立即回填，不得等到收尾。**GUI 上还有待处理项的，视为未收尾**（有需放弃的项就显式说明）
+6. **架构图**：改动涉及页面/路由/组件/表/前端资产 → 按 `.dsh/skills/system-architecture-map/SKILL.md` 更新当日那份图（一天一个文件）
 

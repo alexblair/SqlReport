@@ -1,0 +1,2291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SqlReport 系统架构图 · 页面 / 组件 / dataflow</title>
+<style>
+:root{
+  --bg:#f6f7fb; --panel:#fff; --ink:#181b24; --muted:#5b6274; --line:#e2e5ee; --line2:#eef0f6;
+  --page:#5d61e0; --page-soft:#eef0ff; --page-line:#c7caff;
+  --shared:#0f766e; --shared-soft:#e7fbf7; --shared-line:#9fe8db;
+  --private:#b45309; --private-soft:#fff7ed; --private-line:#fcd9a7;
+  --infra:#1d4ed8; --infra-soft:#eff5ff; --infra-line:#c3d7fd;
+  --ok:#048b56; --warn:#d78c00; --danger:#d02b31;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --r:10px; --r-sm:7px;
+  --sh:0 1px 2px rgba(20,25,45,.05),0 6px 18px -8px rgba(20,25,45,.12);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{margin:0;font-weight:650;letter-spacing:-.01em}
+code,.mono{font-family:var(--mono);font-size:.92em}
+a{color:var(--page)}
+
+/* ── 顶栏 ───────────────────────────────────── */
+.top{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line)}
+.top-in{max-width:1500px;margin:0 auto;padding:9px 22px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.top h1{font-size:15px;letter-spacing:-.01em}
+.top .ver{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+.spacer{flex:1}
+.filters{display:flex;gap:6px;align-items:center}
+.filters button{font:inherit;font-size:12px;cursor:pointer;border:1px solid var(--line);background:#fff;
+  color:var(--muted);border-radius:99px;padding:4px 11px;transition:.12s}
+.filters button:hover{border-color:#c9cde0;color:var(--ink)}
+.filters button.on{background:var(--ink);border-color:var(--ink);color:#fff}
+body.f-shared .chip.private,body.f-shared .g-private{opacity:.22;filter:grayscale(.6)}
+body.f-private .chip.shared,body.f-private .g-shared{opacity:.22;filter:grayscale(.6)}
+
+/* ── 布局 ───────────────────────────────────── */
+.wrap{max-width:1500px;margin:0 auto;padding:26px 22px 90px}
+.hero{background:linear-gradient(135deg,#1a1d2b,#262a3d 55%,#31245a);color:#fff;
+  border-radius:14px;padding:26px 28px;margin-bottom:22px;box-shadow:var(--sh)}
+.hero h2{font-size:21px;margin-bottom:6px}
+.hero p{margin:0;color:#c3c7dc;font-size:13px;max-width:1000px}
+.hero .kpis{display:flex;gap:26px;margin-top:18px;flex-wrap:wrap}
+.hero .kpi b{display:block;font-size:22px;line-height:1.15;font-variant-numeric:tabular-nums}
+.hero .kpi span{font-size:11.5px;color:#a7adc7;letter-spacing:.02em}
+
+.legend{display:flex;gap:20px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:12px 16px;margin-bottom:22px;font-size:12.5px}
+.legend div{display:flex;gap:8px;align-items:center;color:var(--muted)}
+.sw{width:12px;height:12px;border-radius:3px;flex:0 0 auto}
+
+section{margin:34px 0}
+.sec-h{display:flex;align-items:baseline;gap:12px;margin-bottom:14px;
+  padding-bottom:9px;border-bottom:1px solid var(--line)}
+.sec-h h2{font-size:17px}
+.sec-h .n{font:600 11px/1 var(--mono);color:#fff;background:var(--ink);border-radius:5px;padding:4px 6px;
+  align-self:center;letter-spacing:.04em}
+.sec-h p{margin:0;margin-left:auto;color:var(--muted);font-size:12px}
+
+/* ── 分层图 ─────────────────────────────────── */
+.layers{display:flex;flex-direction:column;gap:9px}
+.layer{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);
+  display:grid;grid-template-columns:186px 1fr;overflow:hidden}
+.layer>.lbl{border-right:1px solid var(--line2);padding:13px 15px;background:#fbfbfe}
+.layer>.lbl b{display:block;font-size:12.5px}
+.layer>.lbl span{font:11px/1.45 var(--mono);color:var(--muted);word-break:break-all}
+.layer>.body{padding:12px 15px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+.box{border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 10px;background:#fff;font-size:12px;
+  transition:.12s;max-width:100%}
+.box b{display:block;font-size:12.5px;margin-bottom:1px}
+.box small{color:var(--muted);font:11px/1.4 var(--mono);display:block}
+.box:hover{border-color:#b9bfd8;box-shadow:0 2px 10px -4px rgba(20,25,45,.2)}
+.box.entry{background:var(--page-soft);border-color:var(--page-line)}
+.box.svc{background:#fbfbfe}
+.box.data{background:var(--infra-soft);border-color:var(--infra-line)}
+.box.ext{background:#f5f5f8;border-style:dashed}
+.box.hot{background:#fff6f6;border-color:rgba(208,43,49,.42);
+  box-shadow:inset 0 0 0 1px rgba(208,43,49,.16)}
+.gmark{font:700 9px/1 var(--mono);color:var(--danger);border:1px solid rgba(208,43,49,.42);
+  border-radius:3px;padding:1px 3px;margin-left:5px;vertical-align:1.5px;letter-spacing:.04em}
+.legend .lrow .box{padding:5px 9px;font-size:11.5px;white-space:nowrap}
+.legend .lrow .box b{display:inline;font-size:11.5px;font-weight:650;margin:0}
+.legend .lrow .tagline{margin-right:3px}
+.arrowdown{text-align:center;color:#b7bdd2;font-size:13px;line-height:1;margin:-3px 0 -3px}
+
+/* ── 页面卡片 ───────────────────────────────── */
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(455px,1fr));gap:14px}
+.page{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);
+  overflow:hidden;display:flex;flex-direction:column}
+.page-h{padding:11px 14px;border-bottom:1px solid var(--line2);background:linear-gradient(180deg,#fcfcfe,#f7f8fc);
+  display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.route{font:600 12px/1 var(--mono);background:var(--page);color:#fff;border-radius:5px;padding:5px 7px}
+.route.api{background:#0e7490}
+.route.none{background:#6b7280}
+.page-h .tag{font-size:12.5px;font-weight:650}
+.page-h .flags{margin-left:auto;display:flex;gap:4px}
+.flag{font:11px/1 var(--mono);padding:3px 5px;border-radius:4px;background:#eef0f6;color:#4a5063;border:1px solid #e0e3ec}
+.flag.on{background:#e8f7ee;border-color:#b6e3c8;color:var(--ok)}
+.flag.no{background:#fdf0f0;border-color:#f4cdcd;color:#a9131f}
+.page-body{padding:12px 14px;display:flex;flex-direction:column;gap:11px;flex:1}
+.page-sub{font:11.5px/1.5 var(--mono);color:var(--muted);margin-top:-4px}
+.grp h5{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8b91a4;margin-bottom:5px;font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{font:11.5px/1.35 var(--mono);border:1px solid var(--line);background:#fafafe;color:#3b4152;
+  border-radius:5px;padding:3px 6px;border-left-width:3px;white-space:nowrap;transition:.12s}
+.chip::before{font:700 9px/1.45 var(--mono);letter-spacing:.06em;border-radius:3px;
+  padding:0 3px;margin-right:5px;background:rgba(0,0,0,.06);vertical-align:1px}
+.chip.shared::before{content:"共用";background:rgba(15,118,110,.18)}
+.chip.private::before{content:"私有";background:rgba(180,83,9,.18)}
+.chip.js::before{content:"JS";background:rgba(124,58,237,.16)}
+.chip.css::before{content:"资产";background:rgba(192,38,211,.15)}
+.chip.infra::before{content:"服务";background:rgba(29,78,216,.14)}
+.chip.shared{border-left-color:var(--shared);background:var(--shared-soft);border-color:var(--shared-line);color:#0b5c56}
+.chip.private{border-left-color:var(--private);background:var(--private-soft);border-color:var(--private-line);color:#8a3f07}
+.chip.infra{border-left-color:var(--infra);background:var(--infra-soft);border-color:var(--infra-line);color:#1a3fa8}
+.chip.js{border-left-color:#7c3aed;background:#f6f1ff;border-color:#ddcfff;color:#5b21b6}
+.chip.css{border-left-color:#c026d3;background:#fdf2ff;border-color:#f2c9fb;color:#86198f}
+.chip.guard{box-shadow:inset 0 0 0 1px rgba(208,43,49,.35);cursor:help}
+.chip.guard::after{content:"⚠ 护栏";color:var(--danger);margin-left:5px;font-size:9.5px;
+  font-weight:700;letter-spacing:.04em;border-left:1px solid rgba(208,43,49,.35);padding-left:5px}
+.grp h5{display:flex;align-items:center;gap:6px}
+.grp h5 .dot{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+.grp h5 .gcount{font:600 10.5px/1 var(--mono);color:#6b7280;background:#eef0f6;border-radius:3px;
+  padding:2px 4px;margin-left:auto;letter-spacing:0}
+.legend{flex-direction:column;gap:9px}
+.legend .lrow{display:grid;grid-template-columns:290px 1fr;gap:14px;align-items:center;
+  padding-bottom:8px;border-bottom:1px dashed var(--line2);width:100%}
+.legend .lrow:last-child{border-bottom:0;padding-bottom:0}
+.legend .lrow .desc{color:#545b6d;font-size:12.3px}
+.legend .lrow .desc b{color:var(--ink);font-weight:650}
+.legend .chip{justify-self:start}
+.legend .lg-title{font-size:12px;color:var(--muted);padding-bottom:8px;border-bottom:1px dashed var(--line)}
+.legend .lg-title b{color:var(--ink)}
+@media (max-width:820px){.legend .lrow{grid-template-columns:1fr;gap:5px}}
+.page ol.flow{margin:0;padding-left:19px;font-size:12.4px;color:#3a3f4d}
+.page ol.flow li{margin:2px 0}
+.page ol.flow li code{background:#f2f4fa;border:1px solid #e6e9f2;border-radius:4px;padding:0 4px}
+.note{font-size:12.2px;color:var(--muted);border-left:2px solid var(--line);padding-left:9px}
+.note.warn{border-color:var(--warn);color:#8a5b00;background:#fffbf0;border-radius:0 5px 5px 0;padding:5px 9px}
+
+/* ── 表格 ───────────────────────────────────── */
+.tw{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+th{background:#fafbfe;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#7d8497;
+  font-weight:700;position:sticky;top:0;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fcfcff}
+td code{color:#2a2f3d}
+.cnt{font:600 12px/1 var(--mono);display:inline-block;min-width:24px;text-align:center;
+  background:#eef0f6;border-radius:4px;padding:2px 5px;color:#454b5e}
+.cnt.hi{background:#e7fbf7;color:#0b5c56}
+
+/* ── 链路卡 ─────────────────────────────────── */
+.flows{display:grid;grid-template-columns:repeat(auto-fill,minmax(465px,1fr));gap:14px}
+.flow-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
+.flow-card>h4{font-size:13px;padding:10px 14px;border-bottom:1px solid var(--line2);background:#fbfbfe;
+  display:flex;gap:8px;align-items:center}
+.flow-card>h4 .fid{font:600 11px/1 var(--mono);background:var(--page-soft);color:var(--page);
+  border:1px solid var(--page-line);border-radius:4px;padding:4px 5px}
+.flow-card>h4 .who{margin-left:auto;font:11px/1 var(--mono);color:var(--muted)}
+.steps{padding:9px 14px 13px;margin:0;list-style:none;counter-reset:s}
+.steps>li{counter-increment:s;position:relative;padding:4px 0 4px 26px;font-size:12.4px;color:#3a3f4d;
+  border-left:1px dashed #d9dded;margin-left:8px}
+.steps>li::before{content:counter(s);position:absolute;left:-9px;top:5px;width:18px;height:18px;
+  border-radius:50%;background:#fff;border:1px solid var(--page-line);color:var(--page);
+  font:600 10.5px/17px var(--mono);text-align:center}
+.steps>li:last-child{border-left-color:transparent}
+.steps>li code{background:#f2f4fa;border:1px solid #e6e9f2;border-radius:4px;padding:0 4px;font-size:.94em}
+.steps .tagline{display:inline-block;font:10.5px/1 var(--mono);border-radius:3px;padding:2px 4px;margin-right:4px}
+.tagline.cache{background:#e7fbf7;color:#0b5c56;border:1px solid #9fe8db}
+.tagline.db{background:var(--infra-soft);color:#1a3fa8;border:1px solid var(--infra-line)}
+.tagline.html{background:var(--private-soft);color:#8a3f07;border:1px solid var(--private-line)}
+.tagline.audit{background:#fdf2ff;color:#86198f;border:1px solid #f2c9fb}
+
+/* ── TOC ────────────────────────────────────── */
+.toc{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+.toc a{font-size:12px;text-decoration:none;color:#40465a;background:#fff;border:1px solid var(--line);
+  border-radius:99px;padding:5px 11px;transition:.12s}
+.toc a:hover{border-color:#b9bfd8;color:var(--page);transform:translateY(-1px)}
+
+footer{margin-top:46px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
+  font-size:12px;display:flex;gap:18px;flex-wrap:wrap}
+@media (max-width:820px){
+  .layer{grid-template-columns:1fr}
+  .layer>.lbl{border-right:0;border-bottom:1px solid var(--line2)}
+  .pages,.flows{grid-template-columns:1fr}
+  .wrap{padding:16px 12px 60px}
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="top-in">
+    <h1>SqlReport · 系统架构图</h1>
+    <span class="ver">代码快照 2026-10-20</span>
+    <div class="spacer"></div>
+    <div class="filters">
+      <button data-f="all" class="on">全部</button>
+      <button data-f="shared">仅共用组件</button>
+      <button data-f="private">仅私有组件</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="hero">
+    <h2>服务端渲染的单体报表平台 · 页面 / 组件 / dataflow 全景</h2>
+    <p>纯 Python 3 标准库 + <code>http.server.ThreadingHTTPServer</code>；前端为服务端 HTML 字符串 + 公共 <code>common.css</code>/<code>common.js</code>，
+       无 React / 无构建链。<b>共用组件</b>指跨模块被 2 个以上页面处理器调用的构件；<b>私有组件</b>指只在单一页面装配函数内产出的构件。
+       本图仅分析，未改动任何代码。</p>
+    <div class="kpis">
+      <div class="kpi"><b>18</b><span>HTTP 路由 / 端点</span></div>
+      <div class="kpi"><b>18</b><span>页面与端点（含 /api、/export）</span></div>
+      <div class="kpi"><b>22</b><span>共用构件（矩阵行）</span></div>
+      <div class="kpi"><b>9</b><span>数据表</span></div>
+      <div class="kpi"><b>3</b><span>缓存层（L1 进程 / L2 Redis / L3 MySQL）</span></div>
+      <div class="kpi"><b>~20.4k</b><span>Python 行（业务模块合计）</span></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="lg-title">配色与标识对照 —— 图中每一个色块都<b>同时</b>带前缀文字标签，不靠颜色单独区分</div>
+    <div class="lrow"><span class="chip shared">render_page_header:1025</span>
+      <span class="desc"><b>绿 + 前缀 <code>共用</code></b> —— 服务端 HTML 构件，被 2 个以上模块 / 页面调用，可在其他页面继续复用；调用点矩阵见 ③ 章。</span></div>
+    <div class="lrow"><span class="chip private">_build_report_switcher:2151</span>
+      <span class="desc"><b>橙 + 前缀 <code>私有</code></b> —— 只在当前这一个页面装配函数内产出，不供其他页面使用。</span></div>
+    <div class="lrow"><span class="chip js">initPage</span>
+      <span class="desc"><b>紫 + 前缀 <code>JS</code></b> —— 注入 <code>common.js</code> 的浏览器端函数（或该页内联脚本），任何页面可调，不经服务端。</span></div>
+    <div class="lrow"><span class="chip css">common.css</span>
+      <span class="desc"><b>品红 + 前缀 <code>资产</code></b> —— 公共 CSS 变量 / 组件类 / 第三方前端库（如 mermaid），非业务逻辑、非函数调用。</span></div>
+    <div class="lrow"><span class="chip infra">execute_report:1103</span>
+      <span class="desc"><b>蓝 + 前缀 <code>服务</code></b> —— 该页面调用或读取的后端函数、配置表、Redis / 静态缓存，不是页面 UI 构件。</span></div>
+    <div class="lrow"><span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">sanitize_csv_formula:137</span>
+      <span class="desc"><b>后缀 <code>⚠ 护栏</code></b> —— 叠加标记，不是独立分类：底色仍表示所属分类（多为橙=私有），右侧额外标出 <b>⚠ 护栏</b>，表示涉及权限 / 写操作 / 注入防护等风险点。</span></div></div>
+
+  <div class="toc">
+    <a href="#s1">① 分层架构</a>
+    <a href="#s2">② 页面清单与组件树</a>
+    <a href="#s3">③ 共用组件矩阵</a>
+    <a href="#s4">④ Dataflow 链路</a>
+    <a href="#s5">⑤ 前端资产与初始化</a>
+    <a href="#s6">⑥ 模块依赖关系</a>
+  </div>
+
+  <!-- ══════════════ 1 分层 ══════════════ -->
+  <section id="s1">
+    <div class="sec-h"><span class="n">01</span><h2>分层架构</h2><p>请求自上而下，数据自下而上；每层只依赖下一层</p></div>
+
+    <div class="legend" style="margin-bottom:16px">
+      <div class="lg-title">分层图专用配色 —— 本图的方块表示<b>模块</b>，与 ② 章页面卡里的构件色块是两套体系，不要混读</div>
+      <div class="lrow"><span class="box entry"><b>入口 / 路由派发</b></span>
+        <span class="desc"><b>靛蓝底</b> —— 请求进入点与派发函数：<code>ThreadingHTTPServer</code>、<code>_handle_report</code>、<code>_handle_config</code>、<code>_handle_api</code>。</span></div>
+      <div class="lrow"><span class="box svc"><b>领域服务模块</b></span>
+        <span class="desc"><b>近白底</b> —— 无 UI 的后端能力：<code>execute_report</code>、<code>result_transform</code>、<code>render.py</code>、<code>redis_cache</code>。</span></div>
+      <div class="lrow"><span class="box data"><b>数据 / 存储</b></span>
+        <span class="desc"><b>浅蓝底</b> —— 需要读写落盘的资源：配置库、<code>audit.db</code>、业务 MySQL、Redis、静态缓存目录。</span></div>
+      <div class="lrow"><span class="box ext"><b>外部 / 客户端</b></span>
+        <span class="desc"><b>灰虚线框</b> —— 浏览器、开放 API 调用方与下载端，位于本系统可信边界之外。</span></div>
+      <div class="lrow"><span class="box hot"><b>_authenticate <span class="gmark">⚠ 护栏</span></b></span>
+        <span class="desc"><b>红内框 + <code>⚠ 护栏</code> 徽标</b> —— 鉴权 / 写操作拦截 / 全量输出截断等强制卡点，与 ② 章 <code>⚠ 护栏</code> 后缀同一含义。</span></div>
+    </div>
+
+    <div class="layers">
+
+      <div class="layer">
+        <div class="lbl"><b>L0 浏览器 / 客户端</b><span>browser · curl · BI 工具</span></div>
+        <div class="body">
+          <div class="box ext"><b>HTML 页面</b><small>服务端字符串 + common.css/js</small></div>
+          <div class="box ext"><b>fetch / 表单 POST</b><small>PRG 模式 · 无 SPA 路由</small></div>
+          <div class="box ext"><b>开放 API 调用方</b><small>X-API-Key / Bearer</small></div>
+          <div class="box ext"><b>CSV / JSON / ZIP 下载</b><small>/export · /api</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+
+      <div class="layer">
+        <div class="lbl"><b>L1 HTTP 接入</b><span>server.py 1141 行</span></div>
+        <div class="body">
+          <div class="box entry"><b>ThreadingHTTPServer</b><small>server.py · do_GET/do_POST → _handle</small></div>
+          <div class="box"><b>静态白名单</b><small>_vendor_real_path:233 · /static/vendor/&lt;name@ver&gt;/&lt;file&gt;</small></div>
+          <div class="box"><b>_scan_routes:251</b><small>ROUTES 顺序首次匹配 · 405/404</small></div>
+          <div class="box hot"><b>_authenticate</b><small>Cookie session_id → auth.get_session_user</small></div>
+          <div class="box"><b>_req_conn</b><small>config_db 请求内复用</small></div>
+          <div class="box"><b>_send_html / _send_redirect</b><small>_safe_location · Session 刷新</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+
+      <div class="layer">
+        <div class="lbl"><b>L2 路由派发</b><span>server.ROUTES · config.parse_config_path</span></div>
+        <div class="body">
+          <div class="box entry"><b>_handle_report</b><small>/report → report.handle_request:2240</small></div>
+          <div class="box entry"><b>_handle_config</b><small>/config → config.handle_request:625</small></div>
+          <div class="box entry"><b>_handle_api</b><small>/api → api_handler.handle_api_request:55</small></div>
+          <div class="box entry"><b>_handle_export</b><small>/export → export.handle_export:387</small></div>
+          <div class="box entry"><b>handle_audit_request</b><small>/audit → audit_page 149 行</small></div>
+          <div class="box"><b>_handle_login / _handle_logout / _handle_health / _handle_favicon</b><small>内联于 server.py</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+
+      <div class="layer">
+        <div class="lbl"><b>L3 页面装配层</b><span>服务端 HTML 字符串拼装</span></div>
+        <div class="body">
+          <div class="box"><b>render_report_selector:1469</b><small>报表中心</small></div>
+          <div class="box"><b>render_report_page:1700</b><small>→ _build_report_html:1798</small></div>
+          <div class="box"><b>config.render_overview:271</b><small>配置概览</small></div>
+          <div class="box"><b>config_pages/*</b><small>pools/users/reports/api_endpoints/scheduler/categories/branding</small></div>
+          <div class="box"><b>render_audit_page:4128</b><small>审计</small></div>
+          <div class="box svc"><b>render.py 共享组件库</b><small>4799 行 · 21 个跨页构件</small></div>
+          <div class="box css"><b>ui_assets.py</b><small>1954 行 · _COMMON_CSS + 24 个 JS</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+
+      <div class="layer">
+        <div class="lbl"><b>L4 领域服务层</b><span>report · query_executor · result_transform · export · api_handler · scheduler</span></div>
+        <div class="body">
+          <div class="box svc"><b>execute_report:1103</b><small>写护栏 / 全量护栏 / 三层缓存编排</small></div>
+          <div class="box svc"><b>result_transform.transform_rows:637</b><small>筛选 · 排序 · 选列 · 分页</small></div>
+          <div class="box svc"><b>query_executor.execute_mysql_query:964</b><small>连接池 · 超时 · 语句切分</small></div>
+          <div class="box svc"><b>sql_contains_write:800</b><small>PH-05 写判定</small></div>
+          <div class="box svc"><b>export.handle_export:387</b><small>CSV/JSON/ZIP · 公式注入防护</small></div>
+          <div class="box svc"><b>api_handler._execute_api_query:397</b><small>模板 · 规则 · 覆盖参数</small></div>
+          <div class="box svc"><b>ReportScheduler:264</b><small>定时线程 · 排除规则 · 保活</small></div>
+          <div class="box svc"><b>redis_cache / static_cache</b><small>快照键 · 版本 · 静态文件</small></div>
+          <div class="box svc"><b>auth.py / audit_db.py</b><small>PBKDF2 · 限流 · 审计四类</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+
+      <div class="layer">
+        <div class="lbl"><b>L5 数据与外部系统</b><span>config_db.py 2568 行 · 双引擎</span></div>
+        <div class="body">
+          <div class="box data"><b>配置库（SQLite / MySQL）</b><small>users · connection_pools · report_configs · report_categories · api_endpoints · api_keys · report_schedules · schedule_reports · sessions</small></div>
+          <div class="box data"><b>审计库 audit.db</b><small>audit_logs · type ∈ {operation, web_access, api, scheduler}</small></div>
+          <div class="box data"><b>业务 MySQL</b><small>经 connection_pools 取连接 · 只读/可写由 allow_write 决定</small></div>
+          <div class="box data"><b>Redis</b><small>报表结果快照 · 版本键 · 分布式锁 · 保活</small></div>
+          <div class="box data"><b>静态缓存目录</b><small>{permissions_root}/api/*.json · 版本化写入</small></div>
+          <div class="box data"><b>static/vendor/</b><small>mermaid@11.16.1 + 31 个 self@&lt;hash8&gt; 资产目录</small></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 2 页面 ══════════════ -->
+  <section id="s2">
+    <div class="sec-h"><span class="n">02</span><h2>页面清单与组件树</h2><p>每张卡的构件组按分类分块，组标题左侧色点 = 该组件的分类色（与顶部图例一致）</p></div>
+    <div class="legend" style="margin-bottom:16px">
+      <div class="lg-title">本页色块速查 —— 颜色 + 前缀文字 = 完整含义；每组标题左侧还有对应色点与件数</div>
+      <div class="lrow"><span class="chip shared">服务端 HTML 构件</span><span class="desc">被 2 个以上页面复用</span></div>
+      <div class="lrow"><span class="chip private">本页专用构件</span><span class="desc">仅当前页装配函数产出</span></div>
+      <div class="lrow"><span class="chip js">浏览器端函数</span><span class="desc">common.js 或页内脚本</span></div>
+      <div class="lrow"><span class="chip css">CSS 变量 / 第三方库</span><span class="desc">样式变量与前端库</span></div>
+      <div class="lrow"><span class="chip infra">后端函数 / 表 / 缓存</span><span class="desc">函数 / 表 / 缓存，非 UI</span></div>
+      <div class="lrow"><span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">_apply_max_rows 护栏</span><span class="desc">叠加后缀，非独立分类</span></div>
+      <div class="lrow"><span class="route">GET /report</span><span class="desc"><b>靛蓝路由章</b> = 普通页面（Session 鉴权）；<span class="route api">/api/*</span> 青绿 = 开放 API（API Key 鉴权）；<span class="route none">辅助端点</span> 灰 = 免鉴权 / 内部端点。</span></div>
+      <div class="lrow"><span class="flag on">auth</span><span class="flag on">db</span><span class="flag no">auth✗</span>
+        <span class="desc"><b>绿标</b> = 该端点会做这项检查 / 连这个库；<b>红标</b> = 不做。用于一眼看出鉴权与故障域边界。</span></div>
+      <div class="lrow"><span class="gcount" style="position:static">9</span>
+        <span class="desc"><b>组标题右侧数字</b> = 该组构件件数；标题左侧 <i class="dot" style="background:var(--shared);display:inline-block"></i> 色点 = 该组分类色。</span></div>
+    </div>
+
+    <div class="pages">
+
+      <!-- 登录 -->
+      <article class="page" id="p-login">
+        <div class="page-h">
+          <span class="route">GET/POST /login</span>
+          <span class="tag">登录页</span>
+          <span class="flags"><i class="flag no">auth✗</i><i class="flag no">db✗</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">server.py:54 _LOGIN_PAGE 模板 · _render_login_page:86 · _render_login_page_ex:91</div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">9</span></h5>
+            <div class="chips">
+              <span class="chip private">.login-box 双列网格</span>
+              <span class="chip private">.logo</span>
+              <span class="chip private">.login-subtitle</span>
+              <span class="chip private">.error 提示</span>
+              <span class="chip private">.notice</span>
+              <span class="chip private">.login-footer</span>
+              <span class="chip private">next 隐藏域</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">_sanitize_next_url:111</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">_safe_next_target:123</span>
+            </div>
+          </div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:#c026d3"></i>资产 · 公共 CSS，间接注入（非直接调用）<span class="gcount">2</span></h5>
+            <div class="chips">
+              <span class="chip css">body:has(.login-box) 样式</span>
+              <span class="chip css">--accent #5d61e0 等变量</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，5 步）</h5>
+            <ol class="flow">
+              <li>GET：渲染模板，无侧栏 / 无页头（全站唯一无 <code>render_page_header</code> 的页面）</li>
+              <li>POST：<code>auth.authenticate</code> → PBKDF2-HMAC-SHA256（100k 迭代 + <code>hmac.compare_digest</code>）</li>
+              <li>失败 → 限流计数（5 分钟 5 次）→ 回填 <code>{error}</code> 占位</li>
+              <li>成功 → <code>create_session</code> → <code>Set-Cookie: session_id; HttpOnly; SameSite=Lax; Max-Age=86400</code></li>
+              <li>302 → <code>_safe_next_target</code>（仅允许 <code>/</code> 开头且非 <code>//</code>、<code>/\</code>）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- 报表中心 -->
+      <article class="page" id="p-report-center">
+        <div class="page-h">
+          <span class="route">GET /report</span>
+          <span class="tag">报表中心</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">report.py:1469 render_report_selector(conn)</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">10</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_sidebar:994</span>
+              <span class="chip shared">render_navbar:1012</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">_PAGE_HEADER_TEMPLATE:774</span>
+              <span class="chip shared">_icon:69</span>
+              <span class="chip shared">_escape:1158</span>
+              <span class="chip shared">_get_branding_prefix:1006</span>
+              <span class="chip js">common.js · initRecentReports</span>
+              <span class="chip js">initPage / initFlashMessages</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">10</span></h5>
+            <div class="chips">
+              <span class="chip private">.page-head + #rc-search</span>
+              <span class="chip private">「最近查看」#recent-reports-mount</span>
+              <span class="chip private">.split 左右分栏</span>
+              <span class="chip private">分类树 #rc-tree · _tree() 递归</span>
+              <span class="chip private">卡片 .report-card · _card()</span>
+              <span class="chip private">#rc-grid 网格</span>
+              <span class="chip private">#rc-empty 空态三步引导</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">badge-warn 禁止写 / badge-danger 写操作</span>
+              <span class="chip private">页内联 script 关键词+分类过滤</span>
+              <span class="chip private">MutationObserver 移除占位</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:var(--infra)"></i>服务 · 一次请求发起 6 次查询<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip infra">get_all_reports</span>
+              <span class="chip infra">get_all_categories</span>
+              <span class="chip infra">get_category_tree</span>
+              <span class="chip infra">get_all_api_endpoints</span>
+              <span class="chip infra">get_all_schedules</span>
+              <span class="chip infra">get_schedule_reports</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li><code>_handle_report</code> 无 <code>id</code> 参数 → 直接 200 渲染本页</li>
+              <li>徽标数据（接口数 / 定时任务 / 保活）各自 <code>try/except</code> 降级，任一失败不影响主列表</li>
+              <li>写状态三态：<code>sql_contains_write(sql)</code> × <code>allow_write</code></li>
+              <li>卡片带 <code>data-cat</code>/<code>data-kw</code>，过滤全在前端完成，不再回源</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- 报表详情 -->
+      <article class="page" id="p-report-detail">
+        <div class="page-h">
+          <span class="route">GET /report?id=N</span>
+          <span class="tag">报表详情 · 五页签</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">report.py:1700 render_report_page → _build_report_html:1798</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 服务端 HTML 构件<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_pagination_html:1296</span>
+              <span class="chip shared">format_cell:1128</span>
+              <span class="chip shared">_escape / _js_str / js_arg</span>
+              <span class="chip shared">_icon + _ICONS:39</span>
+              <span class="chip shared">render_page_footer:1068</span>
+            </div>
+          </div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:#c026d3"></i>资产 · CSS 与第三方库<span class="gcount">2</span></h5>
+            <div class="chips">
+              <span class="chip css">common.css / common.js</span>
+              <span class="chip css">mermaid@11.16.1 第三方渲染库</span>
+            </div>
+          </div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:#7c3aed"></i>JS · 浏览器端函数<span class="gcount">2</span></h5>
+            <div class="chips">
+              <span class="chip js">initPage · applyStoredCols · initSqlEditorTabIndent</span>
+              <span class="chip js">initFlashMessages · initAnchorRowHighlight</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅 report.py 产出的 HTML 构件<span class="gcount">26</span></h5>
+            <div class="chips">
+              <span class="chip private">_render_page_header:566</span>
+              <span class="chip private">page_head 面包屑 + h1 + compact_switch</span>
+              <span class="chip private">_build_compact_switcher:2106</span>
+              <span class="chip private">_build_report_switcher:2151</span>
+              <span class="chip private">build_cache_badge_html</span>
+              <span class="chip private">preview_banner / write_banner / trunc_banner</span>
+              <span class="chip private">_build_redis_banners</span>
+              <span class="chip private">memo_bar 备注摘要</span>
+              <span class="chip private">tabs_nav 五页签 _tab()</span>
+              <span class="chip private">data_panel · build_controls_bar_html</span>
+              <span class="chip private">build_filter_action_html</span>
+              <span class="chip private">build_sort_bar_html</span>
+              <span class="chip private">build_filter_form_html</span>
+              <span class="chip private">build_table_header_html</span>
+              <span class="chip private">build_table_body_html</span>
+              <span class="chip private">build_result_selector_html</span>
+              <span class="chip private">build_field_settings_panel_html</span>
+              <span class="chip private">build_sort_settings_panel_html</span>
+              <span class="chip private">rules_panel · build_current_rules_section_html</span>
+              <span class="chip private">api_panel · build_api_urls_section_html</span>
+              <span class="chip private">debug_panel · build_debug_section_html</span>
+              <span class="chip private">memo_panel · build_memo_section_html</span>
+              <span class="chip private">build_export_modal_html</span>
+              <span class="chip private">.backdrop#report-backdrop</span>
+              <span class="chip private">_FOOTER_GLUE 页内 JS（gotoTab / openPanel / buildReportUrl）</span>
+              <span class="chip private">_MERMAID_INIT_JS（可见时才渲染）</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>query 解析：<code>page</code> / <code>page_size</code>(<code>_clamp_ui_page_size:279</code>) / <code>parse_sorts:284</code> / <code>parse_filters:183</code> / <code>parse_nested_filter:240</code> / <code>cols</code> 延迟解析</li>
+              <li><code>execute_report:1103</code>（详见 F3 链路）→ <code>ReportResult:1027</code></li>
+              <li>渲染五页签：数据 / 规则 / 接口 / 调试 / 备注（<code>gotoTab</code> 切 <code>display</code>，Mermaid 在可见时才绘制）</li>
+              <li>页头「刷新数据」= POST <code>/report</code> <code>action=refresh_cache</code>，携带 6 个隐藏域，GET 无副作用</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- 预览 -->
+      <article class="page" id="p-report-preview">
+        <div class="page-h">
+          <span class="route">POST /report/preview</span>
+          <span class="tag">SQL 预览（未保存）</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">report.handle_request 预览分支 · 复用 render_report_page</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 整套报表详情组件树复用<span class="gcount">2</span></h5>
+            <div class="chips"><span class="chip shared">整套报表详情组件树</span><span class="chip shared">build_flash_html</span></div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅在预览分支追加<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip private">preview_banner（flash-warn）</span>
+              <span class="chip private">临时 report 对象 <code>id:0 "新建报表预览"</code></span>
+              <span class="chip private">report_override / sql_override</span>
+              <span class="chip private">active_index=preview_result</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">allow_write 以表单值为准</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>带 <code>id</code>：取库中配置 + 表单 SQL → 覆盖执行</li>
+              <li>无 <code>id</code> 且缺 <code>pool_id</code>/SQL → 回落 <code>render_report_selector</code>（防误触）</li>
+              <li>无 <code>id</code> 且参数齐 → 构造临时报表 → <code>render_report_page(conn, 0, …)</code></li>
+              <li><code>is_preview = sql_query != report["sql_query"]</code> → <b>不写 Redis</b>，只进 L1</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- 导出 -->
+      <article class="page" id="p-export">
+        <div class="page-h">
+          <span class="route">GET /export?id=N</span>
+          <span class="tag">导出（无页面）</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">export.py:387 handle_export → 返回 (code, bytes, headers)</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">1</span></h5>
+            <div class="chips"><span class="chip shared">format_cell:1128（单元格格式化）</span></div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">8</span></h5>
+            <div class="chips">
+              <span class="chip private">_load_and_transform:60</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">sanitize_csv_formula:137</span>
+              <span class="chip private">rows_to_csv:142</span>
+              <span class="chip private">export_report_to_csv:183</span>
+              <span class="chip private">export_report_to_json:231</span>
+              <span class="chip private">_encode_content:318（gbk/utf8 BOM）</span>
+              <span class="chip private">_build_export_filename:335</span>
+              <span class="chip private">_create_temp_zip:350</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:var(--infra)"></i>服务 · 请求参数（URL / 表单透传）<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip infra">format=csv|json</span><span class="chip infra">charset=gbk|utf8</span>
+              <span class="chip infra">smart_quotes</span><span class="chip infra">json_no_quotes</span>
+              <span class="chip infra">zip</span><span class="chip infra">f_COL / op_COL</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>缺 <code>id</code> → 400；报表或连接池不存在 → 404</li>
+              <li><code>_load_and_transform</code> → <code>execute_report</code> + 同样的 transform（与页面同源，保证导出与屏幕一致）</li>
+              <li>CSV：<code>sanitize_csv_formula</code> 防 <code>=+-@</code> 公式注入 → 编码 →（可选）ZIP</li>
+              <li>返回 <code>Content-Disposition</code> + 字节流，不走 HTML 渲染</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- config 概览 -->
+      <article class="page" id="p-config-home">
+        <div class="page-h">
+          <span class="route">GET /config</span>
+          <span class="tag">配置概览仪表盘</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config.py:271 render_overview(conn) · 徽标 _nav_badges:254</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">render_sidebar / render_navbar</span>
+              <span class="chip shared">_icon:69 · _escape:1158</span>
+              <span class="chip js">initPage · toggleSection</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip private">.grid-stat 六磁贴</span>
+              <span class="chip private">.grid-3 快捷入口七按钮</span>
+              <span class="chip private">.grid-2 系统状态卡</span>
+              <span class="chip private">系统状态三徽章（调度/缓存/引擎）</span>
+              <span class="chip private">banner-info 三步引导（n_pools==0）</span>
+              <span class="chip private">_render_branding_anchor（branding.py:187）</span>
+              <span class="chip private">DEBUG 专属「导入演示数据」</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，3 步）</h5>
+            <ol class="flow">
+              <li>一次请求聚合 6 类计数：pools / users / reports / api / sched / categories</li>
+              <li>系统状态：<code>scheduler.enable</code> · <code>redis_cache.redis_available()</code> · <code>config_db</code> 引擎</li>
+              <li>六个磁贴各带跳转，是全部配置子页的入口枢纽</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- pools -->
+      <article class="page" id="p-pools">
+        <div class="page-h">
+          <span class="route">/config/pools*</span>
+          <span class="tag">连接池 · 列表 + 表单</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/pools.py · render_pools_page:37 · render_pool_form_page:55</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip js">common.js · testPoolConnection</span>
+              <span class="chip js">initPage · initFlashMessages</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip private">build_pool_form_html</span>
+              <span class="chip private">build_pool_section_html</span>
+              <span class="chip private">_render_pool_form:12</span>
+              <span class="chip private">_render_pool_section:19</span>
+              <span class="chip private">_pool_test_error_hint:88</span>
+              <span class="chip private">handle_pool_test:97</span>
+              <span class="chip private">handle_pool_add/edit/copy/delete</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>列表 → <code>get_all_pools</code>；表单 → <code>_pool_from_form:73</code></li>
+              <li>「测试连接」POST <code>/config/pools/test</code> → <code>query_executor.create_mysql_connection</code> → 返回 JSON 片段</li>
+              <li>写操作后 PRG：<code>_redirect_or_render:870</code></li>
+              <li>删除前检查报表引用（被引用则拒绝）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- users -->
+      <article class="page" id="p-users">
+        <div class="page-h">
+          <span class="route">/config/users*</span>
+          <span class="tag">用户 · 列表 + 表单</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/users.py 127 行 · render_users_page / render_user_form_page</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_delete_form_html:2419</span>
+              <span class="chip js">initPage</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">3</span></h5>
+            <div class="chips">
+              <span class="chip private">build_user_form_html</span>
+              <span class="chip private">build_user_section_html</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">当前登录用户行不渲染删除按钮</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，3 步）</h5>
+            <ol class="flow">
+              <li>新增/改密 → <code>auth.hash_password</code>（PBKDF2 100k）→ 写 <code>users</code></li>
+              <li>删除 → 清理该用户 <code>sessions</code> 行，强制下线</li>
+              <li>写操作记 <code>audit_logs.type=operation</code></li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- reports 列表 -->
+      <article class="page" id="p-config-reports">
+        <div class="page-h">
+          <span class="route">GET /config/reports</span>
+          <span class="tag">报表管理</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/reports.py:404 render_reports_page</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">13</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_config_filter_box_html:1084</span>
+              <span class="chip shared">build_category_opts_html:2602</span>
+              <span class="chip shared">build_api_endpoints_list_html:3200</span>
+              <span class="chip shared">build_report_schedule_summary_html</span>
+              <span class="chip shared">build_delete_form_html:2419</span>
+              <span class="chip css">_SQL_HIGHLIGHT_JS / _SQL_FORMATTER_JS</span>
+              <span class="chip js">setReportsView · pickedReportIds</span>
+              <span class="chip js">batchUpdatePool · batchSetCategory · batchUpdateCache</span>
+              <span class="chip js">batchDeleteReports · updateBatchCount</span>
+              <span class="chip js">submitBatchPost · initConfigFilter</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip private">.segment#rpt-view-seg 列表/卡片切换</span>
+              <span class="chip private">#sec-reports 分栏容器</span>
+              <span class="chip private">build_category_manage_section_html:2743</span>
+              <span class="chip private">批量工具条（池/分类/缓存/删除）</span>
+              <span class="chip private">localStorage 记忆视图模式</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>列表数据 → <code>get_all_reports</code> + 分类树 + 调度摘要</li>
+              <li>检索全部前端完成：<code>initConfigFilter</code> 按 <code>data-kw</code> 隐藏行</li>
+              <li>批量操作 → <code>submitBatchPost</code> 提交隐藏表单 → <code>handle_batch_*</code>（pool:496 / cache:517 / delete:582）</li>
+              <li>写后 PRG 重定向回列表并带 flash</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- report form -->
+      <article class="page" id="p-report-form">
+        <div class="page-h">
+          <span class="route">/config/reports/add | {id}/edit | copy</span>
+          <span class="tag">报表表单（四段）</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/reports.py:442 render_report_form_page → _report_form_html:91</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">_WARN_BOX_STYLE:96</span>
+              <span class="chip css">_SQL_HIGHLIGHT_JS · _SQL_FORMATTER_JS</span>
+              <span class="chip js">initSqlEditorTabIndent · toggleSection</span>
+              <span class="chip js">toggleTtlInput · syncSchedType · syncBindRow</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip private">① 基础（名/池/分类/描述）</span>
+              <span class="chip private">② SQL（高亮编辑器 + 格式化）</span>
+              <span class="chip private">③ 缓存与护栏（TTL / max_rows / allow_write）</span>
+              <span class="chip private">④ 调度与保活（keepalive）</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">写操作检测提示（sql_contains_write）</span>
+              <span class="chip private">_report_form_pool_options:16</span>
+              <span class="chip private">_report_form_cat_options:32</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，3 步）</h5>
+            <ol class="flow">
+              <li>表单 POST → <code>_parse_report_form:469</code> → <code>_report_from_form:494</code></li>
+              <li>新增 <code>handle_report_add:515</code> / 编辑 <code>:546</code> / 复制 <code>:577</code> / 删除 <code>:612</code></li>
+              <li>SQL 里含写语句但 <code>allow_write=0</code> → 前端 warn-box 提示（后端 PH-05 二次拦截）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- api endpoint form -->
+      <article class="page" id="p-api-form">
+        <div class="page-h">
+          <span class="route">/config/reports/{id}/api_endpoints/*</span>
+          <span class="tag">接口表单 + API Key</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/api_endpoints.py:33 render_api_endpoint_form_page · 510 行</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">9</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_api_key_manage_html:4050</span>
+              <span class="chip shared">build_api_endpoint_preview_help_html:3524</span>
+              <span class="chip shared">build_collapse_section_html:4393</span>
+              <span class="chip shared">build_state_span:4465</span>
+              <span class="chip js">initApiUrls · buildApiUrl · copyToClipboard</span>
+              <span class="chip js">apiToggleMore · apiMainClick</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip private">JSON 模板编辑器（ui_assets 24 个 JS）</span>
+              <span class="chip private">五行排除规则构建器 JS</span>
+              <span class="chip private">_validate_json_template:76</span>
+              <span class="chip private">_endpoint_from_form:91</span>
+              <span class="chip private">handle_api_key_actions:162</span>
+              <span class="chip private">handle_api_endpoint_preview:349</span>
+              <span class="chip private">_estimate_result_count:20</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>保存 → 校验唯一性（<code>_endpoint_unique_error:155</code>）→ 写 <code>api_endpoints</code></li>
+              <li>API Key → <code>generate_api_key:50</code>（仅存哈希）→ 写 <code>api_keys</code></li>
+              <li>保存后触发 <code>rebuild_static_endpoint_file:261</code> 让静态文件与配置版本对齐</li>
+              <li>「预览」<code>:349</code> → 实际执行 SQL 并截取样本 JSON</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- global api endpoints -->
+      <article class="page" id="p-api-list">
+        <div class="page-h">
+          <span class="route">GET /config/api-endpoints</span>
+          <span class="tag">全局接口列表</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">server.py 独立路由 → config_pages/api_endpoints.py:431 render_api_endpoints_page</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_api_endpoints_list_html:3200</span>
+              <span class="chip shared">build_api_key_manage_html:4050</span>
+              <span class="chip js">initApiUrls · copyToClipboard · apiToggleMore</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">4</span></h5>
+            <div class="chips">
+              <span class="chip private">page-head sub（静态缓存目录 · 启用计数）</span>
+              <span class="chip private">show_report_name=True 列表变体</span>
+              <span class="chip private">key_counts 注入</span>
+              <span class="chip private">「+ 新建接口」跳首张报表</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，2 步）</h5>
+            <ol class="flow">
+              <li><code>get_all_endpoints_with_report</code> + <code>get_api_key_counts</code> + <code>app_config.get_server_base_url()</code></li>
+              <li>无报表时「新建」指向 <code>/config/reports/add</code>（先建报表再建接口）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- scheduler -->
+      <article class="page" id="p-scheduler">
+        <div class="page-h">
+          <span class="route">/config/scheduler*</span>
+          <span class="tag">定时任务 · 列表 + 表单</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/scheduler.py:59 render_scheduler_page · :28 render_scheduler_form_page</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">6</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_state_span:4465</span>
+              <span class="chip shared">build_delete_form_html:2419</span>
+              <span class="chip js">syncSchedType · syncBindRow · toggleSection</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip private">build_scheduler_page_html</span>
+              <span class="chip private">build_scheduler_task_form_html</span>
+              <span class="chip private">_scheduler_prefill:14</span>
+              <span class="chip private">_scheduler_flash_url:86</span>
+              <span class="chip private">手动执行 / 启停 / 删除按钮</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，4 步）</h5>
+            <ol class="flow">
+              <li>保存 → <code>config_db</code> 写 <code>report_schedules</code> + <code>schedule_reports</code> 绑定行</li>
+              <li>再 <code>start_scheduler_from_config</code> 热加载调度线程</li>
+              <li><code>run</code> → <code>trigger_manual:750</code>；<code>toggle</code> → 全局 <code>scheduler.enable</code></li>
+              <li>执行结果不进本页，统一去 <code>/audit</code> 看 <code>type=scheduler</code></li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- categories -->
+      <article class="page" id="p-categories">
+        <div class="page-h">
+          <span class="route">GET /config/categories*</span>
+          <span class="tag">分类（重定向）</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">server.py 特判：302 → /config/reports#sec-categories；表单页 config_pages/categories.py:50</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">4</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_category_opts_html:2602</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">4</span></h5>
+            <div class="chips">
+              <span class="chip private">_render_cat_opts:11</span>
+              <span class="chip private">_render_category_section_parts:16</span>
+              <span class="chip private">_render_category_section:44</span>
+              <span class="chip private">handle_batch_set_category:156</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，2 步）</h5>
+            <ol class="flow">
+              <li>列表已并入 <code>/config/reports</code> 左栏，独立页仅保留表单与锚点跳转</li>
+              <li>删除分类 → 其下报表回落为「未分类」（不级联删除）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- branding -->
+      <article class="page" id="p-branding">
+        <div class="page-h">
+          <span class="route">/config/site-branding</span>
+          <span class="tag">站点标识</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">config_pages/branding.py:13 _render_branding_section · :132 保存 · :187 锚点</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">4</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">_get_branding_prefix:1006（消费端）</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">3</span></h5>
+            <div class="chips">
+              <span class="chip private">_render_branding_section:13</span>
+              <span class="chip private">_render_branding_anchor:187</span>
+              <span class="chip private">品牌名 / 副标题 / 图标表单</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，3 步）</h5>
+            <ol class="flow">
+              <li>表单值写入 <code>app_config</code> 键值表</li>
+              <li>全局生效入口：<code>render_navbar:1012</code> / <code>_build_sidebar_html:942</code> 读 <code>_get_branding_prefix()</code></li>
+              <li>改完无需重启，下一请求即生效（无缓存版本号）</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- audit -->
+      <article class="page" id="p-audit">
+        <div class="page-h">
+          <span class="route">/audit</span>
+          <span class="tag">审计日志</span>
+          <span class="flags"><i class="flag on">auth</i><i class="flag no">db✗</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">audit_page.py:149 handle_audit_request → render.py:4128 render_audit_page（<b>唯一不连配置库的页面</b>）</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">7</span></h5>
+            <div class="chips">
+              <span class="chip shared">render_page_header:1025</span>
+              <span class="chip shared">render_page_footer:1068</span>
+              <span class="chip shared">build_flash_html:1189</span>
+              <span class="chip shared">build_pagination_html:1296</span>
+              <span class="chip shared">build_empty_row_html:1210</span>
+              <span class="chip shared">format_cell:1128</span>
+              <span class="chip js">initPage · initFlashMessages</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">5</span></h5>
+            <div class="chips">
+              <span class="chip private">类型下拉四类映射</span>
+              <span class="chip private">日期预设 today/yesterday/last7/last30</span>
+              <span class="chip private">行内类型标签 operation/web_access/api/scheduler</span>
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">?export=csv 导出（11 列）</span>
+              <span class="chip private">POST action=clean 清理</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，3 步）</h5>
+            <ol class="flow">
+              <li>筛选键：<code>_FILTER_KEYS = ("type","date_from","date_to","session_user","keyword")</code></li>
+              <li>分页查询 <code>audit_logs</code>（独立 SQLite，与配置库隔离）</li>
+              <li>CSV 导出走 <code>_CSV_HEADER</code> 11 列，不影响主页面</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- api -->
+      <article class="page" id="p-api">
+        <div class="page-h">
+          <span class="route">* /api/&lt;path&gt;</span>
+          <span class="tag">开放 API（非页面）</span>
+          <span class="flags"><i class="flag no">session✗</i><i class="flag on">apikey</i><i class="flag on">db</i></span>
+        </div>
+        <div class="page-body">
+          <div class="page-sub">api_handler.py 1083 行 · handle_api_request:55 · 唯一不走 Session Cookie 的入口</div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--infra)"></i>服务 · 与页面共享的下推链路<span class="gcount">3</span></h5>
+            <div class="chips">
+              <span class="chip infra">report.execute_report:1103（核心下推）</span>
+              <span class="chip infra">result_transform</span>
+              <span class="chip infra">static_cache.try_read/write</span>
+            </div>
+          </div>
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">12</span></h5>
+            <div class="chips">
+              <span class="chip private guard" title="含安全护栏：服务端会拦截非法写操作 / 全量输出，此处只是界面提示">_validate_api_key:684</span>
+              <span class="chip private">_handle_static_request:186</span>
+              <span class="chip private">_compute_static_config_version:236</span>
+              <span class="chip private">rebuild_static_endpoint_file:261</span>
+              <span class="chip private">_execute_api_query:397</span>
+              <span class="chip private">_apply_json_template:621</span>
+              <span class="chip private">_resolve_params:945（GET/POST 覆盖）</span>
+              <span class="chip private">_format_json_response:989</span>
+              <span class="chip private">_format_csv_response:1036</span>
+              <span class="chip private">_build_cors_headers:746</span>
+              <span class="chip private">_log_api_call:1075</span>
+              <span class="chip private">_error_response:1055</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>dataflow · 数据流向（非构件，5 步）</h5>
+            <ol class="flow">
+              <li>按 endpoint path 查 <code>api_endpoints</code> → 校验 API Key（哈希比对）</li>
+              <li>先试静态缓存文件（命中直接回，毫秒级）</li>
+              <li>未命中 → <code>_execute_api_query</code> → <code>execute_report</code> → 结果组装/模板渲染</li>
+              <li>回写静态文件（版本化）+ 记 <code>audit_logs.type=api</code></li>
+              <li>响应加 CORS 头，支持 GET / POST</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <!-- misc -->
+      <article class="page" id="p-misc">
+        <div class="page-h">
+          <span class="route none">/health · /favicon.ico · /static/vendor</span>
+          <span class="tag">辅助端点</span>
+          <span class="flags"><i class="flag no">auth✗</i><i class="flag no">db✗</i></span>
+        </div>
+        <div class="page-body">
+          <div class="grp g-private"><h5><i class="dot" style="background:var(--private)"></i>私有 · 仅本页装配函数产出<span class="gcount">4</span></h5>
+            <div class="chips">
+              <span class="chip private">_handle_health（JSON 存活探针）</span>
+              <span class="chip private">_handle_favicon</span>
+              <span class="chip private">_vendor_real_path:233</span>
+              <span class="chip private">_vendor_mime_for:245</span>
+            </div>
+          </div>
+          <div class="grp g-shared"><h5><i class="dot" style="background:var(--shared)"></i>共用 · 跨页面复用的服务端构件<span class="gcount">2</span></h5>
+            <div class="chips">
+              <span class="chip shared">_render_error_page:128（404/405/500）</span>
+              <span class="chip css">ensure_common_assets:820 → common.css/js</span>
+            </div>
+          </div>
+          <div class="grp"><h5><i class="dot" style="background:#8b91a4"></i>补充说明 · 非构件</h5>
+            <p class="note">静态白名单直出，<code>Cache-Control: immutable</code>；<code>self@&lt;hash8&gt;</code> 版本目录由内容哈希生成，因此公共样式改动自动失效旧版本。</p>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ 3 共用矩阵 ══════════════ -->
+  <section id="s3">
+    <div class="sec-h"><span class="n">03</span><h2>共用组件矩阵</h2><p>按调用点数量降序 · 「调用点数」为实测跨模块出现次数</p></div>
+    <p class="note" style="margin-bottom:12px">「调用点数」列：<span class="cnt hi">绿底</span> = 高频复用（≥10 处，改动影响面最大）；<span class="cnt">灰底</span> = 一般复用；<span class="cnt">prev</span> = 遍布全站、不便精确计数；<span class="cnt">全站</span> = 所有页面都加载。</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>组件 / 函数</th><th>定义位置</th><th>调用点数</th><th>被哪些页面使用</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>render_page_header</code></td><td>render.py:1025</td><td><span class="cnt hi">18</span></td>
+            <td>报表中心 / 报表详情 ×3 / 配置概览 / 接口列表 ×2 / 分类 / 连接池 ×2 / 报表管理 ×2 / 调度 ×2 / 用户 ×2 / 审计</td>
+            <td>侧栏 + 导航 + 页头 + 面包屑 + 徽标 + 资产注入</td></tr>
+          <tr><td><code>render_page_footer</code></td><td>render.py:1068</td><td><span class="cnt hi">13</span></td>
+            <td>除登录页外的所有页面</td><td>公共 JS 注入 + <code>initPage()</code> 触发 + 页脚</td></tr>
+          <tr><td><code>build_flash_html</code></td><td>render.py:1189</td><td><span class="cnt hi">13</span></td>
+            <td>报表详情 / 全部配置子页 / 审计</td><td>统一 flash 提示条（ok/warn/danger/info）</td></tr>
+          <tr><td><code>format_cell</code></td><td>render.py:1128</td><td><span class="cnt">3</span></td>
+            <td>报表详情表格 / 导出 / 审计</td><td>Decimal / None / 浮点 / 日期统一格式化</td></tr>
+          <tr><td><code>build_api_endpoints_list_html</code></td><td>render.py:3200</td><td><span class="cnt">3</span></td>
+            <td>render.py:4388 / api_endpoints.py:461 / reports.py:462</td><td>接口列表（可切 report_name / key_counts）</td></tr>
+          <tr><td><code>build_pagination_html</code></td><td>render.py:1296</td><td><span class="cnt">2</span></td>
+            <td>报表详情 / 审计</td><td>分页条（sorts/cols/filters 透传）</td></tr>
+          <tr><td><code>build_category_opts_html</code></td><td>render.py:2602</td><td><span class="cnt">2</span></td>
+            <td>render.py:2610 / categories.py:13</td><td>分类下拉选项（递归层级缩进）</td></tr>
+          <tr><td><code>build_delete_form_html</code></td><td>render.py:2419</td><td><span class="cnt">7</span></td>
+            <td>内部 7 处（池/用户/报表/分类/接口/调度）</td><td>带确认的 POST 删除表单</td></tr>
+          <tr><td><code>build_state_span</code></td><td>render.py:4465</td><td><span class="cnt">10</span></td>
+            <td>内部 10 处</td><td>状态徽章（启用/停用/只读…）</td></tr>
+          <tr><td><code>build_move_buttons_html</code></td><td>render.py:2451</td><td><span class="cnt">3</span></td>
+            <td>内部 3 处</td><td>上移/下移排序按钮</td></tr>
+          <tr><td><code>build_empty_row_html</code></td><td>render.py:1210</td><td><span class="cnt">5</span></td>
+            <td>内部 5 处</td><td>空表格占位行</td></tr>
+          <tr><td><code>build_sort_params</code> / <code>build_filter_params</code> / <code>build_nested_filter_param</code></td><td>render.py:1231 / 1239 / 1284</td><td><span class="cnt">14</span></td>
+            <td>内部（URL 参数拼装约定）</td><td>把排序/筛选/嵌套筛选序列化回 query string</td></tr>
+          <tr><td><code>build_config_filter_box_html</code></td><td>render.py:1084</td><td><span class="cnt">1</span></td>
+            <td>reports.py:434（唯一外部）</td><td>配置页纯前端检索框</td></tr>
+          <tr><td><code>build_api_key_manage_html</code></td><td>render.py:4050</td><td><span class="cnt">2</span></td>
+            <td>接口表单 / 接口列表</td><td>API Key 生成/吊销面板</td></tr>
+          <tr><td><code>build_collapse_section_html</code></td><td>render.py:4393</td><td><span class="cnt">2</span></td>
+            <td>报表详情（规则/调试/备注）/ 接口表单</td><td>可折叠区块容器</td></tr>
+          <tr><td><code>build_category_manage_section_html</code></td><td>render.py:2743</td><td><span class="cnt">1</span></td>
+            <td>reports.py（左栏）</td><td>分类管理面板（增删改 + 批量归类）</td></tr>
+          <tr><td><code>build_report_schedule_summary_html</code></td><td>render.py</td><td><span class="cnt">1</span></td>
+            <td>reports.py:390</td><td>报表行内调度摘要</td></tr>
+          <tr><td><code>render_sidebar</code> / <code>render_navbar</code></td><td>render.py:994 / 1012</td><td><span class="cnt">2</span></td>
+            <td>由 <code>render_page_header</code> 内部统一调用</td><td>折叠侧栏（<code>--sidebar-w:248px</code>→<code>rail 60px</code>）+ 顶栏</td></tr>
+          <tr><td><code>_escape</code> / <code>_js_str</code> / <code>js_arg</code> / <code>_icon</code></td><td>render.py:1158 / 1166 / 1175 / 69</td><td><span class="cnt hi">prev</span></td>
+            <td>report.py · config_pages/* · export.py · render.py</td><td>HTML/JS 转义与内联 SVG 图标</td></tr>
+          <tr><td><code>ensure_common_assets</code> / <code>content_hash8</code> / <code>_get_common_asset_urls</code> / <code>self_assets_root</code></td><td>render.py:820 / 815 / 846 / 809</td><td><span class="cnt hi">prev</span></td>
+            <td>所有页面资产注入</td><td>把 CSS+JS 内容哈希成 <code>self@&lt;hash8&gt;</code> 目录并单点产出</td></tr>
+          <tr><td><code>_COMMON_JS</code> 46 个函数</td><td>render.py:114</td><td><span class="cnt hi">46</span></td>
+            <td>全部页面（注入到 common.js）</td><td>侧栏折叠 / 分类树 / 批量提交 / 缓存 TTL / 视图切换 / 定位高亮等</td></tr>
+          <tr><td><code>_COMMON_CSS</code> 设计系统</td><td>ui_assets.py</td><td><span class="cnt hi">全站</span></td>
+            <td>所有页面 + 登录页</td><td>颜色/字阶/间距/圆角/阴影/过渡 令牌 + 组件类</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:10px">判定规则：跨 2 个以上模块出现 = 共用；仅在单一页面装配函数或其内部辅助中出现的 <code>build_*</code> = 私有（如报表详情 15 个 <code>build_*_html</code> 全部只被 <code>report.py</code> 调用）。</p>
+  </section>
+
+  <!-- ══════════════ 4 dataflow ══════════════ -->
+  <section id="s4">
+    <div class="sec-h"><span class="n">04</span><h2>Dataflow 链路</h2><p><span class="tagline cache">cache</span>缓存层 <span class="tagline db">db</span>数据库 <span class="tagline html">html</span>渲染 / 页面 <span class="tagline audit">audit</span>审计落库</p></div>
+    <div class="legend" style="margin-bottom:16px">
+      <div class="lg-title">链路步骤前缀 —— 每个步骤前的<b>小色标</b>标明该步碰的是什么资源，不是构件分类</div>
+      <div class="lrow"><span class="tagline cache">cache</span><span class="desc"><b>青绿</b> —— 命中或写入缓存层（L1 进程内 / L2 Redis 快照 / API 静态文件）。</span></div>
+      <div class="lrow"><span class="tagline db">db</span><span class="desc"><b>蓝</b> —— 访问数据库或连接池取连接。</span></div>
+      <div class="lrow"><span class="tagline html">html</span><span class="desc"><b>橙</b> —— 服务端拼装 HTML 或路由分派等纯内存动作。</span></div>
+      <div class="lrow"><span class="tagline audit">audit</span><span class="desc"><b>品红</b> —— 鉴权校验与审计落库（写入独立的 <code>audit.db</code>）。</span></div>
+      <div class="lrow"><span class="desc" style="grid-column:1/-1">无前缀的步骤 = 普通控制流（参数解析、条件判断、返回封装），不碰外部资源。</span></div>
+    </div>
+    <div class="flows">
+
+      <div class="flow-card">
+        <h4><span class="fid">F1</span>请求主链路（所有 HTML 页面）<span class="who">server.py ~:360</span></h4>
+        <ol class="steps">
+          <li><code>do_GET</code>/<code>do_POST</code> → <code>_handle</code>：<code>urlparse</code> → <code>path.rstrip("/")</code> → <code>unquote</code></li>
+          <li>静态白名单命中 <code>/static/vendor/&lt;name@ver&gt;/&lt;file&gt;</code> → 直接读文件返回，<b>跳过鉴权</b></li>
+          <li><span class="tagline html">route</span><code>_scan_routes</code> 一次遍历得匹配项 + 允许方法；无匹配：有 <code>Allow</code> → 405，否则 404</li>
+          <li><span class="tagline audit">auth</span><code>needs_auth</code> → <code>_authenticate</code>：Cookie <code>session_id</code> → <code>auth.get_session_user</code></li>
+          <li>失败 → 302 <code>/login?expired=1&amp;next=&lt;urlquote(path)&gt;</code>；成功 → <code>refresh_session</code>（滑动 TTL 86400）+ <code>render.set_request_user(user)</code></li>
+          <li><span class="tagline db">db</span><code>needs_db</code> → <code>get_config_db()</code>，存 <code>_req_conn</code> 供本请求复用</li>
+          <li>派发给 page handler，拿 <code>(code, html, headers)</code></li>
+          <li><code>_send_html</code> / <code>_send_redirect</code>（<code>Location</code> 经 <code>_safe_location</code>）+ 刷新 Session Cookie</li>
+          <li><span class="tagline audit">audit</span><code>_log_web_access</code> → <code>audit_logs.type=web_access</code></li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F2</span>登录与 Session<span class="who">server.py:54 · auth.py</span></h4>
+        <ol class="steps">
+          <li>GET <code>/login</code> → 模板渲染（<code>{error}</code> / <code>{next_field}</code> 占位替换）</li>
+          <li>POST → <code>auth.authenticate(username, password)</code></li>
+          <li><span class="tagline db">db</span>取 <code>users</code> 行 → <code>salt$hex</code> 拆分 → PBKDF2-HMAC-SHA256 100k 迭代</li>
+          <li><code>hmac.compare_digest</code> 定长比较（防时序侧信道）</li>
+          <li>失败 → 限流计数（5 分钟 5 次）；超限直接拒绝</li>
+          <li>成功 → <code>create_session</code> 写 <code>sessions</code> → 302 到 <code>_safe_next_target(next)</code></li>
+          <li>登出 → 删 session 行 + 清 Cookie → 302 <code>/login</code></li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F3</span>报表查询 · 三层缓存<span class="who">report.py:1103 execute_report</span></h4>
+        <ol class="steps">
+          <li><span class="tagline db">sql</span><code>sql_contains_write(sql)</code> → 若含写且 <code>allow_write=0</code> → <code>PermissionError(WRITE_DENIED_MESSAGE)</code>（PH-05，<b>置于缓存读之前</b>）</li>
+          <li><code>skip_cache_read = force_rebuild or sql_has_persistent_write(sql)</code>（永久写语句永不信缓存）</li>
+          <li><span class="tagline cache">L1</span><code>QueryCache.get</code>（进程内，TTL ~300s）命中 → <code>CachedResult</code>，直接进第 8 步</li>
+          <li><span class="tagline cache">L2</span>未命中 → <code>redis_cache</code>：<code>compute_config_version(sql, pool_id)</code>（md5）→ <code>build_snapshot_key</code> → 读快照</li>
+          <li>L2 命中 → 回填 L1 → 第 8 步</li>
+          <li><span class="tagline db">L3</span>未命中 → <code>query_executor.execute_mysql_query</code>（连接池取连接，<code>read_timeout=30</code> 仅 Web 路径传）</li>
+          <li><code>_transform_rows</code> → <code>result_transform.transform_rows</code>：筛选 → 排序 → 选列</li>
+          <li><code>_apply_max_rows</code>（PH-06 全量护栏：<code>allow_all_output=0 and max_rows&gt;0</code> → 截断并置 <code>truncated</code>）</li>
+          <li><span class="tagline cache">写回</span>非预览（<code>sql_query == report["sql_query"]</code>）才写 Redis 快照 + L1</li>
+          <li>返回 <code>ReportResult:1027</code>（rows / columns / total / truncated / derived）</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F4</span>筛选 / 排序 / 分页 / 选列<span class="who">report.py + result_transform.py</span></h4>
+        <ol class="steps">
+          <li>query string → <code>parse_filters:183</code>（列+操作符+值）、<code>parse_nested_filter:240</code>（AND/OR 树）</li>
+          <li><code>parse_sorts:284</code>（多列排序）、<code>_parse_cols:312</code>（列可见性，延迟解析）、<code>parse_result_index:334</code>（多结果集切换）</li>
+          <li>非法嵌套筛选 → <code>_filter_warning_flash:2221</code> 提示，<b>不阻断</b>页面</li>
+          <li><code>transform_rows:637</code> 全内存执行：<code>filter_rows:185</code> → <code>filter_rows_nested:497</code> → <code>sort_rows:216</code> → <code>select_columns:301</code></li>
+          <li><code>calc_total_pages:29</code> → 分页切片（不重复查库）</li>
+          <li><span class="tagline cache">derived</span><code>CachedResult.derived</code>（report.py:88）按视图签名复用同一份原始行</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F5</span>刷新缓存（破坏性操作 POST 化）<span class="who">report.py:2164</span></h4>
+        <ol class="steps">
+          <li>页面「刷新数据」按钮 → POST <code>/report</code> + <code>action=refresh_cache</code>（PH-08：GET 无副作用）</li>
+          <li>隐藏域回传 <code>id/page/page_size/sort/dir/cols/nested_filter</code>，保证刷新后视图不变</li>
+          <li><code>_handle_refresh_cache</code> → <code>force_rebuild=True</code> → 跳过 L1/L2 读</li>
+          <li>重新查 L3 → 覆盖 L1 + Redis 快照（TTL 重置）</li>
+          <li>302 回原视图并带 flash</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F6</span>开放 API 出参<span class="who">api_handler.py:55</span></h4>
+        <ol class="steps">
+          <li>路径归一 <code>_normalise_path:137</code> → <code>_lookup_endpoint:147</code> 查 <code>api_endpoints</code></li>
+          <li><span class="tagline audit">auth</span><code>_validate_api_key:684</code>：X-API-Key / Bearer → 与 <code>api_keys</code> 哈希比对</li>
+          <li><span class="tagline cache">static</span><code>_handle_static_request:186</code> → <code>static_cache.try_read</code>：命中即刻返回 JSON（含 <code>_build_static_meta:362</code> 元信息）</li>
+          <li>未命中 → <code>_execute_api_query:397</code>：<code>_resolve_params:945</code>（GET/POST 覆盖）→ 预置规则 → <code>execute_report</code></li>
+          <li><code>_format_output:580</code> → <code>_build_single_context</code>/<code>_build_all_context</code> → <code>_apply_json_template:621</code></li>
+          <li><code>_format_json_response:989</code> 或 <code>_format_csv_response:1036</code></li>
+          <li><span class="tagline cache">写回</span><code>rebuild_static_endpoint_file:261</code> 版本化写静态文件（<code>_compute_static_config_version:236</code> 变更才重建）</li>
+          <li>加 <code>_build_cors_headers:746</code> → <span class="tagline audit">audit</span><code>_log_api_call:1075</code> 记 <code>type=api</code></li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F7</span>导出<span class="who">export.py:387</span></h4>
+        <ol class="steps">
+          <li>GET <code>/export?id=N&amp;format=csv|json&amp;…</code></li>
+          <li><span class="tagline db">db</span><code>_load_and_transform:60</code>：取报表 + 连接池 → <code>execute_report</code> + 同一套 transform（保证导出 = 屏幕）</li>
+          <li>CSV：<code>sanitize_csv_formula:137</code>（<code>= + - @</code> 前缀加 <code>'</code>）→ <code>rows_to_csv:142</code></li>
+          <li>JSON：<code>export_report_to_json:231</code>（<code>json_no_quotes</code>/<code>smart_quotes</code> 开关）</li>
+          <li><code>_encode_content:318</code>（gbk / utf8-BOM 兼容 Excel）</li>
+          <li>可选 <code>_create_temp_zip:350</code> 打包</li>
+          <li><code>_build_export_filename:335</code> → <code>Content-Disposition</code> 返回字节流</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F8</span>定时调度执行<span class="who">scheduler.py:264</span></h4>
+        <ol class="steps">
+          <li><code>ReportScheduler</code> 守护线程启动（<code>start_scheduler_from_config:720</code>）</li>
+          <li><code>compute_next_run:227</code> 算下次触发；<code>_parse_hm:55</code> 解析时:分</li>
+          <li><code>evaluate_exclusions:110</code>（节点树 <code>_eval_node:96</code>）判断今天是否跳过</li>
+          <li><span class="tagline db">db</span>取 <code>schedule_reports</code> 绑定的报表 → 逐个 <code>execute_report(read_timeout=None)</code></li>
+          <li><span class="tagline cache">保活</span><code>snapshot_remaining_ttl:252</code> 维持 Redis 快照热度</li>
+          <li><span class="tagline audit">audit</span>写 <code>audit_logs.type=scheduler</code>；<code>trigger_manual:750</code> 供页面手动执行</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F9</span>配置 CRUD（PRG）<span class="who">config.py:625</span></h4>
+        <ol class="steps">
+          <li><code>parse_config_path:83</code> 先判特例（overview / scheduler / pools/test / site-branding / description-preview）</li>
+          <li>再走 <code>_PATH_PATTERN:66</code> 正则（资源 / action / id / 子资源）</li>
+          <li><code>handle_request:625</code> 分派到 <code>config_pages.*</code></li>
+          <li><code>_parse_form_data:407</code> → <code>_tolerant_int:431</code>/<code>_echo_int:441</code> 宽松解析与回填</li>
+          <li><span class="tagline db">db</span>写配置表 → <span class="tagline audit">audit</span>记 <code>type=operation</code></li>
+          <li><code>_redirect_or_render:870</code> PRG：302 回列表 + flash（防重复提交）</li>
+        </ol>
+      </div>
+
+      <div class="flow-card">
+        <h4><span class="fid">F10</span>审计写入与查询<span class="who">audit_db.py · audit_page.py</span></h4>
+        <ol class="steps">
+          <li>四个写入点：<code>_log_web_access</code>（页面）、<code>_log_api_call</code>（API）、配置 CRUD（operation）、调度器（scheduler）</li>
+          <li><span class="tagline db">db</span>写独立 <code>audit.db</code> → <code>audit_logs</code>（与配置库物理隔离）</li>
+          <li>读取 <code>/audit</code>：<code>_FILTER_KEYS</code> 五维筛选 + 分页</li>
+          <li><code>?export=csv</code> → 11 列 CSV；POST <code>action=clean</code> → 清理</li>
+          <li>本页 <b>不连配置库</b>（<code>needs_db=False</code>），故障域隔离</li>
+        </ol>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ 5 前端资产 ══════════════ -->
+  <section id="s5">
+    <div class="sec-h"><span class="n">05</span><h2>前端资产与初始化链</h2><p>无构建链：CSS/JS 以字符串常量存于 Python，哈希版本化落盘</p></div>
+    <div class="legend" style="margin-bottom:16px">
+      <div class="lg-title">本图方块含义 —— 三个流水段：<b>生成 → 注入 → 运行</b></div>
+      <div class="lrow"><span class="box css"><b>CSS 与资产哈希</b></span>
+        <span class="desc"><b>品红底</b> —— 样式常量与 <code>self@&lt;hash8&gt;</code> 版本目录的生成逻辑。</span></div>
+      <div class="lrow"><span class="box js"><b>JS 函数常量</b></span>
+        <span class="desc"><b>紫底</b> —— <code>_COMMON_JS</code> 与 <code>ui_assets.py</code> 里的浏览器端代码。</span></div>
+      <div class="lrow"><span class="box"><b>注入 / 初始化环节</b></span>
+        <span class="desc"><b>白底</b> —— 页头页尾插入 <code>&lt;link&gt;</code>/<code>&lt;script&gt;</code> 及 <code>initPage()</code> 调度，无独立配色。</span></div>
+    </div>
+    <div class="layers">
+      <div class="layer">
+        <div class="lbl"><b>资产生成</b><span>render.py:804 起</span></div>
+        <div class="body">
+          <div class="box css"><b>ensure_common_assets:820</b><small>写 common.css / common.js</small></div>
+          <div class="box css"><b>content_hash8:815</b><small>CSS+JS 内容 → self@&lt;hash8&gt; 目录</small></div>
+          <div class="box css"><b>_COMMON_ASSET_LOCK:804</b><small>并发写保护</small></div>
+          <div class="box css"><b>_get_common_asset_urls:846</b><small>缓存 URL 列表 · reset:866</small></div>
+          <div class="box"><b>_COMMON_CSS</b><small>ui_assets.py 设计令牌 + 组件类</small></div>
+          <div class="box js"><b>_COMMON_JS:114</b><small>46 个函数 · render.py</small></div>
+          <div class="box js"><b>ui_assets 24 个 JS</b><small>模板编辑器 / 规则构建器</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+      <div class="layer">
+        <div class="lbl"><b>页面注入</b><span>_PAGE_HEADER_TEMPLATE:774</span></div>
+        <div class="body">
+          <div class="box"><b>render_page_header:1025</b><small>&lt;link&gt; common.css + 页面 extra_css</small></div>
+          <div class="box"><b>_SIDEBAR_BOOTSTRAP_JS:761</b><small>首屏前恢复侧栏折叠态（防闪烁）</small></div>
+          <div class="box"><b>render_page_footer:1068</b><small>&lt;script&gt; common.js + initPage()</small></div>
+        </div>
+      </div>
+      <div class="arrowdown">▼</div>
+      <div class="layer">
+        <div class="lbl"><b>运行时初始化</b><span>common.js initPage</span></div>
+        <div class="body">
+          <div class="box js"><b>initSidebarHandle</b><small>sbIsRail / sbStoreWrite</small></div>
+          <div class="box js"><b>initFlashMessages</b><small>自动淡出</small></div>
+          <div class="box js"><b>initCatTree / initCatTreeLocate</b><small>分类树折叠与定位高亮</small></div>
+          <div class="box js"><b>initConfigFilter</b><small>配置页前端检索</small></div>
+          <div class="box js"><b>initRecentReports</b><small>最近查看（localStorage）</small></div>
+          <div class="box js"><b>applyStoredCols / initSqlEditorTabIndent</b><small>列偏好 / SQL 缩进</small></div>
+          <div class="box js"><b>initApiUrls / apiToggleMore</b><small>接口 URL 生成与展开</small></div>
+        </div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:10px">设计令牌示例：<code>--accent:#5d61e0</code> · <code>--ok:#048b56</code> · <code>--warn:#d78c00</code> · <code>--danger:#d02b31</code> · <code>--sidebar-w:248px</code> / <code>--sidebar-rail:60px</code> · 字阶 <code>--fs-11…--fs-28</code>。字体回落为系统栈，无 Web Font 请求。</p>
+  </section>
+
+  <!-- ══════════════ 6 模块依赖 ══════════════ -->
+  <section id="s6">
+    <div class="sec-h"><span class="n">06</span><h2>模块依赖关系</h2><p>箭头 = import 方向；无环形依赖，页面层单向依赖组件库</p></div>
+    <p class="note" style="margin-bottom:12px">本表「依赖」= 本模块 import 的下游模块；「被依赖」= 导入本模块的上游模块。行数为代码物理行数（含注释与空行），用于估算改动影响面，不代表复杂度。</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>模块</th><th>行数</th><th>依赖</th><th>被依赖</th><th>角色</th></tr></thead>
+        <tbody>
+          <tr><td><code>server.py</code></td><td>1141</td><td>auth · config · report · export · api_handler · audit_page · render</td><td>入口</td><td>HTTP 接入 / 路由 / 登录页 / 审计钩子</td></tr>
+          <tr><td><code>render.py</code></td><td>4799</td><td>ui_assets · app_config · config_db（只读徽标）</td><td>report · config · config_pages/* · export · audit_page · server</td><td>共享组件库 + 设计系统</td></tr>
+          <tr><td><code>ui_assets.py</code></td><td>1954</td><td>无</td><td>render</td><td>CSS 令牌 + 交互 JS 常量</td></tr>
+          <tr><td><code>report.py</code></td><td>2368</td><td>render · query_executor · result_transform · redis_cache · static_cache · config_db</td><td>server · export · api_handler · scheduler</td><td>报表查询与页面装配</td></tr>
+          <tr><td><code>config.py</code></td><td>981</td><td>config_pages/* · render · config_db · scheduler · redis_cache</td><td>server</td><td>配置域路由与概览页</td></tr>
+          <tr><td><code>config_pages/*</code></td><td>~2000</td><td>render · config · config_db · auth</td><td>config</td><td>7 个页面装配薄层</td></tr>
+          <tr><td><code>api_handler.py</code></td><td>1083</td><td>report · static_cache · config_db · audit_db</td><td>server</td><td>开放 API（Key 鉴权 / 模板 / 静态缓存）</td></tr>
+          <tr><td><code>export.py</code></td><td>583</td><td>report · render · config_db</td><td>server</td><td>CSV / JSON / ZIP 导出</td></tr>
+          <tr><td><code>result_transform.py</code></td><td>649</td><td>无（纯函数）</td><td>report · api_handler · export</td><td>筛选 / 排序 / 选列 / 分页</td></tr>
+          <tr><td><code>query_executor.py</code></td><td>1012</td><td>config_db</td><td>report · config_pages/pools</td><td>MySQL 连接池 / 超时 / 写语句判定</td></tr>
+          <tr><td><code>config_db.py</code></td><td>2568</td><td>app_config</td><td>几乎全部模块</td><td>配置库双引擎（SQLite / MySQL）</td></tr>
+          <tr><td><code>redis_cache.py</code></td><td>515</td><td>app_config</td><td>report · api_handler · config · scheduler</td><td>L2 快照 / 版本键 / 分布式锁 / 保活</td></tr>
+          <tr><td><code>static_cache.py</code></td><td>277</td><td>app_config</td><td>api_handler</td><td>API 静态文件读写与版本化</td></tr>
+          <tr><td><code>scheduler.py</code></td><td>763</td><td>report · config_db · audit_db</td><td>config_pages/scheduler · server</td><td>定时执行线程 + 排除规则</td></tr>
+          <tr><td><code>audit_db.py</code> / <code>audit_page.py</code></td><td>~200 / 149</td><td>render</td><td>server · config · api_handler · scheduler</td><td>审计写入与查询页</td></tr>
+          <tr><td><code>auth.py</code></td><td>~180</td><td>config_db</td><td>server · config_pages/users</td><td>PBKDF2 / Session / 限流</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:10px">关键约束：<code>result_transform.py</code> 为纯函数模块（无 IO），因此同一套变换能同时服务页面 / 导出 / API，保证三处数据一致。</p>
+  </section>
+
+  <footer>
+    <span>依据：代码快照 <code>/opdev/SqlReport</code> · 2026-10-20</span>
+    <span>范围：18 路由 · 18 页面/端点 · 22 共用构件 · 10 条 dataflow</span>
+    <span>说明：纯分析产物，未修改任何代码</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var btns=document.querySelectorAll('.filters button');
+  btns.forEach(function(b){
+    b.addEventListener('click',function(){
+      btns.forEach(function(x){x.classList.remove('on')});
+      b.classList.add('on');
+      var f=b.getAttribute('data-f');
+      document.body.classList.remove('f-shared','f-private');
+      if(f!=='all')document.body.classList.add('f-'+f);
+    });
+  });
+})();
+</script>
+<script type="application/json" id="arch-facts">
+{
+"root": "/opdev/SqlReport",
+"routes": [
+{
+"pattern": "^/favicon\\.ico$",
+"method": "GET",
+"handler": "_handle_favicon",
+"auth": false,
+"db": false
+},
+{
+"pattern": "^/login$",
+"method": "GET",
+"handler": "_handle_login_get",
+"auth": false,
+"db": false
+},
+{
+"pattern": "^/login$",
+"method": "POST",
+"handler": "_handle_login",
+"auth": false,
+"db": false
+},
+{
+"pattern": "^/health$",
+"method": "GET",
+"handler": "_handle_health",
+"auth": false,
+"db": false
+},
+{
+"pattern": "^/?$",
+"method": "GET",
+"handler": "_handle_home_redirect",
+"auth": true,
+"db": false
+},
+{
+"pattern": "^/logout$",
+"method": "GET",
+"handler": "_handle_logout",
+"auth": true,
+"db": false
+},
+{
+"pattern": "^/config/api-endpoints$",
+"method": "GET",
+"handler": "_handle_config_api_endpoints",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/config/api-endpoints$",
+"method": "POST",
+"handler": "_handle_config_api_endpoints",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/config/reports$",
+"method": "GET",
+"handler": "_handle_config_reports",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/config/reports/memo-preview$",
+"method": "POST",
+"handler": "_handle_config",
+"auth": true,
+"db": false
+},
+{
+"pattern": "^/config/api-endpoints/description-preview$",
+"method": "POST",
+"handler": "_handle_config",
+"auth": true,
+"db": false
+},
+{
+"pattern": "^/config/categories$",
+"method": "GET",
+"handler": "_handle_config_categories",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/config/site-branding$",
+"method": "POST",
+"handler": "_handle_config_site_branding",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/config($|/)",
+"method": "*",
+"handler": "_handle_config",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/report($|/)",
+"method": "*",
+"handler": "_handle_report",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/export($|/)",
+"method": "*",
+"handler": "_handle_export",
+"auth": true,
+"db": true
+},
+{
+"pattern": "^/api/",
+"method": "*",
+"handler": "_handle_api",
+"auth": false,
+"db": true
+},
+{
+"pattern": "^/audit($|/)",
+"method": "*",
+"handler": "_handle_audit",
+"auth": true,
+"db": false
+}
+],
+"modules": {
+"api_handler": {
+"lines": 1083,
+"imports": [
+"app_config",
+"auth",
+"csv",
+"db",
+"export",
+"hmac",
+"json",
+"json_template",
+"logging",
+"os",
+"query_executor",
+"redis_cache",
+"report",
+"result_transform",
+"secrets",
+"static_cache",
+"time",
+"urllib"
+],
+"imported_by": [
+"config",
+"config_pages.api_endpoints",
+"scheduler",
+"server"
+]
+},
+"app_config": {
+"lines": 619,
+"imports": [
+"decimal",
+"json",
+"os",
+"re",
+"time",
+"typing",
+"urllib"
+],
+"imported_by": [
+"api_handler",
+"audit_db",
+"audit_page",
+"config",
+"config_db",
+"config_pages.api_endpoints",
+"config_pages.reports",
+"config_pages.scheduler",
+"export",
+"json_template",
+"redis_cache",
+"render",
+"report",
+"server",
+"static_cache"
+]
+},
+"audit_db": {
+"lines": 342,
+"imports": [
+"app_config",
+"datetime",
+"logging",
+"os",
+"result_transform",
+"sqlite3",
+"typing"
+],
+"imported_by": [
+"audit_page",
+"db",
+"server"
+]
+},
+"audit_page": {
+"lines": 149,
+"imports": [
+"app_config",
+"audit_db",
+"csv",
+"export",
+"logging",
+"os",
+"render",
+"time",
+"urllib"
+],
+"imported_by": [
+"server"
+]
+},
+"auth": {
+"lines": 323,
+"imports": [
+"db",
+"hashlib",
+"hmac",
+"logging",
+"secrets",
+"threading",
+"time",
+"typing"
+],
+"imported_by": [
+"api_handler",
+"config",
+"config_pages.users",
+"server"
+]
+},
+"branding": {
+"lines": 317,
+"imports": [
+"base64",
+"binascii",
+"os",
+"sqlite3",
+"struct",
+"threading",
+"zlib"
+],
+"imported_by": [
+"config",
+"config_pages.branding",
+"render",
+"server"
+]
+},
+"config": {
+"lines": 981,
+"imports": [
+"api_handler",
+"app_config",
+"auth",
+"branding",
+"config_db",
+"config_pages",
+"db",
+"html as html_mod",
+"json",
+"json_template",
+"logging",
+"markdown_render",
+"preset_cases",
+"query_executor",
+"re",
+"redis_cache",
+"render",
+"report",
+"static_cache",
+"time",
+"urllib"
+],
+"imported_by": [
+"config_pages.__init__",
+"config_pages.api_endpoints",
+"config_pages.branding",
+"config_pages.categories",
+"config_pages.pools",
+"config_pages.reports",
+"config_pages.scheduler",
+"config_pages.users",
+"server"
+]
+},
+"config_db": {
+"lines": 2568,
+"imports": [
+"app_config",
+"json",
+"logging",
+"os",
+"sqlite3",
+"static_cache",
+"time",
+"typing"
+],
+"imported_by": [
+"config",
+"config_pages.api_endpoints",
+"config_pages.branding",
+"config_pages.reports",
+"db",
+"report",
+"scheduler"
+]
+},
+"db": {
+"lines": 50,
+"imports": [
+"audit_db",
+"config_db",
+"query_executor"
+],
+"imported_by": [
+"api_handler",
+"auth",
+"config",
+"config_pages.api_endpoints",
+"config_pages.categories",
+"config_pages.pools",
+"config_pages.reports",
+"config_pages.scheduler",
+"config_pages.users",
+"export",
+"report",
+"scheduler",
+"server"
+]
+},
+"export": {
+"lines": 583,
+"imports": [
+"app_config",
+"csv",
+"db",
+"io",
+"json",
+"logging",
+"os",
+"query_executor",
+"render",
+"report",
+"result_transform",
+"shutil",
+"tempfile",
+"typing",
+"urllib",
+"zipfile"
+],
+"imported_by": [
+"api_handler",
+"audit_page"
+]
+},
+"file_permissions": {
+"lines": 225,
+"imports": [
+"grp",
+"logging",
+"os",
+"pwd"
+],
+"imported_by": [
+"server",
+"static_cache"
+]
+},
+"filter_help": {
+"lines": 286,
+"imports": [],
+"imported_by": [
+"render"
+]
+},
+"json_template": {
+"lines": 224,
+"imports": [
+"app_config",
+"json",
+"re"
+],
+"imported_by": [
+"api_handler",
+"config",
+"config_pages.api_endpoints"
+]
+},
+"markdown_render": {
+"lines": 305,
+"imports": [
+"html",
+"html as html_mod",
+"markdown as _markdown"
+],
+"imported_by": [
+"config",
+"config_pages.reports",
+"render",
+"report"
+]
+},
+"preset_cases": {
+"lines": 426,
+"imports": [
+"json",
+"os",
+"sqlite3",
+"time"
+],
+"imported_by": [
+"config"
+]
+},
+"query_executor": {
+"lines": 1012,
+"imports": [
+"threading"
+],
+"imported_by": [
+"api_handler",
+"config",
+"config_pages.reports",
+"db",
+"export",
+"report"
+]
+},
+"redis_cache": {
+"lines": 515,
+"imports": [
+"app_config",
+"decimal",
+"hashlib",
+"json",
+"logging",
+"threading",
+"time",
+"typing",
+"uuid"
+],
+"imported_by": [
+"api_handler",
+"config",
+"render",
+"report",
+"scheduler"
+]
+},
+"render": {
+"lines": 4799,
+"imports": [
+"app_config",
+"branding",
+"decimal",
+"filter_help",
+"hashlib",
+"html as html_mod",
+"json",
+"logging",
+"markdown_render",
+"os",
+"redis_cache",
+"static_cache",
+"string",
+"threading",
+"time",
+"ui_assets",
+"urllib"
+],
+"imported_by": [
+"audit_page",
+"config",
+"config_pages.api_endpoints",
+"config_pages.branding",
+"config_pages.categories",
+"config_pages.pools",
+"config_pages.reports",
+"config_pages.scheduler",
+"config_pages.users",
+"export",
+"report",
+"server"
+]
+},
+"report": {
+"lines": 2368,
+"imports": [
+"app_config",
+"config_db",
+"db",
+"json",
+"logging",
+"markdown_render",
+"query_executor",
+"re",
+"redis_cache",
+"render",
+"result_transform",
+"static_cache",
+"threading",
+"time",
+"typing",
+"urllib"
+],
+"imported_by": [
+"api_handler",
+"config",
+"config_pages.api_endpoints",
+"export",
+"server"
+]
+},
+"result_transform": {
+"lines": 649,
+"imports": [
+"calendar",
+"datetime",
+"decimal",
+"math",
+"re"
+],
+"imported_by": [
+"api_handler",
+"audit_db",
+"export",
+"report"
+]
+},
+"scheduler": {
+"lines": 763,
+"imports": [
+"api_handler",
+"concurrent",
+"config_db",
+"datetime",
+"db",
+"json",
+"logging",
+"redis_cache",
+"report as report_mod",
+"threading",
+"time",
+"typing"
+],
+"imported_by": [
+"server"
+]
+},
+"server": {
+"lines": 1141,
+"imports": [
+"api_handler",
+"app_config",
+"audit_db",
+"audit_page",
+"auth",
+"branding",
+"config",
+"db",
+"export as export_mod",
+"file_permissions",
+"html as _html_mod",
+"http",
+"json",
+"logging",
+"os",
+"re",
+"render",
+"report",
+"scheduler",
+"static_cache",
+"sys",
+"threading",
+"time",
+"urllib"
+],
+"imported_by": []
+},
+"static_cache": {
+"lines": 277,
+"imports": [
+"app_config",
+"collections",
+"file_permissions",
+"glob",
+"json",
+"logging",
+"os",
+"tempfile",
+"threading",
+"time"
+],
+"imported_by": [
+"api_handler",
+"config",
+"config_db",
+"config_pages.api_endpoints",
+"render",
+"report",
+"server"
+]
+},
+"ui_assets": {
+"lines": 1954,
+"imports": [],
+"imported_by": [
+"render"
+]
+},
+"config_pages.__init__": {
+"lines": 19,
+"imports": [
+"config"
+],
+"imported_by": []
+},
+"config_pages.api_endpoints": {
+"lines": 510,
+"imports": [
+"api_handler",
+"app_config",
+"config",
+"config_db",
+"db",
+"html as html_mod",
+"json",
+"json_template",
+"logging",
+"render",
+"report",
+"static_cache",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.branding": {
+"lines": 190,
+"imports": [
+"branding",
+"config",
+"config_db",
+"json",
+"render",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.categories": {
+"lines": 178,
+"imports": [
+"config",
+"db",
+"render",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.pools": {
+"lines": 241,
+"imports": [
+"config",
+"db",
+"logging",
+"render",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.reports": {
+"lines": 651,
+"imports": [
+"app_config",
+"config",
+"config_db",
+"config_pages",
+"db",
+"markdown_render",
+"query_executor",
+"render",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.scheduler": {
+"lines": 253,
+"imports": [
+"app_config",
+"config",
+"db",
+"re",
+"render",
+"time",
+"urllib"
+],
+"imported_by": []
+},
+"config_pages.users": {
+"lines": 127,
+"imports": [
+"auth",
+"config",
+"db",
+"render"
+],
+"imported_by": []
+}
+},
+"shared_components": [
+{
+"fn": "build_flash_html",
+"sites": [
+"config.py",
+"config_pages/api_endpoints.py",
+"config_pages/categories.py",
+"config_pages/pools.py",
+"config_pages/reports.py",
+"config_pages/scheduler.py",
+"config_pages/users.py",
+"report.py"
+],
+"count": 8
+},
+{
+"fn": "render_page_footer",
+"sites": [
+"config.py",
+"config_pages/api_endpoints.py",
+"config_pages/categories.py",
+"config_pages/pools.py",
+"config_pages/reports.py",
+"config_pages/scheduler.py",
+"config_pages/users.py",
+"report.py"
+],
+"count": 8
+},
+{
+"fn": "render_page_header",
+"sites": [
+"config.py",
+"config_pages/api_endpoints.py",
+"config_pages/categories.py",
+"config_pages/pools.py",
+"config_pages/reports.py",
+"config_pages/scheduler.py",
+"config_pages/users.py",
+"report.py"
+],
+"count": 8
+},
+{
+"fn": "build_api_endpoint_preview_help_html",
+"sites": [
+"config.py",
+"config_pages/api_endpoints.py"
+],
+"count": 2
+},
+{
+"fn": "build_api_endpoints_list_html",
+"sites": [
+"config_pages/api_endpoints.py",
+"config_pages/reports.py"
+],
+"count": 2
+}
+],
+"tables": [
+"api_endpoints",
+"api_keys",
+"connection_pools",
+"report_categories",
+"report_configs",
+"report_schedules",
+"schedule_reports",
+"sessions",
+"users"
+],
+"audit_tables": [
+"audit_logs"
+],
+"ui_consts": {
+"css": [
+"BASE_CSS",
+"COMMON_CSS",
+"MD_CSS"
+],
+"js": [
+"API_TEMPLATE_JS",
+"EXCL_EDITOR_JS",
+"SQL_FORMATTER_JS",
+"SQL_HIGHLIGHT_JS"
+],
+"js_functions": [
+"apiMainClick",
+"apiToggleMore",
+"buildApiUrl",
+"catTreeLocate",
+"fmt",
+"h",
+"highlight",
+"initCatTree",
+"initCatTreeLocate",
+"selectAllInSection",
+"submitBatchPost",
+"toggleCatBlock",
+"toggleCatKids",
+"toggleCatNode",
+"toggleCatTree",
+"toggleSection"
+]
+},
+"vendor": [
+"mermaid@11.16.1",
+"self@029fbef8",
+"self@0a57ee79",
+"self@3205b605",
+"self@3b92b87b",
+"self@4fe2ea2a",
+"self@5ef03934",
+"self@637e80b7",
+"self@6815e96a",
+"self@6cdc75af",
+"self@72429792",
+"self@7fdac87f",
+"self@81e8fe89",
+"self@895d171f",
+"self@8e0c877a",
+"self@8fdec733",
+"self@90b6b3e0",
+"self@92b2d576",
+"self@99246dbc",
+"self@9e535ef7",
+"self@a1896cd4",
+"self@b4f25631",
+"self@c73d6b73",
+"self@cfbcadee",
+"self@d2e93eae",
+"self@d5d45d7a",
+"self@e99bdf99",
+"self@ea25c102",
+"self@ea63d909",
+"self@ec7620c9",
+"self@f2ce7172",
+"self@f7bcdcb2"
+]
+}
+</script>
+</body>
+</html>
