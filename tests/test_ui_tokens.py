@@ -649,6 +649,22 @@ class TestSqlEditorScrollContract(unittest.TestCase):
         self.assertEqual([], offenders,
                          "编辑框被 overflow:hidden 裁掉（滚动条消失）：" + "; ".join(offenders))
 
+class TestMarkdownBodyFillsWidth(unittest.TestCase):
+    """`.md-body` 不得限制宽度（2026-10-20 用户实测：「备注内容挤在左侧，没占满屏幕」）。
+
+    事故：`.md-body` 带 `max-width:78ch`，把备注/接口说明正文钉在 ~78 字符宽，
+    宽屏下卡片右侧留一大片空白，像被挤到左边。契约：正文容器随父级（卡片）自适应，
+    不限字符宽度；长串靠 overflow-wrap 自行折行。
+    """
+
+    def test_md_body_has_no_width_cap(self):
+        css = re.sub(r'/\*.*?\*/', '', render._COMMON_CSS, flags=re.S)
+        bodies = re.findall(r'\.md-body\s*\{([^{}]*)\}', css)
+        self.assertTrue(bodies, "缺少 .md-body 规则")
+        for body in bodies:
+            self.assertNotRegex(
+                body, r'(?<!-)max-width\s*:',
+                ".md-body 又加回 max-width → 备注正文不再随屏幕铺满")
 
 class TestNoDuplicateDeclarations(unittest.TestCase):
     """同一条规则内不得重复声明同一属性（后者静默覆盖前者）。

@@ -5,8 +5,8 @@
 ## 单一来源与设计令牌（必须）
 
 - **设计令牌唯一来源 = `render.py` 的 `_BASE_CSS: :root`**（色板 / 字阶 11·12·13·14·16·18·22·28 / 间距 4px 栅格 / 圆角 / 阴影 / 焦点圈）。页面与分卷**不得另起颜色、间距取值**；颜色、背景、边框、字体、内外边距、尺寸、阴影、透明度一律走 class/令牌，`style="…"` 只允许 display/visibility/gap/flex/align/text-align/overflow 等布局行为性声明。
-- 视觉只在两层：`render._BASE_CSS`（令牌 + 基座 + 登录页）+ `render._COMMON_CSS`（页壳/组件/页面级规则）——二者**字面量已外移到 `ui_assets.py`**（B9-1），`render._X` 是兼容名。`report._CSS` / `config._CONFIG_EXTRA_CSS` / `config._REPORTS_EXTRA_CSS` / server 登录页与错误页内联样式均为同名空常量（仅兼容既有引用）。局部样式走 `render_page_header(extra_css=...)`，**不要改 `_COMMON_CSS` 塞局部样式**。
-- **公共 CSS/JS 用内容 hash 版本锁目录**：`ensure_common_assets()` 写 `static/vendor/self@{sha8}/common.css|js`，hash = `sha256(CSS+"\n;;;"+JS)` 前 8 位（改 JS 也换 URL）；`/static/vendor/` 直出 + `immutable`。外链 URL 另有进程级缓存（`_COMMON_ASSET_URLS`）：改了 **`ui_assets.py`**/`render.py`/`report.py`/`config.py`（或 `config_pages/`）必须**重启服务再验**，否则仍指向旧 hash 目录。
+- 视觉只在两层：`render._BASE_CSS`（令牌 + 基座 + 登录页）+ `render._COMMON_CSS`（页壳/组件/页面级规则）——二者**字面量已外移到 `ui_assets.py`**（B9-1），`render._X` 是兼容名。`report._CSS` / `config._CONFIG_EXTRA_CSS` / `config._REPORTS_EXTRA_CSS` / server 登录页与错误页内联样式均为同名空常量（仅兼容引用）。局部样式走 `render_page_header(extra_css=...)`，**不要改 `_COMMON_CSS` 塞局部样式**。
+- **公共 CSS/JS 用内容 hash 版本锁目录**：`ensure_common_assets()` 写 `static/vendor/self@{sha8}/common.css|js`，hash = `sha256(CSS+"\n;;;"+JS)` 前 8 位；`/static/vendor/` 直出 + `immutable`。外链 URL 另有进程级缓存 `_COMMON_ASSET_URLS`：改了 `ui_assets.py`/`render.py`/`report.py`/`config.py`/`config_pages/` 必须**重启服务再验**，否则仍指旧 hash 目录。
 - **`render.py` 有模块级 `logger`**（`logging.getLogger(__name__)`）：`_get_common_asset_urls` 写盘失败必须 `logger.exception` 留痕——失败会把 `("", "")` 哨兵**永久缓存**，之后每页内联约 100KB 且永不重试（曾静默无信号，B6-5）。**禁止**在模块级调 `basicConfig`（`setup_logging` 之前 render 就可能被 import）。
 - **HTML 响应必须 `Cache-Control: no-store`**：页脚脚本内联在 HTML 里，不设禁缓存时用户标签页可能长期执行旧脚本（症状「修复上线了但用户那儿还是坏的」）。
 - **`_escape` 只有一份**（`render._escape`，`config` 直接 import 复用，B7-2）：它先 `format_cell` 再 `escape` → `Decimal` 不会显示成科学计数法。**不得**在别处另写 `html.escape(str(v))`。
@@ -77,11 +77,11 @@
 | 「修复上线了但用户那儿还是坏的」 | HTML 响应未禁缓存，标签页长期跑旧内联脚本 | `TestHtmlFreshness`（`Cache-Control: no-store`） |
 | 隐藏页卡里的 mermaid 流程图永远空白（16×16 空框） | `startOnLoad:true` 在 window load 渲染 `display:none` 页卡，量测全 0 并打 `data-processed`，事后 `mermaid.run` 直接跳过 | `TestMermaidTabRenderContract`（须 `startOnLoad:false`，`gotoTab`/`initReportPage` 调 `renderTabMermaid`）+ `scripts/ui-v2/e2e/mermaid-tab-check.mjs` |
 | SQL 编辑框整段没有滚动条（长 SQL 被裁） | `.sql-editor` 按「容器」写带 `overflow:hidden`，而生产把该类直接挂在 textarea 上 | `TestSqlEditorScrollContract`（`.sql-editor` 永不设 overflow，滚动契约归 `.sql-textarea{overflow:auto}`）；复测 `scripts/ui-v2/e2e/probe_computed_style.py` |
-| **删除/禁用按钮的确认框不弹，直接执行（数据安全）** | **HTML 转义误用于 JS 上下文**：`_escape` 产出 `&#x27;`，浏览器解析 HTML 属性时解码回 `'`，JS 源码语法错 → `onsubmit` 为 null → 表单直接提交。名称含 `'`（如 `O'Brien`）或以 `\` 结尾时触发 | `TestDeleteConfirmJsEscape` + `TestToggleConfirmJsEscape`（把生成的 JS 真的 `exec` 一遍断言文案）；**契约：JS 上下文必须先 `_js_str` 再 `_escape`，即 `_escape(_js_str(raw))`，且调用点传原文** |
-| **文本框聚焦后文字消失（深色代码面被翻白）** | 通用 `input:focus,select:focus,textarea:focus` 把 `background` 设为 `var(--bg-surface)`，特异性 (0,1,1) 高于 `.code-textarea` (0,1,0) → 深底浅字的「当前规则」框聚焦变白底浅字，对比度 14.88:1 → **1.25:1** | `TestFocusDoesNotBreakCodeSurface`（按 CSS 规则实算对比度，不钉类名；新组件自动纳入）；**契约：凡以 `--code-bg` 为底的控件必须自带 `:focus` 高特异性回写底色，或在通用 `:focus` 规则里成对声明 `color`** |
+| **删除/禁用按钮的确认框不弹，直接执行（数据安全）** | **HTML 转义误用于 JS 上下文**：`_escape` 产出 `&#x27;`，浏览器解析属性时解码回 `'` → JS 语法错，`onsubmit` 为 null → 表单直接提交；名称含 `'` 或以 `\` 结尾时触发 | `TestDeleteConfirmJsEscape` + `TestToggleConfirmJsEscape`（把生成的 JS 真 `exec` 一遍）；**契约：JS 上下文 `_escape(_js_str(raw))`，调用点传原文** |
+| **文本框聚焦后文字消失（深色代码面被翻白）** | 通用 `input:focus,select:focus,textarea:focus` 把 `background` 设为 `var(--bg-surface)`，特异性 (0,1,1) 高于 `.code-textarea` (0,1,0) → 深底浅字框变白底浅字，对比度 14.88:1 → **1.25:1** | `TestFocusDoesNotBreakCodeSurface`（按 CSS 规则实算对比度，不钉类名）；**契约：以 `--code-bg` 为底的控件必须自带 `:focus` 高特异性回写底色** |
 | **卡片视图下折叠「作用到下一级」、本级折不掉** | `.cat-block.collapsed > .cat-body` 漏了本级**卡片体** `.cat-cards`（它当时也不带 `.hidden`）；且 `toggleCatBlock` 语义必须只切「按钮所属的那一个」块 | `TestCategoryCollapseScopedToOwnLevel`（折叠规则必须同时覆盖 `.cat-body`/`.cat-cards`/`.cat-children`；toggle 不得出现 `querySelectorAll`/`children`/`nextElementSibling`） |
 | **点分类树层级只折叠、无法定位右侧分组** | 树行 `onclick` 直接切 `.kids` 的 `.on`，把「定位」与「折叠」两件事混在一次点击里；两棵树（`/config/reports` 左树与报表中心 `#rc-tree`）行为还不一致 | `TestCategoryTreeLocatesRightPane` + `TestTreeRowClickConsistency`；**契约：行点击 = 本树主职责（定位/筛选），折叠只归独立箭头（`.cat-expand` / `[data-chevron]`）**；E2E `scripts/ui-v2/e2e/cat-focus-check.mjs` |
-
+| **备注正文挤在左侧、不随屏幕铺满** | `.md-body` 带 `max-width:78ch`（按「阅读宽度」加的），宽屏下卡片右侧大片空白；同时命中备注页卡/接口说明/配置页预览 | `TestMarkdownBodyFillsWidth`（`.md-body` 不得声明 `max-width`）；**契约：正文随父级自适应，长串靠 `overflow-wrap` 折行** |
 | **同一事故复发：8 处内联处理器仍是裸插值** | 2026-09-30 只修了删除按钮一个点，没变成规则；`toggleFilterInput` 的入参直接派生自**用户写的 SQL 列名** | `TestInlineHandlerArgEscaping`（`render.js_arg` 单点原语 + 全生产模块扫描） |
 | **换页后页面级脚本静默不执行** | 换页重放门禁的扫描范围被硬编码成 `(render, report, config)`，`config_pages/*` 与 `ui_assets.py` 全在射程外 | 扫描范围改 `_ui_source_files()` **自动发现**（含 `config_pages/*.py`）；**新增模块/配置页自动入射程** |
 
@@ -95,7 +95,7 @@
 
 - **列宽体系**：宽表用 `table.table-fixed` + `<colgroup>`（`col.c-check/c-name/c-sql/c-cfg/c-pool/c-memo/c-path/c-api/c-ops`）；无 colgroup 的表保留「第 2 列 ≥156px」兜底（历史事故：列宽原由内联 `width` 承载，清理后名称列被压成一字一行）。**10 列表格已废弃**（1440 视口右栏仅 856px，必然挤压）。
 - **class 不得撞名**：`.sql-head` 是「SQL 列表头」钩子，曾被挪用为代码工具条致表头错乱；代码面工具条统一用 `.code-head`。
-- **动态类必须有样式**：JS 运行时切换的 `.hidden`/`.show`/`.fading-out`/`.row-highlight`/`.btn.loading`/`.filter-input-touch`/`query-loading-overlay.show` 必须在公共层定义（遮罩默认 `display:none`，仅 `.show` 显示）；由 JS 切 class 的组件（`.side-panel`/`.modal`）基础态必须隐藏，`.on`/`.open`/`.show` 才显示。
+- **动态类必须有样式**：JS 运行时切换的 `.hidden`/`.show`/`.fading-out`/`.row-highlight`/`.btn.loading`/`.filter-input-touch`/`query-loading-overlay.show` 必须在公共层定义（遮罩默认 `display:none`，仅 `.show` 显示）；由 JS 切 class 的组件（`.side-panel`/`.modal`）基础态必须隐藏。
 - **侧栏收缩三态记忆**：`sqlreport_sidebar_collapsed` 无值=默认、1=收起、0=展开；改语义须同步 `_SIDEBAR_BOOTSTRAP_JS`、`sbStoreWrite` 与 `_COMMON_CSS` 三处；读写异常向 UI 明示（`window.__sbStorageErr` + `showFlashWarn`），不静默降级。
 - **报表卡片的写状态三态**（2026-10-13）：徽标 =「SQL 含写」×「allow_write」的组合，**不是** allow_write 单值——纯读无标 / 含写拒绝=黄「禁止写」/ 含写放行=红「写操作」（`report.render_report_selector` 的 `_badge`）。旧实现 `if not allow_write` 给 9/10 张纯读报表挂红标（用户噪音）。
 - **执行失败错误引导**（2026-10-19）：所有执行失败页统一走 `report.render_sql_error_section` 三段式（发生什么/可能原因/如何解决）+ 正文【编辑】链接 + 右侧「编辑报表」按钮（均 `target=_blank`）；文案字典 `report._ERROR_GUIDES`——**新增错误类型就加词条**（用户不懂程序，别只抛异常）；`report_id<=0` 预览不出口。样式在 `_COMMON_CSS` 的 `.flash-*` 组，禁止页面级补丁。

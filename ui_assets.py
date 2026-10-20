@@ -959,7 +959,9 @@ pre b,pre strong{color:var(--code-kw);font-weight:600}
 }
 .sql-textarea:focus{box-shadow:none;border:0;outline:2px solid var(--accent);outline-offset:-2px}
 /* Markdown 正文 */
-.md-body{font-size:var(--fs-14);line-height:1.75;color:var(--ink-1);max-width:78ch}
+/* 正文不设字符宽度上限：备注页卡需随屏幕自适应铺满（78ch 会把内容挤在左侧）。
+   长行靠 word-break 兜底，pre/table 各自出滚动条。 */
+.md-body{font-size:var(--fs-14);line-height:1.75;color:var(--ink-1);overflow-wrap:break-word}
 .md-body h1{font-size:var(--fs-18);margin:0 0 var(--sp-3);padding-bottom:6px;border-bottom:1px solid var(--line-soft)}
 .md-body h2{font-size:var(--fs-16);margin:var(--sp-4) 0 var(--sp-2)}
 .md-body h3{font-size:var(--fs-14);margin:var(--sp-3) 0 var(--sp-2)}

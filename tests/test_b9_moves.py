@@ -15,8 +15,9 @@ class TestAssetsByteIdentical(unittest.TestCase):
         # _COMMON_CSS +1454B（.cat-expand、折叠规则覆盖卡片体、代码面焦点豁免等）
         # _COMMON_JS  +2472B（catTreeLocate / toggleCatKids / initCatTreeLocate）
         # 2026-10-19 执行失败错误引导（flash-title/flash-hint/flash-actions/
-        # flash-details）：_COMMON_CSS +763B，vendor hash8 改为 f7bcdcb2。
-        "_COMMON_CSS": ("0d8fced6de360d5e", 81748),
+        # flash-details）：_COMMON_CSS +763B。
+        # 2026-10-20 备注正文自适应（`.md-body` 去掉 `max-width:78ch`）：+96B。
+        "_COMMON_CSS": ("9b99fc0d15e3cca6", 81844),
         "_COMMON_JS": ("01e7e1c9b9fa09b7", 23884),
         "_MD_CSS": ("c352588586b20dc3", 2492),
         "_SQL_HIGHLIGHT_JS": ("b747870a03686a41", 1343),
@@ -47,7 +48,7 @@ class TestAssetsByteIdentical(unittest.TestCase):
         import render
         self.assertEqual(
             render.content_hash8(render._COMMON_CSS + "\n;;;\n" + render._COMMON_JS),
-            "f7bcdcb2")
+            "e99bdf99")
 
     def test_ui_assets_exists_and_render_reexports(self):
         """外移后 render 必须继续导出这些名字（config/report 从 render 导入）。"""

@@ -342,6 +342,18 @@ def main() -> int:
            "tests.test_ui_tokens.TestCategoryTreeLocatesRightPane"
            ".test_row_click_locates_instead_of_collapsing")
 
+    # --- 15) 备注正文被字符宽度钉住（2026-10-20 用户实测：挤在左侧没占满屏）---
+    def mutate_md_body_width_cap():
+        render._COMMON_CSS = orig_focus_css.replace(
+            ".md-body{font-size:var(--fs-14);line-height:1.75;color:var(--ink-1);overflow-wrap:break-word}",
+            ".md-body{font-size:var(--fs-14);line-height:1.75;color:var(--ink-1);max-width:78ch}", 1)
+        assert render._COMMON_CSS != orig_focus_css, "变异未命中 .md-body 规则"
+
+    _check("备注正文限宽", mutate_md_body_width_cap,
+           lambda: setattr(render, "_COMMON_CSS", orig_focus_css),
+           "tests.test_ui_tokens.TestMarkdownBodyFillsWidth"
+           ".test_md_body_has_no_width_cap")
+
     # --- 8) 内联处理器裸插值（2026-09-30 删除确认框事故同款） ----------------
     # 把 A-1 改回未转义的裸露插值：若值含单引号，浏览器解码 HTML 实体后
     # JS 字面量断裂 → onchange 变 null → 交互静默失效。
